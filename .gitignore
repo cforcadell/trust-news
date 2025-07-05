@@ -1,3 +1,5 @@
 node_modules
 artifacts
 cache
+ignition/deployments/chain-12345/journal.jsonl
+ignition/deployments/chain-12345/build-info/56172074225d99cafa008427fb3ce358.json

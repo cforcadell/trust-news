@@ -1,0 +1,23 @@
+docker compose build
+
+Si quieres forzar reconstrucción ignorando caché:
+
+docker compose build --no-cache
+
+docker compose up
+# dettached mode
+docker compose up -d
+
+docker compose ps
+
+docker compose logs -f
+
+docker compose logs -f ipfs-fastapi
+
+Detener contenedores sin borrar volúmenes:
+
+docker compose stop
+
+Detener y borrar contenedores, redes y volúmenes asociados:
+
+docker compose down

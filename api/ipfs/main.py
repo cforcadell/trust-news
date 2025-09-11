@@ -1,11 +1,14 @@
+import os
 from fastapi import FastAPI, UploadFile, File, HTTPException
 import httpx
-from fastapi.responses import StreamingResponse 
+from fastapi.responses import StreamingResponse
 
 app = FastAPI()
 
-LOCAL_IPFS_API_ADD = "http://127.0.0.1:5001/api/v0/add"
-LOCAL_IPFS_API_CAT = "http://127.0.0.1:5001/api/v0/cat"
+# Variables de entorno (con valores por defecto)
+LOCAL_IPFS_API_ADD = os.getenv("IPFS_API_ADD", "http://127.0.0.1:5001/api/v0/add")
+LOCAL_IPFS_API_CAT = os.getenv("IPFS_API_CAT", "http://127.0.0.1:5001/api/v0/cat")
+
 
 @app.post("/ipfs/upload")
 async def upload_file(file: UploadFile = File(...)):

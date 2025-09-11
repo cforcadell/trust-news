@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  ipfs:
+    image: ipfs/go-ipfs:latest
+    container_name: ipfs
+    ports:
+      - "5001:5001"   # API
+      - "8080:8080"   # Gateway
+      - "4001:4001"   # Swarm
+    volumes:
+      - ipfs_data:/data/ipfs
+
+  ipfs-fastapi:
+    build: ./ipfs
+    container_name: ipfs-fastapi
+    ports:
+      - "8060:8060"
+    environment:
+      - IPFS_API_ADD=http://ipfs:5001/api/v0/add
+      - IPFS_API_CAT=http://ipfs:5001/api/v0/cat
+    depends_on:
+      - ipfs
+
+  generate-asertions:
+    build: ./generate-asertions
+    container_name: generate-asertions
+    ports:
+      - "8071:8071"
+    depends_on:
+      - ipfs
+      - ipfs-fastapi
+
+  validate-asertions:
+    build: ./validate-asertions
+    container_name: validate-asertions
+    ports:
+      - "8070:8070"
+    depends_on:
+      - ipfs
+      - ipfs-fastapi
+
+volumes:
+  ipfs_data:

@@ -1,0 +1,45 @@
+# construye nueva imagen con tag ipfs-api ( en lugar de latest)
+docker build -t ipfs-api .
+# listado de imagenes
+docker images
+# borrar una imagen
+docker rmi id_image
+# Ejecuta conetnedor a partir de la imagen pasada como parametro y con el nombre name 
+docker stop ipfs-api
+docker remove ipfs-api
+docker run -d --name ipfs-api -p 8060:8060 ipfs-api
+# Listado de contenedores en ejecución
+docker ps
+
+# Listado de contenedores activos
+docker ps -a 
+# borrar contenedor 
+docker remove nombre_contenedor || container_id
+
+
+# ver logs
+docker logs -f <container_name_or_id>
+
+# ver ip de interfaz docker
+ip addr show docker0 | grep "inet" | awk '{print $2}' | cut -d'/' -f1
+
+#open term
+docker exec -it <container_id> /bin/bash
+
+#instalar telnet
+apt-get update && apt-get install -y inetutils-telnet
+
+Haz una petición POST con curl o Postman:
+
+curl -X POST -F "file=@doc.txt" http://localhost:8060/ipfs/upload
+
+retorna CID
+
+contra Kubo directament
+curl -X POST "http://127.0.0.1:5001/api/v0/cat?arg=Qmcu1utLZK7j8Jfu75ahsu1WaJWYcmafm3KynGLyfeVU1y" 
+
+contra l'api de recobriment
+
+curl "http://127.0.0.1:8060/ipfs/Qmcu1utLZK7j8Jfu75ahsu1WaJWYcmafm3KynGLyfeVU1y"
+
+

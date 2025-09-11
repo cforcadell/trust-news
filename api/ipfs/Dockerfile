@@ -13,8 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia el código
 COPY main.py .
 
-# Expone el puerto 8080
-EXPOSE 8080
+# Expone el puerto 8060
+EXPOSE 8060
 
 # Comando para correr FastAPI con Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8060"]

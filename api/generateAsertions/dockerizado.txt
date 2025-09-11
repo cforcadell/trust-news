@@ -7,7 +7,7 @@ docker rmi id_image
 # Ejecuta conetnedor a partir de la imagen pasada como parametro y con el nombre name 
 docker stop generate-asertions-api
 docker remove generate-asertions-api
-docker run -d --name generate-asertions-api -p 8090:8090 generate-asertions-api
+docker run -d --name generate-asertions-api -p 8071:8071 generate-asertions-api
 # Listado de contenedores en ejecución
 docker ps
 
@@ -18,6 +18,6 @@ docker remove nombre_contenedor || container_id
 
 
 
-curl -X POST "http://127.0.0.1:8090/extraer" \
+curl -X POST "http://127.0.0.1:8071/extraer" \
      -H "Content-Type: application/json" \
      -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes y 2 millones de poblacion extranjera"}'

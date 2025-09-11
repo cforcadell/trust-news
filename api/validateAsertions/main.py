@@ -26,7 +26,7 @@ def verificar_asercion(texto: str):
             {
                 "role": "user",
                 "content": (
-                   "Validame la siguienre aserción. Devueve: TRUE, FALSE o UNKNOWN. A continuacion, despues de ":" la explicacion si es necesaria. Ajustate al formato.\n\n"
+                   "Validame la siguiente aserción. Devueve dos tags. En 'resultado': TRUE, FALSE o UNKNOWN. A continuacion en el tag 'descripcion' la explicacion si es necesaria. Ajustate al formato.\n\n"
                     f"Texto a analizar:\n{texto}"
                 )
             }

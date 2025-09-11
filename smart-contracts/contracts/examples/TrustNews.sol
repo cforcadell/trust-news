@@ -25,6 +25,7 @@ contract TrustManager{
     struct Validation{
         Validator validator;
         bool veredict;  
+        string description;
     }
 
     struct Asertion{
@@ -160,13 +161,13 @@ contract TrustManager{
         }
     }
 
-    function addValidationValidatorRegistered(bytes32 digest, string memory asertion,  bool veredict) public {
+    function addValidationValidatorRegistered(bytes32 digest, string memory asertion,  bool veredict,string memory description) public {
         // El sender es el validador. Requerir que esté registrado para incluirlo como oficial. 
         // Si ya ha validado actualizar la validacion si es diferente. Si no devolver error
 
         require(bytes(validators[msg.sender].name).length != 0, "Validator not registered");
     
-        posts[digest].asertions[asertion].validations.push(Validation(validators[msg.sender], veredict));
+        posts[digest].asertions[asertion].validations.push(Validation(validators[msg.sender], veredict,description));
     }
 
 }

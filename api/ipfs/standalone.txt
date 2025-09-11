@@ -38,7 +38,6 @@ retorna CID
 contra Kubo directament
 curl -X POST "http://127.0.0.1:5001/api/v0/cat?arg=Qmcu1utLZK7j8Jfu75ahsu1WaJWYcmafm3KynGLyfeVU1y" 
 
-contra l'api
+contra l'api de recobriment
 
-curl http://127.0.0.1:8060/ipfs/download/<CID>
-curl http://127.0.0.1:8060/ipfs/download/Qmcu1utLZK7j8Jfu75ahsu1WaJWYcmafm3KynGLyfeVU1y
+curl "http://127.0.0.1:8060/ipfs/Qmcu1utLZK7j8Jfu75ahsu1WaJWYcmafm3KynGLyfeVU1y"

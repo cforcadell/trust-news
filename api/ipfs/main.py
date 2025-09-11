@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 import httpx
+from fastapi.responses import StreamingResponse 
 
 app = FastAPI()
 
@@ -28,35 +29,18 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/ipfs/download/{cid}")
-async def download_file(cid: str):
-    if not cid.startswith(("Qm", "bafy")):
-        raise HTTPException(status_code=422, detail="CID inválido")
 
+@app.get("/ipfs/{cid}")
+async def get_ipfs_file(cid: str):
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            async with client.stream(
-                "POST",
-                LOCAL_IPFS_API_CAT,
-                data={"ipfs-path": cid},
-            ) as resp:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{LOCAL_IPFS_API_CAT}?arg={cid}")
 
-                # 1) Si no es 200, lee el body entero antes de fallar
-                if resp.status_code != 200:
-                    error_body = await resp.aread()
-                    raise HTTPException(
-                        status_code=resp.status_code,
-                        detail=error_body.decode(errors="replace")
-                    )
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
 
-                # 2) Si es 200, devuelve el stream
-                return StreamingResponse(
-                    resp.aiter_bytes(),
-                    media_type="application/octet-stream",
-                    headers={"Content-Disposition": f'attachment; filename="{cid}"'}
-                )
+        # devolvemos el contenido tal cual (puede ser binario o texto)
+        return {"cid": cid, "content": response.text}
 
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

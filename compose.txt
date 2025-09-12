@@ -21,3 +21,5 @@ docker compose stop
 Detener y borrar contenedores, redes y volúmenes asociados:
 
 docker compose down
+
+docker compose down -v

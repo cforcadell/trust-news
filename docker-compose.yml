@@ -1,0 +1,91 @@
+version: "3.9"
+
+services:
+  # -------------------------
+  # IPFS
+  # -------------------------
+  ipfs:
+    image: ipfs/go-ipfs:latest
+    container_name: ipfs
+    ports:
+      - "5001:5001" # API
+      - "8080:8080" # Gateway
+      - "4001:4001" # Swarm
+    volumes:
+      - ipfs_data:/data/ipfs
+
+  # -------------------------
+  # IPFS FastAPI
+  # -------------------------
+  ipfs-fastapi:
+    build: ./api/ipfs
+    container_name: ipfs-fastapi
+    ports:
+      - "8060:8060"
+    environment:
+      - IPFS_API_ADD=http://ipfs:5001/api/v0/add
+      - IPFS_API_CAT=http://ipfs:5001/api/v0/cat
+    depends_on:
+      - ipfs
+
+  # -------------------------
+  # generate-asertions API
+  # -------------------------
+  generate-asertions:
+    build: ./api/generate-asertions
+    container_name: generate-asertions
+    ports:
+      - "8071:8071"
+    environment:
+      - IPFS_API_ADD=http://ipfs:5001/api/v0/add
+      - IPFS_API_CAT=http://ipfs:5001/api/v0/cat
+    depends_on:
+      - ipfs
+      - ipfs-fastapi
+
+  # -------------------------
+  # validate-asertions API
+  # -------------------------
+  validate-asertions:
+    build: ./api/validate-asertions
+    container_name: validate-asertions
+    ports:
+      - "8070:8070"
+    environment:
+      - IPFS_API_ADD=http://ipfs:5001/api/v0/add
+      - IPFS_API_CAT=http://ipfs:5001/api/v0/cat
+    depends_on:
+      - ipfs
+      - ipfs-fastapi
+
+  chainlink:
+    image: smartcontract/chainlink:2.27.0
+    container_name: chainlink
+    depends_on:
+      - postgres
+    command: node start -p /chainlink/password.txt -a /chainlink/api.txt
+    ports:
+      - "6688:6688"
+    volumes:
+      - ./chainlink/config.toml:/chainlink/config.toml
+      - ./chainlink/secrets.toml:/chainlink/secrets.toml
+      - ./chainlink/password.txt:/chainlink/password.txt
+      - ./chainlink/api.txt:/chainlink/api.txt
+      - chainlink_data:/chainlink
+
+  postgres:
+      image: postgres:15
+      container_name: postgres
+      environment:
+        - POSTGRES_USER=chainlink
+        - POSTGRES_PASSWORD=cforcadellm
+        - POSTGRES_DB=chainlink
+      volumes:
+        - chainlink_db:/var/lib/postgresql/data
+      ports:
+        - "5432:5432"
+
+volumes:
+  ipfs_data:
+  chainlink_db:
+  chainlink_data:

@@ -1,3 +1,35 @@
+#Previa para que funcione Hardhat y chainlink se pueda conectar
+
+Arrancar desde ~/blockchain/tfm/smart-contracts
+
+npx hardhat node --hostname 0.0.0.0
+
+
+comprobar  curl http://127.0.0.1:8545/ desde el anfitrion o 
+
+desde dentro del contenedor 
+
+docker exec -it -u root e31ecd99b6be bash
+
+
+curl http://host.docker.internal:8545
+# o usando la IP del host
+curl http://172.17.0.1:8545
+
+#para probar conectividad, abrir session
+
+# si no va
+apt update
+apt install -y telnet
+
+telnet 172.17.0.1 22
+telnet 172.17.0.1 8545
+
+
+
+
+
+@ Compose 
 docker compose build
 
 Si quieres forzar reconstrucción ignorando caché:
@@ -29,3 +61,6 @@ psql -h localhost -U chainlink -d chainlink
 
 #up selected services
 docker compose -f 'docker-compose.yml' up   'postgres' 'chainlink' 
+
+
+

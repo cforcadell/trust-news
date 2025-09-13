@@ -8,6 +8,4 @@ SecureCookies = false
 [WebServer.TLS]
 HTTPSPort = 0
 
-[Database]
-URL = 'postgresql://chainlink:password@postgres:5432/chainlink'
 

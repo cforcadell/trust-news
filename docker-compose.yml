@@ -58,32 +58,44 @@ services:
       - ipfs
       - ipfs-fastapi
 
+  # -------------------------
+  # PostgreSQL
+  # -------------------------
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=chainlink
+      - POSTGRES_PASSWORD=Cforcadellm1974!
+      - POSTGRES_DB=chainlink
+    volumes:
+      - chainlink_db:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chainlink -d chainlink"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------
+  # Chainlink Node
+  # -------------------------
   chainlink:
-    image: smartcontract/chainlink:2.27.0
+    image: smartcontract/chainlink:2.26.0
     container_name: chainlink
+    platform: linux/x86_64/v8
     depends_on:
-      - postgres
-    command: node start -p /chainlink/password.txt -a /chainlink/api.txt
+      postgres:
+        condition: service_healthy
+    command: >
+      node -config /chainlink/config.toml -secrets /chainlink/secrets.toml start
     ports:
       - "6688:6688"
     volumes:
-      - ./chainlink/config.toml:/chainlink/config.toml
-      - ./chainlink/secrets.toml:/chainlink/secrets.toml
-      - ./chainlink/password.txt:/chainlink/password.txt
-      - ./chainlink/api.txt:/chainlink/api.txt
-      - chainlink_data:/chainlink
-
-  postgres:
-      image: postgres:15
-      container_name: postgres
-      environment:
-        - POSTGRES_USER=chainlink
-        - POSTGRES_PASSWORD=cforcadellm
-        - POSTGRES_DB=chainlink
-      volumes:
-        - chainlink_db:/var/lib/postgresql/data
-      ports:
-        - "5432:5432"
+      - ~/blockchain/tfm/chainlink:/chainlink
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   ipfs_data:

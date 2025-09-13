@@ -23,3 +23,6 @@ Detener y borrar contenedores, redes y volúmenes asociados:
 docker compose down
 
 docker compose down -v
+
+# Conectar con BBDD
+psql -h localhost -U chainlink -d chainlink

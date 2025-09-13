@@ -8,4 +8,10 @@ SecureCookies = false
 [WebServer.TLS]
 HTTPSPort = 0
 
+[[EVM]]
+ChainID = '31337'  # Hardhat
 
+[[EVM.Nodes]]
+Name = 'Hardhat'
+WSURL = 'ws://host.docker.internal:8545'
+HTTPURL = 'http://host.docker.internal:8545'

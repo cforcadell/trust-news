@@ -85,11 +85,12 @@ services:
     image: smartcontract/chainlink:2.26.0
     container_name: chainlink
     platform: linux/x86_64/v8
+
     depends_on:
       postgres:
         condition: service_healthy
     command: >
-      node -config /chainlink/config.toml -secrets /chainlink/secrets.toml start
+      node -config /chainlink/config.toml -secrets /chainlink/secrets.toml  start -a /chainlink/.api
     ports:
       - "6688:6688"
     volumes:

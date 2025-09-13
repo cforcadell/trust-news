@@ -26,3 +26,6 @@ docker compose down -v
 
 # Conectar con BBDD
 psql -h localhost -U chainlink -d chainlink
+
+#up selected services
+docker compose -f 'docker-compose.yml' up   'postgres' 'chainlink' 

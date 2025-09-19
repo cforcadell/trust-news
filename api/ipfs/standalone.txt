@@ -1,0 +1,43 @@
+-- Instala reqs en venv
+
+python3 -m venv venv
+
+source venv/bin/activate
+
+
+
+
+
+
+requirements.txt
+-----------------
+fastapi
+uvicorn[standard]
+httpx
+python-multipart
+
+
+pip install -r requirements.txt
+
+ipfs (kubo instalado; cliente oficial ipfs)
+-------------------------------------------
+ipfs daemon &
+
+
+Lanza el servidor:
+
+uvicorn main:app --reload --port 8060 &
+
+
+Haz una petición POST con curl o Postman:
+
+curl -X POST -F "file=@doc.txt" http://localhost:8060/ipfs/upload
+
+retorna CID
+
+contra Kubo directament
+curl -X POST "http://127.0.0.1:5001/api/v0/cat?arg=Qmcu1utLZK7j8Jfu75ahsu1WaJWYcmafm3KynGLyfeVU1y" 
+
+contra l'api de recobriment
+
+curl "http://127.0.0.1:8060/ipfs/Qmcu1utLZK7j8Jfu75ahsu1WaJWYcmafm3KynGLyfeVU1y"

@@ -1,0 +1,152 @@
+vscode en host
+hardhat en vm
+vscode amb pluggins 
+	ssh-remote
+	soliidty  nomic foundation
+#per a que funcionin els tests
+npm install --save-dev chai @nomicfoundation/hardhat-toolbox
+
+Seguir guia "D:\Data\OneDrive - Universitat Oberta de Catalunya\UOC\TFM\entorn\3. Creating a new Hardhat project - Ethereum development environment for professionals by Nomic Foundation.url"
+
+homedirectory:/home/adminu/blockchain/tfm
+ 
+Config  /home/adminu/blockchain/tfm/hardhat.config.js
+------ 
+
+require("@nomicfoundation/hardhat-toolbox");
+/** @type import('hardhat/config').HardhatUserConfig */
+module.exports = {
+  solidity: "0.8.28",
+  networks: {
+  hardhat: {
+    chainId: 31337
+  },
+    privateGeth: {
+      url: "http://192.168.56.108:8545", // el port HTTP del node N1
+      accounts: [
+        //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
+        "45a407904ebd8d0f6e9690ee36d7654c50a20e43dc2fa863c1eea9633f567667"
+      ],
+      chainId: 12345
+    }
+  },
+};
+
+cd ~/blockchain/tfm/smart-contracts
+
+Ini node (escuchando de todas las interfaces, icluyendo las de contenedores. interfaz docker0)
+--------
+npx hardhat node --hostname 0.0.0.0 
+
+comprobar  http://127.0.0.1:8545/
+
+Compile
+-------
+npx hardhat clean
+
+npx hardhat compile
+
+test (Keep in mind that when you run npx hardhat test, your contracts will be automatically compiled if they've changed since the last time you ran your tests. Despres es deployan
+--------------------------
+npx hardhat test
+
+
+Deploy
+-------
+Requereix un fitxer .js a ignition/modules. Es Token.js
+
+Després per desplegar...
+
+npx hardhat ignition deploy ./ignition/modules/Token.js
+
+Si no s'indica res es deploya a hardhat. Es pot indicar una instancia concrera afegint a la comana anterior --network <network-name>
+Sent network-name el nom de xarxa declarat a hardhat.config.js
+
+Ejemplo:
+npx hardhat ignition deploy ./ignition/modules/Token.js --network privateGeth
+
+En quest cas, cal aixecar previamente geth. Arrencar bootnode i minim un node geth
+
+Si el contrarto ya está desplegado y se quiere redesplegar, añadir --reset en el depsliuegue o eliminar rm -rf ignition/deployments/privateGeth y redesplegar normlamente
+
+Si estás en fase de desarrollo / pruebas, lo más rápido es borrar la carpeta de deployments o usar --reset.
+Si estás en producción, no deberías borrar nada, sino mantener la compatibilidad del contrato o desplegar una nueva versión con otro nombre.
+
+geth (fem servir la de practica anterior)
+----
+
+cd ~/blockchain/PRAC2Template/"Ejercicios3&4"/ownNet
+
+./bootnode -nodekey ./node.key -addr :30310
+
+./geth --datadir N1 --networkid 12345 --bootnodes "enode://8f9079250bf8a523f46a438560433a962ce2d3f9ba20e99145ac1b52fba27216eef5b6774d6cb9dd83fe564d968ed1725c80e031f988d316be05881419bce6e2@127.0.0.1:0?discport=30310"  --port 30303 --authrpc.port 8551 --http.port 8545 --http.corsdomain "*" --unlock '0xc227d27e10e669b0ad9a0176c521f3793b377b05' --password ./secret.txt  --allow-insecure-unlock --miner.etherbase "0xc227d27e10e669b0ad9a0176c521f3793b377b05" --mine --http.addr "0.0.0.0" --http.api "web3,eth,net,personal" --http console
+
+#commit and push develop via vscode
+usem vscose amb ocpió 
+
+#deploy in private network geth
+
+npx hardhat ignition deploy ./ignition/modules/Token.js --network privateGeth
+
+# Sync develop(ja pushed) amb main
+
+✅ Option 1: Merge Locally in VSCode
+Assume you want to merge develop into main:
+
+Open the Source Control tab (Ctrl+Shift+G or via sidebar).
+
+Checkout main branch:
+
+In the bottom-left corner of VSCode, click the current branch name (develop), and switch to main.
+
+Pull latest changes to ensure main is up to date:
+
+git pull origin main
+Merge develop into main:
+
+
+git merge develop
+Resolve any merge conflicts if prompted.
+
+Push the updated main to remote:
+
+
+git push origin main
+Done! main now includes all changes from develop.
+
+
+chainlink
+---------
+
+Una vez desplegado http://localhost:6688/signin 
+
+Crear un bridge con los datos de la api (compte amb els noms dels hosts)
+
+Ex: http://generate-asertions:8071/extraer
+El bridgeId en hexa es lo que va en el JobId
+
+Crear un job. Ejemplo (cmabiar direccion del contrato de chainlink , chainid y bridgename)
+type              = "directrequest"
+schemaVersion     = 1
+name              = "ExtraerPoblacion"
+contractAddress   = "0x7f851b849911F381649279447cf620EB192b100E" # Operator desplegado
+evmChainID        = "31337"
+maxTaskDuration   = "0s"
+
+observationSource = """
+    fetch    [type=bridge name="extraer_bridge" requestData="{\\"texto\\": \\"<texto>\\"}"]
+    parse    [type=jsonparse path="resultado"]
+    encode   [type=ethabiencode abi="(uint256)" data="{result: $(parse)}"]
+    submit   [type=ethtx to="[[ .contractAddress ]]" data="$(encode)"]
+
+    fetch -> parse -> encode -> submit
+"""
+Añadir los contracts LinkToken.sol i Operator.sol
+
+Ejercutar script de despliegue:
+npx hardhat compile
+
+npx hardhat run scripts/testAPiGenerateAsertions.js --network localhost
+
+
+

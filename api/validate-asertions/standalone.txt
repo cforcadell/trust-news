@@ -1,0 +1,28 @@
+-- Instala reqs en venv
+
+python3 -m venv venv
+
+source venv/bin/activate
+
+
+
+requirements.txt
+-----------------
+fastapi
+uvicorn[standard]
+requests
+pydantic
+
+pip install -r requirements.txt
+
+
+Lanza el servidor:
+
+uvicorn main:app --reload --port 8070
+
+
+Haz una petición POST con curl o Postman:
+
+curl -X POST "http://127.0.0.1:8070/verificar" \
+     -H "Content-Type: application/json" \
+     -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes"}'

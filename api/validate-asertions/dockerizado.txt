@@ -1,0 +1,24 @@
+# construye nueva imagen con tag validate-asertions-api ( en lugar de latest)
+docker build -t validate-asertions-api .
+# listado de imagenes
+docker images
+# borrar una imagen
+docker rmi id_image
+# Ejecuta conetnedor a partir de la imagen pasada como parametro y con el nombre name 
+docker stop validate-asertions-api
+docker remove validate-asertions-api
+docker run -d --name validate-asertions-api -p 8070:8070 --env-file .env validate-asertions-api
+# Listado de contenedores en ejecución
+docker ps
+
+# Listado de contenedores activos
+docker ps -a 
+# borrar contenedor 
+docker remove nombre_contenedor || container_id
+
+
+
+
+curl -X POST "http://127.0.0.1:8070/verificar" \
+     -H "Content-Type: application/json" \
+     -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes"}'

@@ -1,0 +1,8 @@
+PAra subir los cambios de develope a main manteniendo develop como rama de desarrollo.
+
+Dsesde GitHub hacer Pull Request de develop a main
+Aprobar la Pull Request y hacer un merge como main.
+
+Para seguir desarrollando hay dos opciones.
+- Borrar develop y crear nueva rama a partir de main 
+- Seguir con develop si nadie más añade cambios en main (hotfixes,etc...)

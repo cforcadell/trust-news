@@ -3,8 +3,9 @@ from pydantic import BaseModel
 import requests
 
 # Configuración
-API_KEY = "GJD4H9SDx6kf0yH3JSewfQBLUDUb49rf"
-MODEL = "mistral-tiny"
+import os
+
+
 
 # Inicializar FastAPI
 app = FastAPI(title="API de Validación de Aserciones ")
@@ -15,7 +16,10 @@ class TextoEntrada(BaseModel):
 
 # Función que llama a Mistral API
 def verificar_asercion(texto: str):
-    url = "https://api.mistral.ai/v1/chat/completions"
+    url = os.getenv("API_URL")
+    API_KEY = os.getenv("MISTRAL_API_KEY")
+    MODEL = os.getenv("MISTRAL_MODEL", "mistral-tiny")
+    
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"

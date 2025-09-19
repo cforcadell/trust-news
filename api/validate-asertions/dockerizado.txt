@@ -7,7 +7,7 @@ docker rmi id_image
 # Ejecuta conetnedor a partir de la imagen pasada como parametro y con el nombre name 
 docker stop validate-asertions-api
 docker remove validate-asertions-api
-docker run -d --name validate-asertions-api -p 8070:8070 validate-asertions-api
+docker run -d --name validate-asertions-api -p 8070:8070 --env-file .env validate-asertions-api
 # Listado de contenedores en ejecución
 docker ps
 

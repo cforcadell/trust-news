@@ -155,3 +155,15 @@ npx hardhat run scripts/testAPiGenerateAsertions.js --network localhost
 
 
 
+OJO. Para tener saldo en la chainlink
+npx hardhat console --network localhost
+> await hre.network.provider.send("hardhat_setBalance", [
+...   "0x8919aC75c29C538d21bB4D851670a163C6B4fCAA", 
+...   "0x3635C9ADC5DEA00000" // 100 ETH en hexadecimal
+... ]);
+true
+> const balance = await hre.ethers.provider.getBalance("0x8919aC75c29C538d21bB4D851670a163C6B4fCAA");
+undefined
+> console.log("Saldo:", hre.ethers.formatEther(balance), "ETH");
+Saldo: 1000.0 ETH
+undefined

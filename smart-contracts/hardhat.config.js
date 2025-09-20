@@ -4,7 +4,10 @@ module.exports = {
   solidity: "0.8.28",
   networks: {
   hardhat: {
-    chainId: 31337
+    chainId: 31337,
+    mining: {
+      auto: true
+    }
   },
     privateGeth: {
       url: "http://192.168.56.108:8545", // el port HTTP del node N1

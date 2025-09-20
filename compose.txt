@@ -16,9 +16,10 @@ curl http://host.docker.internal:8545
 # o usando la IP del host
 curl http://172.17.0.1:8545
 
+# si no va
 #para probar conectividad, abrir session
 
-# si no va
+
 apt update
 apt install -y telnet
 

@@ -6,3 +6,35 @@ Aprobar la Pull Request y hacer un merge como main.
 Para seguir desarrollando hay dos opciones.
 - Borrar develop y crear nueva rama a partir de main 
 - Seguir con develop si nadie más añade cambios en main (hotfixes,etc...)
+
+#Para cambiar de rama (ya creada en gitbub)
+
+adminu@Ubtuntu:~/blockchain/tfm$ git remote -v
+trust-news-github       https://github.com/cforcadell/trust-news.git (fetch)
+trust-news-github       https://github.com/cforcadell/trust-news.git (push)
+
+#vemos las ramas
+adminu@Ubtuntu:~/blockchain/tfm$ git fetch trust-news-github
+#vemos la rama activa
+adminu@Ubtuntu:~/blockchain/tfm$ git branch -a
+* develop
+  main
+  remotes/trust-news-github/develop
+  remotes/trust-news-github/develop-offchain
+  remotes/trust-news-github/main
+#creamos la rama local y hacemos que sea la activa a partir de la que indicamos como remota
+adminu@Ubtuntu:~/blockchain/tfm$ git checkout -b develop-offchain remotes/trust-news-github/develop-offchain
+rama 'develop-offchain' configurada para rastrear 'trust-news-github/develop-offchain'.
+Cambiado a nueva rama 'develop-offchain'
+#vemos las ramas
+adminu@Ubtuntu:~/blockchain/tfm$ git branch
+  develop
+* develop-offchain
+  main
+adminu@Ubtuntu:~/blockchain/tfm$ git branch -vv
+  develop          8fdc153 [trust-news-github/develop] Nuevo script con timeou en la request
+* develop-offchain d3aa63c [trust-news-github/develop-offchain] Merge pull request #2 from cforcadell/develop
+  main             736cf67 [trust-news-github/main: detrás 20] js to deploy on network
+#Nos traemos el contenido de la rama remota a local
+adminu@Ubtuntu:~/blockchain/tfm$ git pull
+Ya está actualizado.

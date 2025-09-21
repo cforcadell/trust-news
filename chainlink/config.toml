@@ -10,6 +10,7 @@ HTTPSPort = 0
 
 [[EVM]]
 ChainID = '31337'  # Hardhat
+FinalityDepth = 1
 
 [[EVM.Nodes]]
 Name = 'Hardhat'

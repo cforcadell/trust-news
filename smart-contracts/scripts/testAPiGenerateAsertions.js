@@ -4,58 +4,75 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Cuenta deployer:", deployer.address);
 
-  // 1. Deploy LinkTokenMock
-  const LinkTokenMock = await ethers.getContractFactory("LinkTokenMock");
-  const linkToken = await LinkTokenMock.deploy(ethers.utils.parseUnits("1000", 18));
-  await linkToken.deployed();
-  console.log("LinkTokenMock desplegado en:", linkToken.address);
+  let linkToken;
+  let linkTokenAddress;
 
-  // 2. Deploy OperatorMock
-  const OperatorMock = await ethers.getContractFactory("OperatorMock");
-  const operator = await OperatorMock.deploy(linkToken.address);
-  await operator.deployed();
-  console.log("OperatorMock desplegado en:", operator.address);
+  // 🔹 Detectar red
+  const network = await ethers.provider.getNetwork();
+  console.log("Network ID:", network.chainId.toString());
 
-  // 3. Deploy ApiExtraerConsumer
-  // ⚠️ Sustituye jobId por el que te dé tu nodo Chainlink en hexadecimal (0x...)
-  const jobId = "0xef5c4f61aeca4fc9b666d1806e0e1329"; // <- ejemplo en hex sin guiones
-  const fee = ethers.utils.parseEther("0.1"); // 0.1 LINK
+  if (network.chainId === 31337n) {
+    // Local Hardhat → deploy LinkTokenMock
+    console.log("Red local detectada: deployando LinkTokenMock...");
+    const LinkTokenMock = await ethers.getContractFactory("LinkTokenMock");
+    linkToken = await LinkTokenMock.deploy(ethers.parseUnits("1000", 18));
+    await linkToken.waitForDeployment();
+    linkTokenAddress = await linkToken.getAddress();
+    console.log("LinkTokenMock desplegado en:", linkTokenAddress);
+  } else {
+    // Testnet/Mainnet → usar LINK real
+    linkTokenAddress = "0x..."; // Dirección LINK real
+    linkToken = await ethers.getContractAt("LinkToken", linkTokenAddress);
+    console.log("Usando token LINK real en:", linkTokenAddress);
+  }
 
+  // 🔹 Oracle y JobId (ajusta estos valores a tu nodo local)
+  const oracleAddress = "0x8919aC75c29C538d21bB4D851670a163C6B4fCAA"; // Dirección del nodo Chainlink
+  const uuid = "23035921-8e44-4cb2-8a10-0364b29bbf14"; // tu Job UUID
+  const jobId = "0x" + uuid.replace(/-/g, "").padEnd(64, "0"); // bytes32
+  const fee = ethers.parseEther("0.1"); // 0.1 LINK
+
+  // 🔹 Deploy del contrato consumidor
   const ApiExtraerConsumer = await ethers.getContractFactory("ApiExtraerConsumer");
   const consumer = await ApiExtraerConsumer.deploy(
-    linkToken.address,
-    operator.address,
+    linkTokenAddress,
+    oracleAddress,
     jobId,
     fee
   );
-  await consumer.deployed();
-  console.log("ApiExtraerConsumer desplegado en:", consumer.address);
+  await consumer.waitForDeployment();
+  console.log("ApiExtraerConsumer desplegado en:", await consumer.getAddress());
 
-  // 4. Mandar 1 LINK al consumidor
-  const txFund = await linkToken.transfer(consumer.address, ethers.utils.parseEther("1"));
-  await txFund.wait();
-  console.log("1 LINK transferido al contrato consumidor");
+  // 🔹 Fundear el contrato consumidor con LINK
+  await linkToken.transfer(await consumer.getAddress(), ethers.parseEther("1"));
+  console.log("Se transfirió 1 LINK al contrato consumidor");
 
-  // 5. Hacer request a la API
-  const tx = await consumer.requestPoblacion(
+  // 🔹 Preparar promesa para fulfillment
+  const fulfillmentPromise = new Promise((resolve, reject) => {
+    consumer.once("ChainlinkFulfilled", async (requestId) => {
+      console.log(`✅ Request ${requestId} cumplida por el Chainlink Node`);
+      const result = await consumer.message();
+      console.log("📊 Resultado real de la API:", result);
+      resolve();
+    });
+
+    setTimeout(() => reject("⏳ Timeout esperando fulfillment"), 120000); // 2 min
+  });
+
+  // 🔹 Enviar request al nodo Chainlink
+  const tx = await consumer.requestExtraccion(
     "Catalunya tiene una población de 8 millones de habitantes y 2 millones de población extranjera"
   );
   await tx.wait();
-  console.log("Request enviada, esperando fulfillment...");
+  console.log("📡 Request enviada al Chainlink Node. Esperando fulfillment...");
 
-  // 6. Simular fulfillment desde OperatorMock
-  const requestId = await consumer.lastRequestId(); // suponiendo que ApiExtraerConsumer guarda el último requestId
-  const result = 8000000; // ejemplo de valor que la API devolvería
-  const txFulfill = await operator.fulfillRequest(requestId, result);
-  await txFulfill.wait();
-  console.log("Fulfillment simulado enviado al contrato consumidor");
+  // 🔹 Esperar fulfillment o timeout
+  await fulfillmentPromise;
 
-  // 7. Leer el resultado
-  const poblacion = await consumer.poblacion();
-  console.log("Resultado almacenado en contrato:", poblacion.toString());
+  console.log("🎉 Script terminado correctamente");
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error("❌ Error:", error);
   process.exitCode = 1;
 });

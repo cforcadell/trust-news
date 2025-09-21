@@ -120,27 +120,32 @@ chainlink
 
 Una vez desplegado http://localhost:6688/signin 
 
-Crear un bridge con los datos de la api (compte amb els noms dels hosts)
+Crear un bridge con los datos de la api (compte amb els noms dels hosts).
 
-Ex: http://generate-asertions:8071/extraer
+Ex: extraer_bridge http://generate-asertions:8071/extraer
 El bridgeId en hexa es lo que va en el JobId
 
 Crear un job. Ejemplo (cmabiar direccion del contrato de chainlink , chainid y bridgename)
-type              = "directrequest"
-schemaVersion     = 1
-name              = "ExtraerPoblacion"
-contractAddress   = "0x7f851b849911F381649279447cf620EB192b100E" # Operator desplegado
-evmChainID        = "31337"
-maxTaskDuration   = "0s"
-
+type = "directrequest"
+schemaVersion = 1
+name = "ExtraerAsertions"
+externalJobID = "23035921-8e44-4cb2-8a10-0364b29bbf14"
+forwardingAllowed = false
+maxTaskDuration = "0s"
+contractAddress = "0x8919aC75c29C538d21bB4D851670a163C6B4fCAA"
+evmChainID = "31337"
+minIncomingConfirmations = 0
+minContractPaymentLinkJuels = "0"
 observationSource = """
     fetch    [type=bridge name="extraer_bridge" requestData="{\\"texto\\": \\"<texto>\\"}"]
-    parse    [type=jsonparse path="resultado"]
-    encode   [type=ethabiencode abi="(uint256)" data="{result: $(parse)}"]
+    parse    [type=jsonparse path="aserciones"]
+    encode   [type=ethabiencode abi="(bytes)" data="{result: $(parse)}"]
     submit   [type=ethtx to="[[ .contractAddress ]]" data="$(encode)"]
 
     fetch -> parse -> encode -> submit
 """
+
+
 Añadir los contracts LinkToken.sol i Operator.sol
 
 Ejercutar script de despliegue:
@@ -150,3 +155,15 @@ npx hardhat run scripts/testAPiGenerateAsertions.js --network localhost
 
 
 
+OJO. Para tener saldo en la chainlink
+npx hardhat console --network localhost
+> await hre.network.provider.send("hardhat_setBalance", [
+...   "0x8919aC75c29C538d21bB4D851670a163C6B4fCAA", 
+...   "0x3635C9ADC5DEA00000" // 100 ETH en hexadecimal
+... ]);
+true
+> const balance = await hre.ethers.provider.getBalance("0x8919aC75c29C538d21bB4D851670a163C6B4fCAA");
+undefined
+> console.log("Saldo:", hre.ethers.formatEther(balance), "ETH");
+Saldo: 1000.0 ETH
+undefined

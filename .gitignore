@@ -10940,3 +10940,5 @@ api/validate-asertions/.env
 .env
 api/generateAsertions/__pycache__/*.pyc
 api/validate-asertions/__pycache__/*.pyc
+api/kafka/kafka_server_jaas.conf
+api/couchdb/init-couchdb.sh

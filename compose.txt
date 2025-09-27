@@ -40,6 +40,14 @@ Si quieres forzar reconstrucción ignorando caché:
 docker compose build --no-cache
 
 docker compose up
+
+@Para borrar servicios eliminados añadir
+
+ --remove-orphans
+
+# en una sola orden buiil + up
+docker-compose up --build
+
 # dettached mode
 docker compose up -d
 

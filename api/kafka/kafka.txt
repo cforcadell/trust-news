@@ -1,0 +1,9 @@
+adminu@Ubtuntu:~/blockchain/tfm$ docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 --create --topic test-topic --partitions 1 --replication-factor 1
+Created topic test-topic.
+adminu@Ubtuntu:~/blockchain/tfm$ docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 --create --topic test-topic --partitions 1 --replication-factor 1
+Error while executing topic command : Topic 'test-topic' already exists.
+[2025-09-27 08:28:52,123] ERROR org.apache.kafka.common.errors.TopicExistsException: Topic 'test-topic' already exists.
+ (kafka.admin.TopicCommand$)
+adminu@Ubtuntu:~/blockchain/tfm$ docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 --list
+# Debes ver "test-topic"
+test-topic

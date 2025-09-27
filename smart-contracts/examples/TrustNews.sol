@@ -41,9 +41,10 @@ contract TrustManager{
 
     struct Post{
         mapping (string => Asertion) asertions;
-        IPFS_hash document;
+        IPFS_hash document; // Es el CID de ipfs
         address publisher;
         uint256 tokenId;
+        uint256 hashNew; //Permite recuperar el post a partir del texto de la noticia
     }
 
  

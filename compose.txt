@@ -75,3 +75,7 @@ docker compose -f 'docker-compose.yml' up   'postgres' 'chainlink'
 
 
 
+docker compose -f 'docker-compose.yml' up   'ipfs' 'ipfs-fastapi' 'generate-asertions' 'validate-asertions' 'zookeeper' 'kafka' 'control-center' 'mongodb'  'news-handler'
+
+
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'mongodb'  'ipfs' 'ipfs-fastapi' 'generate-asertions' 'validate-asertions'

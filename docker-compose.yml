@@ -12,7 +12,7 @@ services:
       - "8080:8080" # Gateway
       - "4001:4001" # Swarm
     volumes:
-      - ipfs_data:/data/ipfs
+      - ./volumes/ipfs_data:/data/ipfs
 
   # -------------------------
   # IPFS FastAPI
@@ -73,7 +73,7 @@ services:
     env_file:
       - ./api/kafka/.env.zookeeper
     volumes:
-      - zookeeper_data:/var/lib/zookeeper
+      - ./volumes/zookeeper_data:/var/lib/zookeeper
 
   # -------------------------
   # Kafka (SASL/PLAIN)
@@ -88,7 +88,7 @@ services:
     env_file:
       - ./api/kafka/.env.kafka
     volumes:
-      - kafka_data:/var/lib/kafka
+      - ./volumes/kafka_data:/var/lib/kafka
       - ./api/kafka/kafka_server_jaas.conf:/etc/kafka/secrets/kafka_server_jaas.conf:ro
       - ./api/kafka/log4j.properties:/etc/kafka/secrets/log4j.properties:ro
     environment:
@@ -96,34 +96,34 @@ services:
   # -------------------------
   # Control Center
   # -------------------------
-  #control-center:
-  #  image: confluentinc/cp-enterprise-control-center:7.6.1
-  #  container_name: control-center
-  #  ports:
-  #    - "9021:9021"
-  #  env_file:
-  #    - ./api/kafka/.env.controlcenter
-  #  depends_on:
-  #    - zookeeper
-  #    - kafka
-  #  volumes:
-  #    - ./api/kafka/control-center-log4j.properties:/etc/confluent-control-center/secrets/log4j.properties:ro
-  #  environment:
-  #    CONTROL_CENTER_LOG4J_OPTS: "-Dlog4j.configuration=file:/etc/confluent-control-center/secrets/log4j.properties"
-
-  # -------------------------
-  # CouchDB (con .env)
-  # -------------------------
-  couchdb:
-    image: couchdb:3
-    container_name: couchdb
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:7.6.1
+    container_name: control-center
     ports:
-      - "5984:5984"
+      - "9021:9021"
     env_file:
-      - ./api/couchdb/.env
+      - ./api/kafka/.env.controlcenter
+    depends_on:
+      - zookeeper
+      - kafka
     volumes:
-      - couchdb_data:/opt/couchdb/data
-      - ./api/couchdb/init-couchdb.sh:/docker-entrypoint-initdb.d/init-couchdb.sh:ro
+      - ./api/kafka/control-center-log4j.properties:/etc/confluent-control-center/secrets/log4j.properties:ro
+    environment:
+      CONTROL_CENTER_LOG4J_OPTS: "-Dlog4j.configuration=file:/etc/confluent-control-center/secrets/log4j.properties"
+
+
+  mongodb:
+    image: mongo:4.4
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    env_file:
+      - ./api/mongo/.env
+    volumes:
+      - ./volumes/mongo/data/db:/data/db
+
+
 
   # -------------------------
   # News Handler
@@ -133,10 +133,10 @@ services:
     container_name: news-handler
     depends_on:
       - kafka
-      - couchdb
+      #- couchdb
+      - mongodb
     env_file:
       - ./api/news-handler/.env
-      - ./api/couchdb/.env  # Para pasar credenciales de CouchDB
     ports:
       - "8072:8072"
     command: uvicorn main:app --host 0.0.0.0 --port 8072
@@ -181,10 +181,4 @@ services:
   #  extra_hosts:
   #    - "host.docker.internal:host-gateway"
 
-volumes:
-  ipfs_data:
-  kafka_data:
-  zookeeper_data:
-  couchdb_data:
-  #chainlink_db:
-  #chainlink_data:
+

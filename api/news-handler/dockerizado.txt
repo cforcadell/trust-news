@@ -1,0 +1,25 @@
+# construye nueva imagen con tag news-handler ( en lugar de latest)
+docker build -t news-handler .
+# listado de imagenes
+docker images
+# borrar una imagen
+docker rmi id_image
+# Ejecuta conetnedor a partir de la imagen pasada como parametro y con el nombre name 
+docker stop news-handler
+docker remove news-handler
+docker run -d --name news-handler -p 8072:8072 --env-file .env news-handler 
+# Listado de contenedores en ejecución
+docker ps
+
+# Listado de contenedores activos
+docker ps -a 
+# borrar contenedor 
+docker remove nombre_contenedor || container_id
+
+
+
+curl -X POST "http://127.0.0.1:8072/extraer" \
+     -H "Content-Type: application/json" \
+     -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes y 2 millones de poblacion extranjera"}'
+
+docker logs -f <idContainer>

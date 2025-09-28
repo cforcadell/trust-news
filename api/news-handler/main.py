@@ -3,12 +3,12 @@ import uuid
 import json
 import asyncio
 import logging
-from typing import Any, Dict
 
+from typing import Any, Dict
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
-from aiocouch import CouchDB, NotFoundError
+from motor.motor_asyncio import AsyncIOMotorClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fake-news-orchestrator")
@@ -23,17 +23,17 @@ KAFKA_MECHANISM = os.getenv("KAFKA_MECHANISM", "PLAIN")
 TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "fake_news_requests")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
 
-COUCHDB_USER = os.getenv("COUCHDB_USER", "admin")
-COUCHDB_PASSWORD = os.getenv("COUCHDB_PASSWORD", "")
-COUCHDB_HOST = os.getenv("COUCHDB_HOST", "couchdb:5984")
-ORDERS_DB = os.getenv("ORDERS_DB", "orders")
+MONGO_URI = os.getenv("MONGO_URI", "")
+MONGO_DBNAME = os.getenv("MONGO_DBNAME", "")
+MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "")
 
 # ---------- App & globals ----------
 app = FastAPI(title="Fake News Orchestrator")
 producer: AIOKafkaProducer | None = None
 consumer: AIOKafkaConsumer | None = None
-couch: CouchDB | None = None
+mongo_client: AsyncIOMotorClient | None = None
 db = None
+orders_collection = None
 
 # ---------- Models ----------
 class PublishRequest(BaseModel):
@@ -49,41 +49,35 @@ def kafka_security_kwargs():
     )
 
 async def save_order_doc(order_doc: dict):
-    global db
-    doc = await db.create(order_doc["order_id"], data=order_doc)
-    await doc.save()
+    global orders_collection
+    await orders_collection.insert_one(order_doc)
 
 async def update_order(order_id: str, update: dict):
-    global db
-    try:
-        doc = await db[order_id]
-        for k, v in update.items():
-            if k == "$push":
-                for push_key, push_val in v.items():
-                    if push_key not in doc:
-                        doc[push_key] = []
-                    doc[push_key].append(push_val)
-            else:
-                doc[k] = v
-        await doc.save()
-    except NotFoundError:
-        logger.error(f"Order {order_id} not found in CouchDB")
+    global orders_collection
+    mongo_update = {}
+    if "$push" in update:
+        mongo_update["$push"] = update.pop("$push")
+    if update:
+        mongo_update["$set"] = update
+    result = await orders_collection.update_one({"order_id": order_id}, mongo_update)
+    if result.matched_count == 0:
+        logger.error(f"Order {order_id} not found in MongoDB")
+
+async def get_order_doc(order_id: str) -> dict:
+    doc = await orders_collection.find_one({"order_id": order_id})
+    return doc
 
 # ---------- Startup / Shutdown ----------
 @app.on_event("startup")
 async def startup_event():
-    global producer, consumer, couch, db
+    global producer, consumer, mongo_client, db, orders_collection
 
-    # CouchDB
-    couch = CouchDB(COUCHDB_USER, COUCHDB_PASSWORD, url=f"http://{COUCHDB_HOST}", connect=True)
-    # Crear DB si no existe
-    if ORDERS_DB not in await couch.keys():
-        db = await couch.create(ORDERS_DB)
-        logger.info(f"CouchDB database '{ORDERS_DB}' created")
-    else:
-        db = await couch[ORDERS_DB]
-        logger.info(f"CouchDB database '{ORDERS_DB}' exists")
-    
+    # MongoDB
+    mongo_client = AsyncIOMotorClient(MONGO_URI)
+    db = mongo_client[MONGO_DBNAME]
+    orders_collection = db[ORDERS_COLLECTION]
+    logger.info(f"MongoDB connected at {MONGO_COLLECTION}")
+
     # Kafka producer
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BROKER,
@@ -108,13 +102,13 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global producer, consumer, couch
+    global producer, consumer, mongo_client
     if producer:
         await producer.stop()
     if consumer:
         await consumer.stop()
-    if couch:
-        await couch.close()
+    if mongo_client:
+        mongo_client.close()
     logger.info("Shutdown complete")
 
 # ---------- Endpoints ----------
@@ -137,7 +131,7 @@ async def publish_new(req: PublishRequest):
         "history": [],
     }
     await save_order_doc(order_doc)
-    logger.info(f"[{order_id}] Order saved in CouchDB, status=PENDING")
+    logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
 
     # Publicar petición a generar aserciones
     message = {
@@ -154,15 +148,14 @@ async def publish_new(req: PublishRequest):
 
 @app.get("/orders/{order_id}")
 async def get_order(order_id: str):
-    try:
-        doc = await db[order_id]
-        return dict(doc)
-    except NotFoundError:
+    doc = await get_order_doc(order_id)
+    if doc is None:
         raise HTTPException(status_code=404, detail="Order not found")
+    return doc
 
 # ---------- Kafka consumer loop ----------
 async def consume_responses_loop():
-    global consumer, producer, db
+    global consumer, producer, orders_collection
     logger.info("Starting consume_responses_loop")
     try:
         async for msg in consumer:
@@ -181,16 +174,26 @@ async def consume_responses_loop():
 
                 # Ejemplo: handle assertions_generated
                 if action == "assertions_generated":
-                    doc_text = (await db[order_id])["text"]
-                    doc = {"order_id": order_id, "text": doc_text, "assertions": payload.get("assertions", []), "metadata": {"generated_by": "ai-service", "timestamp": asyncio.get_event_loop().time()}}
-                    await update_order(order_id, {"assertions": doc["assertions"], "document": doc, "status": "DOCUMENT_CREATED", "$push": {"history": {"event": "assertions_received", "payload": payload}}})
+                    doc = await get_order_doc(order_id)
+                    if not doc:
+                        logger.warning(f"Order {order_id} not found")
+                        continue
+                    doc_update = {
+                        "assertions": payload.get("assertions", []),
+                        "document": {"order_id": order_id, "text": doc["text"], "assertions": payload.get("assertions", []),
+                                     "metadata": {"generated_by": "ai-service", "timestamp": asyncio.get_event_loop().time()}},
+                        "status": "DOCUMENT_CREATED",
+                        "$push": {"history": {"event": "assertions_received", "payload": payload}}
+                    }
+                    await update_order(order_id, doc_update)
+
                     # Publicar request IPFS
-                    msg_ipfs = {"action": "upload_ipfs", "order_id": order_id, "payload": {"document": doc}}
+                    msg_ipfs = {"action": "upload_ipfs", "order_id": order_id, "payload": {"document": doc_update["document"]}}
                     await producer.send_and_wait(TOPIC_REQUESTS, json.dumps(msg_ipfs).encode("utf-8"))
                     await update_order(order_id, {"status": "IPFS_PENDING", "$push": {"history": {"event": "sent_upload_ipfs"}}})
 
                 # ...otros actions se adaptan de manera similar usando update_order
-                # Puedes copiar el resto de tu lógica reemplazando `update_order` y `db[...]` en lugar de Mongo
             except Exception as e:
                 logger.exception("Error processing response message: %s", e)
     except Exception as e:
+        logger.exception("Error in consume_responses_loop: %s", e)

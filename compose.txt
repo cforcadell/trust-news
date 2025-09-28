@@ -79,3 +79,5 @@ docker compose -f 'docker-compose.yml' up   'ipfs' 'ipfs-fastapi' 'generate-aser
 
 
 docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'mongodb'  'ipfs' 'ipfs-fastapi' 'generate-asertions' 'validate-asertions'
+
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'mongodb' 'generate-asertions' 

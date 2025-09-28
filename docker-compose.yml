@@ -1,4 +1,3 @@
-version: "3.9"
 
 services:
   # -------------------------
@@ -133,7 +132,6 @@ services:
     container_name: news-handler
     depends_on:
       - kafka
-      #- couchdb
       - mongodb
     env_file:
       - ./api/news-handler/.env
@@ -180,5 +178,12 @@ services:
   #    - ~/blockchain/tfm/chainlink:/chainlink
   #  extra_hosts:
   #    - "host.docker.internal:host-gateway"
-
+  test:
+    build: ./api/news-handler 
+    command: python ./api/tests/test_kafka.py
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      - generate-asertions
+      - kafka
 

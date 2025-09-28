@@ -1,28 +1,27 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
-
-# Configuración
 import os
+import asyncio
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+import json
 
+# -----------------------------
+# FastAPI
+# -----------------------------
+app = FastAPI(title="API de Extracción de Aserciones Verificables y Generación de Documentos")
 
-
-
-
-# Inicializar FastAPI
-app = FastAPI(title="API de Extracción de Aserciones Verificables")
-
-# Modelo de entrada
+# Modelo de entrada para /extraer
 class TextoEntrada(BaseModel):
     texto: str
 
+# -----------------------------
 # Función que llama a Mistral API
+# -----------------------------
 def extraer_aserciones_verificables(texto: str):
-    
     url = os.getenv("API_URL")
     API_KEY = os.getenv("MISTRAL_API_KEY")
     MODEL = os.getenv("MISTRAL_MODEL", "mistral-tiny")
-    print(url)
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -36,10 +35,9 @@ def extraer_aserciones_verificables(texto: str):
                 "content": (
                     "Extrae solo las aserciones verificables que contengan cifras objetivables y eliminen cualquier valoración subjetiva. "
                     "Formatea el resultado como una lista de aserciones con sus fuentes sugeridas para verificación con su pais asociado, en formato JSON. "
-                    "La lista debe contener objetos con las claves 'asercion','fuente sugerida' y 'pais'. "
-                    "Los valores de fuentes son: ECONOMIA, INE, EUROSTAT, FMI, BANCO MUNDIAL, ONU, OMS, UNESCO, OIT, OCDE, UNICEF, FAO, PNUD, CEPAL, ECDC, JHU, WHO... "
-                    "Los valores de pais son los paises existentes: España, Francia, Alemania, Italia, Portugal, Reino Unido, Estados Unidos, Canada, Mexico, Argentina, Brasil, Chile, Colombia, Peru, Venezuela... "
-                    "Si no hay aserciones verificables, devuelve una lista vacía.\n\n"
+                    "Los valores de fuentes: ECONOMIA, INE, EUROSTAT, FMI, BANCO MUNDIAL, ONU, OMS, UNESCO, OIT, OCDE, UNICEF, FAO, PNUD, CEPAL, ECDC, JHU, WHO..."
+                    "Los valores de pais: España, Francia, Alemania, Italia, Portugal, Reino Unido, Estados Unidos, Canada, Mexico, Argentina, Brasil, Chile, Colombia, Peru, Venezuela..."
+                    "Si no hay aserciones verificables, devuelve lista vacía.\n\n"
                     f"Texto a analizar:\n{texto}"
                 )
             }
@@ -53,8 +51,91 @@ def extraer_aserciones_verificables(texto: str):
     else:
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
-# Endpoint
+# -----------------------------
+# Endpoint /extraer (texto -> JSON final)
+# -----------------------------
 @app.post("/extraer")
 def extraer(texto_entrada: TextoEntrada):
-    resultado = extraer_aserciones_verificables(texto_entrada.texto)
-    return {"aserciones": resultado}
+    texto = texto_entrada.texto
+
+    # Llamada a Mistral
+    aserciones_raw = extraer_aserciones_verificables(texto)
+
+    # Intentamos parsear JSON de las aserciones
+    try:
+        aserciones_list = json.loads(aserciones_raw)
+        aserciones_final = [
+            a.get("asercion", a) if isinstance(a, dict) else a
+            for a in aserciones_list
+        ]
+    except:
+        aserciones_final = []
+
+    # Construir documento final
+    documento = {
+        "new": texto,
+        "asertions": []
+    }
+    for i, a in enumerate(aserciones_final, start=1):
+        documento["asertions"].append({
+            "id": str(i),
+            "description": a
+        })
+
+    return documento
+
+# -----------------------------
+# Kafka consumer/producer (consume texto, publica documento final)
+# -----------------------------
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
+REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "fake_news_requests")
+RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses")
+
+# -----------------------------
+# Kafka consumer/producer con reintentos
+# -----------------------------
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
+REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "fake_news_requests")
+RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses")
+MAX_RETRIES = 10
+RETRY_DELAY = 3  # segundos
+
+async def consume_and_process():
+    consumer = AIOKafkaConsumer(
+        REQUEST_TOPIC,
+        bootstrap_servers=KAFKA_BOOTSTRAP,
+        group_id="news-handler-group"
+    )
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+
+    # Reintentos para conectar Kafka
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            await consumer.start()
+            await producer.start()
+            print("✅ Conectado a Kafka correctamente")
+            break
+        except Exception as e:
+            print(f"⚠️  Kafka no disponible (intento {attempt}/{MAX_RETRIES}): {e}")
+            if attempt == MAX_RETRIES:
+                raise
+            await asyncio.sleep(RETRY_DELAY)
+
+    try:
+        async for msg in consumer:
+            payload = json.loads(msg.value.decode())
+            texto = payload.get("texto", "")
+
+            # Llamada al endpoint /extraer internamente
+            documento = extraer(TextoEntrada(texto=texto))
+
+            # Publicar documento final en topic de respuestas
+            await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(documento).encode())
+    finally:
+        await consumer.stop()
+        await producer.stop()
+
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(consume_and_process())

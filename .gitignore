@@ -10981,3 +10981,14 @@ volumes/mongo/data/db/WiredTiger.lock
 volumes/mongo/data/db/WiredTiger.turtle
 volumes/mongo/data/db/WiredTiger.wt
 volumes/mongo/data/db/WiredTigerHS.wt
+volumes/ipfs_data/api
+volumes/ipfs_data/gateway
+volumes/ipfs_data/repo.lock
+volumes/ipfs_data/datastore/000009.ldb
+volumes/ipfs_data/datastore/000010.log
+volumes/ipfs_data/datastore/MANIFEST-000011
+volumes/ipfs_data/datastore/000018.ldb
+volumes/ipfs_data/datastore/000019.ldb
+volumes/ipfs_data/datastore/000022.ldb
+volumes/ipfs_data/datastore/000023.log
+volumes/ipfs_data/datastore/MANIFEST-000024

@@ -1,5 +1,7 @@
 # construye nueva imagen con tag news-handler ( en lugar de latest)
 docker build -t news-handler .
+#si no volem tenir problemes de cache de llibreries
+docker build --no-cache -t news-handler .
 # listado de imagenes
 docker images
 # borrar una imagen

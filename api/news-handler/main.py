@@ -75,7 +75,7 @@ async def startup_event():
     # MongoDB
     mongo_client = AsyncIOMotorClient(MONGO_URI)
     db = mongo_client[MONGO_DBNAME]
-    orders_collection = db[ORDERS_COLLECTION]
+    orders_collection = db[MONGO_COLLECTION]
     logger.info(f"MongoDB connected at {MONGO_COLLECTION}")
 
     # Kafka producer

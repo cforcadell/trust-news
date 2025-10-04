@@ -20,8 +20,11 @@ docker remove nombre_contenedor || container_id
 
 
 
-curl -X POST "http://127.0.0.1:8072/extraer" \
+curl -X POST "http://localhost:8072/publishNew" \
      -H "Content-Type: application/json" \
-     -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes y 2 millones de poblacion extranjera"}'
+     -d '{
+           "text": "El Gobierno ha anunciado un plan de ayudas para impulsar el uso de energías renovables en hogares y pymes. El programa contará con una inversión inicial de 500 millones de euros."
+         }'
+
 
 docker logs -f <idContainer>

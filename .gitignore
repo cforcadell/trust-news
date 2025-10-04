@@ -13140,3 +13140,5 @@ volumes/ipfs_data/datastore/000041.ldb
 volumes/ipfs_data/datastore/000042.log
 volumes/ipfs_data/datastore/000044.ldb
 volumes/ipfs_data/datastore/MANIFEST-000043
+volumes/mongo/data/db/collection-0--2463949140687063073.wt
+volumes/mongo/data/db/index-1--2463949140687063073.wt

@@ -13136,3 +13136,7 @@ volumes/ipfs_data/datastore/000032.ldb
 volumes/ipfs_data/datastore/000035.ldb
 volumes/ipfs_data/datastore/000036.log
 volumes/ipfs_data/datastore/MANIFEST-000037
+volumes/ipfs_data/datastore/000041.ldb
+volumes/ipfs_data/datastore/000042.log
+volumes/ipfs_data/datastore/000044.ldb
+volumes/ipfs_data/datastore/MANIFEST-000043

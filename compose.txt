@@ -83,3 +83,5 @@ docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'generate-aser
 docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  
 docker compose -f 'docker-compose.yml' up     'generate-asertions' 'news-handler'
 
+docker compose -f 'docker-compose.yml' down     'generate-asertions' 'news-handler'
+

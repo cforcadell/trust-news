@@ -166,7 +166,7 @@ async def consume_responses_loop():
                 action = data.get("action")
                 order_id = data.get("order_id")
                 payload = data.get("payload", {})
-                status = data.get("status")
+                #status = data.get("status")
 
                 if not order_id or not action:
                     logger.warning("Message without order_id/action, ignoring")

@@ -7,6 +7,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 import json
 import logging
 from dotenv import load_dotenv
+import uuid
 
 # -----------------------------
 # Cargar variables de entorno
@@ -45,7 +46,7 @@ def extraer_aserciones_verificables(texto: str):
     )
 
     full_prompt = f"{PROMPT}. Texto a analizar:\n{texto}"
-    logger.info(f"Prompt enviado a Mistral: {full_prompt}")
+    logger.debug(f"Prompt enviado a Mistral: {full_prompt}")
 
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     data = {
@@ -68,7 +69,7 @@ def extraer_aserciones_verificables(texto: str):
 @app.post("/extraer")
 def extraer(texto_entrada: TextoEntrada):
     texto = texto_entrada.texto
-    logger.info(f"Texto recibido en /extraer: {texto}")
+    logger.debug(f"Texto recibido en /extraer: {texto}")
 
     try:
         aserciones_raw = extraer_aserciones_verificables(texto)
@@ -128,15 +129,36 @@ async def consume_and_process():
 
     try:
         async for msg in consumer:
-            payload = json.loads(msg.value.decode())
-            texto = payload.get("texto", "")
-            logger.debug(f"Mensaje recibido de Kafka: {texto}")
+            try:
+                payload_msg = json.loads(msg.value.decode())
+                action = payload_msg.get("action")
+                order_id = payload_msg.get("order_id", str(uuid.uuid4()))
+                payload = payload_msg.get("payload", {})
+                texto = payload.get("text", "")
+                
+                logger.debug(f"Mensaje recibido de Kafka (action={action}, order_id={order_id}): {texto}")
 
-            documento = extraer(TextoEntrada(texto=texto))
-            logger.debug(f"Documento generado para Kafka: {documento}")
+                if action != "generate_assertions":
+                    logger.warning(f"Ignorando mensaje con action inesperada: {action}")
+                    continue
 
-            await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(documento).encode())
-            logger.info(f"Documento publicado en topic {RESPONSE_TOPIC}")
+                # Generar aserciones usando la función extraer
+                documento = extraer(TextoEntrada(texto=texto))
+
+                # Construir respuesta estructurada
+                response_msg = {
+                    "action": "assertions_generated",
+                    "order_id": order_id,
+                    "payload": {"assertions": [a["description"] for a in documento.get("asertions", [])]}
+                }
+
+                # Publicar en topic de respuestas
+                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(response_msg).encode())
+                logger.info(f"Documento publicado en topic {RESPONSE_TOPIC} (order_id={order_id})")
+
+            except Exception as e:
+                logger.error(f"Error procesando mensaje Kafka: {e}")
+
     finally:
         await consumer.stop()
         await producer.stop()

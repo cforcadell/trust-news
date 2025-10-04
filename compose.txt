@@ -80,8 +80,9 @@ docker compose -f 'docker-compose.yml' up   'ipfs' 'ipfs-fastapi' 'generate-aser
 -- Provar handler y llamar a genrate-asertions
 docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'generate-asertions' 'news-handler'
 
-docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  
-docker compose -f 'docker-compose.yml' up     'generate-asertions' 'news-handler' 'mongodb'
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs'  
+docker compose -f 'docker-compose.yml' up       'ipfs-fastapi'  'generate-asertions' 'news-handler' 'mongodb'
 
 docker compose -f 'docker-compose.yml' down     'generate-asertions' 'news-handler' 'mongodb'
+docker compose -f 'docker-compose.yml' down    'ipfs-fastapi'
 

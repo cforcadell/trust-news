@@ -23,8 +23,10 @@ docker remove nombre_contenedor || container_id
 curl -X POST "http://localhost:8072/publishNew" \
      -H "Content-Type: application/json" \
      -d '{
-           "text": "El Gobierno ha anunciado un plan de ayudas para impulsar el uso de energías renovables en hogares y pymes. El programa contará con una inversión inicial de 500 millones de euros."
+           "text": "Catalunya tiene una poblacion de 8 millones de habitantes de los que 2 son menores edad y 3 mayores de 65."
          }'
+
+
 
 
 docker logs -f <idContainer>

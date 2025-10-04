@@ -187,10 +187,19 @@ async def consume_responses_loop():
                     }
                     await update_order(order_id, doc_update)
 
-                    # Publicar request IPFS
-                    msg_ipfs = {"action": "upload_ipfs", "order_id": order_id, "payload": {"document": doc_update["document"]}}
+                    # Publicar request IPFS sin order_id en payload.document
+                    msg_ipfs = {
+                        "action": "upload_ipfs",
+                        "order_id": order_id,  # mantenemos order_id para seguimiento de la orden
+                        "payload": {"document": doc_update["document"]}  # document sin order_id
+                    }
                     await producer.send_and_wait(TOPIC_REQUESTS, json.dumps(msg_ipfs).encode("utf-8"))
-                    await update_order(order_id, {"status": "IPFS_PENDING", "$push": {"history": {"event": "sent_upload_ipfs"}}})
+
+                    # Actualizar estado en MongoDB
+                    await update_order(
+                        order_id,
+                        {"status": "IPFS_PENDING", "$push": {"history": {"event": "sent_upload_ipfs"}}}
+                    )
 
                 # ...otros actions se adaptan de manera similar usando update_order
             except Exception as e:

@@ -1,4 +1,8 @@
-fastapi
-uvicorn[standard]
-httpx
-python-multipart
+fastapi==0.101.1
+uvicorn[standard]==0.23.2
+httpx==0.24.1
+aiokafka==0.10.0
+python-dotenv==1.0.0
+python-multipart==0.0.6
+
+

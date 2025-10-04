@@ -1,4 +1,4 @@
-mongosh "mongodb://root:xxxxxxxx@localhost:27017"
+mongosh "mongodb://root:<pwd>@localhost:27017"
 
 # Seleccionar la base de datos (si hace falta)
 use newsdb

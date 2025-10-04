@@ -21,9 +21,8 @@ services:
     container_name: ipfs-fastapi
     ports:
       - "8060:8060"
-    environment:
-      - IPFS_API_ADD=http://ipfs:5001/api/v0/add
-      - IPFS_API_CAT=http://ipfs:5001/api/v0/cat
+    env_file:
+      - ./api/ipfs/.env
     depends_on:
       - ipfs
 

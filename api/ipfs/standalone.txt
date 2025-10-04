@@ -33,6 +33,11 @@ Haz una petición POST con curl o Postman:
 
 curl -X POST -F "file=@doc.txt" http://localhost:8060/ipfs/upload
 
+curl -X POST "http://localhost:8060/ipfs/upload" \
+  -F "filename=mi_documento.json" \
+  -F "content_bytes=$(echo '{\"texto\":\"Hola mundo\"}' | base64 -w 0 | base64 --decode)"
+
+
 retorna CID
 
 contra Kubo directament

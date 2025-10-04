@@ -33,7 +33,7 @@ def extraer_aserciones_verificables(texto: str):
             {
                 "role": "user",
                 "content": (
-                    "Extrae solo las aserciones verificables que contengan cifras objetivables y eliminen cualquier valoración subjetiva. "
+                    "Extrae solo las aserciones verificables que contengan cifras objetivables y eliminen cualquier valoración subjetiva. En cada aserción, incluye antes de la asercion una frase con el enunciado de la noticia ."
                     "Formatea el resultado como una lista de aserciones con sus fuentes sugeridas para verificación con su pais asociado, en formato JSON. "
                     "Los valores de fuentes: ECONOMIA, INE, EUROSTAT, FMI, BANCO MUNDIAL, ONU, OMS, UNESCO, OIT, OCDE, UNICEF, FAO, PNUD, CEPAL, ECDC, JHU, WHO..."
                     "Los valores de pais: España, Francia, Alemania, Italia, Portugal, Reino Unido, Estados Unidos, Canada, Mexico, Argentina, Brasil, Chile, Colombia, Peru, Venezuela..."

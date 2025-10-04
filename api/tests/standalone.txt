@@ -1,0 +1,20 @@
+-- Instala reqs en venv
+
+python3 -m venv venv
+
+source venv/bin/activate
+
+
+
+requirements.txt
+-----------------
+aiokafka==0.10.0
+pytest
+pytest-asyncio
+
+
+pip install -r requirements.txt
+
+python3 test_kafka.py
+
+

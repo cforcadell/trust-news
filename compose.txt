@@ -77,7 +77,9 @@ docker compose -f 'docker-compose.yml' up   'postgres' 'chainlink'
 
 docker compose -f 'docker-compose.yml' up   'ipfs' 'ipfs-fastapi' 'generate-asertions' 'validate-asertions' 'zookeeper' 'kafka' 'control-center' 'mongodb'  'news-handler'
 
+-- Provar handler y llamar a genrate-asertions
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'generate-asertions' 'news-handler'
 
-docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'mongodb'  'ipfs' 'ipfs-fastapi' 'generate-asertions' 'validate-asertions'
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  
+docker compose -f 'docker-compose.yml' up     'generate-asertions' 'news-handler'
 
-docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'mongodb' 'generate-asertions' 

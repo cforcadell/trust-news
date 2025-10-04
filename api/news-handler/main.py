@@ -20,8 +20,11 @@ KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
 KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
 KAFKA_MECHANISM = os.getenv("KAFKA_MECHANISM", "PLAIN")
 
-TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "fake_news_requests")
+TOPIC_REQUESTS_GENERATE = os.getenv("TOPIC_REQUESTS_GENERATE", "fake_news_requests_generate")
+TOPIC_REQUESTS_IPFS = os.getenv("TOPIC_REQUESTS_IPFS", "fake_news_requests_ipfs")
+TOPIC_REQUESTS_VALIDATE = os.getenv("TOPIC_REQUESTS_VALIDATE", "fake_news_requests_validate")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
+
 
 MONGO_URI = os.getenv("MONGO_URI", "")
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "")
@@ -121,13 +124,12 @@ async def publish_new(req: PublishRequest):
     order_id = str(uuid.uuid4())
     order_doc = {
         "order_id": order_id,
-        "text": text,
         "status": "PENDING",
+        "text": text,
         "assertions": None,
         "document": None,
-        "ipfs_hash": None,
+        "cid": None,
         "smart_token": None,
-        "validator_status": None,
         "history": [],
     }
     await save_order_doc(order_doc)
@@ -139,7 +141,7 @@ async def publish_new(req: PublishRequest):
         "order_id": order_id,
         "payload": {"text": text}
     }
-    await producer.send_and_wait(TOPIC_REQUESTS, json.dumps(message).encode("utf-8"))
+    await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, json.dumps(message).encode("utf-8"))
     logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS}")
 
     # update status
@@ -166,42 +168,100 @@ async def consume_responses_loop():
                 action = data.get("action")
                 order_id = data.get("order_id")
                 payload = data.get("payload", {})
-                #status = data.get("status")
 
                 if not order_id or not action:
                     logger.warning("Message without order_id/action, ignoring")
                     continue
 
-                # Ejemplo: handle assertions_generated
+                # --- assertions_generated ---
                 if action == "assertions_generated":
                     doc = await get_order_doc(order_id)
                     if not doc:
                         logger.warning(f"Order {order_id} not found")
                         continue
+
+                    # Actualizamos assertions y creamos document
+                    assertions = payload.get("assertions", [])
                     doc_update = {
-                        "assertions": payload.get("assertions", []),
-                        "document": {"order_id": order_id, "text": doc["text"], "assertions": payload.get("assertions", []),
-                                     "metadata": {"generated_by": "ai-service", "timestamp": asyncio.get_event_loop().time()}},
+                        "assertions": assertions,
+                        "document": {
+                            "order_id": order_id,
+                            "text": doc["text"],
+                            "assertions": assertions,
+                            "metadata": {
+                                "generated_by": "news-handler",
+                                "timestamp": asyncio.get_event_loop().time()
+                            }
+                        },
                         "status": "DOCUMENT_CREATED",
                         "$push": {"history": {"event": "assertions_received", "payload": payload}}
                     }
                     await update_order(order_id, doc_update)
 
-                    # Publicar request IPFS sin order_id en payload.document
+                    # Enviamos a IPFS
                     msg_ipfs = {
                         "action": "upload_ipfs",
-                        "order_id": order_id,  # mantenemos order_id para seguimiento de la orden
-                        "payload": {"document": doc_update["document"]}  # document sin order_id
+                        "order_id": order_id,
+                        "payload": {"document": doc_update["document"]}
                     }
-                    await producer.send_and_wait(TOPIC_REQUESTS, json.dumps(msg_ipfs).encode("utf-8"))
+                    await producer.send_and_wait(TOPIC_REQUESTS_IPFS, json.dumps(msg_ipfs).encode("utf-8"))
 
-                    # Actualizar estado en MongoDB
+                    # Actualizamos estado
                     await update_order(
                         order_id,
                         {"status": "IPFS_PENDING", "$push": {"history": {"event": "sent_upload_ipfs"}}}
                     )
+                    logger.info(f"[{order_id}] Assertions procesadas y documento enviado a IPFS")
 
-                # ...otros actions se adaptan de manera similar usando update_order
+                # --- ipfs_uploaded ---
+                elif action == "ipfs_uploaded":
+                    doc = await get_order_doc(order_id)
+                    if not doc:
+                        logger.warning(f"Order {order_id} not found")
+                        continue
+
+                    # Actualizamos status y cid
+                    update_fields = {
+                        "status": "IPFS_UPLOADED",
+                        "cid": payload.get("cid"),
+                        "$push": {"history": {"event": "ipfs_uploaded", "payload": payload}}
+                    }
+                    await update_order(order_id, update_fields)
+                    logger.info(f"[{order_id}] Status actualizado a IPFS_UPLOADED con hash={payload.get('cid')}")
+
+                    # Enviar un mensaje por cada aserción
+                    for assertion in doc.get("document", {}).get("assertions", []):
+                        msg_validation = {
+                            "action": "request_validation",
+                            "order_id": order_id,
+                            "payload": {
+                                "assertion_id": assertion.get("id"),
+                                "assertion_content": assertion.get("description")
+                            }
+                        }
+                        await producer.send_and_wait(TOPIC_REQUESTS_VALIDATE, json.dumps(msg_validation).encode("utf-8"))
+                        logger.info(f"[{order_id}] Request_validation enviado para aserción {assertion.get('id')}")
+
+                        # Actualizamos status general de validación pendiente
+                        await update_order(
+                            order_id,
+                            {"status": "VALIDATION_PENDING", "$push": {"history": {"event": "sent_request_validation {assertion.get('id')}"}}}
+                        )
+
+
+                # --- validation_completed ---
+                elif action == "validation_completed":
+                    update_fields = {
+                        "status": "ASSERTION VALIDATED",
+                        "validator_status": payload.get("status"),
+                        "$push": {"history": {"event": "validation_completed", "payload": payload}}
+                    }
+                    await update_order(order_id, update_fields)
+                    logger.info(f"[{order_id}] Validación completada con estado {payload.get('status')}")
+
+                else:
+                    logger.warning(f"[{order_id}] Acción desconocida: {action}")
+
             except Exception as e:
                 logger.exception("Error processing response message: %s", e)
     except Exception as e:

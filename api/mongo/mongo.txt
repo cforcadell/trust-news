@@ -1,4 +1,4 @@
-mongosh "mongodb://root:<pwd>@localhost:27017"
+mongosh "mongodb://root:cforcadellm@localhost:27017"
 
 # Seleccionar la base de datos (si hace falta)
 use newsdb
@@ -10,7 +10,7 @@ show collections
 db.news.find().pretty()
 
 # Consultar un documento específico por order_id
-db.news.findOne({ order_id: "6c570ea2-880e-48de-b157-ac9a63b4e9ba" })
+db.news.findOne({ order_id: "45d248ba-5b10-48fc-a62f-93f4f82956e5" })
 
 # Contar documentos
 db.news.countDocuments()

@@ -149,7 +149,7 @@ async def consume_and_process():
                 response_msg = {
                     "action": "assertions_generated",
                     "order_id": order_id,
-                    "payload": {"assertions": [a["description"] for a in documento.get("asertions", [])]}
+                    "payload": {"assertions": documento.get("asertions", [])}
                 }
 
                 # Publicar en topic de respuestas

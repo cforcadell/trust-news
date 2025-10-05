@@ -45,22 +45,55 @@ services:
       - kafka
 
   # -------------------------
-  # validate-asertions API
+  # validate-asertions API MAIN
   # -------------------------
-  validate-asertions:
+  validate-asertions-worker_1:
     build: ./api/validate-asertions
-    container_name: validate-asertions
+    container_name: validate-asertions-worker_1
     ports:
       - "8070:8070"
     env_file:
       - ./api/validate-asertions/.env
     environment:
-      - IPFS_API_ADD=http://ipfs:5001/api/v0/add
-      - IPFS_API_CAT=http://ipfs:5001/api/v0/cat
+      - ENABLE_KAFKA_CONSUMER = "true"
+      - WORKER_ID = "1"
     depends_on:
       - ipfs
       - ipfs-fastapi
-
+  
+  # -------------------------
+  # validate-asertions API WORKER 2
+  # -------------------------
+  validate-asertions-worker_2:
+    build: ./api/validate-asertions
+    container_name: validate-asertions-worker_2
+    ports:
+      - "8069:8070"
+    env_file:
+      - ./api/validate-asertions/.env
+    environment:
+      - ENABLE_KAFKA_CONSUMER = "false"
+      - WORKER_ID = "2"
+    depends_on:
+      - ipfs
+      - ipfs-fastapi
+  
+  # -------------------------
+  # validate-asertions API WORKER 3
+  # -------------------------
+  validate-asertions-worker_3:
+    build: ./api/validate-asertions
+    container_name: validate-asertions-worker_3
+    ports:
+      - "8068:8070"
+    env_file:
+      - ./api/validate-asertions/.env
+    environment:
+      - ENABLE_KAFKA_CONSUMER = "false"
+      - WORKER_ID = "3"
+    depends_on:
+      - ipfs
+      - ipfs-fastapi
   # -------------------------
   # Zookeeper
   # -------------------------

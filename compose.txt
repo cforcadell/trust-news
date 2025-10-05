@@ -75,15 +75,22 @@ docker compose -f 'docker-compose.yml' up   'postgres' 'chainlink'
 
 
 
-docker compose -f 'docker-compose.yml' up   'ipfs' 'ipfs-fastapi' 'generate-asertions' 'validate-asertions' 'zookeeper' 'kafka' 'control-center' 'mongodb'  'news-handler'
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs'
 
--- Provar handler y llamar a genrate-asertions
-docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka'  'generate-asertions' 'news-handler'
+-- TOTAL
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs' 'generate-asertions' 'news-handler' 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+docker compose -f 'docker-compose.yml' down    'zookeeper' 'kafka'  'ipfs' 'generate-asertions' 'news-handler' 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+
 
 docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs'  
-docker compose -f 'docker-compose.yml' up       'ipfs-fastapi'  'generate-asertions' 'validate-asertions'  'news-handler' 'mongodb'
+docker compose -f 'docker-compose.yml' up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+docker compose -f 'docker-compose.yml' down 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+
+
+
 
 docker compose -f 'docker-compose.yml' down     'generate-asertions' 'news-handler' 'mongodb'
 docker compose -f 'docker-compose.yml' up    'generate-asertions'
-docker compose -f 'docker-compose.yml' down    'generate-asertions' 'news-handler'
+docker compose -f 'docker-compose.yml' up  'news-handler'
+docker compose -f 'docker-compose.yml' down  'news-handler'
 

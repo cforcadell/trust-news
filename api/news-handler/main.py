@@ -3,6 +3,8 @@ import uuid
 import json
 import asyncio
 import logging
+import aiohttp
+import itertools
 
 from typing import Any, Dict
 from fastapi import FastAPI, HTTPException
@@ -25,10 +27,12 @@ TOPIC_REQUESTS_IPFS = os.getenv("TOPIC_REQUESTS_IPFS", "fake_news_requests_ipfs"
 TOPIC_REQUESTS_VALIDATE = os.getenv("TOPIC_REQUESTS_VALIDATE", "fake_news_requests_validate")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
 
-
 MONGO_URI = os.getenv("MONGO_URI", "")
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "")
+
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
+worker_counter = itertools.cycle(range(1, MAX_WORKERS + 1))
 
 # ---------- App & globals ----------
 app = FastAPI(title="Fake News Orchestrator")
@@ -142,7 +146,7 @@ async def publish_new(req: PublishRequest):
         "payload": {"text": text}
     }
     await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, json.dumps(message).encode("utf-8"))
-    logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS}")
+    logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
 
     # update status
     await update_order(order_id, {"status": "ASSERTIONS_REQUESTED", "$push": {"history": {"event": "sent_generate_assertions"}}})
@@ -157,7 +161,7 @@ async def get_order(order_id: str):
 
 # ---------- Kafka consumer loop ----------
 async def consume_responses_loop():
-    global consumer, producer, orders_collection
+    global consumer, producer, orders_collection, worker_counter
     logger.info("Starting consume_responses_loop")
     try:
         async for msg in consumer:
@@ -220,7 +224,6 @@ async def consume_responses_loop():
                         logger.warning(f"Order {order_id} not found")
                         continue
 
-                    # Actualizamos status y cid
                     update_fields = {
                         "status": "IPFS_UPLOADED",
                         "cid": payload.get("cid"),
@@ -229,25 +232,56 @@ async def consume_responses_loop():
                     await update_order(order_id, update_fields)
                     logger.info(f"[{order_id}] Status actualizado a IPFS_UPLOADED con hash={payload.get('cid')}")
 
-                    # Enviar un mensaje por cada aserción
-                    for assertion in doc.get("document", {}).get("assertions", []):
-                        msg_validation = {
-                            "action": "request_validation",
-                            "order_id": order_id,
-                            "payload": {
-                                "assertion_id": assertion.get("id"),
-                                "assertion_content": assertion.get("description")
-                            }
-                        }
-                        await producer.send_and_wait(TOPIC_REQUESTS_VALIDATE, json.dumps(msg_validation).encode("utf-8"))
-                        logger.info(f"[{order_id}] Request_validation enviado para aserción {assertion.get('id')}")
+                    # -------- Validación directa vía HTTP --------
+                    async with aiohttp.ClientSession() as session:
+                        context=doc.get("document", {}).get("text", "")
+                        for assertion in doc.get("document", {}).get("assertions", []):
+                            worker_index = next(worker_counter)
+                            worker_url = f"http://validate-asertions-worker_{worker_index}:8070/verificar"
+                            assertion_id = assertion.get("id")
+                            assertion_text = assertion.get("description", {}).get("assertion", "")
+                            payload_http = {"texto": assertion_text,"contexto":context}
 
-                        # Actualizamos status general de validación pendiente
-                        await update_order(
-                            order_id,
-                            {"status": "VALIDATION_PENDING", "$push": {"history": {"event": "sent_request_validation {assertion.get('id')}"}}}
-                        )
+                            try:
+                                async with session.post(worker_url, json=payload_http, timeout=60) as resp:
+                                    if resp.status == 200:
+                                        result = await resp.json()
+                                        verificacion = result.get("verificación")
 
+                                        logger.info(
+                                            f"[{order_id}] Aserción {assertion_id} validada por worker {worker_index}: {verificacion}"
+                                        )
+
+                                        await update_order(
+                                            order_id,
+                                            {
+                                                "status": "VALIDATION_COMPLETED",
+                                                "$push": {
+                                                    "history": {
+                                                        "event": f"validated_by_worker_{worker_index}",
+                                                        "payload": {
+                                                            "assertion_id": assertion_id,
+                                                            "worker_index": worker_index,
+                                                            "verificacion": verificacion
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    else:
+                                        logger.error(
+                                            f"[{order_id}] Error {resp.status} validando aserción {assertion_id} en worker {worker_index}"
+                                        )
+                            except Exception as e:
+                                logger.error(
+                                    f"[{order_id}] Fallo llamando a worker {worker_index} para aserción {assertion_id}: {e}"
+                                )
+
+                    await update_order(
+                        order_id,
+                        {"status": "VALIDATION_PENDING", "$push": {"history": {"event": "sent_request_validations_all"}}}
+                    )
+                    logger.info(f"[{order_id}] Todas las aserciones enviadas a validación HTTP")
 
                 # --- validation_completed ---
                 elif action == "validation_completed":

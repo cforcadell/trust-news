@@ -8,6 +8,8 @@ import json
 import logging
 from dotenv import load_dotenv
 import uuid
+from typing import Optional
+
 
 # -----------------------------
 # Cargar variables de entorno
@@ -28,44 +30,53 @@ logger = logging.getLogger(__name__)
 # Inicializar FastAPI
 app = FastAPI(title="API de Validación de Aserciones ")
 
-# Modelo de entrada
-class TextoEntrada(BaseModel):
+# Modelo de entrada actualizado
+class VerificarEntrada(BaseModel):
     texto: str
+    contexto: Optional[str] = None  # parámetro opcional
 
 # Función que llama a Mistral API
-def verificar_asercion(texto: str):
+def verificar_asercion(texto: str, contexto: Optional[str] = None):
     url = os.getenv("API_URL")
     API_KEY = os.getenv("MISTRAL_API_KEY")
     MODEL = os.getenv("MISTRAL_MODEL", "mistral-tiny")
-    
+    WORKER_ID = os.getenv("WORKER_ID", "0")
+
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
+
+    contenido = f"Texto a analizar:\n{texto}"
+    if contexto:
+        contenido += f"\nContexto adicional:\n{contexto}"
+
     data = {
         "model": MODEL,
         "messages": [
             {
                 "role": "user",
                 "content": (
-                   "Validame la siguiente aserción. Devueve dos tags. En 'resultado': TRUE, FALSE o UNKNOWN. A continuacion en el tag 'descripcion' la explicacion si es necesaria. Ajustate al formato.\n\n"
-                    f"Texto a analizar:\n{texto}"
+                    "Validame la siguiente aserción. Devuelve dos tags. En 'resultado': TRUE, FALSE o UNKNOWN. "
+                    "A continuación, en el tag 'descripcion' la explicación si es necesaria. Ajustate al formato.\n\n"
+                    f"{contenido}"
                 )
             }
         ],
         "temperature": 0.3,
     }
 
+    logger.info(f"Verificando aserción (worker_id={WORKER_ID}): {texto} | contexto: {contexto}")
     response = requests.post(url, headers=headers, json=data)
     if response.status_code == 200:
         return response.json()["choices"][0]["message"]["content"]
     else:
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
-# Endpoint
+# Endpoint actualizado
 @app.post("/verificar")
-def verificar(texto_entrada: TextoEntrada):
-    resultado = verificar_asercion(texto_entrada.texto)
+def verificar(entrada: VerificarEntrada):
+    resultado = verificar_asercion(entrada.texto, entrada.contexto)
     return {"verificación": resultado}
 
 # -----------------------------
@@ -106,17 +117,18 @@ async def consume_and_process():
                 action = payload_msg.get("action")
                 order_id = payload_msg.get("order_id", str(uuid.uuid4()))
                 payload = payload_msg.get("payload", {})
-                texto = payload.get("assertion_content", "")
+                assertion = payload.get("assertion_content", "")
+                context = payload.get("context", "")
                 assertion_id = payload.get("assertion_id", "")
                 
-                logger.debug(f"Mensaje recibido de Kafka (action={action}, order_id={order_id}): {texto}")
+                logger.debug(f"Mensaje recibido de Kafka (action={action}, order_id={order_id}): {assertion}")
 
                 if action != "request_validation":
-                    logger.warning(f"Ignorando mensaje con action inesperada: {action}")
+                    logger.warning(f"Ignorando mensaje con action inesperada: {assertion}")
                     continue
 
                 # Generar aserciones usando la función extraer
-                veredict = verificar_asercion(TextoEntrada(texto=texto))
+                veredict = verificar_asercion(texto=assertion,contexto=context)
 
                 # Construir respuesta estructurada
                 response_msg = {
@@ -139,4 +151,11 @@ async def consume_and_process():
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(consume_and_process())
+    ENABLE_KAFKA_CONSUMER = os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true"
+
+    if ENABLE_KAFKA_CONSUMER:
+        logger.info("✅ ENABLE_KAFKA_CONSUMER está habilitado. Iniciando consumidor Kafka...")
+        asyncio.create_task(consume_and_process())
+    else:
+        logger.info("🚫 ENABLE_KAFKA_CONSUMER está deshabilitado. No se iniciará el consumidor Kafka.")
+

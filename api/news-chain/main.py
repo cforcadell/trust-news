@@ -1,0 +1,227 @@
+# main.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from web3 import Web3
+import json
+from dotenv import load_dotenv
+import os
+import logging
+import asyncio
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+import uuid
+from typing import List
+
+# ========================================
+# CONFIGURACIÓN
+# ========================================
+load_dotenv()
+RPC_URL = os.getenv("RPC_URL")
+PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
+CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
+
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
+REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "register_blockchain")
+RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "register_blockchain_responses")
+MAX_RETRIES = 10
+RETRY_DELAY = 3  # segundos
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
+logger = logging.getLogger("TrustManagerAPI")
+
+# ========================================
+# Web3 y contrato
+# ========================================
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
+
+with open("contract_abi.json") as f:
+    abi = json.load(f)
+
+contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
+
+# ========================================
+# MODELOS DE DATOS
+# ========================================
+class MultihashModel(BaseModel):
+    hash_function: str
+    hash_size: str
+    digest: str
+
+class ValidatorModel(BaseModel):
+    validatorAddress: str
+    domain: str
+    reputation: int
+
+class ValidationModel(BaseModel):
+    id: str
+    validator: ValidatorModel
+    veredict: bool
+    hash_description: MultihashModel
+
+class AsertionModel(BaseModel):
+    hash_asertion: MultihashModel
+    validations: List[ValidationModel] = []
+
+class PublishModel(BaseModel):
+    hash_new: MultihashModel
+    hash_ipfs: MultihashModel
+    asertions: List[AsertionModel] = []
+    publisher: str
+
+class RegisterValidatorModel(BaseModel):
+    name: str
+    categories: List[str]
+
+class AddValidationModel(BaseModel):
+    PostId: int
+    asertionIndex: int
+    veredict: bool
+    hash_description: MultihashModel
+
+# ========================================
+# FUNCIONES AUXILIARES
+# ========================================
+def send_tx(function_call):
+    try:
+        nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
+        tx = function_call.build_transaction({
+            "from": ACCOUNT_ADDRESS,
+            "nonce": nonce,
+            "gas": 800000,
+            "gasPrice": w3.toWei("1", "gwei")
+        })
+        signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        logger.info(f"Transaction sent: {tx_hash.hex()}")
+        return receipt
+    except Exception as e:
+        logger.error(f"Error sending transaction: {e}")
+        raise
+
+def convert_multihash_to_tuple(mh: MultihashModel):
+    t = (int(mh.hash_function, 16), int(mh.hash_size, 16), bytes.fromhex(mh.digest[2:]))
+    logger.debug(f"Converted multihash {mh} to tuple {t}")
+    return t
+
+# ========================================
+# ENDPOINTS
+# ========================================
+app = FastAPI(title="TrustManager SC API")
+
+@app.post("/publishNew")
+def publish_new(data: PublishModel):
+    logger.info(f"publishNew called by {data.publisher}")
+    hash_new = convert_multihash_to_tuple(data.hash_new)
+    hash_ipfs = convert_multihash_to_tuple(data.hash_ipfs)
+
+    asertions_list = []
+    for a in data.asertions:
+        validations_list = []
+        for v in a.validations:
+            v_tuple = (
+                int(v.id, 16),
+                (v.validator.validatorAddress, v.validator.domain, v.validator.reputation),
+                v.veredict,
+                convert_multihash_to_tuple(v.hash_description)
+            )
+            validations_list.append(v_tuple)
+        asertions_list.append((convert_multihash_to_tuple(a.hash_asertion), validations_list))
+
+    func_call = contract.functions.publishNew(hash_new, hash_ipfs, asertions_list, data.publisher)
+    receipt = send_tx(func_call)
+    logger.info(f"Post published with tx_hash: {receipt.transactionHash.hex()}")
+    return {"status": "success", "tx_hash": receipt.transactionHash.hex()}
+
+@app.get("/getNewByHash/{digest}")
+def get_new_by_hash(digest: str):
+    digest_bytes = bytes.fromhex(digest[2:])
+    postId = contract.functions.postsHash(digest_bytes).call()
+    post = contract.functions.postsById(postId).call()
+    return {"postId": postId, "post": post}
+
+@app.get("/getNewByCid/{digest}")
+def get_new_by_cid(digest: str):
+    digest_bytes = bytes.fromhex(digest[2:])
+    postId = contract.functions.postsCid(digest_bytes).call()
+    post = contract.functions.postsById(postId).call()
+    return {"postId": postId, "post": post}
+
+@app.get("/getValidationsByNew/{PostId}")
+def get_validations_by_new(PostId: int):
+    allValidations = contract.functions.getValidationsByNew(PostId).call()
+    return {"PostId": PostId, "validations": allValidations}
+
+# ========================================
+# CONSUMER KAFKA
+# ========================================
+async def consume_register_blockchain():
+    consumer = AIOKafkaConsumer(
+        REQUEST_TOPIC,
+        bootstrap_servers=KAFKA_BOOTSTRAP,
+        group_id="trustmanager-api-group",
+        auto_offset_reset="earliest"
+    )
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            await consumer.start()
+            await producer.start()
+            logger.info("✅ Kafka conectado para register_blockchain")
+            break
+        except Exception as e:
+            logger.warning(f"⚠️ Kafka no disponible (intento {attempt}/{MAX_RETRIES}): {e}")
+            await asyncio.sleep(RETRY_DELAY)
+
+    try:
+        async for msg in consumer:
+            try:
+                payload_msg = json.loads(msg.value.decode())
+                order_id = payload_msg.get("order_id", str(uuid.uuid4()))
+                payload = payload_msg.get("payload", {})
+                publisher = payload.get("publisher", ACCOUNT_ADDRESS)
+                hash_new = MultihashModel(**payload["hash_new"])
+                hash_ipfs = MultihashModel(**payload["hash_ipfs"])
+                asertions = [AsertionModel(**a) for a in payload.get("asertions", [])]
+
+                publish_data = PublishModel(
+                    hash_new=hash_new,
+                    hash_ipfs=hash_ipfs,
+                    asertions=asertions,
+                    publisher=publisher
+                )
+
+                # Llamar a publishNew
+                result = publish_new(publish_data)
+                logger.info(f"Post publicado desde Kafka: {result}")
+
+                # Responder al topic de respuestas
+                response = {
+                    "action": "blockchain_registered",
+                    "order_id": order_id,
+                    "payload": result
+                }
+                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(response).encode())
+                logger.info(f"Respuesta enviada a {RESPONSE_TOPIC} para order_id {order_id}")
+
+            except Exception as e:
+                logger.error(f"Error procesando mensaje Kafka: {e}")
+
+    finally:
+        await consumer.stop()
+        await producer.stop()
+        logger.info("Kafka consumer y producer detenidos para register_blockchain")
+
+# ========================================
+# STARTUP
+# ========================================
+@app.on_event("startup")
+async def startup_event():
+    if os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true":
+        asyncio.create_task(consume_register_blockchain())
+        logger.info("Kafka consumer iniciado")

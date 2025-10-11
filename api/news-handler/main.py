@@ -24,6 +24,7 @@ KAFKA_MECHANISM = os.getenv("KAFKA_MECHANISM", "PLAIN")
 
 TOPIC_REQUESTS_GENERATE = os.getenv("TOPIC_REQUESTS_GENERATE", "fake_news_requests_generate")
 TOPIC_REQUESTS_IPFS = os.getenv("TOPIC_REQUESTS_IPFS", "fake_news_requests_ipfs")
+TOPIC_REQUESTS_BLOCKCHAIN = os.getenv("TOPIC_REQUESTS_BLOCKCHAIN", "fake_news_requests_blockchain")
 TOPIC_REQUESTS_VALIDATE = os.getenv("TOPIC_REQUESTS_VALIDATE", "fake_news_requests_validate")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
 
@@ -45,6 +46,7 @@ orders_collection = None
 # ---------- Models ----------
 class PublishRequest(BaseModel):
     text: str
+    callback_url: str  
 
 # ---------- Helpers ----------
 def kafka_security_kwargs():
@@ -135,6 +137,7 @@ async def publish_new(req: PublishRequest):
         "cid": None,
         "smart_token": None,
         "history": [],
+        "callback_url": req.callback_url
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
@@ -159,144 +162,211 @@ async def get_order(order_id: str):
         raise HTTPException(status_code=404, detail="Order not found")
     return doc
 
+@app.post("/news_registered/{order_id}")
+async def news_registered(order_id: str):
+    doc = await get_order_doc(order_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Solo actualizar si no estaba ya registrado
+    if doc.get("status") != "NEWS_REGISTERED":
+        await update_order(order_id, {
+            "status": "NEWS_REGISTERED",
+            "$push": {"history": {"event": "news_registered"}}
+        })
+        logger.info(f"[{order_id}] Status actualizado a NEWS_REGISTERED por frontend")
+        return {"order_id": order_id, "status": "NEWS_REGISTERED"}
+    else:
+        return {"order_id": order_id, "status": doc.get("status"), "msg": "Already registered"}
+
+
+import hashlib
+
+import hashlib
+
 # ---------- Kafka consumer loop ----------
 async def consume_responses_loop():
-    global consumer, producer, orders_collection, worker_counter
+    global consumer, producer, orders_collection
     logger.info("Starting consume_responses_loop")
+
     try:
         async for msg in consumer:
             try:
                 raw = msg.value.decode("utf-8")
                 data = json.loads(raw)
-                logger.info(f"Received response message: {data}")
+                logger.debug(f"Raw message received: {raw}")
+
                 action = data.get("action")
                 order_id = data.get("order_id")
                 payload = data.get("payload", {})
 
-                if not order_id or not action:
-                    logger.warning("Message without order_id/action, ignoring")
+                if not action or not order_id:
+                    logger.warning("Message without 'action' or 'order_id', skipping.")
                     continue
 
-                # --- assertions_generated ---
+                # ================================================================
+                # 1️⃣ assertions_generated
+                # ================================================================
                 if action == "assertions_generated":
                     doc = await get_order_doc(order_id)
                     if not doc:
-                        logger.warning(f"Order {order_id} not found")
+                        logger.warning(f"[{order_id}] Document not found in DB.")
                         continue
 
-                    # Actualizamos assertions y creamos document
                     assertions = payload.get("assertions", [])
-                    doc_update = {
-                        "assertions": assertions,
-                        "document": {
-                            "order_id": order_id,
-                            "text": doc["text"],
-                            "assertions": assertions,
-                            "metadata": {
-                                "generated_by": "news-handler",
-                                "timestamp": asyncio.get_event_loop().time()
-                            }
-                        },
-                        "status": "DOCUMENT_CREATED",
-                        "$push": {"history": {"event": "assertions_received", "payload": payload}}
-                    }
-                    await update_order(order_id, doc_update)
+                    if not assertions:
+                        logger.warning(f"[{order_id}] Empty assertions payload.")
+                        continue
 
-                    # Enviamos a IPFS
+                    document = {
+                        "order_id": order_id,
+                        "text": doc["text"],
+                        "assertions": assertions,
+                        "metadata": {
+                            "generated_by": "news-handler",
+                            "timestamp": asyncio.get_event_loop().time()
+                        }
+                    }
+
+                    await update_order(order_id, {
+                        "assertions": assertions,
+                        "document": document,
+                        "status": "DOCUMENT_CREATED",
+                        "$push": {"history": {"event": "assertions_generated", "payload": payload}}
+                    })
+                    logger.info(f"[{order_id}] Assertions saved and document created.")
+
+                    # Send upload_ipfs request
                     msg_ipfs = {
                         "action": "upload_ipfs",
                         "order_id": order_id,
-                        "payload": {"document": doc_update["document"]}
+                        "payload": {"document": document}
                     }
                     await producer.send_and_wait(TOPIC_REQUESTS_IPFS, json.dumps(msg_ipfs).encode("utf-8"))
+                    logger.info(f"[{order_id}] Document sent to IPFS service.")
 
-                    # Actualizamos estado
-                    await update_order(
-                        order_id,
-                        {"status": "IPFS_PENDING", "$push": {"history": {"event": "sent_upload_ipfs"}}}
-                    )
-                    logger.info(f"[{order_id}] Assertions procesadas y documento enviado a IPFS")
+                    await update_order(order_id, {
+                        "status": "IPFS_PENDING",
+                        "$push": {"history": {"event": "upload_ipfs_requested"}}
+                    })
 
-                # --- ipfs_uploaded ---
+                # ================================================================
+                # 2️⃣ ipfs_uploaded
+                # ================================================================
                 elif action == "ipfs_uploaded":
                     doc = await get_order_doc(order_id)
                     if not doc:
-                        logger.warning(f"Order {order_id} not found")
+                        logger.warning(f"[{order_id}] Document not found for IPFS update.")
                         continue
 
-                    update_fields = {
+                    cid = payload.get("cid")
+                    if not cid:
+                        logger.warning(f"[{order_id}] Missing 'cid' in payload.")
+                        continue
+
+                    text = doc.get("text", "")
+                    hash_text = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+                    await update_order(order_id, {
+                        "cid": cid,
+                        "hash_text": hash_text,
                         "status": "IPFS_UPLOADED",
-                        "cid": payload.get("cid"),
                         "$push": {"history": {"event": "ipfs_uploaded", "payload": payload}}
+                    })
+                    logger.info(f"[{order_id}] IPFS uploaded with CID={cid} and hash={hash_text}")
+
+                    # Send register_blockchain request
+                    msg_blockchain = {
+                        "action": "register_blockchain",
+                        "order_id": order_id,
+                        "payload": {
+                            "hash_text": hash_text,
+                            "cid": cid,
+                            "assertions": doc.get("assertions", [])
+                        }
                     }
-                    await update_order(order_id, update_fields)
-                    logger.info(f"[{order_id}] Status actualizado a IPFS_UPLOADED con hash={payload.get('cid')}")
+                    await producer.send_and_wait(TOPIC_REQUESTS_BLOCKCHAIN, json.dumps(msg_blockchain).encode("utf-8"))
+                    logger.info(f"[{order_id}] Sent register_blockchain request.")
 
-                    # -------- Validación directa vía HTTP --------
-                    async with aiohttp.ClientSession() as session:
-                        context=doc.get("document", {}).get("text", "")
-                        for assertion in doc.get("document", {}).get("assertions", []):
-                            worker_index = next(worker_counter)
-                            worker_url = f"http://validate-asertions-worker_{worker_index}:8070/verificar"
-                            assertion_id = assertion.get("id")
-                            assertion_text = assertion.get("description", {}).get("assertion", "")
-                            payload_http = {"texto": assertion_text,"contexto":context}
+                    await update_order(order_id, {
+                        "status": "BLOCKCHAIN_PENDING",
+                        "$push": {"history": {"event": "register_blockchain_sent"}}
+                    })
 
-                            try:
-                                async with session.post(worker_url, json=payload_http, timeout=60) as resp:
-                                    if resp.status == 200:
-                                        result = await resp.json()
-                                        verificacion = result.get("verificación")
+                # ================================================================
+                # 3️⃣ blockchain_registered
+                # ================================================================
+                elif action == "blockchain_registered":
+                    validators = payload.get("validators", [])
+                    if not validators:
+                        logger.warning(f"[{order_id}] Blockchain registered without validators.")
+                        continue
 
-                                        logger.info(
-                                            f"[{order_id}] Aserción {assertion_id} validada por worker {worker_index}: {verificacion}"
-                                        )
+                    await update_order(order_id, {
+                        "validators": validators,
+                        "validators_pending": len(validators),
+                        "status": "VALIDATION_PENDING",
+                        "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
+                    })
+                    logger.info(f"[{order_id}] Blockchain registration confirmed. Validators: {len(validators)}")
 
-                                        await update_order(
-                                            order_id,
-                                            {
-                                                "status": "VALIDATION_COMPLETED",
-                                                "$push": {
-                                                    "history": {
-                                                        "event": f"validated_by_worker_{worker_index}",
-                                                        "payload": {
-                                                            "assertion_id": assertion_id,
-                                                            "worker_index": worker_index,
-                                                            "verificacion": verificacion
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    else:
-                                        logger.error(
-                                            f"[{order_id}] Error {resp.status} validando aserción {assertion_id} en worker {worker_index}"
-                                        )
-                            except Exception as e:
-                                logger.error(
-                                    f"[{order_id}] Fallo llamando a worker {worker_index} para aserción {assertion_id}: {e}"
-                                )
+                    # Send validation requests
+                    for val in validators:
+                        msg_validation = {
+                            "action": "request_validation",
+                            "order_id": order_id,
+                            "payload": val
+                        }
+                        await producer.send_and_wait(TOPIC_REQUESTS_VALIDATION, json.dumps(msg_validation).encode("utf-8"))
 
-                    await update_order(
-                        order_id,
-                        {"status": "VALIDATION_PENDING", "$push": {"history": {"event": "sent_request_validations_all"}}}
-                    )
-                    logger.info(f"[{order_id}] Todas las aserciones enviadas a validación HTTP")
+                    await update_order(order_id, {
+                        "$push": {"history": {"event": "validation_requests_sent"}}
+                    })
+                    logger.info(f"[{order_id}] Validation requests dispatched to all validators.")
 
-                # --- validation_completed ---
+                # ================================================================
+                # 4️⃣ validation_completed
+                # ================================================================
                 elif action == "validation_completed":
-                    update_fields = {
-                        "status": "ASSERTION VALIDATED",
-                        "validator_status": payload.get("status"),
-                        "$push": {"history": {"event": "validation_completed", "payload": payload}}
-                    }
-                    await update_order(order_id, update_fields)
-                    logger.info(f"[{order_id}] Validación completada con estado {payload.get('status')}")
+                    id_val = payload.get("idValidator")
+                    id_assert = payload.get("idAsertion")
+                    status_val = payload.get("status")
 
+                    doc = await get_order_doc(order_id)
+                    if not doc:
+                        logger.warning(f"[{order_id}] Document not found for validation_completed.")
+                        continue
+
+                    validators_pending = doc.get("validators_pending", 0)
+                    if validators_pending > 0:
+                        validators_pending -= 1
+
+                    # Update validation result
+                    await update_order(order_id, {
+                        "validators_pending": validators_pending,
+                        "$push": {"history": {
+                            "event": "validation_completed",
+                            "payload": payload
+                        }}
+                    })
+                    logger.info(f"[{order_id}] Validation completed by {id_val} for {id_assert} → {status_val}")
+
+                    # If all validations completed
+                    if validators_pending <= 0:
+                        await update_order(order_id, {
+                            "status": "VALIDATED",
+                            "$push": {"history": {"event": "all_validations_completed"}}
+                        })
+                        logger.info(f"[{order_id}] ✅ All validations completed. Order marked as VALIDATED.")
+
+                # ================================================================
+                # ⚠️ Unknown Action
+                # ================================================================
                 else:
-                    logger.warning(f"[{order_id}] Acción desconocida: {action}")
+                    logger.warning(f"[{order_id}] Unknown action received: {action}")
 
             except Exception as e:
-                logger.exception("Error processing response message: %s", e)
+                logger.exception("Error processing Kafka message: %s", e)
+
     except Exception as e:
-        logger.exception("Error in consume_responses_loop: %s", e)
+        logger.exception("Fatal error in consume_responses_loop: %s", e)

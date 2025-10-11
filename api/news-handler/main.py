@@ -297,32 +297,41 @@ async def consume_responses_loop():
                 # 3️⃣ blockchain_registered
                 # ================================================================
                 elif action == "blockchain_registered":
-                    validators = payload.get("validators", [])
-                    if not validators:
+                    validators_info = payload.get("validators", [])
+                    if not validators_info:
                         logger.warning(f"[{order_id}] Blockchain registered without validators.")
                         continue
 
+                    # Guardar info de validadores y actualizar estado de orden
                     await update_order(order_id, {
-                        "validators": validators,
-                        "validators_pending": len(validators),
+                        "validators": validators_info,
+                        "validators_pending": len(validators_info),
                         "status": "VALIDATION_PENDING",
                         "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
                     })
-                    logger.info(f"[{order_id}] Blockchain registration confirmed. Validators: {len(validators)}")
+                    logger.info(f"[{order_id}] Blockchain registration confirmed. Validators: {len(validators_info)}")
 
-                    # Send validation requests
-                    for val in validators:
-                        msg_validation = {
-                            "action": "request_validation",
-                            "order_id": order_id,
-                            "payload": val
-                        }
-                        await producer.send_and_wait(TOPIC_REQUESTS_VALIDATION, json.dumps(msg_validation).encode("utf-8"))
+                    # Enviar requests de validación a cada validador
+                    for val in validators_info:
+                        # val debe contener al menos: {"asertionId": "0x..", "validatorAddresses": ["0x..", ...]}
+                        for validator_addr in val.get("validatorAddresses", []):
+                            msg_validation = {
+                                "action": "request_validation",
+                                "order_id": order_id,
+                                "payload": {
+                                    "asertionId": val.get("asertionId"),
+                                    "idValidator": validator_addr,  # Aquí usamos el address devuelto por el contrato
+                                    "postId": payload.get("postId")
+                                }
+                            }
+                            await producer.send_and_wait(TOPIC_REQUESTS_VALIDATION, json.dumps(msg_validation).encode("utf-8"))
+                            logger.info(f"[{order_id}] Validation request sent to validator {validator_addr} for asertion {val.get('asertionId')}")
 
                     await update_order(order_id, {
                         "$push": {"history": {"event": "validation_requests_sent"}}
                     })
                     logger.info(f"[{order_id}] Validation requests dispatched to all validators.")
+
 
                 # ================================================================
                 # 4️⃣ validation_completed

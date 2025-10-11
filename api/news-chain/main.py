@@ -2,19 +2,16 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from web3 import Web3
-import json
-from dotenv import load_dotenv
-import os
-import logging
-import asyncio
+import json, os, logging, asyncio, uuid
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-import uuid
 from typing import List
 
 # ========================================
 # CONFIGURACIÓN
 # ========================================
+from dotenv import load_dotenv
 load_dotenv()
+
 RPC_URL = os.getenv("RPC_URL")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
@@ -24,23 +21,18 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
 REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "register_blockchain")
 RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "register_blockchain_responses")
 MAX_RETRIES = 10
-RETRY_DELAY = 3  # segundos
+RETRY_DELAY = 3
 
 # Configurar logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger("TrustManagerAPI")
 
 # ========================================
-# Web3 y contrato
+# WEB3 Y CONTRATO
 # ========================================
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
-
 with open("contract_abi.json") as f:
     abi = json.load(f)
-
 contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
 
 # ========================================
@@ -72,16 +64,6 @@ class PublishModel(BaseModel):
     asertions: List[AsertionModel] = []
     publisher: str
 
-class RegisterValidatorModel(BaseModel):
-    name: str
-    categories: List[str]
-
-class AddValidationModel(BaseModel):
-    PostId: int
-    asertionIndex: int
-    veredict: bool
-    hash_description: MultihashModel
-
 # ========================================
 # FUNCIONES AUXILIARES
 # ========================================
@@ -104,21 +86,21 @@ def send_tx(function_call):
         raise
 
 def convert_multihash_to_tuple(mh: MultihashModel):
-    t = (int(mh.hash_function, 16), int(mh.hash_size, 16), bytes.fromhex(mh.digest[2:]))
-    logger.debug(f"Converted multihash {mh} to tuple {t}")
-    return t
+    return (int(mh.hash_function, 16), int(mh.hash_size, 16), bytes.fromhex(mh.digest[2:]))
 
 # ========================================
-# ENDPOINTS
+# FASTAPI
 # ========================================
 app = FastAPI(title="TrustManager SC API")
 
 @app.post("/publishNew")
 def publish_new(data: PublishModel):
     logger.info(f"publishNew called by {data.publisher}")
+
     hash_new = convert_multihash_to_tuple(data.hash_new)
     hash_ipfs = convert_multihash_to_tuple(data.hash_ipfs)
 
+    # Preparar aserciones y validaciones
     asertions_list = []
     for a in data.asertions:
         validations_list = []
@@ -132,10 +114,38 @@ def publish_new(data: PublishModel):
             validations_list.append(v_tuple)
         asertions_list.append((convert_multihash_to_tuple(a.hash_asertion), validations_list))
 
-    func_call = contract.functions.publishNew(hash_new, hash_ipfs, asertions_list, data.publisher)
+    # Llamar a publishNew en blockchain
+    func_call = contract.functions.publishNew(hash_new, hash_ipfs, asertions_list)
     receipt = send_tx(func_call)
-    logger.info(f"Post published with tx_hash: {receipt.transactionHash.hex()}")
-    return {"status": "success", "tx_hash": receipt.transactionHash.hex()}
+
+    # Obtener PostId
+    postId = contract.functions.postCounter().call()
+
+    # Recuperar validaciones
+    all_validations = contract.functions.getValidationsByNew(postId).call()
+
+    # Mapear aserciones a validadores
+    asertion_validator_map = []
+    temp_map = {}
+    for v in all_validations:
+        asertion_id = v[0]  # id de la aserción
+        validator_addr = v[1][0]  # address del validador
+        if asertion_id not in temp_map:
+            temp_map[asertion_id] = []
+        temp_map[asertion_id].append(validator_addr)
+
+    for aid, addrs in temp_map.items():
+        asertion_validator_map.append({
+            "asertionId": aid.hex() if isinstance(aid, bytes) else aid,
+            "validatorAddresses": addrs
+        })
+
+    return {
+        "status": "success",
+        "postId": postId,
+        "asertions": asertion_validator_map,
+        "tx_hash": receipt.transactionHash.hex()
+    }
 
 @app.get("/getNewByHash/{digest}")
 def get_new_by_hash(digest: str):
@@ -196,11 +206,10 @@ async def consume_register_blockchain():
                     publisher=publisher
                 )
 
-                # Llamar a publishNew
-                result = publish_new(publish_data)
+                # Llamada síncrona adaptada a async
+                result = await asyncio.to_thread(publish_new, publish_data)
                 logger.info(f"Post publicado desde Kafka: {result}")
 
-                # Responder al topic de respuestas
                 response = {
                     "action": "blockchain_registered",
                     "order_id": order_id,

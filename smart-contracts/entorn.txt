@@ -51,6 +51,10 @@ test (Keep in mind that when you run npx hardhat test, your contracts will be au
 npx hardhat test
 
 
+script
+------
+npx hardhat run scripts/testTrustNews.js --network localhost
+
 Deploy
 -------
 Requereix un fitxer .js a ignition/modules. Es Token.js
@@ -152,6 +156,8 @@ Ejercutar script de despliegue:
 npx hardhat compile
 
 npx hardhat run scripts/testAPiGenerateAsertions.js --network localhost
+
+
 
 
 

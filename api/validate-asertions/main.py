@@ -236,7 +236,8 @@ async def consume_and_process():
         async for msg in consumer:
             payload = json.loads(msg.value.decode())
             action = payload.get("action")
-            if action != "request_validation":
+            idValidator = payload.get("idValidator")
+            if action != "request_validation" or idValidator != os.getenv("SMART_CONTRACT_ADDRESS"):
                 continue
 
             order_id = int(payload.get("order_id", "0"))

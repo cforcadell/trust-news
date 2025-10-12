@@ -8,7 +8,7 @@ contract TrustNews {
     mapping(uint256 => Post) public postsById;
 
     struct Category {
-        bytes1 id;
+        uint256 id;
         string description;
     }
 
@@ -19,7 +19,6 @@ contract TrustNews {
     }
 
     struct Validation {
-        bytes1 id;
         Validator validator;
         bool veredict;  
         Multihash hash_description; 
@@ -43,11 +42,24 @@ contract TrustNews {
         Multihash hashNew; 
     }
 
+    struct ValidationView {
+        address validatorAddress;
+        string domain;
+        uint256 reputation;
+        bool veredict;
+        Multihash hash_description;
+    }
+
+    struct AsertionView {
+        Multihash hash_asertion;
+        ValidationView[] validations;
+    }
+
     mapping (bytes32 => uint256) public postsHash;
     mapping (bytes32 => uint256) public postsCid;
     mapping (address => Validator) public validators;
-    mapping (bytes1 => Validator[]) public validatorsByCategory;
-    mapping (bytes1 => string) public categories; // 🔹 Nueva estructura
+    mapping (uint256 => Validator[]) public validatorsByCategory;
+    mapping (uint256 => string) public categories; // 🔹 Nueva estructura
 
     constructor() {
         owner = msg.sender;
@@ -57,44 +69,46 @@ contract TrustNews {
     // PUBLICACIONES
     // ======================================
 
-    function publishNew(
-        Multihash memory hash_new, 
-        Multihash memory hash_ipfs, 
-        Asertion[] memory asertions
-    ) public returns (uint256 PostId, bytes1[] memory asertionIds, address[] memory validatorAddresses) {
-        postCounter++;
-        Post storage newPost = postsById[postCounter];
+function publishNew(
+    Multihash memory hash_new,
+    Multihash memory hash_ipfs,
+    Asertion[] memory asertions,
+    uint256 categoryId
+)
+    public
+    returns (
+        uint256 postId,
+        address[][] memory validatorAddressesByAsertion
+    )
+{
+    postCounter++;
+    Post storage newPost = postsById[postCounter];
+    newPost.document = hash_ipfs;
+    newPost.hashNew = hash_new;
+    newPost.publisher = msg.sender;
 
-        newPost.document = hash_ipfs;
-        newPost.hashNew = hash_new;
-        newPost.publisher = msg.sender;
+    uint256 numAsertions = asertions.length;
+    validatorAddressesByAsertion = new address[][](numAsertions);
 
-        uint totalValidations = 0;
-        for (uint i = 0; i < asertions.length; i++) {
-            totalValidations += asertions[i].validations.length;
+    Validator[] storage catValidators = validatorsByCategory[categoryId];
+    uint256 numValidators = catValidators.length;
+
+    for (uint256 i = 0; i < numAsertions; i++) {
+        Asertion storage a = newPost.asertions.push();
+        a.hash_asertion = asertions[i].hash_asertion;
+
+        validatorAddressesByAsertion[i] = new address[](numValidators);
+        for (uint256 j = 0; j < numValidators; j++) {
+            validatorAddressesByAsertion[i][j] = catValidators[j].validatorAddress;
         }
-
-        asertionIds = new bytes1[](totalValidations);
-        validatorAddresses = new address[](totalValidations);
-
-        uint idx = 0;
-        for (uint i = 0; i < asertions.length; i++) {
-            Asertion storage a = newPost.asertions.push();
-            a.hash_asertion = asertions[i].hash_asertion;
-
-            for (uint j = 0; j < asertions[i].validations.length; j++) {
-                a.validations.push(asertions[i].validations[j]);
-                asertionIds[idx] = asertions[i].validations[j].id;
-                validatorAddresses[idx] = asertions[i].validations[j].validator.validatorAddress;
-                idx++;
-            }
-        }
-
-        postsHash[hash_new.digest] = postCounter;
-        postsCid[hash_ipfs.digest] = postCounter;
-
-        return (postCounter, asertionIds, validatorAddresses);
     }
+
+    postsHash[hash_new.digest] = postCounter;
+    postsCid[hash_ipfs.digest] = postCounter;
+
+    return (postCounter,  validatorAddressesByAsertion);
+}
+
 
     // ======================================
     // CONSULTAS
@@ -110,69 +124,114 @@ contract TrustNews {
         hash_new = postsById[PostId].hashNew;
     }
 
-    function getValidationsByNew(uint256 PostId) public view returns (Validation[] memory) {
-        uint totalValidations = 0;
-        Post storage p = postsById[PostId];
-        for (uint i = 0; i < p.asertions.length; i++) {
-            totalValidations += p.asertions[i].validations.length;
+    function getAsertionsWithValidations(uint256 postId)
+        public
+        view
+        returns (AsertionView[] memory)
+    {
+        Post storage p = postsById[postId];
+        uint256 numAsertions = p.asertions.length;
+
+        // Array de salida
+        AsertionView[] memory asertionViews = new AsertionView[](numAsertions);
+
+        // Iterar sobre todas las aserciones
+        for (uint256 i = 0; i < numAsertions; i++) {
+            Asertion storage a = p.asertions[i];
+            uint256 numValidations = a.validations.length;
+
+            // Copiar hash_asertion
+            asertionViews[i].hash_asertion = a.hash_asertion;
+
+            // Crear array temporal de validaciones
+            ValidationView[] memory validationViews = new ValidationView[](numValidations);
+
+            // Copiar las validaciones y los datos del validador
+            for (uint256 j = 0; j < numValidations; j++) {
+                Validation storage v = a.validations[j];
+                validationViews[j] = ValidationView({
+                    validatorAddress: v.validator.validatorAddress,
+                    domain: v.validator.domain,
+                    reputation: v.validator.reputation,
+                    veredict: v.veredict,
+                    hash_description: v.hash_description
+                });
+            }
+
+            // Asignar al resultado
+            asertionViews[i].validations = validationViews;
         }
 
-        Validation[] memory allValidations = new Validation[](totalValidations);
-        uint k = 0;
-        for (uint i = 0; i < p.asertions.length; i++) {
-            for (uint j = 0; j < p.asertions[i].validations.length; j++) {
-                allValidations[k] = p.asertions[i].validations[j];
-                k++;
-            }
-        }
-        return allValidations;
+        return asertionViews;
     }
+
 
     // ======================================
     // VALIDADORES Y CATEGORÍAS
     // ======================================
 
-    function addCategory(bytes1 id, string memory description) public {
+    function addCategory(uint256 id, string memory description) public {
         require(msg.sender == owner, "Only owner can add categories");
         require(bytes(categories[id]).length == 0, "Category already exists");
         categories[id] = description;
     }
 
-    function registerValidator(string memory name, string[] memory categoryIds) public {
+    function registerValidator(string memory name, uint256[] memory categoryIds) public {
         require(bytes(name).length != 0, "Invalid name");
         require(categoryIds.length != 0, "Invalid categories");
 
         for (uint i = 0; i < categoryIds.length; i++) {
-            bytes1 catId = bytes1(bytes(categoryIds[i])[0]);
+            uint256 catId = categoryIds[i];
             require(bytes(categories[catId]).length != 0, "Category not registered");
         }
 
         validators[msg.sender] = Validator(msg.sender, name, 0);
 
         for (uint i = 0; i < categoryIds.length; i++) {
-            bytes1 catId = bytes1(bytes(categoryIds[i])[0]);
+            uint256 catId = categoryIds[i];
             validatorsByCategory[catId].push(validators[msg.sender]);
         }
     }
 
     function addValidation(
-        uint256 PostId,
+        uint256 postId,
         uint256 asertionIndex,
         bool veredict,
         Multihash memory hash_description
     ) public {
-        require(validators[msg.sender].validatorAddress != address(0), "Validator not registered");
+        // Asegurar que el validador está registrado
+        require(
+            validators[msg.sender].validatorAddress != address(0),
+            "Validator not registered"
+        );
 
-        Post storage p = postsById[PostId];
+        // Recuperar el post y verificar índices válidos
+        Post storage p = postsById[postId];
         require(asertionIndex < p.asertions.length, "Invalid asertion index");
 
-        Validation memory v = Validation({
-            id: bytes1(0),
-            validator: validators[msg.sender],
-            veredict: veredict,
-            hash_description: hash_description
-        });
+        // Buscar si el validador ya emitió una validación
+        Validation[] storage validations = p.asertions[asertionIndex].validations;
+        bool updated = false;
 
-        p.asertions[asertionIndex].validations.push(v);
+        for (uint256 i = 0; i < validations.length; i++) {
+            if (validations[i].validator.validatorAddress == msg.sender) {
+                //Actualizar validación existente
+                validations[i].veredict = veredict;
+                validations[i].hash_description = hash_description;
+                updated = true;
+                break;
+            }
+        }
+
+        // Si no existe, añadir nueva validación
+        if (!updated) {
+            Validation memory v = Validation({
+                validator: validators[msg.sender],
+                veredict: veredict,
+                hash_description: hash_description
+            });
+            validations.push(v);
+        }
     }
+
 }

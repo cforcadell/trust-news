@@ -1,112 +1,108 @@
-const hre = require("hardhat");
+const { ethers } = require("hardhat");
 
 async function main() {
-  const [deployer, validator1, validator2] = await hre.ethers.getSigners();
-  console.log("Cuenta deployer:", deployer.address);
+    const [deployer, validator1, validator2] = await ethers.getSigners();
 
-  // ================================
-  // DESPLEGAR CONTRATO
-  // ================================
-  const TrustManager = await hre.ethers.getContractFactory("TrustNews");
-  const tm = await TrustManager.deploy();
-  await tm.waitForDeployment();
-  console.log("Contrato desplegado en:", await tm.getAddress());
+    console.log("👤 Cuenta deployer:", deployer.address);
 
-  // ================================
-  // AÑADIR CATEGORÍAS DE PRUEBA
-  // ================================
-  const categories = [
-    { id: "0x4e", desc: "News" },   // 'N'
-    { id: "0x54", desc: "Tech" },   // 'T'
-    { id: "0x53", desc: "Sports" }, // 'S'
-  ];
+    // 1️⃣ Desplegar contrato
+    const TrustNews = await ethers.getContractFactory("TrustNews");
+    const trustNews = await TrustNews.deploy();
+    await trustNews.waitForDeployment();
+    console.log("✅ Contrato desplegado en:", await trustNews.getAddress());
 
-  for (const cat of categories) {
-    const tx = await tm.addCategory(cat.id, cat.desc);
-    await tx.wait();
-    console.log(`Categoría añadida: ${cat.desc} (${cat.id})`);
-  }
+    // 2️⃣ Registrar categorías
+    await (await trustNews.addCategory(1, "Noticias")).wait();
+    await (await trustNews.addCategory(2, "Política")).wait();
+    console.log("📚 Categorías añadidas correctamente.");
 
-  // ================================
-  // REGISTRAR VALIDADORES
-  // ================================
-  const tx1 = await tm.connect(validator1).registerValidator("ValidatorOne", ["News"]);
-  await tx1.wait();
-  console.log("Validador 1 registrado:", validator1.address);
+    // 3️⃣ Registrar validadores indicando categorías
+    await (await trustNews.connect(validator1).registerValidator("factcheck.org", [1])).wait(); // Noticias
+    await (await trustNews.connect(validator2).registerValidator("truth.net", [2])).wait(); // Política
+    console.log("🧾 Validadores registrados con sus categorías.");
 
-  const tx2 = await tm.connect(validator2).registerValidator("ValidatorTwo", ["Tech"]);
-  await tx2.wait();
-  console.log("Validador 2 registrado:", validator2.address);
+    // 4️⃣ Publicar post con aserciones (sin validaciones)
+    const hash_new = {
+        hash_function: Uint8Array.from([0x12]), // bytes1
+        hash_size: Uint8Array.from([0x20]),     // 32 en bytes1
+        digest: ethers.keccak256(ethers.toUtf8Bytes("Noticia Principal"))
+    };
 
-  // ================================
-  // CREAR HASHES DE PRUEBA
-  // ================================
-  const hash_new = {
-    hash_function: "0x12",
-    hash_size: "0x20",
-    digest: hre.ethers.toBeHex(hre.ethers.toUtf8Bytes("hash_new_test"), { size: 32 }),
-  };
+    const hash_ipfs = {
+        hash_function: Uint8Array.from([0x12]),
+        hash_size: Uint8Array.from([0x20]),
+        digest: ethers.keccak256(ethers.toUtf8Bytes("IPFS documento"))
+    };
 
-  const hash_ipfs = {
-    hash_function: "0x12",
-    hash_size: "0x20",
-    digest: hre.ethers.toBeHex(hre.ethers.toUtf8Bytes("hash_ipfs_test"), { size: 32 }),
-  };
+    const asertions = [
+        {
+            hash_asertion: {
+                hash_function: Uint8Array.from([0x12]),
+                hash_size: Uint8Array.from([0x20]),
+                digest: ethers.keccak256(ethers.toUtf8Bytes("Asercion 1"))
+            },
+            validations: []
+        },
+        {
+            hash_asertion: {
+                hash_function: Uint8Array.from([0x12]),
+                hash_size: Uint8Array.from([0x20]),
+                digest: ethers.keccak256(ethers.toUtf8Bytes("Asercion 2"))
+            },
+            validations: []
+        }
+    ];
 
-  const hash_assertion = {
-    hash_function: "0x12",
-    hash_size: "0x20",
-    digest: hre.ethers.toBeHex(hre.ethers.toUtf8Bytes("assertion_1"), { size: 32 }),
-  };
+    const txPublish = await trustNews.publishNew(hash_new, hash_ipfs, asertions, 1);
+    await txPublish.wait();
+    const postId = await trustNews.postCounter();
+    console.log("📰 Post publicado con ID:", postId.toString());
 
-  const hash_description = {
-    hash_function: "0x12",
-    hash_size: "0x20",
-    digest: hre.ethers.toBeHex(hre.ethers.toUtf8Bytes("desc_validation_1"), { size: 32 }),
-  };
+    // 5️⃣ Añadir validaciones posteriores
+    const multihashVal1 = {
+        hash_function: Uint8Array.from([0x12]),
+        hash_size: Uint8Array.from([0x20]),
+        digest: ethers.keccak256(ethers.toUtf8Bytes("Validación 1 de A1"))
+    };
 
-  // ================================
-  // CREAR VALIDACIONES Y ASERCIONES
-  // ================================
-  const validations = [
-    {
-      id: "0x01",
-      validator: {
-        validatorAddress: validator1.address,
-        domain: "ValidatorOne",
-        reputation: 10,
-      },
-      veredict: true,
-      hash_description,
-    },
-  ];
+    const multihashVal2 = {
+        hash_function: Uint8Array.from([0x12]),
+        hash_size: Uint8Array.from([0x20]),
+        digest: ethers.keccak256(ethers.toUtf8Bytes("Validación 2 de A2"))
+    };
 
-  const asertions = [
-    {
-      hash_asertion: hash_assertion,
-      validations,
-    },
-  ];
+    // validator1 valida Aserción 0 (true)
+    await (await trustNews.connect(validator1).addValidation(postId, 0, true, multihashVal1)).wait();
 
-  // ================================
-  // PUBLICAR UNA NOTICIA
-  // ================================
-  const txNew = await tm.publishNew(hash_new, hash_ipfs, asertions);
-  const receipt = await txNew.wait();
+    // validator2 valida Aserción 1 (false)
+    await (await trustNews.connect(validator2).addValidation(postId, 1, false, multihashVal2)).wait();
 
-  const result = await tm.getNewByHash(hash_new);
-  const postId = result[1];
+    console.log("✅ Validaciones añadidas correctamente.");
 
-  console.log("\n=== Resultado de publicación ===");
-  console.log("PostId:", postId);
+    // 6️⃣ Consultar aserciones con sus validaciones y validadores
+    const asertionsWithValidations = await trustNews.getAsertionsWithValidations(postId);
 
-  // Ver validaciones registradas
-  const validationsStored = await tm.getValidationsByNew(postId);
-  console.log("Validaciones guardadas:", validationsStored.length);
-  console.log("Validator address:", validationsStored[0].validator.validatorAddress);
+    console.log("\n📘 Resultado de getAsertionsWithValidations:");
+    for (let i = 0; i < asertionsWithValidations.length; i++) {
+        const a = asertionsWithValidations[i];
+        console.log(`\n🔹 Aserción #${i}`);
+        console.log(`   Digest: ${a.hash_asertion.digest}`);
+
+        for (let j = 0; j < a.validations.length; j++) {
+            const v = a.validations[j];
+            console.log(`   ➤ Validación #${j}`);
+            console.log(`      Validator: ${v.validatorAddress}`);
+            console.log(`      Domain: ${v.domain}`);
+            console.log(`      Reputación: ${v.reputation}`);
+            console.log(`      Veredicto: ${v.veredict}`);
+            console.log(`      Hash descripción: ${v.hash_description.digest}`);
+        }
+    }
+
+    console.log("\n✅ Test completado correctamente.");
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
+main().catch((error) => {
+    console.error("❌ Error en el test:", error);
+    process.exitCode = 1;
 });

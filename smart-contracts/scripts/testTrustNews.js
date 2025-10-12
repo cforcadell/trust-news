@@ -23,8 +23,8 @@ async function main() {
 
     // 4️⃣ Publicar post con aserciones (sin validaciones)
     const hash_new = {
-        hash_function: Uint8Array.from([0x12]), // bytes1
-        hash_size: Uint8Array.from([0x20]),     // 32 en bytes1
+        hash_function: Uint8Array.from([0x12]),
+        hash_size: Uint8Array.from([0x20]),
         digest: ethers.keccak256(ethers.toUtf8Bytes("Noticia Principal"))
     };
 
@@ -58,6 +58,18 @@ async function main() {
     const postId = await trustNews.postCounter();
     console.log("📰 Post publicado con ID:", postId.toString());
 
+    // 4️⃣a Consultar por hash_new
+    const newByHash = await trustNews.getNewByHash(hash_new);
+    console.log("\n🔹 getNewByHash:");
+    console.log("   PostId:", newByHash.PostId.toString());
+    console.log("   hash_cid digest:", newByHash.hash_cid.digest);
+
+    // 4️⃣b Consultar por hash_ipfs
+    const newByCid = await trustNews.getNewByCid(hash_ipfs);
+    console.log("\n🔹 getNewByCid:");
+    console.log("   PostId:", newByCid.PostId.toString());
+    console.log("   hash_new digest:", newByCid.hash_new.digest);
+
     // 5️⃣ Añadir validaciones posteriores
     const multihashVal1 = {
         hash_function: Uint8Array.from([0x12]),
@@ -71,12 +83,8 @@ async function main() {
         digest: ethers.keccak256(ethers.toUtf8Bytes("Validación 2 de A2"))
     };
 
-    // validator1 valida Aserción 0 (true)
     await (await trustNews.connect(validator1).addValidation(postId, 0, true, multihashVal1)).wait();
-
-    // validator2 valida Aserción 1 (false)
     await (await trustNews.connect(validator2).addValidation(postId, 1, false, multihashVal2)).wait();
-
     console.log("✅ Validaciones añadidas correctamente.");
 
     // 6️⃣ Consultar aserciones con sus validaciones y validadores

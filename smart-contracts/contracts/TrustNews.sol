@@ -59,7 +59,7 @@ contract TrustNews {
     mapping (bytes32 => uint256) public postsCid;
     mapping (address => Validator) public validators;
     mapping (uint256 => Validator[]) public validatorsByCategory;
-    mapping (uint256 => string) public categories; // 🔹 Nueva estructura
+    mapping (uint256 => string) public categories; 
 
     constructor() {
         owner = msg.sender;

@@ -161,10 +161,48 @@ def get_new_by_cid(digest: str):
     post = contract.functions.postsById(postId).call()
     return {"postId": postId, "post": post}
 
-@app.get("/getValidationsByNew/{PostId}")
-def get_validations_by_new(PostId: int):
-    allValidations = contract.functions.getValidationsByNew(PostId).call()
-    return {"PostId": PostId, "validations": allValidations}
+
+@app.get("/getAsertionsWithValidations/{PostId}")
+def get_asertions_with_validations(PostId: int):
+    try:
+        # Obtener todas las aserciones del Post
+        raw_asertions = contract.functions.getAsertionsByNew(PostId).call()  # suponiendo que existe en el SC
+        result = []
+
+        # Para cada aserción, obtener sus validaciones
+        for a in raw_asertions:
+            asertion_hash = a[0]  # hash de la aserción
+            validations_raw = contract.functions.getValidationsByAsertion(a[1]).call()  # id de la aserción
+            validations_list = []
+
+            for v in validations_raw:
+                validation = {
+                    "id": v[0],
+                    "validator": {
+                        "validatorAddress": v[1][0],
+                        "domain": v[1][1],
+                        "reputation": v[1][2]
+                    },
+                    "veredict": v[2],
+                    "hash_description": {
+                        "hash_function": hex(v[3][0]),
+                        "hash_size": hex(v[3][1]),
+                        "digest": "0x" + v[3][2].hex()
+                    }
+                }
+                validations_list.append(validation)
+
+            result.append({
+                "hash_asertion": "0x" + asertion_hash.hex() if isinstance(asertion_hash, bytes) else asertion_hash,
+                "validations": validations_list
+            })
+
+        return {"PostId": PostId, "asertions": result}
+
+    except Exception as e:
+        logger.error(f"Error en getAsertionsWithValidations para PostId={PostId}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ========================================
 # CONSUMER KAFKA

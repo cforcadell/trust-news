@@ -11,7 +11,7 @@ import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from web3 import Web3
 from eth_account import Account
-from dotenv import load_dotenv
+from dotenv import load_dotenvregistrar_validacion_blockchain
 
 
 # =======================================================
@@ -35,11 +35,12 @@ logger = logging.getLogger(__name__)
 WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL")
 CONTRACT_ADDRESS = os.getenv("SMART_CONTRACT_ADDRESS")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
 CHAIN_ID = int(os.getenv("CHAIN_ID", "11155111"))  # Sepolia por defecto
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER_URL))
-account = Account.from_key(PRIVATE_KEY)
-logger.info(f"Conectado a blockchain: {w3.is_connected()} - Address: {account.address}")
+
+logger.info(f"Conectado a blockchain: {w3.is_connected()} - Address: {ACCOUNT_ADDRESS}")
 
 TRUSTMANAGER_ABI = [
     {

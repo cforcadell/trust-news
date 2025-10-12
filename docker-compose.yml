@@ -179,6 +179,23 @@ services:
       - ./api/news-handler:/app
 
   # -------------------------
+  # News Handler
+  # -------------------------
+  news-chain:
+    build: ./api/news-chain
+    container_name: news-chain
+    depends_on:
+      - kafka
+      - mongodb
+    env_file:
+      - ./api/news-chain/.env
+    ports:
+      - "8073:8073"
+    command: uvicorn main:app --host 0.0.0.0 --port 8073
+    volumes:
+      - ./api/news-chain:/app
+
+  # -------------------------
   # PostgreSQL
   # -------------------------
   #postgres:

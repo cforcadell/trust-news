@@ -203,6 +203,13 @@ def get_asertions_with_validations(PostId: int):
         logger.error(f"Error en getAsertionsWithValidations para PostId={PostId}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+from fastapi import Query
+import requests
+from bs4 import BeautifulSoup
+
+
+
+
 
 # ========================================
 # CONSUMER KAFKA

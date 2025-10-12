@@ -5,12 +5,20 @@ import asyncio
 import logging
 import aiohttp
 import itertools
+import hashlib
+import requests
+import bs4
 
+
+from bs4 import BeautifulSoup
 from typing import Any, Dict
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,Query
 from pydantic import BaseModel
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from motor.motor_asyncio import AsyncIOMotorClient
+from fastapi import Query
+
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fake-news-orchestrator")
@@ -179,10 +187,34 @@ async def news_registered(order_id: str):
     else:
         return {"order_id": order_id, "status": doc.get("status"), "msg": "Already registered"}
 
+@app.get("/extract_text_from_url")
+def extract_text_from_url(url: str = Query(..., description="URL de la noticia")):
+    """
+    Recupera el contenido de una URL y devuelve solo el texto limpio de la noticia.
+    """
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=f"No se pudo acceder a la URL: {url}")
 
-import hashlib
+        soup = BeautifulSoup(resp.content, "html.parser")
 
-import hashlib
+        # Extraer solo texto visible, ignorando scripts y estilos
+        for script_or_style in soup(["script", "style"]):
+            script_or_style.extract()
+
+        text = soup.get_text(separator="\n")
+        # Limpiar líneas vacías
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        clean_text = "\n".join(lines)
+
+        return {"url": url, "text": clean_text}
+
+    except requests.RequestException as e:
+        logger.error(f"Error accediendo a URL {url}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # ---------- Kafka consumer loop ----------
 async def consume_responses_loop():

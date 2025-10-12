@@ -83,8 +83,8 @@ docker compose -f 'docker-compose.yml' down    'zookeeper' 'kafka'  'ipfs' 'gene
 
 
 docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs'  
-docker compose -f 'docker-compose.yml' up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
-docker compose -f 'docker-compose.yml' down 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+docker compose -f 'docker-compose.yml' up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'news-chain' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+docker compose -f 'docker-compose.yml' down 'ipfs-fastapi'  'generate-asertions'   'news-handler'  'news-chain' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
 
 
 

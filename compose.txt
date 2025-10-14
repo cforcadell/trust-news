@@ -78,13 +78,13 @@ docker compose -f 'docker-compose.yml' up   'postgres' 'chainlink'
 docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs'
 
 -- TOTAL
-docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs' 'generate-asertions' 'news-handler' 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
-docker compose -f 'docker-compose.yml' down    'zookeeper' 'kafka'  'ipfs' 'generate-asertions' 'news-handler' 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs' 'generate-asertions' 'news-handler' 'news-chain' 'ipfs-fastapi'  'generate-asertions'   'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+docker compose -f 'docker-compose.yml' down    'zookeeper' 'kafka'  'ipfs' 'generate-asertions' 'news-handler' 'news-chain' 'ipfs-fastapi'  'generate-asertions'    'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
 
 
 docker compose -f 'docker-compose.yml' up    'zookeeper' 'kafka' 'ipfs'  
-docker compose -f 'docker-compose.yml' up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'news-chain' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
-docker compose -f 'docker-compose.yml' down 'ipfs-fastapi'  'generate-asertions'   'news-handler'  'news-chain' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 'mongodb'
+docker compose -f 'docker-compose.yml' up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'news-chain' 'mongodb' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 
+docker compose -f 'docker-compose.yml' down 'ipfs-fastapi'  'generate-asertions'   'news-handler'  'news-chain' 'mongodb' 'validate-asertions-worker_1' 'validate-asertions-worker_2' 'validate-asertions-worker_3' 
 
 
 
@@ -92,5 +92,87 @@ docker compose -f 'docker-compose.yml' down 'ipfs-fastapi'  'generate-asertions'
 docker compose -f 'docker-compose.yml' down     'generate-asertions' 'news-handler' 'mongodb'
 docker compose -f 'docker-compose.yml' up    'generate-asertions'
 docker compose -f 'docker-compose.yml' up  'news-handler'
-docker compose -f 'docker-compose.yml' down  'news-handler'
+docker compose -f 'docker-compose.yml' down  'news-chain'
 
+
+
+tests
+-----
+
+docker compose -f docker-compose.test.yml  build
+
+
+
+
+
+PARTED
+------
+
+docker compose -f docker-compose.base.yml build
+docker compose -f docker-compose.base.yml up
+docker compose -f docker-compose.base.yml down
+
+docker compose  -f docker-compose.blockchain.yml build
+docker compose  -f docker-compose.blockchain.yml up
+docker compose  -f docker-compose.blockchain.yml down
+
+docker compose  -f docker-compose.apis.yml build
+docker compose  -f docker-compose.apis.yml up
+docker compose  -f docker-compose.apis.yml down
+
+docker compose -f docker-compose.tests.yml build
+docker compose -f docker-compose.tests.yml up
+docker compose -f docker-compose.tests.yml down
+
+cd smart-contracts
+npx hardhat run scripts/deploy.js --network localnet
+
+
+
+
+
+Cómo funciona
+
+✅ Automático:
+Cada nodo comprueba si existe /root/.ethereum/geth
+→ si no, ejecuta geth init /ethereum/genesis.json.
+→ Luego arranca el nodo normal.
+
+✅ Sin comandos manuales, todo ocurre dentro del contenedor.
+
+✅ Montaje limpio:
+
+/ethereum → contiene genesis.json, passwords.txt, y (opcionalmente) node1_enode.txt.
+
+/root/.ethereum → datos persistentes del nodo.
+
+🧠 Conectar los dos nodos
+
+Para que el nodo 2 se conecte al 1:
+
+Levanta el primero:
+
+docker compose up -d geth-node1
+
+
+Obtén el enode:
+
+docker exec geth-node1 geth attach http://localhost:8545 --exec "admin.nodeInfo.enode"
+
+
+Copia la cadena resultante (por ejemplo):
+
+enode://abcdef1234...@geth-node1:30303
+
+
+Guárdala en tu host en:
+
+./ethereum/node1_enode.txt
+
+
+Luego levanta todo:
+
+docker compose up -d
+
+
+Así, el segundo nodo leerá automáticamente el enode desde /ethereum/node1_enode.txt.

@@ -1,2 +1,10 @@
-
-Acabar smart contract
+- descomposar docker-compose OK
+- Parametro para levantar news-handler y validate sin parte blockchain OK
+- proves auto generate asertions OK 
+- proves auto validate asertions OK
+- proves auto ipfs 
+- proves handler 
+- proves auto smart contract
+- proves e2e
+- dockeritzar geth
+- levantar news-chain

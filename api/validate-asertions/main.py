@@ -11,7 +11,8 @@ import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from web3 import Web3
 from eth_account import Account
-from dotenv import load_dotenvregistrar_validacion_blockchain
+from dotenv import load_dotenv
+import random
 
 
 # =======================================================
@@ -32,64 +33,72 @@ logger = logging.getLogger(__name__)
 # =======================================================
 # Configuración Web3 / Smart Contract
 # =======================================================
-WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL")
-CONTRACT_ADDRESS = os.getenv("SMART_CONTRACT_ADDRESS")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")
-ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "11155111"))  # Sepolia por defecto
+BLOCKCHAIN_MODE = os.getenv("BLOCKCHAIN_MODE", "real").lower()  # real | emulated
 
-w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER_URL))
+if BLOCKCHAIN_MODE == "real":
+    WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL")
+    CONTRACT_ADDRESS = os.getenv("SMART_CONTRACT_ADDRESS")
+    PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+    ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
+    CHAIN_ID = int(os.getenv("CHAIN_ID", "11155111"))  # Sepolia por defecto
 
-logger.info(f"Conectado a blockchain: {w3.is_connected()} - Address: {ACCOUNT_ADDRESS}")
+    w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER_URL))
 
-TRUSTMANAGER_ABI = [
-    {
-        "inputs": [
-            {"internalType": "uint256", "name": "PostId", "type": "uint256"},
-            {"internalType": "uint256", "name": "asertionIndex", "type": "uint256"},
-            {"internalType": "bool", "name": "veredict", "type": "bool"},
-            {
-                "components": [
-                    {"internalType": "bytes1", "name": "hash_function", "type": "bytes1"},
-                    {"internalType": "bytes1", "name": "hash_size", "type": "bytes1"},
-                    {"internalType": "bytes32", "name": "digest", "type": "bytes32"},
-                ],
-                "internalType": "struct TrustManager.Multihash",
-                "name": "hash_description",
-                "type": "tuple",
-            },
-        ],
-        "name": "addValidation",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"internalType": "string", "name": "name", "type": "string"},
-            {"internalType": "string[]", "name": "categories", "type": "string[]"},
-        ],
-        "name": "registerValidator",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"internalType": "address", "name": "", "type": "address"}
-        ],
-        "name": "validators",
-        "outputs": [
-            {"internalType": "address", "name": "validatorAddress", "type": "address"},
-            {"internalType": "string", "name": "domain", "type": "string"},
-            {"internalType": "uint256", "name": "reputation", "type": "uint256"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    }
-]
+    logger.info(f"Conectado a blockchain: {w3.is_connected()} - Address: {ACCOUNT_ADDRESS}")
 
-contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=TRUSTMANAGER_ABI)
+    TRUSTMANAGER_ABI = [
+        {
+            "inputs": [
+                {"internalType": "uint256", "name": "PostId", "type": "uint256"},
+                {"internalType": "uint256", "name": "asertionIndex", "type": "uint256"},
+                {"internalType": "bool", "name": "veredict", "type": "bool"},
+                {
+                    "components": [
+                        {"internalType": "bytes1", "name": "hash_function", "type": "bytes1"},
+                        {"internalType": "bytes1", "name": "hash_size", "type": "bytes1"},
+                        {"internalType": "bytes32", "name": "digest", "type": "bytes32"},
+                    ],
+                    "internalType": "struct TrustManager.Multihash",
+                    "name": "hash_description",
+                    "type": "tuple",
+                },
+            ],
+            "name": "addValidation",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function",
+        },
+        {
+            "inputs": [
+                {"internalType": "string", "name": "name", "type": "string"},
+                {"internalType": "string[]", "name": "categories", "type": "string[]"},
+            ],
+            "name": "registerValidator",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function",
+        },
+        {
+            "inputs": [
+                {"internalType": "address", "name": "", "type": "address"}
+            ],
+            "name": "validators",
+            "outputs": [
+                {"internalType": "address", "name": "validatorAddress", "type": "address"},
+                {"internalType": "string", "name": "domain", "type": "string"},
+                {"internalType": "uint256", "name": "reputation", "type": "uint256"}
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]
+
+    contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=TRUSTMANAGER_ABI)
+else:
+    logger.warning("⚠️ Blockchain en modo EMULADO: no se conectará a Web3 ni se enviarán transacciones.")
+    w3 = None
+    contract = None
+    account = None
 
 # =======================================================
 # FastAPI
@@ -158,6 +167,11 @@ def build_and_send_tx(fn):
 
 
 async def registrar_validacion_blockchain(post_id: int, asertion_index: int, veredict: bool, hash_desc_digest: str):
+    if BLOCKCHAIN_MODE == "emulated":
+        fake_hash = f"0x{uuid.uuid4().hex[:64]}"
+        logger.info(f"🧩 [EMULADO] Validación simulada on-chain: {fake_hash}")
+        return fake_hash
+
     try:
         fn = contract.functions.addValidation(
             post_id,
@@ -178,6 +192,11 @@ async def registrar_validacion_blockchain(post_id: int, asertion_index: int, ver
 
 
 async def registrar_validador_blockchain(name: str, categories: List[str]):
+    if BLOCKCHAIN_MODE == "emulated":
+        fake_hash = f"0x{uuid.uuid4().hex[:64]}"
+        logger.info(f"🧩 [EMULADO] Registro de validador '{name}' simulado: {fake_hash}")
+        return fake_hash
+
     try:
         fn = contract.functions.registerValidator(name, categories)
         tx_hash, _ = build_and_send_tx(fn)
@@ -186,7 +205,6 @@ async def registrar_validador_blockchain(name: str, categories: List[str]):
     except Exception as e:
         logger.error(f"❌ Error al registrar validador: {e}")
         return None
-
 
 # =======================================================
 # Endpoints

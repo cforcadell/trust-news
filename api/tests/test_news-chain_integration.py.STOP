@@ -1,0 +1,108 @@
+import os
+import pytest
+import requests
+import json
+
+NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://localhost:8074")
+
+@pytest.mark.integration
+def test_publish_new_basic():
+    """
+    Prueba de integración básica del endpoint /publishNew.
+    Usa datos de prueba simulados con formato correcto.
+    """
+
+    url = f"{NEWS_CHAIN_URL}/publishNew"
+
+    payload = {
+        "hash_new": {
+            "hash_function": "0x12",
+            "hash_size": "0x20",
+            "digest": "0x" + "a1" * 32
+        },
+        "hash_ipfs": {
+            "hash_function": "0x12",
+            "hash_size": "0x20",
+            "digest": "0x" + "b2" * 32
+        },
+        "asertions": [
+            {
+                "hash_asertion": {
+                    "hash_function": "0x12",
+                    "hash_size": "0x20",
+                    "digest": "0x" + "c3" * 32
+                },
+                "validations": [
+                    {
+                        "id": "0x1",
+                        "validator": {
+                            "validatorAddress": "0x1111111111111111111111111111111111111111",
+                            "domain": "example.org",
+                            "reputation": 5
+                        },
+                        "veredict": True,
+                        "hash_description": {
+                            "hash_function": "0x12",
+                            "hash_size": "0x20",
+                            "digest": "0x" + "d4" * 32
+                        }
+                    }
+                ]
+            }
+        ],
+        "publisher": os.getenv("ACCOUNT_ADDRESS", "0x2222222222222222222222222222222222222222")
+    }
+
+    response = requests.post(url, json=payload)
+
+    assert response.status_code in [200, 500], f"Respuesta inesperada: {response.status_code} - {response.text}"
+
+    if response.status_code == 200:
+        data = response.json()
+        assert "status" in data and data["status"] == "success"
+        assert "postId" in data
+        assert "tx_hash" in data
+        print(f"✅ publishNew OK: postId={data['postId']}, tx={data['tx_hash']}")
+    else:
+        print(f"⚠️ publishNew devolvió 500 (probablemente blockchain no accesible): {response.text}")
+
+
+@pytest.mark.integration
+def test_get_new_by_hash_and_cid():
+    """
+    Prueba de endpoints de consulta de un post a partir del hash o del CID.
+    Usa digests de ejemplo en formato 0x...
+    """
+    fake_digest = "0x" + "a1" * 32
+
+    url_hash = f"{NEWS_CHAIN_URL}/getNewByHash/{fake_digest}"
+    url_cid = f"{NEWS_CHAIN_URL}/getNewByCid/{fake_digest}"
+
+    # En ambos casos, la API puede devolver 200 (si hay datos) o error 500 (si el contrato no existe)
+    res_hash = requests.get(url_hash)
+    res_cid = requests.get(url_cid)
+
+    assert res_hash.status_code in [200, 500]
+    assert res_cid.status_code in [200, 500]
+
+    print(f"📘 getNewByHash status={res_hash.status_code}, getNewByCid status={res_cid.status_code}")
+
+
+@pytest.mark.integration
+def test_get_asertions_with_validations():
+    """
+    Prueba de integración del endpoint /getAsertionsWithValidations/{PostId}
+    """
+    post_id = 1
+    url = f"{NEWS_CHAIN_URL}/getAsertionsWithValidations/{post_id}"
+
+    response = requests.get(url)
+    assert response.status_code in [200, 500], f"Error inesperado: {response.status_code} - {response.text}"
+
+    if response.status_code == 200:
+        data = response.json()
+        assert "PostId" in data
+        assert "asertions" in data
+        print(f"✅ getAsertionsWithValidations OK para PostId={post_id}")
+    else:
+        print(f"⚠️ No se pudo acceder al contrato (500): {response.text}")

@@ -1,0 +1,84 @@
+version: "3.8"
+
+services:
+  # -------------------------
+  # IPFS
+  # -------------------------
+  ipfs:
+    image: ipfs/go-ipfs:latest
+    container_name: ipfs
+    ports:
+      - "5001:5001"
+      - "8080:8080"
+      - "4001:4001"
+    volumes:
+      - ./volumes/ipfs_data:/data/ipfs
+
+  # -------------------------
+  # Zookeeper
+  # -------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    env_file:
+      - ./api/kafka/.env.zookeeper
+    volumes:
+      - ./volumes/zookeeper_data:/var/lib/zookeeper
+
+  # -------------------------
+  # Kafka
+  # -------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    depends_on:
+      - zookeeper
+    env_file:
+      - ./api/kafka/.env.kafka
+    volumes:
+      - ./volumes/kafka_data:/var/lib/kafka
+      - ./api/kafka/kafka_server_jaas.conf:/etc/kafka/secrets/kafka_server_jaas.conf:ro
+      - ./api/kafka/log4j.properties:/etc/kafka/secrets/log4j.properties:ro
+    environment:
+      KAFKA_LOG4J_OPTS: "-Dlog4j.configuration=file:/etc/kafka/secrets/log4j.properties"
+
+  # -------------------------
+  # Control Center
+  # -------------------------
+  #control-center:
+  #  image: confluentinc/cp-enterprise-control-center:7.6.1
+  #  container_name: control-center
+  #  ports:
+  #    - "9021:9021"
+  #  env_file:
+  #    - ./api/kafka/.env.controlcenter
+  #  depends_on:
+  #    - zookeeper
+  #    - kafka
+  #  volumes:
+  #    - ./api/kafka/control-center-log4j.properties:/etc/confluent-control-center/secrets/log4j.properties:ro
+  #  environment:
+  #    CONTROL_CENTER_LOG4J_OPTS: "-Dlog4j.configuration=file:/etc/confluent-control-center/secrets/log4j.properties"
+
+  # -------------------------
+  # MongoDB
+  # -------------------------
+  mongodb:
+    image: mongo:4.4
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    env_file:
+      - ./api/mongo/.env
+    volumes:
+      - ./volumes/mongo/data/db:/data/db
+
+networks:
+  default:
+    name: tfm_network

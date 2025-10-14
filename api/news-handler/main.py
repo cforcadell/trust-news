@@ -54,7 +54,6 @@ orders_collection = None
 # ---------- Models ----------
 class PublishRequest(BaseModel):
     text: str
-    callback_url: str  
 
 # ---------- Helpers ----------
 def kafka_security_kwargs():
@@ -144,8 +143,7 @@ async def publish_new(req: PublishRequest):
         "document": None,
         "cid": None,
         "smart_token": None,
-        "history": [],
-        "callback_url": req.callback_url
+        "history": []
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
@@ -214,7 +212,43 @@ def extract_text_from_url(url: str = Query(..., description="URL de la noticia")
         logger.error(f"Error accediendo a URL {url}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+async def handle_blockchain_request(order_id: str, hash_text: str, cid: str, assertions: list):
+    """
+    En lugar de enviar al topic blockchain, genera un mensaje tipo 'blockchain_registered'
+    que se procese como si viniera de Kafka.
+    """
+    if os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "false").lower() == "true":
+        logger.info(f"[{order_id}] Blockchain request emulada. Generando blockchain_registered...")
 
+        # Simulamos los validadores
+        fake_validators = [
+            {"asertionId": f"{uuid.uuid4().hex[:8]}", "validatorAddresses": ["0xVAL1", "0xVAL2"]}
+            for _ in assertions
+        ]
+
+        simulated_msg = {
+            "action": "blockchain_registered",
+            "order_id": order_id,
+            "payload": {
+                "hash_text": hash_text,
+                "cid": cid,
+                "assertions": assertions,
+                "validators": fake_validators,
+                "postId": 1
+            }
+        }
+
+        # Llamamos directamente al handler de mensajes
+        await process_kafka_message(simulated_msg)
+    else:
+        # Publicar realmente en Kafka
+        message = {
+            "action": "register_blockchain",
+            "order_id": order_id,
+            "payload": {"hash_text": hash_text, "cid": cid, "assertions": assertions}
+        }
+        await producer.send_and_wait(TOPIC_REQUESTS_BLOCKCHAIN, json.dumps(message).encode("utf-8"))
+        logger.info(f"[{order_id}] Mensaje enviado al topic {TOPIC_REQUESTS_BLOCKCHAIN}")
 
 # ---------- Kafka consumer loop ----------
 async def consume_responses_loop():
@@ -307,18 +341,9 @@ async def consume_responses_loop():
                     })
                     logger.info(f"[{order_id}] IPFS uploaded with CID={cid} and hash={hash_text}")
 
-                    # Send register_blockchain request
-                    msg_blockchain = {
-                        "action": "register_blockchain",
-                        "order_id": order_id,
-                        "payload": {
-                            "hash_text": hash_text,
-                            "cid": cid,
-                            "assertions": doc.get("assertions", [])
-                        }
-                    }
-                    await producer.send_and_wait(TOPIC_REQUESTS_BLOCKCHAIN, json.dumps(msg_blockchain).encode("utf-8"))
-                    logger.info(f"[{order_id}] Sent register_blockchain request.")
+                    # Manejo especial: si EMULATE_BLOCKCHAIN_REQUESTS=true, se genera blockchain_registered
+                    await handle_blockchain_request(order_id, hash_text, cid, doc.get("assertions", []))
+
 
                     await update_order(order_id, {
                         "status": "BLOCKCHAIN_PENDING",

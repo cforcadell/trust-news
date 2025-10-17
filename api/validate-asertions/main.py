@@ -37,7 +37,7 @@ BLOCKCHAIN_MODE = os.getenv("BLOCKCHAIN_MODE", "real").lower()  # real | emulate
 
 if BLOCKCHAIN_MODE == "real":
     WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL")
-    CONTRACT_ADDRESS = os.getenv("SMART_CONTRACT_ADDRESS")
+    CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
     PRIVATE_KEY = os.getenv("PRIVATE_KEY")
     ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
     CHAIN_ID = int(os.getenv("CHAIN_ID", "11155111"))  # Sepolia por defecto
@@ -236,7 +236,7 @@ async def consume_and_process():
     consumer = AIOKafkaConsumer(
         REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
-        group_id="news-handler-group",
+        group_id=f"validate-asertions-{os.getenv('ACCOUNT_ADDRESS')}",
         auto_offset_reset="earliest"
     )
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
@@ -254,12 +254,14 @@ async def consume_and_process():
     try:
         async for msg in consumer:
             payload = json.loads(msg.value.decode())
+            logger.debug(f"payload: {payload}")
             action = payload.get("action")
-            idValidator = payload.get("idValidator")
-            if action != "request_validation" or idValidator != os.getenv("SMART_CONTRACT_ADDRESS"):
+            idValidator = payload.get("payload", {}).get("idValidator")
+            if action != "request_validation" or idValidator != os.getenv("ACCOUNT_ADDRESS"):
+                logger.info(f"Mensaje ignorado (action={action}, idValidator={idValidator})")
                 continue
 
-            order_id = int(payload.get("order_id", "0"))
+            order_id = str(payload.get("order_id", "0"))
             assertion = payload["payload"].get("assertion_content", "")
             assertion_id = int(payload["payload"].get("assertion_id", "0"))
             context = payload["payload"].get("context", "")

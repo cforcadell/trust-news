@@ -51,6 +51,7 @@ def test_get_order():
                 data = r.json()
                 last_status = data.get("status")
                 print(f"⏳ Estado actual: {last_status}")
+                print(data)
 
             if last_status == "VALIDATED":
                 print("✅ get_order OK: VALIDATED")

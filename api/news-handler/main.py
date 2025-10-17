@@ -117,7 +117,7 @@ async def handle_blockchain_request(order_id: str, hash_text: str, cid: str, ass
             fake_validators.append({
                 "asertionId": assertion_id,
                 "validatorAddresses": [
-                    "0xVAL1", "0xVAL2"
+                    "VAL1", "VAL2"
                 ]
             })
 

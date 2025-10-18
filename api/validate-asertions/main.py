@@ -262,8 +262,8 @@ async def consume_and_process():
                 continue
 
             order_id = str(payload.get("order_id", "0"))
-            assertion = payload["payload"].get("assertion_content", "")
-            assertion_id = int(payload["payload"].get("assertion_id", "0"))
+            assertion = payload["payload"].get("text", "")
+            assertion_id = payload["payload"].get("idAssertion", "0")
             context = payload["payload"].get("context", "")
 
             logger.info(f"🧩 Validando assertion_id={assertion_id}...")
@@ -278,9 +278,10 @@ async def consume_and_process():
                 "action": "validation_completed",
                 "order_id": order_id,
                 "payload": {
-                    "assertion_id": assertion_id,
-                    "status": "TRUE" if veredict_bool else "FALSE",
-                    "description": veredict_text,
+                    "idAssertion": assertion_id,
+                    "idValidator": os.getenv("ACCOUNT_ADDRESS"),
+                    "approval": "TRUE" if veredict_bool else "FALSE",
+                    "text": assertion,
                     "tx_hash": tx_hash
                 }
             }

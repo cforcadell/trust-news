@@ -27,6 +27,7 @@ contract TrustNews {
     struct Asertion {
         Multihash hash_asertion;
         Validation[] validations;
+        uint256 categoryId;
     }
 
     struct Multihash {
@@ -53,6 +54,7 @@ contract TrustNews {
     struct AsertionView {
         Multihash hash_asertion;
         ValidationView[] validations;
+        uint256 categoryId;   
     }
 
     mapping (bytes32 => uint256) public postsHash;
@@ -69,11 +71,11 @@ contract TrustNews {
     // PUBLICACIONES
     // ======================================
 
-function publishNew(
+function registerNew(
     Multihash memory hash_new,
     Multihash memory hash_ipfs,
     Asertion[] memory asertions,
-    uint256 categoryId
+    uint256[] memory categoryIds
 )
     public
     returns (
@@ -81,6 +83,8 @@ function publishNew(
         address[][] memory validatorAddressesByAsertion
     )
 {
+    require(asertions.length == categoryIds.length, "Cada asercion debe tener su categoria");
+
     postCounter++;
     Post storage newPost = postsById[postCounter];
     newPost.document = hash_ipfs;
@@ -90,14 +94,19 @@ function publishNew(
     uint256 numAsertions = asertions.length;
     validatorAddressesByAsertion = new address[][](numAsertions);
 
-    Validator[] storage catValidators = validatorsByCategory[categoryId];
-    uint256 numValidators = catValidators.length;
-
     for (uint256 i = 0; i < numAsertions; i++) {
+        uint256 categoryId = categoryIds[i];
+        Validator[] storage catValidators = validatorsByCategory[categoryId];
+        uint256 numValidators = catValidators.length;
+
+        // Añadimos la aserción con categoryId
         Asertion storage a = newPost.asertions.push();
         a.hash_asertion = asertions[i].hash_asertion;
+        a.categoryId = categoryId;  // ← nueva línea
 
+        // Creamos el array de direcciones para esta aserción
         validatorAddressesByAsertion[i] = new address[](numValidators);
+
         for (uint256 j = 0; j < numValidators; j++) {
             validatorAddressesByAsertion[i][j] = catValidators[j].validatorAddress;
         }
@@ -106,7 +115,7 @@ function publishNew(
     postsHash[hash_new.digest] = postCounter;
     postsCid[hash_ipfs.digest] = postCounter;
 
-    return (postCounter,  validatorAddressesByAsertion);
+    return (postCounter, validatorAddressesByAsertion);
 }
 
 
@@ -142,6 +151,7 @@ function publishNew(
 
             // Copiar hash_asertion
             asertionViews[i].hash_asertion = a.hash_asertion;
+            asertionViews[i].categoryId = a.categoryId;
 
             // Crear array temporal de validaciones
             ValidationView[] memory validationViews = new ValidationView[](numValidations);

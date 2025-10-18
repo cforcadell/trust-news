@@ -1,75 +1,100 @@
 const { ethers } = require("hardhat");
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  const [deployer, val1, val2, val3] = await ethers.getSigners();
   console.log("Cuenta deployer:", deployer.address);
 
-  let linkToken;
-  let linkTokenAddress;
+  // 🔹 Desplegar TrustNews
+  const TrustNews = await ethers.getContractFactory("TrustNews");
+  const trustNews = await TrustNews.deploy();
+  await trustNews.waitForDeployment();
+  const trustNewsAddress = await trustNews.getAddress();
+  console.log("✅ TrustNews desplegado en:", trustNewsAddress);
 
-  // 🔹 Detectar red
-  const network = await ethers.provider.getNetwork();
-  console.log("Network ID:", network.chainId.toString());
+  // ======================================================
+  // 🔹 Configurar categorías y validadores
+  // ======================================================
 
-  if (network.chainId === 31337n) {
-    // Local Hardhat → deploy LinkTokenMock
-    console.log("Red local detectada: deployando LinkTokenMock...");
-    const LinkTokenMock = await ethers.getContractFactory("LinkTokenMock");
-    linkToken = await LinkTokenMock.deploy(ethers.parseUnits("1000", 18));
-    await linkToken.waitForDeployment();
-    linkTokenAddress = await linkToken.getAddress();
-    console.log("LinkTokenMock desplegado en:", linkTokenAddress);
-  } else {
-    // Testnet/Mainnet → usar LINK real
-    linkTokenAddress = "0x..."; // Dirección LINK real
-    linkToken = await ethers.getContractAt("LinkToken", linkTokenAddress);
-    console.log("Usando token LINK real en:", linkTokenAddress);
+  const tx1 = await trustNews.connect(deployer).categories(1);
+  if (!tx1) {
+    // asignamos descripción solo si no existía
+    await (await trustNews.connect(deployer)).categories(1);
   }
 
-  // 🔹 Oracle y JobId (ajusta estos valores a tu nodo local)
-  const oracleAddress = "0x8919aC75c29C538d21bB4D851670a163C6B4fCAA"; // Dirección del nodo Chainlink
-  const uuid = "23035921-8e44-4cb2-8a10-0364b29bbf14"; // tu Job UUID
-  const jobId = "0x" + uuid.replace(/-/g, "").padEnd(64, "0"); // bytes32
-  const fee = ethers.parseEther("0.1"); // 0.1 LINK
+  console.log("🔧 Creando validadores y categorías...");
 
-  // 🔹 Deploy del contrato consumidor
-  const ApiExtraerConsumer = await ethers.getContractFactory("ApiExtraerConsumer");
-  const consumer = await ApiExtraerConsumer.deploy(
-    linkTokenAddress,
-    oracleAddress,
-    jobId,
-    fee
-  );
-  await consumer.waitForDeployment();
-  console.log("ApiExtraerConsumer desplegado en:", await consumer.getAddress());
+  // Creamos manualmente tres validadores
+  await (await trustNews.connect(deployer).validators(val1.address, {
+    validatorAddress: val1.address,
+    domain: "politica.cat",
+    reputation: 90
+  })).wait;
 
-  // 🔹 Fundear el contrato consumidor con LINK
-  await linkToken.transfer(await consumer.getAddress(), ethers.parseEther("1"));
-  console.log("Se transfirió 1 LINK al contrato consumidor");
+  await (await trustNews.connect(deployer).validators(val2.address, {
+    validatorAddress: val2.address,
+    domain: "economia.cat",
+    reputation: 80
+  })).wait;
 
-  // 🔹 Preparar promesa para fulfillment
-  const fulfillmentPromise = new Promise((resolve, reject) => {
-    consumer.once("ChainlinkFulfilled", async (requestId) => {
-      console.log(`✅ Request ${requestId} cumplida por el Chainlink Node`);
-      const result = await consumer.message();
-      console.log("📊 Resultado real de la API:", result);
-      resolve();
-    });
+  await (await trustNews.connect(deployer).validators(val3.address, {
+    validatorAddress: val3.address,
+    domain: "sociedad.cat",
+    reputation: 70
+  })).wait;
 
-    setTimeout(() => reject("⏳ Timeout esperando fulfillment"), 120000); // 2 min
+  // Añadir validadores a dos categorías (por ejemplo)
+  await (await trustNews.connect(deployer).validatorsByCategory(1)).push({
+    validatorAddress: val1.address,
+    domain: "politica.cat",
+    reputation: 90
   });
 
-  // 🔹 Enviar request al nodo Chainlink
-  const tx = await consumer.requestExtraccion(
-    "Catalunya tiene una población de 8 millones de habitantes y 2 millones de población extranjera"
+  await (await trustNews.connect(deployer).validatorsByCategory(2)).push({
+    validatorAddress: val2.address,
+    domain: "economia.cat",
+    reputation: 80
+  });
+
+  // ======================================================
+  // 🔹 Crear multihash y aserciones de prueba
+  // ======================================================
+  const emptyHash = {
+    hash_function: "0x12",
+    hash_size: "0x20",
+    digest: ethers.zeroPadBytes("0x1111", 32),
+  };
+
+  const asertions = [
+    { hash_asertion: emptyHash, validations: [] },
+    { hash_asertion: emptyHash, validations: [] },
+  ];
+
+  const categoryIds = [1, 2];
+
+  // ======================================================
+  // 🔹 Publicar una noticia
+  // ======================================================
+  console.log("📰 Publicando noticia...");
+  const tx = await trustNews.registerNew(
+    emptyHash,      // hash_new
+    emptyHash,      // hash_ipfs
+    asertions,      // aserciones
+    categoryIds     // categorías
   );
-  await tx.wait();
-  console.log("📡 Request enviada al Chainlink Node. Esperando fulfillment...");
 
-  // 🔹 Esperar fulfillment o timeout
-  await fulfillmentPromise;
+  const receipt = await tx.wait();
+  const event = receipt.logs.find(log => log.fragment?.name === "PostCreated");
+  const postId = event ? event.args[0] : null;
 
-  console.log("🎉 Script terminado correctamente");
+  const [id, validatorAddressesByAsertion] = await trustNews.publishNew.staticCall(
+    emptyHash, emptyHash, asertions, categoryIds
+  );
+
+  console.log("🆔 ID de publicación:", id.toString());
+  console.log("📜 Direcciones devueltas por publishNew():");
+  console.log(validatorAddressesByAsertion);
+
+  console.log("🎉 Test de TrustNews completado correctamente");
 }
 
 main().catch((error) => {

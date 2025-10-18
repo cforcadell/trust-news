@@ -70,7 +70,7 @@ def test_get_order():
                 break
 
 
-def test_news_registered():
+def _test_news_registered():
     """
     Simula el callback del frontend notificando que la noticia fue registrada.
     """

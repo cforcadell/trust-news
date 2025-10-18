@@ -1,281 +1,197 @@
-# main.py
+import os
+import json
+import uuid
+import hashlib
+import logging
+import asyncio
+from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from web3 import Web3
-import json, os, logging, asyncio, uuid
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from typing import List
-
-# ========================================
-# CONFIGURACIÓN
-# ========================================
 from dotenv import load_dotenv
+from web3 import Web3
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
+# =========================================================
+# Config
+# =========================================================
 load_dotenv()
 
 RPC_URL = os.getenv("RPC_URL")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
+CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "contract_abi.json")
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
 REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "register_blockchain")
 RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "register_blockchain_responses")
-MAX_RETRIES = 10
-RETRY_DELAY = 3
+ENABLE_KAFKA_CONSUMER = os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true"
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger("TrustManagerAPI")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("TrustNewsAPI")
 
-# ========================================
-# WEB3 Y CONTRATO
-# ========================================
+# =========================================================
+# Web3 / Contract
+# =========================================================
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
-with open("contract_abi.json") as f:
+with open(CONTRACT_ABI_PATH) as f:
     abi = json.load(f)
 contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
 
-# ========================================
-# MODELOS DE DATOS
-# ========================================
+# =========================================================
+# Models
+# =========================================================
 class MultihashModel(BaseModel):
     hash_function: str
     hash_size: str
     digest: str
 
-class ValidatorModel(BaseModel):
-    validatorAddress: str
-    domain: str
-    reputation: int
+class AsertionInputModel(BaseModel):
+    idAssertion: Optional[str] = None
+    text: str
+    categoryId: int
 
-class ValidationModel(BaseModel):
-    id: str
-    validator: ValidatorModel
-    veredict: bool
-    hash_description: MultihashModel
-
-class AsertionModel(BaseModel):
-    hash_asertion: MultihashModel
-    validations: List[ValidationModel] = []
-
-class PublishModel(BaseModel):
-    hash_new: MultihashModel
-    hash_ipfs: MultihashModel
-    asertions: List[AsertionModel] = []
+class PublishRequestModel(BaseModel):
+    action: str
+    order_id: str
+    payload: dict
+    text: str
+    cid: str
+    assertions: List[AsertionInputModel]
     publisher: str
 
-# ========================================
-# FUNCIONES AUXILIARES
-# ========================================
-def send_tx(function_call):
-    try:
-        nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
-        tx = function_call.build_transaction({
-            "from": ACCOUNT_ADDRESS,
-            "nonce": nonce,
-            "gas": 800000,
-            "gasPrice": w3.toWei("1", "gwei")
-        })
-        signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-        logger.info(f"Transaction sent: {tx_hash.hex()}")
-        return receipt
-    except Exception as e:
-        logger.error(f"Error sending transaction: {e}")
-        raise
+# =========================================================
+# Helpers
+# =========================================================
+def hash_text_to_multihash(text: str) -> MultihashModel:
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x"+h)
 
 def convert_multihash_to_tuple(mh: MultihashModel):
-    return (int(mh.hash_function, 16), int(mh.hash_size, 16), bytes.fromhex(mh.digest[2:]))
+    return (
+        bytes.fromhex(mh.hash_function[2:]),
+        bytes.fromhex(mh.hash_size[2:]),
+        bytes.fromhex(mh.digest[2:]),
+    )
 
-# ========================================
-# FASTAPI
-# ========================================
-app = FastAPI(title="TrustManager SC API")
+def send_tx(function_call):
+    nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
+    tx = function_call.build_transaction({
+        "from": ACCOUNT_ADDRESS,
+        "nonce": nonce,
+        "gas": 8000000,
+        "gasPrice": w3.toWei("1", "gwei"),
+    })
+    signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    logger.info(f"TX enviada: {tx_hash.hex()}")
+    return receipt
 
-@app.post("/publishNew")
-def publish_new(data: PublishModel):
-    logger.info(f"publishNew called by {data.publisher}")
+# =========================================================
+# FastAPI
+# =========================================================
+app = FastAPI(title="TrustNews Smart Contract API")
 
-    hash_new = convert_multihash_to_tuple(data.hash_new)
-    hash_ipfs = convert_multihash_to_tuple(data.hash_ipfs)
-
-    # Preparar aserciones y validaciones
-    asertions_list = []
-    for a in data.asertions:
-        validations_list = []
-        for v in a.validations:
-            v_tuple = (
-                int(v.id, 16),
-                (v.validator.validatorAddress, v.validator.domain, v.validator.reputation),
-                v.veredict,
-                convert_multihash_to_tuple(v.hash_description)
-            )
-            validations_list.append(v_tuple)
-        asertions_list.append((convert_multihash_to_tuple(a.hash_asertion), validations_list))
-
-    # Llamar a publishNew en blockchain
-    func_call = contract.functions.publishNew(hash_new, hash_ipfs, asertions_list)
-    receipt = send_tx(func_call)
-
-    # Obtener PostId
-    postId = contract.functions.postCounter().call()
-
-    # Recuperar validaciones
-    all_validations = contract.functions.getValidationsByNew(postId).call()
-
-    # Mapear aserciones a validadores
-    asertion_validator_map = []
-    temp_map = {}
-    for v in all_validations:
-        asertion_id = v[0]  # id de la aserción
-        validator_addr = v[1][0]  # address del validador
-        if asertion_id not in temp_map:
-            temp_map[asertion_id] = []
-        temp_map[asertion_id].append(validator_addr)
-
-    for aid, addrs in temp_map.items():
-        asertion_validator_map.append({
-            "asertionId": aid.hex() if isinstance(aid, bytes) else aid,
-            "validatorAddresses": addrs
-        })
-
-    return {
-        "status": "success",
-        "postId": postId,
-        "asertions": asertion_validator_map,
-        "tx_hash": receipt.transactionHash.hex()
-    }
-
-@app.get("/getNewByHash/{digest}")
-def get_new_by_hash(digest: str):
-    digest_bytes = bytes.fromhex(digest[2:])
-    postId = contract.functions.postsHash(digest_bytes).call()
-    post = contract.functions.postsById(postId).call()
-    return {"postId": postId, "post": post}
-
-@app.get("/getNewByCid/{digest}")
-def get_new_by_cid(digest: str):
-    digest_bytes = bytes.fromhex(digest[2:])
-    postId = contract.functions.postsCid(digest_bytes).call()
-    post = contract.functions.postsById(postId).call()
-    return {"postId": postId, "post": post}
-
-
-@app.get("/getAsertionsWithValidations/{PostId}")
-def get_asertions_with_validations(PostId: int):
+@app.post("/registerNew")
+def register_new(data: PublishRequestModel):
     try:
-        # Obtener todas las aserciones del Post
-        raw_asertions = contract.functions.getAsertionsByNew(PostId).call()  # suponiendo que existe en el SC
-        result = []
+        logger.info(f"registerNew() invoked by {data.publisher}")
 
-        # Para cada aserción, obtener sus validaciones
-        for a in raw_asertions:
-            asertion_hash = a[0]  # hash de la aserción
-            validations_raw = contract.functions.getValidationsByAsertion(a[1]).call()  # id de la aserción
-            validations_list = []
+        # ===== Hash principal y CID =====
+        hash_new = hash_text_to_multihash(data.text)
+        hash_ipfs = MultihashModel(
+            hash_function="0x12",
+            hash_size="0x20",
+            digest=data.cid if data.cid.startswith("0x") else "0x"+data.cid
+        )
 
-            for v in validations_raw:
-                validation = {
-                    "id": v[0],
-                    "validator": {
-                        "validatorAddress": v[1][0],
-                        "domain": v[1][1],
-                        "reputation": v[1][2]
-                    },
-                    "veredict": v[2],
-                    "hash_description": {
-                        "hash_function": hex(v[3][0]),
-                        "hash_size": hex(v[3][1]),
-                        "digest": "0x" + v[3][2].hex()
-                    }
-                }
-                validations_list.append(validation)
+        # ===== Preparar assertions =====
+        asertions_struct = []
+        categoryIds = []
+        for a in data.assertions:
+            mh = hash_text_to_multihash(a.text)
+            asertions_struct.append({
+                "hash_asertion": convert_multihash_to_tuple(mh),
+                "categoryId": a.categoryId,
+                "validations": []  # vacío al crear post
+            })
+            categoryIds.append(a.categoryId)
 
-            result.append({
-                "hash_asertion": "0x" + asertion_hash.hex() if isinstance(asertion_hash, bytes) else asertion_hash,
-                "validations": validations_list
+        # ===== Llamada al contrato =====
+        func_call = contract.functions.registerNew(
+            convert_multihash_to_tuple(hash_new),
+            convert_multihash_to_tuple(hash_ipfs),
+            asertions_struct,
+            categoryIds
+        )
+        receipt = send_tx(func_call)
+        post_id, validator_addresses_by_asertion = contract.functions.registerNew(
+            convert_multihash_to_tuple(hash_new),
+            convert_multihash_to_tuple(hash_ipfs),
+            asertions_struct,
+            categoryIds
+        ).call({"from": ACCOUNT_ADDRESS})
+
+        # ===== Preparar output =====
+        asertions_output = []
+        for i, a in enumerate(data.assertions):
+            asertions_output.append({
+                "hash_asertion": asertions_struct[i]["hash_asertion"][2].hex(),  # digest
+                "idAssertion": a.idAssertion or str(uuid.uuid4().hex[:8]),
+                "text": a.text,
+                "categoryId": a.categoryId,
+                "validatorAddresses": [{"Address": v} for v in validator_addresses_by_asertion[i]]
             })
 
-        return {"PostId": PostId, "asertions": result}
+        return {
+            "action": "blockchain_registered",
+            "order_id": data.order_id,
+            "payload": {
+                "post_id": str(post_id),
+                "hash_text": hash_new.digest,
+                "assertions": asertions_output,
+                "tx_hash": receipt.transactionHash.hex()
+            }
+        }
 
     except Exception as e:
-        logger.error(f"Error en getAsertionsWithValidations para PostId={PostId}: {e}")
+        logger.error(f"Error en registerNew: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-from fastapi import Query
-import requests
-from bs4 import BeautifulSoup
-
-
-
-
-
-# ========================================
-# CONSUMER KAFKA
-# ========================================
+# =========================================================
+# Kafka consumer opcional
+# =========================================================
 async def consume_register_blockchain():
     consumer = AIOKafkaConsumer(
         REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
-        group_id="trustmanager-api-group",
+        group_id="trustnews-api-group",
         auto_offset_reset="earliest"
     )
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            await consumer.start()
-            await producer.start()
-            logger.info("✅ Kafka conectado para register_blockchain")
-            break
-        except Exception as e:
-            logger.warning(f"⚠️ Kafka no disponible (intento {attempt}/{MAX_RETRIES}): {e}")
-            await asyncio.sleep(RETRY_DELAY)
+    await consumer.start()
+    await producer.start()
+    logger.info("Kafka consumer y producer iniciados")
 
     try:
         async for msg in consumer:
             try:
                 payload_msg = json.loads(msg.value.decode())
-                order_id = payload_msg.get("order_id", str(uuid.uuid4()))
-                payload = payload_msg.get("payload", {})
-                publisher = payload.get("publisher", ACCOUNT_ADDRESS)
-                hash_new = MultihashModel(**payload["hash_new"])
-                hash_ipfs = MultihashModel(**payload["hash_ipfs"])
-                asertions = [AsertionModel(**a) for a in payload.get("asertions", [])]
-
-                publish_data = PublishModel(
-                    hash_new=hash_new,
-                    hash_ipfs=hash_ipfs,
-                    asertions=asertions,
-                    publisher=publisher
-                )
-
-                # Llamada síncrona adaptada a async
-                result = await asyncio.to_thread(publish_new, publish_data)
-                logger.info(f"Post publicado desde Kafka: {result}")
-
-                response = {
-                    "action": "blockchain_registered",
-                    "order_id": order_id,
-                    "payload": result
-                }
-                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(response).encode())
-                logger.info(f"Respuesta enviada a {RESPONSE_TOPIC} para order_id {order_id}")
-
+                publish_input = PublishRequestModel(**payload_msg)
+                result = await asyncio.to_thread(register_new, publish_input)
+                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(result).encode())
+                logger.info(f"Respuesta enviada para order_id={publish_input.order_id}")
             except Exception as e:
                 logger.error(f"Error procesando mensaje Kafka: {e}")
-
     finally:
         await consumer.stop()
         await producer.stop()
-        logger.info("Kafka consumer y producer detenidos para register_blockchain")
+        logger.info("Kafka detenido")
 
-# ========================================
-# STARTUP
-# ========================================
 @app.on_event("startup")
 async def startup_event():
-    if os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true":
+    if ENABLE_KAFKA_CONSUMER:
         asyncio.create_task(consume_register_blockchain())
-        logger.info("Kafka consumer iniciado")
+        logger.info("Kafka consumer iniciado en background")

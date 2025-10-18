@@ -83,65 +83,86 @@ async def save_order_doc(order_doc: dict):
 async def update_order(order_id: str, update: dict):
     global orders_collection
     mongo_update = {}
+
+    # Mantener $push si existe
     if "$push" in update:
         mongo_update["$push"] = update.pop("$push")
-    if update:
+
+    # Si el update ya tiene $set, usarlo directamente
+    if "$set" in update:
+        mongo_update["$set"] = update.pop("$set")
+    elif update:  # Si no, envolver todo en $set
         mongo_update["$set"] = update
+
     result = await orders_collection.update_one({"order_id": order_id}, mongo_update)
     if result.matched_count == 0:
         logger.error(f"Order {order_id} not found in MongoDB")
+
 
 async def get_order_doc(order_id: str) -> Optional[dict]:
     doc = await orders_collection.find_one({"order_id": order_id})
     return doc
 
-# =========================================================
-# Emulación / manejo del registro en blockchain
-# =========================================================
-async def handle_blockchain_request(order_id: str, hash_text: str, cid: str, assertions: list):
-    """
-    Si EMULATE_BLOCKCHAIN_REQUESTS=true, no enviamos al topic de requests blockchain.
-    En su lugar publicamos en TOPIC_RESPONSES un mensaje 'blockchain_registered' que
-    será consumido por el propio consumidor (o procesado directamente si prefieres).
-    """
+# ===========================
+# Helpers para hashes
+# ===========================
+def hash_text_to_multihash(text: str) -> dict:
+    """Genera un hash SHA-256 tipo multihash para enviar al smart contract."""
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return {
+        "hash_function": "0x12",  # sha2-256
+        "hash_size": "0x20",      # 32 bytes
+        "digest": "0x" + h
+    }
+
+# ===========================
+# Emulación / manejo blockchain
+# ===========================
+async def handle_blockchain_request(order_id: str, text: str, cid: str, assertions: list):
     global producer
 
+    hash_text = hash_text_to_multihash(text)
+    asertions_hashed = []
+    validator_addresses_matrix = []
+
+    for a in assertions:
+        mh = hash_text_to_multihash(a.get("text", ""))
+        id_assertion = a.get("idAssertion") or str(uuid.uuid4().hex[:8])
+        asertions_hashed.append({
+            "hash_asertion": mh,
+            "idAssertion": id_assertion,
+            "text": a.get("text", ""),
+            "categoryId": a.get("categoryId", 0)
+        })
+        # Simulamos validadores si estamos en modo emulado
+        fake_validators = ["VAL1", "VAL2", "VAL3"]
+        validator_addresses_matrix.append([{"Address": v} for v in fake_validators])
+
     if EMULATE_BLOCKCHAIN_REQUESTS:
-        logger.info(f"[{order_id}] Blockchain request EMULADA: generando 'blockchain_registered'...")
-
-        # Crear validators simulados (uno por assertion)
-        fake_validators = []
-        for a in assertions:
-            # a puede tener assertion_id o assertionId; intentamos standardizar:
-            assertion_id = a.get("assertion_id") or a.get("assertionId") or str(uuid.uuid4().hex[:8])
-            fake_validators.append({
-                "asertionId": assertion_id,
-                "validatorAddresses": [
-                    "VAL1", "VAL2"
-                ]
-            })
-
         simulated_msg = {
             "action": "blockchain_registered",
             "order_id": order_id,
             "payload": {
+                "postId": 1,
                 "hash_text": hash_text,
-                "cid": cid,
-                "assertions": assertions,
-                "validators": fake_validators,
-                "postId": 1
+                "assertions": asertions_hashed,
+                "validatorAddressesByAsertion": validator_addresses_matrix,
+                "tx_hash": "0xSIMULATEDTXHASH1234567890abcdef"
             }
         }
-
-        # Publicamos directamente en TOPIC_RESPONSES (como una respuesta automática)
         await producer.send_and_wait(TOPIC_RESPONSES, json.dumps(simulated_msg).encode("utf-8"))
-        logger.info(f"[{order_id}] Mensaje 'blockchain_registered' EMULADO publicado en {TOPIC_RESPONSES}")
+        logger.info(f"[{order_id}] Mensaje 'blockchain_registered' EMULADO publicado")
     else:
-        # Enviar petición real al topic de blockchain
+        # Mensaje real al topic de blockchain
         message = {
             "action": "register_blockchain",
             "order_id": order_id,
-            "payload": {"hash_text": hash_text, "cid": cid, "assertions": assertions}
+            "payload": {
+                "hash_text": hash_text,
+                "cid": cid,
+                "assertions": asertions_hashed,
+                "publisher": "news-handler"
+            }
         }
         await producer.send_and_wait(TOPIC_REQUESTS_BLOCKCHAIN, json.dumps(message).encode("utf-8"))
         logger.info(f"[{order_id}] Mensaje enviado al topic {TOPIC_REQUESTS_BLOCKCHAIN}")
@@ -164,7 +185,7 @@ async def process_kafka_message(data: dict):
             return
 
         # ================================================================
-        # 1️⃣ assertions_generated
+        # 1️ assertions_generated
         # ================================================================
         if action == "assertions_generated":
             doc = await get_order_doc(order_id)
@@ -210,7 +231,7 @@ async def process_kafka_message(data: dict):
             })
 
         # ================================================================
-        # 2️⃣ ipfs_uploaded
+        # 2 ipfs_uploaded
         # ================================================================
         elif action == "ipfs_uploaded":
             doc = await get_order_doc(order_id)
@@ -224,18 +245,17 @@ async def process_kafka_message(data: dict):
                 return
 
             text = doc.get("text", "")
-            hash_text = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            
 
             await update_order(order_id, {
                 "cid": cid,
-                "hash_text": hash_text,
                 "status": "IPFS_UPLOADED",
                 "$push": {"history": {"event": "ipfs_uploaded", "payload": payload}}
             })
-            logger.info(f"[{order_id}] IPFS uploaded with CID={cid} and hash={hash_text}")
+            logger.info(f"[{order_id}] IPFS uploaded with CID={cid} ")
 
             # Manejo especial: si EMULATE_BLOCKCHAIN_REQUESTS=true, se genera blockchain_registered
-            await handle_blockchain_request(order_id, hash_text, cid, doc.get("assertions", []))
+            await handle_blockchain_request(order_id, text, cid, doc.get("assertions", []))
 
             await update_order(order_id, {
                 "status": "BLOCKCHAIN_PENDING",
@@ -243,77 +263,102 @@ async def process_kafka_message(data: dict):
             })
 
         # ================================================================
-        # 3️⃣ blockchain_registered
+        # 3 blockchain_registered
         # ================================================================
         elif action == "blockchain_registered":
-            validators_info = payload.get("validators", [])
-            if not validators_info:
-                logger.warning(f"[{order_id}] Blockchain registered without validators.")
+            post_id = payload.get("postId")
+            validator_matrix = payload.get("validatorAddressesByAsertion")
+            if not validator_matrix:
+                logger.warning(f"[{order_id}] blockchain_registered sin validatorAddressesByAsertion")
                 return
 
-            # Guardar info de validadores y actualizar estado de orden
+            doc = await get_order_doc(order_id)
+            if not doc:
+                logger.warning(f"[{order_id}] Documento no encontrado para blockchain_registered")
+                return
+
+            validators_info = []
+            for i, validator_list in enumerate(validator_matrix):
+                assertion_id = (
+                    doc["assertions"][i].get("idAssertion") or str(uuid.uuid4().hex[:8])
+                )
+                validators_info.append({
+                    "idAssertion": assertion_id,
+                    "validatorAddresses": [v["Address"] for v in validator_list]
+                })
+
+            # Guardar info en MongoDB
             await update_order(order_id, {
                 "validators": validators_info,
-                "validators_pending": len(validators_info),
+                "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
                 "status": "VALIDATION_PENDING",
                 "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
             })
-            logger.info(f"[{order_id}] Blockchain registration confirmed. Validators: {len(validators_info)}")
 
-            # Enviar requests de validación a cada validador
+            # Enviar requests de validación
             for val in validators_info:
-                for validator_addr in val.get("validatorAddresses", []):
+                for validator_addr in val["validatorAddresses"]:
                     msg_validation = {
                         "action": "request_validation",
                         "order_id": order_id,
                         "payload": {
-                            "asertionId": val.get("asertionId"),
                             "idValidator": validator_addr,
-                            "postId": payload.get("postId")
+                            "idAssertion": val["idAssertion"],
+                            "text": doc["text"],
+                            "context": doc["text"]
                         }
                     }
                     await producer.send_and_wait(TOPIC_REQUESTS_VALIDATE, json.dumps(msg_validation).encode("utf-8"))
-                    logger.info(f"[{order_id}] Validation request sent to {validator_addr} for asertion {val.get('asertionId')}")
-
-            await update_order(order_id, {
-                "$push": {"history": {"event": "validation_requests_sent"}}
-            })
-            logger.info(f"[{order_id}] Validation requests dispatched to all validators.")
 
         # ================================================================
-        # 4️⃣ validation_completed
+        # 4️ validation_completed (adaptado: requiere todas las validaciones)
         # ================================================================
         elif action == "validation_completed":
             id_val = payload.get("idValidator")
-            id_assert = payload.get("idAsertion") or payload.get("assertion_id") or payload.get("asertionId")
-            status_val = payload.get("status")
+            id_assert = payload.get("idAssertion")
+            status_val = payload.get("approval")
+            assertion_text = payload.get("text", "")
+            tx_hash = payload.get("tx_hash", "")
+
+            logger.info(f"[{order_id}] Validación recibida: Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
+
+            if not id_val or not id_assert:
+                logger.warning(f"[{order_id}] validation_completed sin idValidator o idAssertion, ignorando")
+                return
 
             doc = await get_order_doc(order_id)
             if not doc:
-                logger.warning(f"[{order_id}] Document not found for validation_completed.")
+                logger.warning(f"[{order_id}] Documento no encontrado para validation_completed")
                 return
 
-            validators_pending = doc.get("validators_pending", 0)
-            if validators_pending > 0:
-                validators_pending -= 1
+            # Guardar resultado en MongoDB
+            validations = doc.get("validations", {})
+            id_assert_str = str(id_assert)
+            if id_assert_str not in validations:
+                validations[id_assert_str] = {}
 
-            # Update validation result
-            await update_order(order_id, {
-                "validators_pending": validators_pending,
-                "$push": {"history": {
-                    "event": "validation_completed",
-                    "payload": payload
-                }}
-            })
-            logger.info(f"[{order_id}] Validation completed by {id_val} for {id_assert} → {status_val}")
+            validations[id_assert_str][id_val] = {
+                "approval": status_val,
+                "text": assertion_text,
+                "tx_hash": tx_hash
+            }
 
-            # If all validations completed
-            if validators_pending <= 0:
-                await update_order(order_id, {
-                    "status": "VALIDATED",
-                    "$push": {"history": {"event": "all_validations_completed"}}
-                })
-                logger.info(f"[{order_id}] ✅ All validations completed. Order marked as VALIDATED.")
+            await update_order(order_id, {"$set": {"validations": validations}})
+            logger.info(f"[{order_id}] Validación registrada en MongoDB para Assertion={id_assert}, Validator={id_val}")
+
+            # Comprobar si todas las aserciones han completado todas sus validaciones
+            all_done = True
+            for assertion in doc.get("assertions", []):
+                aid = str(assertion.get("idAssertion"))
+                expected_validators = assertion.get("validators", [])
+                done_validators = validations.get(aid, {})
+                if set(done_validators.keys()) != set(expected_validators):
+                    all_done = False
+                    break
+
+            if all_done:
+                await update_order(order_id, {"$set": {"status": "VALIDATED"}})
+                logger.info(f"[{order_id}] Toda la noticia validada correctamente.")
 
         else:
             logger.warning(f"[{order_id}] Unknown action received: {action}")

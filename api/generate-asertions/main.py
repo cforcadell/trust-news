@@ -46,7 +46,7 @@ def extraer_aserciones_verificables(texto: str):
     )
 
     full_prompt = f"{PROMPT}. Texto a analizar:\n{texto}"
-    logger.debug(f"Prompt enviado a Mistral: {full_prompt}")
+    logger.info(f"Prompt a enviar a Mistral: {full_prompt}")
 
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     data = {
@@ -57,7 +57,7 @@ def extraer_aserciones_verificables(texto: str):
 
     response = requests.post(url, headers=headers, json=data)
     if response.status_code == 200:
-        logger.debug("Mistral API respondió correctamente")
+        logger.info("Mistral API respondió correctamente")
         return response.json()["choices"][0]["message"]["content"]
     else:
         logger.error(f"Error Mistral API {response.status_code}: {response.text}")
@@ -69,7 +69,7 @@ def extraer_aserciones_verificables(texto: str):
 @app.post("/extraer")
 def extraer(texto_entrada: TextoEntrada):
     texto = texto_entrada.texto
-    logger.debug(f"Texto recibido en /extraer: {texto}")
+    logger.info(f"Texto recibido en /extraer: {texto}")
 
     try:
         aserciones_raw = extraer_aserciones_verificables(texto)
@@ -91,7 +91,7 @@ def extraer(texto_entrada: TextoEntrada):
 
     documento = {"new": texto, "asertions": []}
     for i, a in enumerate(aserciones_final, start=1):
-        documento["asertions"].append({"id": str(i), "description": a})
+        documento["asertions"].append({"idAssertion": str(i), "description": a})
 
     logger.info(f"Documento final generado: {documento}")
     return documento

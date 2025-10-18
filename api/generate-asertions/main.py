@@ -63,6 +63,35 @@ def extraer_aserciones_verificables(texto: str):
         logger.error(f"Error Mistral API {response.status_code}: {response.text}")
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
+
+import re
+
+def parse_aserciones_mistral(aserciones_raw: str):
+    """
+    Intenta extraer la lista de aserciones de un texto semiestructurado devuelto por Mistral.
+    """
+    # 1️⃣ Quitar prefijos como "assertions:" o "aserciones:" si existen
+    cleaned = re.sub(r'^\s*(assertions|aserciones)\s*:\s*', '', aserciones_raw.strip(), flags=re.IGNORECASE)
+
+    # 2️⃣ Asegurarse de que empieza con "[" y termina con "]"
+    start = cleaned.find('[')
+    end = cleaned.rfind(']') + 1
+    if start != -1 and end != -1:
+        cleaned = cleaned[start:end]
+
+    # 3️⃣ Intentar parsear JSON directamente
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        # 4️⃣ Intentar fallback: convertir comillas simples a dobles, eliminar comentarios, etc.
+        fixed = cleaned.replace("'", '"')
+        try:
+            return json.loads(fixed)
+        except Exception:
+            logger.warning(f"No se pudo convertir la respuesta en JSON válido. Texto recibido:\n{aserciones_raw}")
+            return []
+
+
 # -----------------------------
 # Endpoint /extraer
 # -----------------------------
@@ -73,18 +102,18 @@ def extraer(texto_entrada: TextoEntrada):
 
     try:
         aserciones_raw = extraer_aserciones_verificables(texto)
-        logger.debug(f"Aserciones crudas recibidas de Mistral: {aserciones_raw}")
+        logger.info(f"Aserciones crudas recibidas de Mistral: {aserciones_raw}")
     except HTTPException as e:
         logger.error(f"Error al llamar a Mistral API: {e.detail}")
         raise
 
     try:
-        aserciones_list = json.loads(aserciones_raw)
+        aserciones_list = parse_aserciones_mistral(aserciones_raw)
         aserciones_final = [
             a.get("asercion", a) if isinstance(a, dict) else a
             for a in aserciones_list
         ]
-        logger.debug(f"Aserciones parseadas: {aserciones_final}")
+        logger.info(f"Aserciones parseadas: {aserciones_final}")
     except Exception as e:
         logger.warning(f"No se pudo parsear JSON de aserciones: {e}")
         aserciones_final = []
@@ -92,6 +121,8 @@ def extraer(texto_entrada: TextoEntrada):
     documento = {"new": texto, "asertions": []}
     for i, a in enumerate(aserciones_final, start=1):
         documento["asertions"].append({"idAssertion": str(i), "description": a})
+        logger.info(f"Aserción añadida al documento: idAssertion={i}, description={a}")        
+
 
     logger.info(f"Documento final generado: {documento}")
     return documento

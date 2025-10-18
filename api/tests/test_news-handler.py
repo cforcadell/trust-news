@@ -14,7 +14,7 @@ def test_publish_new():
     Verifica que el endpoint /publishNew funcione correctamente y devuelva order_id.
     """
     payload = {
-        "text": "Catalunya tiene una población de más de 7 millones de habitantes."
+        "text": "Catalunya tiene una población de más de 7 millones de habitantes. Tambien hay alrededor de 2 millones de niños en edad escolar.",
         }
 
     r = requests.post(f"{NEWS_HANDLER_URL}/publishNew", json=payload)

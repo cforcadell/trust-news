@@ -135,7 +135,7 @@ async def handle_blockchain_request(order_id: str, text: str, cid: str, assertio
             "categoryId": a.get("categoryId", 0)
         })
         # Simulamos validadores si estamos en modo emulado
-        fake_validators = ["VAL1", "VAL2", "VAL3"]
+        fake_validators = ["VAL1", "VAL2"]
         validator_addresses_matrix.append([{"Address": v} for v in fake_validators])
 
     if EMULATE_BLOCKCHAIN_REQUESTS:
@@ -309,6 +309,7 @@ async def process_kafka_message(data: dict):
                         }
                     }
                     await producer.send_and_wait(TOPIC_REQUESTS_VALIDATE, json.dumps(msg_validation).encode("utf-8"))
+                    logger.info(f"[{order_id}] Validation request sent to {validator_addr} for Assertion={val['idAssertion']}")
 
         # ================================================================
         # 4️ validation_completed (adaptado: requiere todas las validaciones)

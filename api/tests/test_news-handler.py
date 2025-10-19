@@ -14,7 +14,7 @@ def test_publish_new():
     Verifica que el endpoint /publishNew funcione correctamente y devuelva order_id.
     """
     payload = {
-        "text": "Catalunya tiene una población de más de 7 millones de habitantes. Tambien hay alrededor de 2 millones de niños en edad escolar.",
+        "text": "Catalunya tiene una población de más de 7 millones de habitantesde los que  2 millones de niños en edad escolar y otro millón son inmigrantes.",
         }
 
     r = requests.post(f"{NEWS_HANDLER_URL}/publishNew", json=payload)
@@ -55,10 +55,12 @@ def test_get_order():
 
             if last_status == "VALIDATED":
                 print("✅ get_order OK: VALIDATED")
+                assert last_status == "VALIDATED"
                 break
 
             if time.time() - start_time > timeout:
                 print(f"❌ Timeout esperando estado VALIDATED (último estado: {last_status})")
+                assert last_status == "VALIDATED"
                 break
 
             time.sleep(interval)
@@ -70,7 +72,7 @@ def test_get_order():
                 break
 
 
-def _test_news_registered():
+def test_news_registered():
     """
     Simula el callback del frontend notificando que la noticia fue registrada.
     """

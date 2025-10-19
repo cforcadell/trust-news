@@ -130,6 +130,7 @@ def verificar_asercion(texto: str, contexto: Optional[str] = None):
     contenido = f"Texto a analizar:\n{texto}"
     if contexto:
         contenido += f"\nContexto adicional:\n{contexto}"
+        logger.info(f"Contexto proporcionado de {len(contexto)} caracteres.")
 
     data = {
         "model": MODEL,
@@ -144,7 +145,7 @@ def verificar_asercion(texto: str, contexto: Optional[str] = None):
         "temperature": 0.3,
     }
 
-    logger.info(f"Verificando aserción: {texto[:60]}...")
+    logger.info(f"Verificando aserción: {texto[:100]}...")
     response = requests.post(url, headers=headers, json=data)
     if response.status_code == 200:
         return response.json()["choices"][0]["message"]["content"]

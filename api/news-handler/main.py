@@ -189,21 +189,24 @@ async def process_kafka_message(data: dict):
         payload = data.get("payload", {})
 
         if not action or not order_id:
-            logger.warning("Message without 'action' or 'order_id', skipping.")
+            logger.warning("⚠️ Mensaje Kafka sin 'action' o 'order_id', ignorado.")
             return
 
+        logger.info(f"📨 [{order_id}] Procesando acción '{action}'...")
+
         # ================================================================
-        # 1️ assertions_generated
+        # 1️⃣ assertions_generated
         # ================================================================
         if action == "assertions_generated":
+            logger.info(f"[{order_id}] 🧩 Recibido 'assertions_generated'.")
             doc = await get_order_doc(order_id)
             if not doc:
-                logger.warning(f"[{order_id}] Document not found in DB.")
+                logger.warning(f"[{order_id}] ⚠️ Documento no encontrado en DB.")
                 return
 
             assertions = payload.get("assertions", [])
             if not assertions:
-                logger.warning(f"[{order_id}] Empty assertions payload.")
+                logger.warning(f"[{order_id}] ⚠️ Payload vacío de aserciones.")
                 return
 
             document = {
@@ -222,7 +225,7 @@ async def process_kafka_message(data: dict):
                 "status": "DOCUMENT_CREATED",
                 "$push": {"history": {"event": "assertions_generated", "payload": payload}}
             })
-            logger.info(f"[{order_id}] Assertions saved and document created.")
+            logger.info(f"[{order_id}] 📄 Documento y aserciones guardadas en MongoDB.")
 
             # Enviar upload_ipfs request
             msg_ipfs = {
@@ -231,7 +234,7 @@ async def process_kafka_message(data: dict):
                 "payload": {"document": document}
             }
             await producer.send_and_wait(TOPIC_REQUESTS_IPFS, json.dumps(msg_ipfs).encode("utf-8"))
-            logger.info(f"[{order_id}] Document sent to IPFS service ({TOPIC_REQUESTS_IPFS}).")
+            logger.info(f"[{order_id}] 🌐 Documento enviado al servicio IPFS ({TOPIC_REQUESTS_IPFS}).")
 
             await update_order(order_id, {
                 "status": "IPFS_PENDING",
@@ -239,76 +242,73 @@ async def process_kafka_message(data: dict):
             })
 
         # ================================================================
-        # 2 ipfs_uploaded
+        # 2️⃣ ipfs_uploaded
         # ================================================================
         elif action == "ipfs_uploaded":
+            logger.info(f"[{order_id}] 🌐 Recibido 'ipfs_uploaded'.")
             doc = await get_order_doc(order_id)
             if not doc:
-                logger.warning(f"[{order_id}] Document not found for IPFS update.")
+                logger.warning(f"[{order_id}] ⚠️ Documento no encontrado para IPFS update.")
                 return
 
             cid = payload.get("cid")
             if not cid:
-                logger.warning(f"[{order_id}] Missing 'cid' in payload.")
+                logger.warning(f"[{order_id}] ⚠️ Falta 'cid' en payload.")
                 return
 
             text = doc.get("text", "")
-            
-
             await update_order(order_id, {
                 "cid": cid,
                 "status": "IPFS_UPLOADED",
                 "$push": {"history": {"event": "ipfs_uploaded", "payload": payload}}
             })
-            logger.info(f"[{order_id}] IPFS uploaded with CID={cid} ")
+            logger.info(f"[{order_id}] ✅ IPFS subido con CID={cid}")
 
-            # Manejo especial: si EMULATE_BLOCKCHAIN_REQUESTS=true, se genera blockchain_registered
+            # Modo emulado → Generar blockchain_registered
             await handle_blockchain_request(order_id, text, cid, doc.get("assertions", []))
-
             await update_order(order_id, {
                 "status": "BLOCKCHAIN_PENDING",
                 "$push": {"history": {"event": "register_blockchain_sent"}}
             })
+            logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain enviada (emulada).")
 
         # ================================================================
-        # 3 blockchain_registered
+        # 3️⃣ blockchain_registered
         # ================================================================
         elif action == "blockchain_registered":
-            logger.info(f"[{order_id}] blockchain_registered recibido.")
-            logger.debug(f"[{order_id}] Payload completo blockchain_registered: {json.dumps(payload, indent=2)}")
+            logger.info(f"[{order_id}] ⛓️ Recibido 'blockchain_registered'.")
+            logger.debug(f"[{order_id}] 🧾 Payload blockchain_registered: {json.dumps(payload, indent=2)}")
 
             post_id = payload.get("postId")
             validator_matrix = payload.get("validatorAddressesByAsertion")
             assertions_payload = payload.get("assertions", [])
 
             if not validator_matrix or not assertions_payload:
-                logger.warning(f"[{order_id}] blockchain_registered sin assertions o validators.")
+                logger.warning(f"[{order_id}] ⚠️ blockchain_registered sin assertions o validators.")
                 return
 
             doc = await get_order_doc(order_id)
             if not doc:
-                logger.warning(f"[{order_id}] Documento no encontrado en MongoDB para blockchain_registered.")
+                logger.warning(f"[{order_id}] ❌ Documento no encontrado en MongoDB.")
                 return
 
-            logger.info(f"[{order_id}] Documento recuperado. Contiene {len(assertions_payload)} aserciones y {len(validator_matrix)} conjuntos de validadores.")
+            logger.info(f"[{order_id}] 📄 Documento recuperado. {len(assertions_payload)} aserciones, {len(validator_matrix)} grupos de validadores.")
 
             validators_info = []
             for i, validator_list in enumerate(validator_matrix):
-                # Recuperar idAssertion desde el payload o el documento
                 assertion_id = (
                     assertions_payload[i].get("idAssertion")
-                    if i < len(assertions_payload) else
-                    doc["document"]["assertions"][i]["idAssertion"]
+                    if i < len(assertions_payload)
+                    else doc["document"]["assertions"][i]["idAssertion"]
                 )
 
-                # Recuperar texto de la aserción desde el payload o el documento (fallback)
                 assertion_text = (
                     assertions_payload[i].get("text")
                     or doc["document"]["assertions"][i]["description"]["text"]
                 )
 
-                logger.info(f"[{order_id}] Aserción #{i+1}: id={assertion_id}, texto='{assertion_text[:80]}...'")
-                logger.debug(f"[{order_id}] Validadores asignados: {validator_list}")
+                logger.info(f"[{order_id}] 🧩 Aserción #{i+1}: id={assertion_id}, texto='{assertion_text[:70]}...'")
+                logger.debug(f"[{order_id}] ⚙️ Validadores: {validator_list}")
 
                 validators_info.append({
                     "idAssertion": assertion_id,
@@ -316,14 +316,13 @@ async def process_kafka_message(data: dict):
                     "text": assertion_text
                 })
 
-            # Guardar info en MongoDB
             await update_order(order_id, {
                 "validators": validators_info,
                 "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
                 "status": "VALIDATION_PENDING",
                 "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
             })
-            logger.info(f"[{order_id}] Información de validadores guardada en MongoDB ({len(validators_info)} aserciones).")
+            logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones).")
 
             # Enviar requests de validación
             for val in validators_info:
@@ -336,25 +335,21 @@ async def process_kafka_message(data: dict):
                         "payload": {
                             "idValidator": validator_addr,
                             "idAssertion": id_assert,
-                            "text": text_assert,          # ← texto de la aserción (desde Mongo si falta)
-                            "context": doc["text"]        # ← texto completo de la noticia
+                            "text": text_assert,
+                            "context": doc["text"]
                         }
                     }
-                    logger.debug(f"[{order_id}] Construido mensaje de validación para {validator_addr}: {json.dumps(msg_validation, indent=2)}")
+                    logger.debug(f"[{order_id}] 🧮 Construido mensaje validación -> {validator_addr}: {json.dumps(msg_validation, indent=2)}")
                     await producer.send_and_wait(
                         TOPIC_REQUESTS_VALIDATE,
                         json.dumps(msg_validation).encode("utf-8")
                     )
-                    logger.info(
-                        f"[{order_id}] Mensaje de validación enviado a {validator_addr} "
-                        f"para Aserción={id_assert}. Texto='{text_assert[:50]}...'"
-                    )
+                    logger.info(f"[{order_id}] 📤 Enviada validación a {validator_addr} para aserción {id_assert}.")
 
-            logger.info(f"[{order_id}] Envío de todas las validaciones completado ({sum(len(v['validatorAddresses']) for v in validators_info)} mensajes totales).")
-
+            logger.info(f"[{order_id}] 🎯 Envío de validaciones completado ({sum(len(v['validatorAddresses']) for v in validators_info)} totales).")
 
         # ================================================================
-        # 4️ validation_completed (adaptado: requiere todas las validaciones)
+        # 4️⃣ validation_completed
         # ================================================================
         elif action == "validation_completed":
             id_val = payload.get("idValidator")
@@ -369,24 +364,20 @@ async def process_kafka_message(data: dict):
                 logger.warning(f"[{order_id}] ⚠️ validation_completed sin idValidator o idAssertion, ignorando.")
                 return
 
-            # Obtener lock por order_id para evitar condiciones de carrera
             lock = await get_order_lock(order_id)
             async with lock:
                 doc = await get_order_doc(order_id)
                 if not doc:
-                    logger.warning(f"[{order_id}] ❌ Documento no encontrado para validation_completed")
+                    logger.warning(f"[{order_id}] ❌ Documento no encontrado para validation_completed.")
                     return
 
-                # ================================
-                # Actualizar validaciones
-                # ================================
                 validations = doc.get("validations", {})
                 if id_assert not in validations:
                     validations[id_assert] = {}
 
                 already_done = id_val in validations[id_assert]
                 if already_done:
-                    logger.info(f"[{order_id}] ⚠️ Validación duplicada ignorada (Assertion={id_assert}, Validator={id_val})")
+                    logger.info(f"[{order_id}] ⚠️ Validación duplicada ignorada (Assertion={id_assert}, Validator={id_val}).")
                     return
 
                 validations[id_assert][id_val] = {
@@ -396,11 +387,8 @@ async def process_kafka_message(data: dict):
                 }
 
                 await update_order(order_id, {"$set": {"validations": validations}})
-                logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}")
+                logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
 
-                # ================================
-                # Recalcular validaciones pendientes
-                # ================================
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
                 for v in validators_cfg:
@@ -410,27 +398,27 @@ async def process_kafka_message(data: dict):
                     pending = expected - done
                     total_pending += len(pending)
                     logger.info(
-                        f"[{order_id}] 🔍 Assertion {aid}: {len(done)}/{len(expected)} completadas. "
-                        f"Pendientes: {list(pending) if pending else 'NINGUNO'}"
+                        f"[{order_id}] 🧮 Assertion {aid}: {len(done)}/{len(expected)} completadas. Pendientes: {list(pending) if pending else 'NINGUNO'}"
                     )
 
-                # Actualizar contador global
                 await update_order(order_id, {"$set": {"validators_pending": total_pending}})
                 logger.info(f"[{order_id}] 📊 Validadores pendientes totales: {total_pending}")
 
-                # ================================
-                # Verificar si se completaron todas
-                # ================================
                 if total_pending == 0:
                     await update_order(order_id, {"$set": {"status": "VALIDATED"}})
                     logger.info(f"[{order_id}] 🎯 Todas las validaciones completadas. Noticia VALIDADA.")
                 else:
-                    logger.info(f"[{order_id}] ⏳ Aún quedan {total_pending} validaciones pendientes.")
+                    logger.info(f"[{order_id}] 🕓 Aún quedan {total_pending} validaciones pendientes.")
+
+        # ================================================================
+        # Acción desconocida
+        # ================================================================
         else:
-            logger.warning(f"[{order_id}] Unknown action received: {action}")
+            logger.warning(f"[{order_id}] ⚠️ Acción desconocida recibida: {action}")
 
     except Exception as e:
-        logger.exception(f"Error processing Kafka message: {e}")
+        logger.exception(f"❌ Error procesando mensaje Kafka: {e}")
+
 
 # =========================================================
 # Kafka consumer loop

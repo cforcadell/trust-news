@@ -55,6 +55,7 @@ consumer: Optional[AIOKafkaConsumer] = None
 mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 orders_collection = None
+order_locks = {}
 
 # ---------- Models ----------
 class PublishRequest(BaseModel):
@@ -114,6 +115,13 @@ def hash_text_to_multihash(text: str) -> dict:
         "hash_size": "0x20",      # 32 bytes
         "digest": "0x" + h
     }
+
+
+
+async def get_order_lock(order_id: str):
+    if order_id not in order_locks:
+        order_locks[order_id] = asyncio.Lock()
+    return order_locks[order_id]
 
 # ===========================
 # Emulación / manejo blockchain
@@ -266,25 +274,46 @@ async def process_kafka_message(data: dict):
         # 3 blockchain_registered
         # ================================================================
         elif action == "blockchain_registered":
+            logger.info(f"[{order_id}] blockchain_registered recibido.")
+            logger.debug(f"[{order_id}] Payload completo blockchain_registered: {json.dumps(payload, indent=2)}")
+
             post_id = payload.get("postId")
             validator_matrix = payload.get("validatorAddressesByAsertion")
-            if not validator_matrix:
-                logger.warning(f"[{order_id}] blockchain_registered sin validatorAddressesByAsertion")
+            assertions_payload = payload.get("assertions", [])
+
+            if not validator_matrix or not assertions_payload:
+                logger.warning(f"[{order_id}] blockchain_registered sin assertions o validators.")
                 return
 
             doc = await get_order_doc(order_id)
             if not doc:
-                logger.warning(f"[{order_id}] Documento no encontrado para blockchain_registered")
+                logger.warning(f"[{order_id}] Documento no encontrado en MongoDB para blockchain_registered.")
                 return
+
+            logger.info(f"[{order_id}] Documento recuperado. Contiene {len(assertions_payload)} aserciones y {len(validator_matrix)} conjuntos de validadores.")
 
             validators_info = []
             for i, validator_list in enumerate(validator_matrix):
+                # Recuperar idAssertion desde el payload o el documento
                 assertion_id = (
-                    doc["assertions"][i].get("idAssertion") or str(uuid.uuid4().hex[:8])
+                    assertions_payload[i].get("idAssertion")
+                    if i < len(assertions_payload) else
+                    doc["document"]["assertions"][i]["idAssertion"]
                 )
+
+                # Recuperar texto de la aserción desde el payload o el documento (fallback)
+                assertion_text = (
+                    assertions_payload[i].get("text")
+                    or doc["document"]["assertions"][i]["description"]["text"]
+                )
+
+                logger.info(f"[{order_id}] Aserción #{i+1}: id={assertion_id}, texto='{assertion_text[:80]}...'")
+                logger.debug(f"[{order_id}] Validadores asignados: {validator_list}")
+
                 validators_info.append({
                     "idAssertion": assertion_id,
-                    "validatorAddresses": [v["Address"] for v in validator_list]
+                    "validatorAddresses": [v["Address"] for v in validator_list],
+                    "text": assertion_text
                 })
 
             # Guardar info en MongoDB
@@ -294,73 +323,109 @@ async def process_kafka_message(data: dict):
                 "status": "VALIDATION_PENDING",
                 "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
             })
+            logger.info(f"[{order_id}] Información de validadores guardada en MongoDB ({len(validators_info)} aserciones).")
 
             # Enviar requests de validación
             for val in validators_info:
+                id_assert = val["idAssertion"]
+                text_assert = val["text"]
                 for validator_addr in val["validatorAddresses"]:
                     msg_validation = {
                         "action": "request_validation",
                         "order_id": order_id,
                         "payload": {
                             "idValidator": validator_addr,
-                            "idAssertion": val["idAssertion"],
-                            "text": doc["text"],
-                            "context": doc["text"]
+                            "idAssertion": id_assert,
+                            "text": text_assert,          # ← texto de la aserción (desde Mongo si falta)
+                            "context": doc["text"]        # ← texto completo de la noticia
                         }
                     }
-                    await producer.send_and_wait(TOPIC_REQUESTS_VALIDATE, json.dumps(msg_validation).encode("utf-8"))
-                    logger.info(f"[{order_id}] Validation request sent to {validator_addr} for Assertion={val['idAssertion']}")
+                    logger.debug(f"[{order_id}] Construido mensaje de validación para {validator_addr}: {json.dumps(msg_validation, indent=2)}")
+                    await producer.send_and_wait(
+                        TOPIC_REQUESTS_VALIDATE,
+                        json.dumps(msg_validation).encode("utf-8")
+                    )
+                    logger.info(
+                        f"[{order_id}] Mensaje de validación enviado a {validator_addr} "
+                        f"para Aserción={id_assert}. Texto='{text_assert[:50]}...'"
+                    )
+
+            logger.info(f"[{order_id}] Envío de todas las validaciones completado ({sum(len(v['validatorAddresses']) for v in validators_info)} mensajes totales).")
+
 
         # ================================================================
         # 4️ validation_completed (adaptado: requiere todas las validaciones)
         # ================================================================
         elif action == "validation_completed":
             id_val = payload.get("idValidator")
-            id_assert = payload.get("idAssertion")
+            id_assert = str(payload.get("idAssertion"))
             status_val = payload.get("approval")
             assertion_text = payload.get("text", "")
             tx_hash = payload.get("tx_hash", "")
 
-            logger.info(f"[{order_id}] Validación recibida: Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
+            logger.info(f"[{order_id}] 🧩 Validación recibida -> Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
 
             if not id_val or not id_assert:
-                logger.warning(f"[{order_id}] validation_completed sin idValidator o idAssertion, ignorando")
+                logger.warning(f"[{order_id}] ⚠️ validation_completed sin idValidator o idAssertion, ignorando.")
                 return
 
-            doc = await get_order_doc(order_id)
-            if not doc:
-                logger.warning(f"[{order_id}] Documento no encontrado para validation_completed")
-                return
+            # Obtener lock por order_id para evitar condiciones de carrera
+            lock = await get_order_lock(order_id)
+            async with lock:
+                doc = await get_order_doc(order_id)
+                if not doc:
+                    logger.warning(f"[{order_id}] ❌ Documento no encontrado para validation_completed")
+                    return
 
-            # Guardar resultado en MongoDB
-            validations = doc.get("validations", {})
-            id_assert_str = str(id_assert)
-            if id_assert_str not in validations:
-                validations[id_assert_str] = {}
+                # ================================
+                # Actualizar validaciones
+                # ================================
+                validations = doc.get("validations", {})
+                if id_assert not in validations:
+                    validations[id_assert] = {}
 
-            validations[id_assert_str][id_val] = {
-                "approval": status_val,
-                "text": assertion_text,
-                "tx_hash": tx_hash
-            }
+                already_done = id_val in validations[id_assert]
+                if already_done:
+                    logger.info(f"[{order_id}] ⚠️ Validación duplicada ignorada (Assertion={id_assert}, Validator={id_val})")
+                    return
 
-            await update_order(order_id, {"$set": {"validations": validations}})
-            logger.info(f"[{order_id}] Validación registrada en MongoDB para Assertion={id_assert}, Validator={id_val}")
+                validations[id_assert][id_val] = {
+                    "approval": status_val,
+                    "text": assertion_text,
+                    "tx_hash": tx_hash
+                }
 
-            # Comprobar si todas las aserciones han completado todas sus validaciones
-            all_done = True
-            for assertion in doc.get("assertions", []):
-                aid = str(assertion.get("idAssertion"))
-                expected_validators = assertion.get("validators", [])
-                done_validators = validations.get(aid, {})
-                if set(done_validators.keys()) != set(expected_validators):
-                    all_done = False
-                    break
+                await update_order(order_id, {"$set": {"validations": validations}})
+                logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}")
 
-            if all_done:
-                await update_order(order_id, {"$set": {"status": "VALIDATED"}})
-                logger.info(f"[{order_id}] Toda la noticia validada correctamente.")
+                # ================================
+                # Recalcular validaciones pendientes
+                # ================================
+                validators_cfg = doc.get("validators", [])
+                total_pending = 0
+                for v in validators_cfg:
+                    aid = str(v["idAssertion"])
+                    expected = set(v["validatorAddresses"])
+                    done = set(validations.get(aid, {}).keys())
+                    pending = expected - done
+                    total_pending += len(pending)
+                    logger.info(
+                        f"[{order_id}] 🔍 Assertion {aid}: {len(done)}/{len(expected)} completadas. "
+                        f"Pendientes: {list(pending) if pending else 'NINGUNO'}"
+                    )
 
+                # Actualizar contador global
+                await update_order(order_id, {"$set": {"validators_pending": total_pending}})
+                logger.info(f"[{order_id}] 📊 Validadores pendientes totales: {total_pending}")
+
+                # ================================
+                # Verificar si se completaron todas
+                # ================================
+                if total_pending == 0:
+                    await update_order(order_id, {"$set": {"status": "VALIDATED"}})
+                    logger.info(f"[{order_id}] 🎯 Todas las validaciones completadas. Noticia VALIDADA.")
+                else:
+                    logger.info(f"[{order_id}] ⏳ Aún quedan {total_pending} validaciones pendientes.")
         else:
             logger.warning(f"[{order_id}] Unknown action received: {action}")
 

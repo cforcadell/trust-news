@@ -34,9 +34,9 @@ logger = logging.getLogger("TrustNewsAPI")
 # Web3 / Contract
 # =========================================================
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
+
 with open(CONTRACT_ABI_PATH) as f:
     artifact = json.load(f)
-
 abi = artifact["abi"]
 contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
 
@@ -64,7 +64,7 @@ class PublishRequestModel(BaseModel):
 # =========================================================
 def hash_text_to_multihash(text: str) -> MultihashModel:
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x"+h)
+    return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x" + h)
 
 def multihash_to_tuple(mh: MultihashModel):
     hf = bytes.fromhex(mh.hash_function[2:])
@@ -74,7 +74,7 @@ def multihash_to_tuple(mh: MultihashModel):
         raise ValueError("Digest must be 32 bytes")
     return (hf, hs, dg)
 
-def send_tx(function_call, gas_estimate=3_000_000):
+def send_tx_async(function_call, gas_estimate=3_000_000):
     nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
     tx = function_call.build_transaction({
         "from": ACCOUNT_ADDRESS,
@@ -84,9 +84,53 @@ def send_tx(function_call, gas_estimate=3_000_000):
     })
     signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+    logger.info(f"TX enviada (no minada aún): {tx_hash.hex()}")
+    return tx_hash.hex()
+
+def wait_for_receipt(tx_hash: str):
+    logger.info(f"Esperando minado de {tx_hash}...")
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-    logger.info(f"TX enviada: {tx_hash.hex()}")
+    logger.info(f"TX minada en bloque {receipt.blockNumber}")
     return receipt
+
+def parse_registernew_event(receipt, data: PublishRequestModel):
+    events = contract.events.RegisterNewResult().process_receipt(receipt)
+    if not events:
+        logger.warning("No RegisterNewResult event found; returning minimal info")
+        return {
+            "post_id": None,
+            "hash_text": "",
+            "assertions": [],
+            "tx_hash": receipt.transactionHash.hex()
+        }
+
+    event = events[0]
+    post_id = event['args']['postId']
+    validator_addresses_by_asertion = event['args']['validatorAddressesByAsertion']
+
+    # reconstrucción hashes
+    asertions_output = []
+    for i, a in enumerate(data.assertions):
+        mh = hash_text_to_multihash(a.text)
+        digest_hex = mh.digest[2:]
+        addrs_raw = validator_addresses_by_asertion[i] if i < len(validator_addresses_by_asertion) else []
+        addrs = [str(x) for x in addrs_raw]
+        asertions_output.append({
+            "hash_asertion": "0x" + digest_hex,
+            "idAssertion": a.idAssertion or str(uuid.uuid4().hex[:8]),
+            "text": a.text,
+            "categoryId": a.categoryId,
+            "validatorAddresses": addrs
+        })
+
+    hash_new = hash_text_to_multihash(data.text)
+
+    return {
+        "post_id": str(post_id),
+        "hash_text": hash_new.digest,
+        "assertions": asertions_output,
+        "tx_hash": receipt.transactionHash.hex()
+    }
 
 # =========================================================
 # FastAPI
@@ -95,10 +139,9 @@ app = FastAPI(title="TrustNews Smart Contract API")
 
 @app.post("/registerNew")
 def register_new(data: PublishRequestModel):
+    """Lanza la transacción sin esperar al minado, devolviendo tx_hash."""
     try:
         logger.info(f"registerNew() invoked by {data.publisher}")
-
-        # ===== Hash principal y CID =====
         hash_new = hash_text_to_multihash(data.text)
         hash_ipfs = MultihashModel(
             hash_function="0x12",
@@ -106,91 +149,23 @@ def register_new(data: PublishRequestModel):
             digest=data.cid if data.cid.startswith("0x") else "0x" + data.cid
         )
 
-        # ===== Helpers locales para bytes exactos y tuplas =====
-        def hex_to_bytes32(hexstr: str) -> bytes:
-            b = bytes.fromhex(hexstr[2:]) if hexstr.startswith("0x") else bytes.fromhex(hexstr)
-            if len(b) != 32:
-                raise ValueError("Digest must be 32 bytes")
-            return b
-
-        def multihash_to_tuple(mh: MultihashModel):
-            hf = bytes.fromhex(mh.hash_function[2:])   # bytes1
-            hs = bytes.fromhex(mh.hash_size[2:])       # bytes1
-            dg = hex_to_bytes32(mh.digest)             # bytes32
-            return (hf, hs, dg)
-
-        # ===== Preparar assertions =====
         asertions_struct = []
         categoryIds = []
-
         for a in data.assertions:
             mh = hash_text_to_multihash(a.text)
-            empty_validations: list = []
-
-            # struct: (hash_asertion, validations[], categoryId)
-            as_tuple = (
-                multihash_to_tuple(mh),
-                tuple(empty_validations),
-                int(a.categoryId)
-            )
+            as_tuple = (multihash_to_tuple(mh), tuple([]), int(a.categoryId))
             asertions_struct.append(as_tuple)
             categoryIds.append(int(a.categoryId))
 
-        asertions_struct = tuple(asertions_struct)
-        categoryIds = tuple(categoryIds)
-
-        # ===== Llamada al contrato =====
         func_call = contract.functions.registerNew(
             multihash_to_tuple(hash_new),
             multihash_to_tuple(hash_ipfs),
-            asertions_struct,
-            categoryIds
+            tuple(asertions_struct),
+            tuple(categoryIds)
         )
 
-        receipt = send_tx(func_call)
-
-        w3.eth.wait_for_transaction_receipt(receipt.transactionHash)
-        # ===== Parseo seguro de eventos =====
-        events = []
-        events = contract.events.RegisterNewResult().process_receipt(receipt)
-        
-        if not events:
-            logger.warning("No RegisterNewResult event found; returning minimal info")
-            return {
-                "payload": {
-                    "post_id": None,
-                    "hash_text": hash_new.digest,
-                    "assertions": [],
-                    "tx_hash": receipt.transactionHash.hex()
-                }
-            }
-
-        event = events[0]
-        post_id = event['args']['postId']
-        validator_addresses_by_asertion = event['args']['validatorAddressesByAsertion']
-
-        # ===== Preparar output =====
-        asertions_output = []
-        for i, a in enumerate(data.assertions):
-            digest_hex = asertions_struct[i][0][2].hex()
-            addrs_raw = validator_addresses_by_asertion[i] if i < len(validator_addresses_by_asertion) else []
-            addrs = [str(x) for x in addrs_raw]
-            asertions_output.append({
-                "hash_asertion": "0x" + digest_hex,
-                "idAssertion": a.idAssertion or str(uuid.uuid4().hex[:8]),
-                "text": a.text,
-                "categoryId": a.categoryId,
-                "validatorAddresses": addrs
-            })
-
-        return {
-            "payload": {
-                "post_id": str(post_id),
-                "hash_text": hash_new.digest,
-                "assertions": asertions_output,
-                "tx_hash": receipt.transactionHash.hex()
-            }
-        }
+        tx_hash = send_tx_async(func_call)
+        return {"tx_hash": tx_hash, "result": False}
 
     except Exception as e:
         logger.exception(f"Error en registerNew: {e}")
@@ -199,11 +174,66 @@ def register_new(data: PublishRequestModel):
 
 @app.get("/tx-status/{tx_hash}")
 def tx_status(tx_hash: str):
-    receipt = w3.eth.get_transaction_receipt(tx_hash)
-    return {"status": receipt.status, "blockNumber": receipt.blockNumber}
+    """Consulta si la transacción está minada y devuelve el payload completo si lo está."""
+    try:
+        receipt = w3.eth.get_transaction_receipt(tx_hash)
+        if receipt is None:
+            return {"result": False, "status": "pending"}
+
+        if receipt.status == 1:
+            # Intenta reconstruir los eventos como la parte asíncrona
+            try:
+                # Necesitamos un PublishRequestModel para el parseo completo, si lo tenemos cacheado.
+                # Si no lo tenemos (porque no se guarda), devolvemos solo la info del receipt.
+                # Por simplicidad: devolvemos solo los datos del evento.
+                events = contract.events.RegisterNewResult().process_receipt(receipt)
+                if not events:
+                    return {
+                        "result": True,
+                        "status": "mined",
+                        "blockNumber": receipt.blockNumber,
+                        "payload": {"message": "Transaction mined but no events found."}
+                    }
+
+                event = events[0]
+                post_id = event['args']['postId']
+                validator_addresses_by_asertion = event['args']['validatorAddressesByAsertion']
+
+                # Construimos payload tipo asincrono
+                payload = {
+                    "post_id": str(post_id),
+                    "validatorAddressesByAsertion": [
+                        [str(a) for a in addrs]
+                        for addrs in validator_addresses_by_asertion
+                    ],
+                    "tx_hash": tx_hash
+                }
+
+                return {
+                    "result": True,
+                    "status": "mined",
+                    "blockNumber": receipt.blockNumber,
+                    "payload": payload
+                }
+
+            except Exception as e:
+                logger.error(f"Error al parsear evento de {tx_hash}: {e}")
+                return {
+                    "result": True,
+                    "status": "mined",
+                    "blockNumber": receipt.blockNumber,
+                    "payload": {"message": "Transaction mined but parse failed."}
+                }
+
+        else:
+            return {"result": False, "status": "pending"}
+
+    except Exception:
+        return {"result": False, "status": "pending"}
+
 
 # =========================================================
-# Kafka consumer opcional
+# Kafka consumer opcional (asincrónico)
 # =========================================================
 async def consume_register_blockchain():
     consumer = AIOKafkaConsumer(
@@ -213,7 +243,6 @@ async def consume_register_blockchain():
         auto_offset_reset="earliest"
     )
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
-
     await consumer.start()
     await producer.start()
     logger.info("Kafka consumer y producer iniciados")
@@ -223,15 +252,25 @@ async def consume_register_blockchain():
             try:
                 payload_msg = json.loads(msg.value.decode())
                 publish_input = PublishRequestModel(**payload_msg)
-                result = await asyncio.to_thread(register_new, publish_input)
+                
+                # Paso 1: enviar transacción
+                tx_info = register_new(publish_input)
+                tx_hash = tx_info["tx_hash"]
+
+                # Paso 2: esperar hasta que se mine
+                receipt = await asyncio.to_thread(wait_for_receipt, tx_hash)
+                result = parse_registernew_event(receipt, publish_input)
+
                 await producer.send_and_wait(RESPONSE_TOPIC, json.dumps({
                     "action": "blockchain_registered",
                     "order_id": payload_msg.get("order_id"),
                     "payload": result
                 }).encode())
                 logger.info(f"Respuesta enviada para order_id={payload_msg.get('order_id')}")
+
             except Exception as e:
                 logger.error(f"Error procesando mensaje Kafka: {e}")
+
     finally:
         await consumer.stop()
         await producer.stop()

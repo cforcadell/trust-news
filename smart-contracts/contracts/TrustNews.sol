@@ -1,216 +1,251 @@
-import os
-import json
-import uuid
-import hashlib
-import logging
-import asyncio
-from typing import List, Optional
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from dotenv import load_dotenv
-from web3 import Web3
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
 
-# =========================================================
-# Config
-# =========================================================
-load_dotenv()
+contract TrustNews {
 
-RPC_URL = os.getenv("RPC_URL")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")
-ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
-CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustNews.json")
+    address public owner;
+    uint256 public postCounter;
+    mapping(uint256 => Post) public postsById;
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
-REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "register_blockchain")
-RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "register_blockchain_responses")
-ENABLE_KAFKA_CONSUMER = os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true"
+    struct Category {
+        uint256 id;
+        string description;
+    }
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("TrustNewsAPI")
+    struct Validator {
+        address validatorAddress;
+        string domain;
+        uint256 reputation;
+    }
 
-# =========================================================
-# Web3 / Contract
-# =========================================================
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
-with open(CONTRACT_ABI_PATH) as f:
-    artifact = json.load(f)
+    struct Validation {
+        Validator validator;
+        bool veredict;  
+        Multihash hash_description; 
+    }
 
-abi = artifact["abi"]
-contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
+    struct Asertion {
+        Multihash hash_asertion;
+        Validation[] validations;
+        uint256 categoryId;
+    }
 
-# =========================================================
-# Models
-# =========================================================
-class MultihashModel(BaseModel):
-    hash_function: str
-    hash_size: str
-    digest: str
+    struct Multihash {
+        bytes1 hash_function;
+        bytes1 hash_size;
+        bytes32 digest;
+    }
 
-class AsertionInputModel(BaseModel):
-    idAssertion: Optional[str] = None
-    text: str
-    categoryId: int
+    struct Post {
+        Asertion[] asertions;
+        Multihash document; 
+        address publisher;
+        Multihash hashNew; 
+    }
 
-class PublishRequestModel(BaseModel):
-    text: str
-    cid: str
-    assertions: List[AsertionInputModel]
-    publisher: str
+    struct ValidationView {
+        address validatorAddress;
+        string domain;
+        uint256 reputation;
+        bool veredict;
+        Multihash hash_description;
+    }
 
-# =========================================================
-# Helpers
-# =========================================================
-def hash_text_to_multihash(text: str) -> MultihashModel:
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x"+h)
+    struct AsertionView {
+        Multihash hash_asertion;
+        ValidationView[] validations;
+        uint256 categoryId;   
+    }
 
-def multihash_to_tuple(mh: MultihashModel):
-    hf = bytes.fromhex(mh.hash_function[2:])
-    hs = bytes.fromhex(mh.hash_size[2:])
-    dg = bytes.fromhex(mh.digest[2:])
-    if len(dg) != 32:
-        raise ValueError("Digest must be 32 bytes")
-    return (hf, hs, dg)
+    mapping (bytes32 => uint256) public postsHash;
+    mapping (bytes32 => uint256) public postsCid;
+    mapping (address => Validator) public validators;
+    mapping (uint256 => Validator[]) public validatorsByCategory;
+    mapping (uint256 => string) public categories; 
 
-def send_tx(function_call, gas_estimate=3_000_000):
-    nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
-    tx = function_call.build_transaction({
-        "from": ACCOUNT_ADDRESS,
-        "nonce": nonce,
-        "gas": gas_estimate,
-        "gasPrice": w3.eth.gas_price,
-    })
-    signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-    logger.info(f"TX enviada: {tx_hash.hex()}")
-    return receipt
+    event RegisterNewResult(uint256  postId,Multihash hashNews,address[][] validatorAddressesByAsertion);
 
-# =========================================================
-# FastAPI
-# =========================================================
-app = FastAPI(title="TrustNews Smart Contract API")
 
-@app.post("/registerNew")
-def register_new(data: PublishRequestModel):
-    try:
-        logger.info(f"registerNew() invoked by {data.publisher}")
+    constructor() {
+        owner = msg.sender;
+    } 
 
-        # ===== Hash principal y CID =====
-        hash_new = hash_text_to_multihash(data.text)
-        hash_ipfs = MultihashModel(
-            hash_function="0x12",
-            hash_size="0x20",
-            digest=data.cid if data.cid.startswith("0x") else "0x" + data.cid
-        )
+    // ======================================
+    // PUBLICACIONES
+    // ======================================
 
-        # ===== Preparar assertions =====
-        asertions_struct = []
-        categoryIds = []
+function registerNew(
+    Multihash memory hash_new,
+    Multihash memory hash_ipfs,
+    Asertion[] memory asertions,
+    uint256[] memory categoryIds
+)
+    public
+    returns (
+        uint256 postId,
+        address[][] memory validatorAddressesByAsertion
+    )
+{
+    require(asertions.length == categoryIds.length, "Cada asercion debe tener su categoria");
 
-        for a in data.assertions:
-            mh = hash_text_to_multihash(a.text)
-            empty_validations: list = []
-            as_tuple = (
-                multihash_to_tuple(mh),
-                tuple(empty_validations),
-                int(a.categoryId)
-            )
-            asertions_struct.append(as_tuple)
-            categoryIds.append(int(a.categoryId))
+    postCounter++;
+    Post storage newPost = postsById[postCounter];
+    newPost.document = hash_ipfs;
+    newPost.hashNew = hash_new;
+    newPost.publisher = msg.sender;
 
-        asertions_struct = tuple(asertions_struct)
-        categoryIds = tuple(categoryIds)
+    uint256 numAsertions = asertions.length;
+    validatorAddressesByAsertion = new address[][](numAsertions);
 
-        # ===== Llamada al contrato =====
-        func_call = contract.functions.registerNew(
-            multihash_to_tuple(hash_new),
-            multihash_to_tuple(hash_ipfs),
-            asertions_struct,
-            categoryIds
-        )
-        receipt = send_tx(func_call)
+    for (uint256 i = 0; i < numAsertions; i++) {
+        uint256 categoryId = categoryIds[i];
+        Validator[] storage catValidators = validatorsByCategory[categoryId];
+        uint256 numValidators = catValidators.length;
 
-        # ===== Parsear evento RegisterNewResult =====
-        events = contract.events.RegisterNewResult().processReceipt(receipt)
-        if not events:
-            raise HTTPException(status_code=500, detail="No RegisterNewResult event found")
+        // Añadimos la aserción con categoryId
+        Asertion storage a = newPost.asertions.push();
+        a.hash_asertion = asertions[i].hash_asertion;
+        a.categoryId = categoryId;  // ← nueva línea
 
-        event = events[0]
-        post_id = event['args']['postId']
-        validator_addresses_by_asertion = event['args']['validatorAddressesByAsertion']
+        // Creamos el array de direcciones para esta aserción
+        validatorAddressesByAsertion[i] = new address[](numValidators);
 
-        # ===== Preparar output =====
-        asertions_output = []
-        for i, a in enumerate(data.assertions):
-            digest_hex = asertions_struct[i][0][2].hex()
-            addrs_raw = validator_addresses_by_asertion[i]
-            addrs = [str(x) for x in addrs_raw] if addrs_raw is not None else []
-            asertions_output.append({
-                "hash_asertion": "0x" + digest_hex,
-                "idAssertion": a.idAssertion or str(uuid.uuid4().hex[:8]),
-                "text": a.text,
-                "categoryId": a.categoryId,
-                "validatorAddresses": addrs
-            })
+        for (uint256 j = 0; j < numValidators; j++) {
+            validatorAddressesByAsertion[i][j] = catValidators[j].validatorAddress;
+        }
+    }
 
-        return {
-            "payload": {
-                "post_id": str(post_id),
-                "hash_text": hash_new.digest,
-                "assertions": asertions_output,
-                "tx_hash": receipt.transactionHash.hex()
+    postsHash[hash_new.digest] = postCounter;
+    postsCid[hash_ipfs.digest] = postCounter;
+
+    emit RegisterNewResult(postId, hash_new, validatorAddressesByAsertion);
+    return (postCounter, validatorAddressesByAsertion);
+}
+
+
+    // ======================================
+    // CONSULTAS
+    // ======================================
+
+    function getNewByHash(Multihash memory hash_new) public view returns (Multihash memory hash_cid, uint256 PostId) {
+        PostId = postsHash[hash_new.digest];
+        hash_cid = postsById[PostId].document;
+    }
+
+    function getNewByCid(Multihash memory hash_cid) public view returns (Multihash memory hash_new, uint256 PostId) {
+        PostId = postsCid[hash_cid.digest];
+        hash_new = postsById[PostId].hashNew;
+    }
+
+    function getAsertionsWithValidations(uint256 postId)
+        public
+        view
+        returns (AsertionView[] memory)
+    {
+        Post storage p = postsById[postId];
+        uint256 numAsertions = p.asertions.length;
+
+        // Array de salida
+        AsertionView[] memory asertionViews = new AsertionView[](numAsertions);
+
+        // Iterar sobre todas las aserciones
+        for (uint256 i = 0; i < numAsertions; i++) {
+            Asertion storage a = p.asertions[i];
+            uint256 numValidations = a.validations.length;
+
+            // Copiar hash_asertion
+            asertionViews[i].hash_asertion = a.hash_asertion;
+            asertionViews[i].categoryId = a.categoryId;
+
+            // Crear array temporal de validaciones
+            ValidationView[] memory validationViews = new ValidationView[](numValidations);
+
+            // Copiar las validaciones y los datos del validador
+            for (uint256 j = 0; j < numValidations; j++) {
+                Validation storage v = a.validations[j];
+                validationViews[j] = ValidationView({
+                    validatorAddress: v.validator.validatorAddress,
+                    domain: v.validator.domain,
+                    reputation: v.validator.reputation,
+                    veredict: v.veredict,
+                    hash_description: v.hash_description
+                });
+            }
+
+            // Asignar al resultado
+            asertionViews[i].validations = validationViews;
+        }
+
+        return asertionViews;
+    }
+
+
+    // ======================================
+    // VALIDADORES Y CATEGORÍAS
+    // ======================================
+
+    function addCategory(uint256 id, string memory description) public {
+        require(msg.sender == owner, "Only owner can add categories");
+        require(bytes(categories[id]).length == 0, "Category already exists");
+        categories[id] = description;
+    }
+
+    function registerValidator(string memory name, uint256[] memory categoryIds) public {
+        require(bytes(name).length != 0, "Invalid name");
+        require(categoryIds.length != 0, "Invalid categories");
+
+        for (uint i = 0; i < categoryIds.length; i++) {
+            uint256 catId = categoryIds[i];
+            require(bytes(categories[catId]).length != 0, "Category not registered");
+        }
+
+        validators[msg.sender] = Validator(msg.sender, name, 0);
+
+        for (uint i = 0; i < categoryIds.length; i++) {
+            uint256 catId = categoryIds[i];
+            validatorsByCategory[catId].push(validators[msg.sender]);
+        }
+    }
+
+    function addValidation(
+        uint256 postId,
+        uint256 asertionIndex,
+        bool veredict,
+        Multihash memory hash_description
+    ) public {
+        // Asegurar que el validador está registrado
+        require(
+            validators[msg.sender].validatorAddress != address(0),
+            "Validator not registered"
+        );
+
+        // Recuperar el post y verificar índices válidos
+        Post storage p = postsById[postId];
+        require(asertionIndex < p.asertions.length, "Invalid asertion index");
+
+        // Buscar si el validador ya emitió una validación
+        Validation[] storage validations = p.asertions[asertionIndex].validations;
+        bool updated = false;
+
+        for (uint256 i = 0; i < validations.length; i++) {
+            if (validations[i].validator.validatorAddress == msg.sender) {
+                //Actualizar validación existente
+                validations[i].veredict = veredict;
+                validations[i].hash_description = hash_description;
+                updated = true;
+                break;
             }
         }
 
-    except Exception as e:
-        logger.exception(f"Error en registerNew: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        // Si no existe, añadir nueva validación
+        if (!updated) {
+            Validation memory v = Validation({
+                validator: validators[msg.sender],
+                veredict: veredict,
+                hash_description: hash_description
+            });
+            validations.push(v);
+        }
+    }
 
-@app.get("/tx-status/{tx_hash}")
-def tx_status(tx_hash: str):
-    receipt = w3.eth.get_transaction_receipt(tx_hash)
-    return {"status": receipt.status, "blockNumber": receipt.blockNumber}
-
-# =========================================================
-# Kafka consumer opcional
-# =========================================================
-async def consume_register_blockchain():
-    consumer = AIOKafkaConsumer(
-        REQUEST_TOPIC,
-        bootstrap_servers=KAFKA_BOOTSTRAP,
-        group_id="trustnews-api-group",
-        auto_offset_reset="earliest"
-    )
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
-
-    await consumer.start()
-    await producer.start()
-    logger.info("Kafka consumer y producer iniciados")
-
-    try:
-        async for msg in consumer:
-            try:
-                payload_msg = json.loads(msg.value.decode())
-                publish_input = PublishRequestModel(**payload_msg)
-                result = await asyncio.to_thread(register_new, publish_input)
-                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps({
-                    "action": "blockchain_registered",
-                    "order_id": payload_msg.get("order_id"),
-                    "payload": result
-                }).encode())
-                logger.info(f"Respuesta enviada para order_id={payload_msg.get('order_id')}")
-            except Exception as e:
-                logger.error(f"Error procesando mensaje Kafka: {e}")
-    finally:
-        await consumer.stop()
-        await producer.stop()
-        logger.info("Kafka detenido")
-
-@app.on_event("startup")
-async def startup_event():
-    if ENABLE_KAFKA_CONSUMER:
-        asyncio.create_task(consume_register_blockchain())
-        logger.info("Kafka consumer iniciado en background")
+}

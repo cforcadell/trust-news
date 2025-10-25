@@ -1,3 +1,26 @@
+cd ~/blockchain/tfm/smart-contracts
+
+npx hardhat node --hostname 0.0.0.0 
+
+comprobar  http://127.0.0.1:8545/
+
+
+
+script de test
+------
+npx hardhat run scripts/testTrustNews.js --network localhost
+
+Deploy
+-------
+npx hardhat run scripts/deploy.js --network localhost
+
+
+Registro de validadores
+-----------------------
+¿?
+
+Informar AddressContract en news-chain .env.
+
 docker compose -f docker-compose.base.yml build
 docker compose -f docker-compose.base.yml up
 docker compose -f docker-compose.base.yml down

@@ -63,6 +63,9 @@ contract TrustNews {
     mapping (uint256 => Validator[]) public validatorsByCategory;
     mapping (uint256 => string) public categories; 
 
+    event RegisterNewResult(uint256 postId, address[][] validatorAddressesByAsertion);
+
+
     constructor() {
         owner = msg.sender;
     } 
@@ -115,6 +118,7 @@ function registerNew(
     postsHash[hash_new.digest] = postCounter;
     postsCid[hash_ipfs.digest] = postCounter;
 
+    emit RegisterNewResult(postCounter, validatorAddressesByAsertion); 
     return (postCounter, validatorAddressesByAsertion);
 }
 

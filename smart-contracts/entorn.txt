@@ -51,30 +51,14 @@ test (Keep in mind that when you run npx hardhat test, your contracts will be au
 npx hardhat test
 
 
-script
+script de test
 ------
 npx hardhat run scripts/testTrustNews.js --network localhost
 
 Deploy
 -------
-Requereix un fitxer .js a ignition/modules. Es Token.js
+npx hardhat run scripts/deploy.js --network localhost
 
-Després per desplegar...
-
-npx hardhat ignition deploy ./ignition/modules/Token.js
-
-Si no s'indica res es deploya a hardhat. Es pot indicar una instancia concrera afegint a la comana anterior --network <network-name>
-Sent network-name el nom de xarxa declarat a hardhat.config.js
-
-Ejemplo:
-npx hardhat ignition deploy ./ignition/modules/Token.js --network privateGeth
-
-En quest cas, cal aixecar previamente geth. Arrencar bootnode i minim un node geth
-
-Si el contrarto ya está desplegado y se quiere redesplegar, añadir --reset en el depsliuegue o eliminar rm -rf ignition/deployments/privateGeth y redesplegar normlamente
-
-Si estás en fase de desarrollo / pruebas, lo más rápido es borrar la carpeta de deployments o usar --reset.
-Si estás en producción, no deberías borrar nada, sino mantener la compatibilidad del contrato o desplegar una nueva versión con otro nombre.
 
 geth (fem servir la de practica anterior)
 ----

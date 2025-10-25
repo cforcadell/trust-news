@@ -1,15 +1,17 @@
-const { ethers } = require("ethers");
-const fs = require("fs");
+const { ethers } = require("hardhat");
 
-const provider = new ethers.JsonRpcProvider("http://localhost:8545");
-const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+async function main() {
+  const [deployer] = await ethers.getSigners();
+  console.log("👤 Cuenta deployer:", deployer.address);
 
-async function deploy() {
-  const abi = JSON.parse(fs.readFileSync("../contracts/TrustNews.abi"));
-  const bytecode = fs.readFileSync("TrustNews.bin").toString();
-  const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+  const TrustNews = await ethers.getContractFactory("TrustNews");
+  const trustNews = await TrustNews.deploy();
+  await trustNews.waitForDeployment();
 
-  const contract = await factory.deploy();
-  console.log("Contrato desplegado en:", contract.target);
+  console.log("✅ Contrato desplegado en:", await trustNews.getAddress());
 }
-deploy();
+
+main().catch((error) => {
+  console.error("❌ Error al desplegar:", error);
+  process.exitCode = 1;
+});

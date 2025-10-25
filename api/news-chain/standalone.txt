@@ -1,0 +1,21 @@
+curl -X 'POST' \
+  'http://localhost:8073/registerNew' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "text": "aaaaaaaaaaaaaaaa",
+  "cid": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "assertions": [
+    {
+      "idAssertion": "1",
+      "text": "bbbbbbbb",
+      "categoryId": 1
+    },
+    {
+      "idAssertion": "2",
+      "text": "ccccccc",
+      "categoryId": 2
+    }
+  ],
+  "publisher": "test"
+}'

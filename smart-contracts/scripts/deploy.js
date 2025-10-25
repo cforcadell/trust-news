@@ -1,4 +1,6 @@
-const { ethers } = require("hardhat");
+const { ethers, hre } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -8,7 +10,10 @@ async function main() {
   const trustNews = await TrustNews.deploy();
   await trustNews.waitForDeployment();
 
-  console.log("✅ Contrato desplegado en:", await trustNews.getAddress());
+  const address = await trustNews.getAddress();
+  console.log("✅ Contrato desplegado en:", address);
+
+  
 }
 
 main().catch((error) => {

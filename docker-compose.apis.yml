@@ -97,16 +97,17 @@ services:
   # -------------------------
   # News Chain
   # -------------------------
-  #news-chain:
-  #  build: ./api/news-chain
-  #  container_name: news-chain
-  #  ports:
-  #    - "8073:8073"
-  #  env_file:
-  #    - ./api/news-chain/.env
-  #  command: uvicorn main:app --host 0.0.0.0 --port 8073
-  #  volumes:
-  #    - ./api/news-chain:/app
+  news-chain:
+    build: ./api/news-chain
+    container_name: news-chain
+    ports:
+      - "8073:8073"
+    env_file:
+      - ./api/news-chain/.env
+    command: uvicorn main:app --host 0.0.0.0 --port 8073
+    volumes:
+      - ./api/news-chain:/app
+      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
 networks:
   default:

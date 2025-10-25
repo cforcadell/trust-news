@@ -149,15 +149,11 @@ def register_new(data: PublishRequestModel):
 
         receipt = send_tx(func_call)
 
+        w3.eth.wait_for_transaction_receipt(receipt.transactionHash)
         # ===== Parseo seguro de eventos =====
         events = []
-        for log in receipt.logs:
-            try:
-                ev = contract.events.RegisterNewResult().processLog(log)
-                events.append(ev)
-            except Exception:
-                continue
-
+        events = contract.events.RegisterNewResult().process_receipt(receipt)
+        
         if not events:
             logger.warning("No RegisterNewResult event found; returning minimal info")
             return {

@@ -31,7 +31,7 @@ def test_registrar_validador():
     url = f"{BASE_URL}/registrar_validador"
     payload = {
         "nombre": "validator_test_domain",
-        "categorias": ["politica", "economia"]
+        "categorias": [1, 2]
     }
 
     response = requests.post(url, json=payload)

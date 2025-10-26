@@ -128,25 +128,25 @@ async def get_order_lock(order_id: str):
 # ===========================
 async def handle_blockchain_request(order_id: str, text: str, cid: str, assertions: list):
     global producer
-
-    hash_text = hash_text_to_multihash(text)
-    asertions_hashed = []
-    validator_addresses_matrix = []
-
-    for a in assertions:
-        mh = hash_text_to_multihash(a.get("text", ""))
-        id_assertion = a.get("idAssertion") or str(uuid.uuid4().hex[:8])
-        asertions_hashed.append({
-            "hash_asertion": mh,
-            "idAssertion": id_assertion,
-            "text": a.get("text", ""),
-            "categoryId": a.get("categoryId", 0)
-        })
-        # Simulamos validadores si estamos en modo emulado
-        fake_validators = ["VAL1", "VAL2"]
-        validator_addresses_matrix.append([{"Address": v} for v in fake_validators])
-
     if EMULATE_BLOCKCHAIN_REQUESTS:
+        hash_text = hash_text_to_multihash(text)
+        asertions_hashed = []
+        validator_addresses_matrix = []
+
+        for a in assertions:
+            mh = hash_text_to_multihash(a.get("text", ""))
+            id_assertion = a.get("idAssertion") or str(uuid.uuid4().hex[:8])
+            asertions_hashed.append({
+                "hash_asertion": mh,
+                "idAssertion": id_assertion,
+                "text": a.get("text", ""),
+                "categoryId": a.get("categoryId", 0)
+            })
+            # Simulamos validadores si estamos en modo emulado
+            fake_validators = ["VAL1", "VAL2"]
+            validator_addresses_matrix.append([{"Address": v} for v in fake_validators])
+
+
         simulated_msg = {
             "action": "blockchain_registered",
             "order_id": order_id,
@@ -166,9 +166,9 @@ async def handle_blockchain_request(order_id: str, text: str, cid: str, assertio
             "action": "register_blockchain",
             "order_id": order_id,
             "payload": {
-                "hash_text": hash_text,
+                "text": text,
                 "cid": cid,
-                "assertions": asertions_hashed,
+                "assertions": assertions,
                 "publisher": "news-handler"
             }
         }
@@ -277,14 +277,13 @@ async def process_kafka_message(data: dict):
         # ================================================================
         elif action == "blockchain_registered":
             logger.info(f"[{order_id}] ⛓️ Recibido 'blockchain_registered'.")
-            logger.debug(f"[{order_id}] 🧾 Payload blockchain_registered: {json.dumps(payload, indent=2)}")
+            logger.info(f"[{order_id}] 🧾 Payload blockchain_registered: {json.dumps(payload, indent=2)}")
 
-            post_id = payload.get("postId")
-            validator_matrix = payload.get("validatorAddressesByAsertion")
+            post_id = payload.get("post_id")
             assertions_payload = payload.get("assertions", [])
 
-            if not validator_matrix or not assertions_payload:
-                logger.warning(f"[{order_id}] ⚠️ blockchain_registered sin assertions o validators.")
+            if not assertions_payload:
+                logger.warning(f"[{order_id}] ⚠️ blockchain_registered sin assertions, abortando.")
                 return
 
             doc = await get_order_doc(order_id)
@@ -292,28 +291,28 @@ async def process_kafka_message(data: dict):
                 logger.warning(f"[{order_id}] ❌ Documento no encontrado en MongoDB.")
                 return
 
-            logger.info(f"[{order_id}] 📄 Documento recuperado. {len(assertions_payload)} aserciones, {len(validator_matrix)} grupos de validadores.")
-
             validators_info = []
-            for i, validator_list in enumerate(validator_matrix):
-                assertion_id = (
-                    assertions_payload[i].get("idAssertion")
-                    if i < len(assertions_payload)
-                    else doc["document"]["assertions"][i]["idAssertion"]
+            for i, a in enumerate(assertions_payload):
+                assertion_id = a.get("idAssertion")
+                assertion_text = a.get("text")
+                category_id = int(a.get("categoryId", 0))
+
+                # Acepta strings o dicts y elimina duplicados
+                validator_addresses = set(
+                    v["Address"] if isinstance(v, dict) else v
+                    for v in a.get("validatorAddresses", [])
                 )
 
-                assertion_text = (
-                    assertions_payload[i].get("text")
-                    or doc["document"]["assertions"][i]["description"]["text"]
-                )
+                validator_addresses = list(validator_addresses)  # volver a lista
 
-                logger.info(f"[{order_id}] 🧩 Aserción #{i+1}: id={assertion_id}, texto='{assertion_text[:70]}...'")
-                logger.debug(f"[{order_id}] ⚙️ Validadores: {validator_list}")
+                logger.info(f"[{order_id}] 🧩 Aserción #{i+1}: id={assertion_id}, texto='{assertion_text[:70]}...', categoria={category_id}")
+                logger.debug(f"[{order_id}] ⚙️ Validadores únicos: {validator_addresses}")
 
                 validators_info.append({
                     "idAssertion": assertion_id,
-                    "validatorAddresses": [v["Address"] for v in validator_list],
-                    "text": assertion_text
+                    "validatorAddresses": validator_addresses,
+                    "text": assertion_text,
+                    "categoryId": category_id
                 })
 
             await update_order(order_id, {
@@ -336,7 +335,7 @@ async def process_kafka_message(data: dict):
                             "idValidator": validator_addr,
                             "idAssertion": id_assert,
                             "text": text_assert,
-                            "context": doc["text"]
+                            "context": doc.get("text", "")
                         }
                     }
                     logger.debug(f"[{order_id}] 🧮 Construido mensaje validación -> {validator_addr}: {json.dumps(msg_validation, indent=2)}")
@@ -346,7 +345,8 @@ async def process_kafka_message(data: dict):
                     )
                     logger.info(f"[{order_id}] 📤 Enviada validación a {validator_addr} para aserción {id_assert}.")
 
-            logger.info(f"[{order_id}] 🎯 Envío de validaciones completado ({sum(len(v['validatorAddresses']) for v in validators_info)} totales).")
+            total_validators = sum(len(v['validatorAddresses']) for v in validators_info)
+            logger.info(f"[{order_id}] 🎯 Envío de validaciones completado ({total_validators} totales).")
 
         # ================================================================
         # 4️⃣ validation_completed

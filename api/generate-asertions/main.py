@@ -8,6 +8,7 @@ import json
 import logging
 from dotenv import load_dotenv
 import uuid
+import re
 
 # -----------------------------
 # Cargar variables de entorno
@@ -64,7 +65,7 @@ def extraer_aserciones_verificables(texto: str):
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
 
-import re
+
 
 def parse_aserciones_mistral(aserciones_raw: str):
     """
@@ -118,10 +119,10 @@ def extraer(texto_entrada: TextoEntrada):
         logger.warning(f"No se pudo parsear JSON de aserciones: {e}")
         aserciones_final = []
 
-    documento = {"new": texto, "asertions": []}
-    for i, a in enumerate(aserciones_final, start=1):
-        documento["asertions"].append({"idAssertion": str(i), "description": a})
-        logger.info(f"Aserción añadida al documento: idAssertion={i}, description={a}")        
+    documento = {"new": texto, "asertions": aserciones_final}
+    #for i, a in enumerate(aserciones_final, start=1):
+    #    documento["asertions"].append({"idAssertion": str(i), "description": a})
+    #    logger.info(f"Aserción añadida al documento: idAssertion={i}, description={a}")        
 
 
     logger.info(f"Documento final generado: {documento}")

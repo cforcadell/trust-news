@@ -62,6 +62,31 @@ class PublishRequestModel(BaseModel):
 # =========================================================
 # Helpers
 # =========================================================
+
+def safe_multihash_to_tuple(mh: MultihashModel):
+    """
+    Convierte SHA256 (hex) a bytes, pero si digest no es hex (ej. CID IPFS),
+    devolvemos 32 bytes vacíos y lo guardamos como string en el contrato (emulado).
+    """
+    hf = bytes.fromhex(mh.hash_function[2:])
+    hs = bytes.fromhex(mh.hash_size[2:])
+    
+    try:
+        dg = bytes.fromhex(mh.digest[2:])
+        if len(dg) != 32:
+            dg = dg.ljust(32, b'\0')
+    except ValueError:
+        dg = b'\0' * 32  # fallback para CID no hex
+        logger.warning(f"Digest no hex, usando bytes vacíos: {mh.digest}")
+
+    return (hf, hs, dg)
+
+def hash_text_to_multihash(text: str) -> MultihashModel:
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x" + h)
+
+
+
 def hash_text_to_multihash(text: str) -> MultihashModel:
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x" + h)
@@ -158,8 +183,8 @@ def register_new(data: PublishRequestModel):
             categoryIds.append(int(a.categoryId))
 
         func_call = contract.functions.registerNew(
-            multihash_to_tuple(hash_new),
-            multihash_to_tuple(hash_ipfs),
+            safe_multihash_to_tuple(hash_new),
+            safe_multihash_to_tuple(hash_ipfs),
             tuple(asertions_struct),
             tuple(categoryIds)
         )
@@ -251,7 +276,7 @@ async def consume_register_blockchain():
         async for msg in consumer:
             try:
                 payload_msg = json.loads(msg.value.decode())
-                publish_input = PublishRequestModel(**payload_msg)
+                publish_input = PublishRequestModel(**payload_msg.get("payload", {}))
                 
                 # Paso 1: enviar transacción
                 tx_info = register_new(publish_input)
@@ -266,7 +291,7 @@ async def consume_register_blockchain():
                     "order_id": payload_msg.get("order_id"),
                     "payload": result
                 }).encode())
-                logger.info(f"Respuesta enviada para order_id={payload_msg.get('order_id')}")
+                logger.info(f"Respuesta enviada para order_id={payload_msg.get('order_id')} payload={json.dumps(result, indent=2)}")
 
             except Exception as e:
                 logger.error(f"Error procesando mensaje Kafka: {e}")

@@ -325,7 +325,7 @@ async def endpoint_registrar_validador(input: RegistroValidadorInput):
 # =========================================================
 async def consume_and_process():
     consumer = AIOKafkaConsumer(
-        REQUEST_TOPIC,
+        KAFKA_REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
         group_id=f"validate-asertions-{ACCOUNT_ADDRESS}",
         auto_offset_reset="earliest"
@@ -399,7 +399,7 @@ async def consume_and_process():
                         }
                     }
 
-                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(response_msg).encode())
+                await producer.send_and_wait(KAFKA_RESPONSE_TOPIC, json.dumps(response_msg).encode())
                 logger.info(f"Kafka: publicado resultado para order_id={order_id}")
 
             except Exception as e:

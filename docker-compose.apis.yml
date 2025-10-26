@@ -1,5 +1,11 @@
 version: '3.8'
 
+
+x-global-environment: &global-env
+  CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+  EMULATE_BLOCKCHAIN_REQUESTS: "false"  # true o false
+  CONTRACT_ABI_PATH: deployments/TrustNews.json
+
 services:
   # -------------------------
   # IPFS FastAPI
@@ -41,13 +47,15 @@ services:
     env_file:
       - ./api/validate-asertions/.env
     environment:
-      - ENABLE_KAFKA_CONSUMER=true
-      #- ACCOUNT_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-      - ACCOUNT_ADDRESS=VAL1
-      - CONTRACT_ADDRESS=0x00
-      - PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+      <<: *global-env
+      ENABLE_KAFKA_CONSUMER: "true"
+      ACCOUNT_ADDRESS: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 # Account #1
+      PRIVATE_KEY: 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+      VALIDATOR_CATEGORIES: "[1,2,3,6,10]"
     depends_on:
       - ipfs-fastapi
+    volumes:
+      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
   validate-asertions-worker_2:
     build: ./api/validate-asertions
@@ -57,13 +65,15 @@ services:
     env_file:
       - ./api/validate-asertions/.env
     environment:
-      - ENABLE_KAFKA_CONSUMER=true
-      #- ACCOUNT_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
-      - ACCOUNT_ADDRESS=VAL2
-      - CONTRACT_ADDRESS=0x00
-      - PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+      <<: *global-env
+      ENABLE_KAFKA_CONSUMER: "true"
+      ACCOUNT_ADDRESS: 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC # Account #2
+      PRIVATE_KEY: 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+      VALIDATOR_CATEGORIES: "[1,4,5,6,10]"
     depends_on:
       - ipfs-fastapi
+    volumes:
+      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
   validate-asertions-worker_3:
     build: ./api/validate-asertions
@@ -73,12 +83,15 @@ services:
     env_file:
       - ./api/validate-asertions/.env
     environment:
-      - ENABLE_KAFKA_CONSUMER=false
-      - ACCOUNT_ADDRESS=VAL3
-      - CONTRACT_ADDRESS=0x00
-      - PRIVATE_KEY=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
+      <<: *global-env
+      ENABLE_KAFKA_CONSUMER: "true"
+      ACCOUNT_ADDRESS: 0x90F79bf6EB2c4f870365E785982E1f101E93b906 # Account #3
+      PRIVATE_KEY: 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
+      VALIDATOR_CATEGORIES: "[1,7,8,9,10]"
     depends_on:
       - ipfs-fastapi
+    volumes:
+      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
   # -------------------------
   # News Handler
@@ -90,6 +103,8 @@ services:
       - "8072:8072"
     env_file:
       - ./api/news-handler/.env
+    environment:
+      <<: *global-env
     command: uvicorn main:app --host 0.0.0.0 --port 8072
     volumes:
       - ./api/news-handler:/app
@@ -104,6 +119,8 @@ services:
       - "8073:8073"
     env_file:
       - ./api/news-chain/.env
+    environment:
+      <<: *global-env
     command: uvicorn main:app --host 0.0.0.0 --port 8073
     volumes:
       - ./api/news-chain:/app

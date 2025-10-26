@@ -207,6 +207,19 @@ function registerNew(
         }
     }
 
+
+    function getValidatorsByCategory(uint256 categoryId) public view returns (address[] memory) {
+        Validator[] storage catValidators = validatorsByCategory[categoryId];
+        uint256 numValidators = catValidators.length;
+        address[] memory validatorAddresses = new address[](numValidators);
+
+        for (uint256 i = 0; i < numValidators; i++) {
+            validatorAddresses[i] = catValidators[i].validatorAddress;
+        }
+
+        return validatorAddresses;
+    }
+
     function addValidation(
         uint256 postId,
         uint256 asertionIndex,

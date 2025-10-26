@@ -8,30 +8,39 @@ comprobar  http://127.0.0.1:8545/
 
 script de test
 ------
-npx hardhat run scripts/testTrustNews.js --network localhost
+npx hardhat run scripts/testTrustNews.js 
 
 Deploy
 -------
-npx hardhat run scripts/deploy.js --network localhost
+npx hardhat run scripts/deploy.js --network localhost 
+!ojo que si no indicamos network levanta un nodo temporal que desaparecerá dspues de ejecutarse!
 
 
-Registro de validadores
------------------------
-¿?
+npx hardhat run scripts/registeredValidators.js  --network localhost 
+# deberia devolver lista vacia con error
 
-Informar AddressContract en news-chain .env.
+npx hardhat console --network localhost 
+# si queremos interactuar con la consola
+
+
+Informar AddressContract en 
+   - compose.apis. Ej: 
+            CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+   - y en registeredValidators.js
 
 docker compose -f docker-compose.base.yml build
 docker compose -f docker-compose.base.yml up
 docker compose -f docker-compose.base.yml down
 
-docker compose  -f docker-compose.blockchain.yml build
-docker compose  -f docker-compose.blockchain.yml up
-docker compose  -f docker-compose.blockchain.yml down
+#docker compose  -f docker-compose.blockchain.yml build
+#docker compose  -f docker-compose.blockchain.yml up
+#docker compose  -f docker-compose.blockchain.yml down
 
 docker compose  -f docker-compose.apis.yml build
 docker compose  -f docker-compose.apis.yml up
 docker compose  -f docker-compose.apis.yml down
+
+npx hardhat run scripts/registeredValidators.js   --network localhost # deberia devolver lista de validadores registrados
 
 
 cd ~/blockchain/tfm/api/tests

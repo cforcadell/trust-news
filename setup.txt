@@ -38,6 +38,8 @@ docker compose -f docker-compose.base.yml down
 
 docker compose  -f docker-compose.apis.yml build
 docker compose  -f docker-compose.apis.yml up
+# si nomes volem aixecar un validador
+docker compose  -f docker-compose.apis.yml up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'news-chain'  'validate-asertions-worker_1'
 docker compose  -f docker-compose.apis.yml down
 
 npx hardhat run scripts/registeredValidators.js   --network localhost # deberia devolver lista de validadores registrados

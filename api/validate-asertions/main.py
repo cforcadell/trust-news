@@ -111,6 +111,8 @@ class RegistroValidadorInput(BaseModel):
 # =========================================================
 # Helpers: Mistral call, hashing, tx send/wait
 # =========================================================
+
+
 def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
     """Llama a la API de Mistral usando el prompt configurado en .env"""
     if not API_URL or not MISTRAL_API_KEY:
@@ -180,7 +182,7 @@ def wait_for_receipt_blocking(tx_hash: str, timeout: Optional[int] = None) -> Op
 # =========================================================
 # Funciones internas reutilizables
 # =========================================================
-def registrar_validacion_internal(post_id: int, assertion_id: int, texto: str, contexto: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+def registrar_validacion_internal(post_id: Any, assertion_id: Any, texto: str, contexto: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
     1) Verifica la aserción (Mistral)
     2) Envía la transacción addValidation
@@ -201,8 +203,8 @@ def registrar_validacion_internal(post_id: int, assertion_id: int, texto: str, c
             return tx_hash, receipt
 
         func_call = contract.functions.addValidation(
-            int(post_id),
-            int(assertion_id),
+            post_id,          # ✅ ahora el post_id también se convierte
+            int(assertion_id),     # ✅ igual que assertion_id
             bool(veredict_bool),
             {
                 "hash_function": b"\x12",
@@ -321,11 +323,11 @@ async def endpoint_registrar_validador(input: RegistroValidadorInput):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =========================================================
-# Kafka consumer (asincrónico) — usa internals y espera minado
+# Kafka consumer (asincrónico) — procesa mensajes y valida directamente
 # =========================================================
 async def consume_and_process():
     consumer = AIOKafkaConsumer(
-        KAFKA_REQUEST_TOPIC,
+        REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
         group_id=f"validate-asertions-{ACCOUNT_ADDRESS}",
         auto_offset_reset="earliest"
@@ -333,89 +335,129 @@ async def consume_and_process():
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
     await consumer.start()
     await producer.start()
-    logger.info("Kafka consumer y producer iniciados (background)")
+    logger.info(f"Kafka consumer y producer iniciados (background) - {ACCOUNT_ADDRESS}")
 
     try:
         async for msg in consumer:
             try:
                 payload = json.loads(msg.value.decode())
                 action = payload.get("action")
-                idValidator = payload.get("payload", {}).get("idValidator")
+                val_payload = payload.get("payload", {})
+                idValidator = val_payload.get("idValidator")
 
+                # Filtrar mensajes no dirigidos a este validador
                 if action != "request_validation" or idValidator != ACCOUNT_ADDRESS:
-                    logger.info(f"Kafka: mensaje ignorado (action={action}, idValidator={idValidator})")
+                    logger.debug(f"Ignorado mensaje Kafka (action={action}, idValidator={idValidator})")
                     continue
 
-                order_id = str(payload.get("order_id", "0"))
-                assertion = payload["payload"].get("text", "")
-                assertion_id = payload["payload"].get("idAssertion", "0")
-                context = payload["payload"].get("context", "")
+                order_id = str(payload.get("order_id", ""))
+                post_id = val_payload.get("postId")
+                assertion_id = val_payload.get("idAssertion", "0")
+                assertion_text = val_payload.get("text", "")
+                context = val_payload.get("context", "")
 
-                logger.info(f"Kafka: validando assertion_id={assertion_id} (order {order_id})")
+                logger.info(f"Kafka: procesando request_validation para postId={post_id}, assertion_id={assertion_id}")
 
-                # Ejecutar la lógica interna que verifica, envía y espera el minado
-                tx_hash, receipt = await asyncio.to_thread(
-                    registrar_validacion_internal,
-                    int(order_id),
-                    int(assertion_id),
-                    assertion,
-                    context
-                )
+                # =====================================================
+                # 1️⃣ Verificar directamente 
+                # =====================================================
 
-                if not tx_hash:
-                    logger.error(f"Kafka: error al generar tx para assertion {assertion_id}")
-                    # enviar un mensaje de fallo opcional
+                try:
+                    # Usa la misma función interna que el endpoint
+                    result_text = verificar_asercion(assertion_text, context)
+                    logger.info(f"Resultado verificación: {result_text[:120]}...")
+                except Exception as e:
+                    logger.exception(f"Error ejecutando verificar_asercion(): {e}")
                     await producer.send_and_wait(RESPONSE_TOPIC, json.dumps({
                         "action": "validation_failed",
                         "order_id": order_id,
-                        "payload": {"idAssertion": assertion_id, "error": "tx_failed"}
+                        "payload": {
+                            "postId": post_id,
+                            "idAssertion": assertion_id,
+                            "idValidator": ACCOUNT_ADDRESS,
+                            "error": f"verificar_error: {str(e)}"
+                        }
                     }).encode())
                     continue
 
-                # receipt puede ser None si hubo fallo esperando minado
-                if receipt and receipt.get("status") == 1:
-                    response_msg = {
-                        "action": "validation_completed",
-                        "order_id": order_id,
-                        "payload": {
-                            "idAssertion": assertion_id,
-                            "idValidator": ACCOUNT_ADDRESS,
-                            "approval": "TRUE" if "TRUE" in str(receipt).upper() else "UNKNOWN",
-                            "text": assertion,
-                            "tx_hash": tx_hash,
-                            "receipt": receipt
-                        }
-                    }
-                else:
-                    response_msg = {
+                # =====================================================
+                # 2️⃣ Registrar en blockchain
+                # =====================================================
+                try:
+                    veredict_bool = "TRUE" in result_text.upper()
+                    digest_bytes = hash_text_to_bytes(result_text)
+                    logger.info(f"Veredicto (bool): {veredict_bool} — registrando en blockchain")
+
+                    if EMULATE_BLOCKCHAIN_REQUESTS == "true":
+                        tx_hash = f"0x{uuid.uuid4().hex[:64]}"
+                        receipt = {"transactionHash": tx_hash, "blockNumber": 0, "status": 1}
+                    else:
+                        func_call = contract.functions.addValidation(
+                            uuid_to_uint256(str(post_id)),
+                            uuid_to_uint256(str(assertion_id)),
+                            bool(veredict_bool),
+                            {
+                                "hash_function": b"\x12",
+                                "hash_size": b"\x20",
+                                "digest": digest_bytes
+                            }
+                        )
+                        tx_hash = send_signed_tx(func_call)
+                        receipt = wait_for_receipt_blocking(tx_hash)
+
+                    if not tx_hash:
+                        raise RuntimeError("No se generó hash de transacción")
+
+                except Exception as e:
+                    logger.exception(f"Error registrando validación en blockchain: {e}")
+                    await producer.send_and_wait(RESPONSE_TOPIC, json.dumps({
                         "action": "validation_failed",
                         "order_id": order_id,
                         "payload": {
+                            "postId": post_id,
                             "idAssertion": assertion_id,
                             "idValidator": ACCOUNT_ADDRESS,
-                            "error": "tx_mined_failed_or_no_receipt",
-                            "tx_hash": tx_hash,
-                            "receipt": receipt
+                            "error": f"blockchain_error: {str(e)}"
                         }
-                    }
+                    }).encode())
+                    continue
 
-                await producer.send_and_wait(KAFKA_RESPONSE_TOPIC, json.dumps(response_msg).encode())
-                logger.info(f"Kafka: publicado resultado para order_id={order_id}")
+                # =====================================================
+                # 3️⃣ Publicar resultado final
+                # =====================================================
+                response_msg = {
+                    "action": "validation_completed",
+                    "order_id": order_id,
+                    "payload": {
+                        "postId": post_id,
+                        "idAssertion": assertion_id,
+                        "idValidator": ACCOUNT_ADDRESS,
+                        "approval": "TRUE" if veredict_bool else "FALSE",
+                        "text": result_text,
+                        "tx_hash": tx_hash,
+                        "receipt": receipt
+                    }
+                }
+
+                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(response_msg).encode())
+                logger.info(f"✅ Publicado validation_completed (postId={post_id}, assertion_id={assertion_id})")
 
             except Exception as e:
                 logger.exception(f"Error procesando mensaje Kafka: {e}")
+
     finally:
         await consumer.stop()
         await producer.stop()
         logger.info("Kafka detenido")
 
+        
 # =========================================================
 # Startup: lanzar kafka consumer y registrar validador si hace falta
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
     # iniciar Kafka consumer si está habilitado
-    if ENABLE_KAFKA_CONSUMER == "true":
+    if ENABLE_KAFKA_CONSUMER :
         asyncio.create_task(consume_and_process())
         logger.info("Kafka consumer iniciado en background")
 

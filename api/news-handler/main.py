@@ -321,6 +321,8 @@ async def process_kafka_message(data: dict):
                 "status": "VALIDATION_PENDING",
                 "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
             })
+            await update_order(order_id, {"post_id": payload.get("postId")})
+            
             logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones).")
 
             # Enviar requests de validación
@@ -332,6 +334,7 @@ async def process_kafka_message(data: dict):
                         "action": "request_validation",
                         "order_id": order_id,
                         "payload": {
+                            "postId": str(payload.get("postId")), 
                             "idValidator": validator_addr,
                             "idAssertion": id_assert,
                             "text": text_assert,
@@ -352,13 +355,14 @@ async def process_kafka_message(data: dict):
         # 4️⃣ validation_completed
         # ================================================================
         elif action == "validation_completed":
+            post_id = str(payload.get("postId", ""))
             id_val = payload.get("idValidator")
             id_assert = str(payload.get("idAssertion"))
             status_val = payload.get("approval")
             assertion_text = payload.get("text", "")
             tx_hash = payload.get("tx_hash", "")
 
-            logger.info(f"[{order_id}] 🧩 Validación recibida -> Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
+            logger.info(f"[{order_id}] 🧩 Validación recibida -> PostId={post_id}, Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
 
             if not id_val or not id_assert:
                 logger.warning(f"[{order_id}] ⚠️ validation_completed sin idValidator o idAssertion, ignorando.")

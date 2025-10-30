@@ -107,6 +107,8 @@ async def get_order_doc(order_id: str) -> Optional[dict]:
 # ===========================
 # Helpers para hashes
 # ===========================
+
+
 def hash_text_to_multihash(text: str) -> dict:
     """Genera un hash SHA-256 tipo multihash para enviar al smart contract."""
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -279,7 +281,7 @@ async def process_kafka_message(data: dict):
             logger.info(f"[{order_id}] ⛓️ Recibido 'blockchain_registered'.")
             logger.info(f"[{order_id}] 🧾 Payload blockchain_registered: {json.dumps(payload, indent=2)}")
 
-            post_id = payload.get("post_id")
+            postId = payload.get("postId")
             assertions_payload = payload.get("assertions", [])
 
             if not assertions_payload:
@@ -321,7 +323,7 @@ async def process_kafka_message(data: dict):
                 "status": "VALIDATION_PENDING",
                 "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
             })
-            await update_order(order_id, {"post_id": payload.get("postId")})
+            await update_order(order_id, {"postId": payload.get("postId")})
             
             logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones).")
 
@@ -346,7 +348,7 @@ async def process_kafka_message(data: dict):
                         TOPIC_REQUESTS_VALIDATE,
                         json.dumps(msg_validation).encode("utf-8")
                     )
-                    logger.info(f"[{order_id}] 📤 Enviada validación a {validator_addr} para aserción {id_assert}.")
+                    logger.info(f"[{order_id}] 📤 Enviada validación a {validator_addr} para aserción {id_assert} y postId {payload.get('postId')}.")
 
             total_validators = sum(len(v['validatorAddresses']) for v in validators_info)
             logger.info(f"[{order_id}] 🎯 Envío de validaciones completado ({total_validators} totales).")
@@ -355,14 +357,14 @@ async def process_kafka_message(data: dict):
         # 4️⃣ validation_completed
         # ================================================================
         elif action == "validation_completed":
-            post_id = str(payload.get("postId", ""))
+            postId = str(payload.get("postId", ""))
             id_val = payload.get("idValidator")
             id_assert = str(payload.get("idAssertion"))
             status_val = payload.get("approval")
             assertion_text = payload.get("text", "")
             tx_hash = payload.get("tx_hash", "")
 
-            logger.info(f"[{order_id}] 🧩 Validación recibida -> PostId={post_id}, Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
+            logger.info(f"[{order_id}] 🧩 Validación recibida -> postId={postId}, Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
 
             if not id_val or not id_assert:
                 logger.warning(f"[{order_id}] ⚠️ validation_completed sin idValidator o idAssertion, ignorando.")

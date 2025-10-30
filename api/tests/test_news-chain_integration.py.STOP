@@ -93,8 +93,8 @@ def test_get_asertions_with_validations():
     """
     Prueba de integración del endpoint /getAsertionsWithValidations/{PostId}
     """
-    post_id = 1
-    url = f"{NEWS_CHAIN_URL}/getAsertionsWithValidations/{post_id}"
+    postId = 1
+    url = f"{NEWS_CHAIN_URL}/getAsertionsWithValidations/{postId}"
 
     response = requests.get(url)
     assert response.status_code in [200, 500], f"Error inesperado: {response.status_code} - {response.text}"
@@ -103,6 +103,6 @@ def test_get_asertions_with_validations():
         data = response.json()
         assert "PostId" in data
         assert "asertions" in data
-        print(f"✅ getAsertionsWithValidations OK para PostId={post_id}")
+        print(f"✅ getAsertionsWithValidations OK para PostId={postId}")
     else:
         print(f"⚠️ No se pudo acceder al contrato (500): {response.text}")

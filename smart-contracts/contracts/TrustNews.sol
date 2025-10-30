@@ -89,6 +89,7 @@ function registerNew(
     require(asertions.length == categoryIds.length, "Cada asercion debe tener su categoria");
 
     postCounter++;
+    postId = postCounter;
     Post storage newPost = postsById[postCounter];
     newPost.document = hash_ipfs;
     newPost.hashNew = hash_new;
@@ -118,8 +119,9 @@ function registerNew(
     postsHash[hash_new.digest] = postCounter;
     postsCid[hash_ipfs.digest] = postCounter;
 
+
     emit RegisterNewResult(postId, hash_new, validatorAddressesByAsertion);
-    return (postCounter, validatorAddressesByAsertion);
+    return (postId, validatorAddressesByAsertion);
 }
 
 

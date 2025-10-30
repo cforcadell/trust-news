@@ -6,7 +6,7 @@ comprobar  http://127.0.0.1:8545/
 
 
 
-script de test
+script de test (en node tamporal)
 ------
 npx hardhat run scripts/testTrustNews.js 
 

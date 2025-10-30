@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from web3 import Web3
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
+
 # =========================================================
 # Cargar .env
 # =========================================================
@@ -99,7 +100,7 @@ class VerificarEntrada(BaseModel):
     contexto: Optional[str] = None
 
 class RegistroValidacionModel(BaseModel):
-    post_id: int
+    postId: int
     assertion_id: int
     texto: str
     contexto: Optional[str] = None
@@ -179,10 +180,29 @@ def wait_for_receipt_blocking(tx_hash: str, timeout: Optional[int] = None) -> Op
         logger.error(f"Error esperando receipt de {tx_hash}: {e}")
         return None
 
+def uuid_to_uint256(u: str) -> int:
+    """
+    Convierte un UUID (en formato string) a un entero uint256 compatible con Solidity.
+    Si el UUID no es válido, devuelve 0.
+    """
+    try:
+        return uuid.UUID(u).int
+    except Exception:
+        # Si no es UUID válido (ej: "3" o "abc"), convertir hash como fallback
+        return int(hashlib.sha256(u.encode()).hexdigest(), 16) % (2**256)
+
+def hash_text_to_bytes(text: str) -> bytes:
+    """
+    Calcula el hash SHA256 de un texto y lo devuelve como bytes.
+    Usado para registrar el digest en la blockchain.
+    """
+    digest_hex = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return bytes.fromhex(digest_hex)
+
 # =========================================================
 # Funciones internas reutilizables
 # =========================================================
-def registrar_validacion_internal(post_id: Any, assertion_id: Any, texto: str, contexto: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, contexto: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
     1) Verifica la aserción (Mistral)
     2) Envía la transacción addValidation
@@ -194,7 +214,7 @@ def registrar_validacion_internal(post_id: Any, assertion_id: Any, texto: str, c
         veredict_bool = "TRUE" in veredict_text.upper()
         digest_bytes = hash_text_to_bytes(veredict_text)
 
-        logger.info(f"Veredicto (bool): {veredict_bool} — preparando tx addValidation (post {post_id}, assertion {assertion_id})")
+        logger.info(f"Veredicto (bool): {veredict_bool} — preparando tx addValidation (post {postId}, assertion {assertion_id})")
 
         if EMULATE_BLOCKCHAIN_REQUESTS == "true":
             tx_hash = f"0x{uuid.uuid4().hex[:64]}"
@@ -203,8 +223,8 @@ def registrar_validacion_internal(post_id: Any, assertion_id: Any, texto: str, c
             return tx_hash, receipt
 
         func_call = contract.functions.addValidation(
-            post_id,          # ✅ ahora el post_id también se convierte
-            int(assertion_id),     # ✅ igual que assertion_id
+            postId,          # ✅ ahora el postId también se convierte
+            int(assertion_id)-1,     # ✅ igual que assertion_id
             bool(veredict_bool),
             {
                 "hash_function": b"\x12",
@@ -293,7 +313,7 @@ async def endpoint_registrar_validacion(body: RegistroValidacionModel):
     Devuelve tx_hash y receipt (o error).
     """
     try:
-        tx_hash, receipt = await asyncio.to_thread(registrar_validacion_internal, body.post_id, body.assertion_id, body.texto, body.contexto)
+        tx_hash, receipt = await asyncio.to_thread(registrar_validacion_internal, body.postId, body.assertion_id, body.texto, body.contexto)
         if tx_hash is None:
             raise HTTPException(status_code=500, detail="Error al registrar validación (ver logs).")
         return {"tx_hash": tx_hash, "receipt": receipt}
@@ -347,16 +367,16 @@ async def consume_and_process():
 
                 # Filtrar mensajes no dirigidos a este validador
                 if action != "request_validation" or idValidator != ACCOUNT_ADDRESS:
-                    logger.debug(f"Ignorado mensaje Kafka (action={action}, idValidator={idValidator})")
+                    logger.info(f"Ignorado mensaje Kafka (action={action}, idValidator={idValidator})")
                     continue
 
                 order_id = str(payload.get("order_id", ""))
-                post_id = val_payload.get("postId")
+                postId = val_payload.get("postId")
                 assertion_id = val_payload.get("idAssertion", "0")
                 assertion_text = val_payload.get("text", "")
                 context = val_payload.get("context", "")
 
-                logger.info(f"Kafka: procesando request_validation para postId={post_id}, assertion_id={assertion_id}")
+                logger.info(f"Kafka: procesando request_validation para postId={postId}, assertion_id={assertion_id}")
 
                 # =====================================================
                 # 1️⃣ Verificar directamente 
@@ -372,7 +392,7 @@ async def consume_and_process():
                         "action": "validation_failed",
                         "order_id": order_id,
                         "payload": {
-                            "postId": post_id,
+                            "postId": postId,
                             "idAssertion": assertion_id,
                             "idValidator": ACCOUNT_ADDRESS,
                             "error": f"verificar_error: {str(e)}"
@@ -392,9 +412,11 @@ async def consume_and_process():
                         tx_hash = f"0x{uuid.uuid4().hex[:64]}"
                         receipt = {"transactionHash": tx_hash, "blockNumber": 0, "status": 1}
                     else:
+                        logger.info(f"Registrando validación: postId={postId} ({uuid_to_uint256(str(postId))}), assertion_id={assertion_id}")
+
                         func_call = contract.functions.addValidation(
-                            uuid_to_uint256(str(post_id)),
-                            uuid_to_uint256(str(assertion_id)),
+                            int(postId),
+                            int(assertion_id) - 1,   # 👈 índice 0-based
                             bool(veredict_bool),
                             {
                                 "hash_function": b"\x12",
@@ -414,7 +436,7 @@ async def consume_and_process():
                         "action": "validation_failed",
                         "order_id": order_id,
                         "payload": {
-                            "postId": post_id,
+                            "postId": postId,
                             "idAssertion": assertion_id,
                             "idValidator": ACCOUNT_ADDRESS,
                             "error": f"blockchain_error: {str(e)}"
@@ -429,7 +451,7 @@ async def consume_and_process():
                     "action": "validation_completed",
                     "order_id": order_id,
                     "payload": {
-                        "postId": post_id,
+                        "postId": postId,
                         "idAssertion": assertion_id,
                         "idValidator": ACCOUNT_ADDRESS,
                         "approval": "TRUE" if veredict_bool else "FALSE",
@@ -440,7 +462,7 @@ async def consume_and_process():
                 }
 
                 await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(response_msg).encode())
-                logger.info(f"✅ Publicado validation_completed (postId={post_id}, assertion_id={assertion_id})")
+                logger.info(f"✅ Publicado validation_completed (postId={postId}, assertion_id={assertion_id})")
 
             except Exception as e:
                 logger.exception(f"Error procesando mensaje Kafka: {e}")

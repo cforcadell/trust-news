@@ -123,14 +123,14 @@ def parse_registernew_event(receipt, data: PublishRequestModel):
     if not events:
         logger.warning("No RegisterNewResult event found; returning minimal info")
         return {
-            "post_id": None,
+            "postId": None,
             "hash_text": "",
             "assertions": [],
             "tx_hash": receipt.transactionHash.hex()
         }
 
     event = events[0]
-    post_id = event['args']['postId']
+    postId = event['args']['postId']
     validator_addresses_by_asertion = event['args']['validatorAddressesByAsertion']
 
     # reconstrucción hashes
@@ -151,7 +151,7 @@ def parse_registernew_event(receipt, data: PublishRequestModel):
     hash_new = hash_text_to_multihash(data.text)
 
     return {
-        "post_id": str(post_id),
+        "postId": str(postId),
         "hash_text": hash_new.digest,
         "assertions": asertions_output,
         "tx_hash": receipt.transactionHash.hex()
@@ -221,12 +221,12 @@ def tx_status(tx_hash: str):
                     }
 
                 event = events[0]
-                post_id = event['args']['postId']
+                postId = event['args']['postId']
                 validator_addresses_by_asertion = event['args']['validatorAddressesByAsertion']
 
                 # Construimos payload tipo asincrono
                 payload = {
-                    "post_id": str(post_id),
+                    "postId": str(postId),
                     "validatorAddressesByAsertion": [
                         [str(a) for a in addrs]
                         for addrs in validator_addresses_by_asertion

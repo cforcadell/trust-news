@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  test:
+    build: ./api/news-handler
+    container_name: test-news-handler
+    command: python ./api/tests/test_kafka.py
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+
+
+networks:
+  default:
+    name: tfm_network

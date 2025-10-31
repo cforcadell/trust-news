@@ -1,0 +1,16 @@
+mongosh "mongodb://root:cforcadellm@localhost:27017"
+
+# Seleccionar la base de datos (si hace falta)
+use newsdb
+
+# Ver todas las colecciones
+show collections
+
+# Consultar todos los documentos de una colección
+db.news.find().pretty()
+
+# Consultar un documento específico por order_id
+db.news.findOne({ order_id: "5eaead55-3d1e-4576-b3d8-b110495145c9" })
+
+# Contar documentos
+db.news.countDocuments()

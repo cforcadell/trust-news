@@ -1,0 +1,10 @@
+adminu@Ubtuntu:~/blockchain/tfm$ docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 --create --topic test-topic --partitions 1 --replication-factor 1
+Created topic test-topic.
+
+adminu@Ubtuntu:~/blockchain/tfm$ docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 --list
+# Debes ver "test-topic"
+test-topic
+
+docker exec -it kafka kafka-topics --bootstrap-server kafka:9092 --create --topic fake_news_responses --partitions 1 --replication-factor 1
+
+f

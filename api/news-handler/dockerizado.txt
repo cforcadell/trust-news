@@ -1,0 +1,32 @@
+# construye nueva imagen con tag news-handler ( en lugar de latest)
+docker build -t news-handler .
+#si no volem tenir problemes de cache de llibreries
+docker build --no-cache -t news-handler .
+# listado de imagenes
+docker images
+# borrar una imagen
+docker rmi id_image
+# Ejecuta conetnedor a partir de la imagen pasada como parametro y con el nombre name 
+docker stop news-handler
+docker remove news-handler
+docker run -d --name news-handler -p 8072:8072 --env-file .env news-handler 
+# Listado de contenedores en ejecución
+docker ps
+
+# Listado de contenedores activos
+docker ps -a 
+# borrar contenedor 
+docker remove nombre_contenedor || container_id
+
+
+
+curl -X POST "http://localhost:8072/publishNew" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "text": "Catalunya tiene una poblacion de 8 millones de habitantes de los que 2 son menores edad y 3 mayores de 65."
+         }'
+
+
+
+
+docker logs -f <idContainer>

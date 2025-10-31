@@ -1,0 +1,26 @@
+curl -X 'POST' \
+  'http://localhost:8073/registerNew' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "text": "aaaaaaaaaaaaaaaa",
+  "cid": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "assertions": [
+    {
+      "idAssertion": "1",
+      "text": "bbbbbbbb",
+      "categoryId": 1
+    },
+    {
+      "idAssertion": "2",
+      "text": "ccccccc",
+      "categoryId": 2
+    }
+  ],
+  "publisher": "test"
+}'
+
+
+curl -X 'GET' \
+  'http://localhost:8073/tx-status/0xb02d6b7d34eef63577ca616d0ef6dd62a2aae612e91efe52799ee91c1bdc5403' \
+  -H 'accept: application/json'

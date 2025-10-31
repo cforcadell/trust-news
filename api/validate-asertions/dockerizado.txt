@@ -22,3 +22,15 @@ docker remove nombre_contenedor || container_id
 curl -X POST "http://127.0.0.1:8070/verificar" \
      -H "Content-Type: application/json" \
      -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes"}'
+
+     curl -X POST "http://127.0.0.1:8069/verificar" \
+     -H "Content-Type: application/json" \
+     -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes"}'
+
+     curl -X POST "http://127.0.0.1:8068/verificar" \
+     -H "Content-Type: application/json" \
+     -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes"}'
+
+     curl -X POST "http://127.0.0.1:8070/verificar" \
+     -H "Content-Type: application/json" \
+     -d '{"texto": "Catalunya tiene una población de 8 millones de habitantes","contexto":"Población de CAtalunya"}'

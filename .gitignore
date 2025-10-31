@@ -13866,3 +13866,6 @@ volumes/ipfs_data/blocks/WF/CIQL2JUX4DCJ6FLTZDRZ2W6HUC2GOFMBG3WMX65MF7IC2QIPMB7Q
 volumes/ipfs_data/blocks/XT/CIQHGIWSN75D77CCBYNOQ6NRFJPYHOOQPCZHHHKAC766VCKVALDMXTQ.data
 volumes/ipfs_data/blocks/6R/CIQMMN6VEHDFDJZJ4A7CPSZ7ZHQSCPPHZIXKEASSJBE74FR5RMSE6RY.data
 volumes/ipfs_data/blocks/ZE/CIQI6GJMMP4FNXPSCIZTMECWOJ6DCAALLFCLWOY2LPFTA2JV5VJDZEA.data
+api/validate-asertions/.env_gemini
+api/validate-asertions/.env_mistral
+api/validate-asertions/.env_openrouter

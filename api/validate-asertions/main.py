@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from web3 import Web3
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from abc import ABC, abstractmethod
 
 
 # =========================================================
@@ -28,8 +29,7 @@ ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")  # 0x...
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustManager.json")
 
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
-MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-tiny")
+
 API_URL = os.getenv("API_URL")
 VALIDATION_PROMPT = os.getenv(
     "VALIDATION_PROMPT",
@@ -43,6 +43,7 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
 REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "fake_news_requests")
 RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses")
 ENABLE_KAFKA_CONSUMER = os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()  # "mistral" | "gemini" | "copilot"
 
 EMULATE_BLOCKCHAIN_REQUESTS = os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "false").lower()  # True or False
 
@@ -63,6 +64,151 @@ try:
 except Exception as e:
     logger.error(f"Error parsing VALIDATOR_CATEGORIES from .env: {e}; defaulting to empty list")
     VALIDATOR_CATEGORIES = []
+    
+# =========================================================
+# Pydantic Models
+# =========================================================
+class VerificarEntrada(BaseModel):
+    texto: str
+    contexto: Optional[str] = None
+
+class RegistroValidacionModel(BaseModel):
+    postId: int
+    assertion_id: int
+    texto: str
+    contexto: Optional[str] = None
+
+class RegistroValidadorInput(BaseModel):
+    nombre: str
+    categorias: Optional[List[int]] = None
+    
+    
+# =========================================================
+# AI classes
+# =========================================================
+class AIValidator(ABC):
+    """Interfaz común para verificadores basados en IA."""
+    @abstractmethod
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+        pass
+
+
+class MistralValidator(AIValidator):
+    def __init__(self, api_url: str, api_key: str, model: str):
+        self.api_url = api_url
+        self.api_key = api_key
+        self.model = model
+
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+        if not self.api_url or not self.api_key:
+            raise HTTPException(status_code=500, detail="Mistral API configuration missing")
+
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
+        if contexto:
+            contenido += f"\nContexto adicional:\n{contexto}"
+
+        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
+        logger.info(f"Invocando Mistral para validar aserción (preview): {texto[:80]}...")
+        resp = requests.post(self.api_url, headers=headers, json=data)
+        if resp.status_code == 200:
+            return resp.json()["choices"][0]["message"]["content"]
+        logger.error(f"Mistral API returned {resp.status_code}: {resp.text}")
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+
+class GeminiValidator(AIValidator):
+    """Ejemplo de integración con Gemini (Google AI)."""
+    def __init__(self, api_url: str, api_key: str, model: str):
+        self.api_url = api_url
+        self.api_key = api_key
+        self.model = model
+
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+        if not self.api_url or not self.api_key:
+            raise HTTPException(status_code=500, detail="Gemini API configuration missing")
+
+        prompt = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
+        if contexto:
+            prompt += f"\nContexto adicional:\n{contexto}"
+
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2, "topK": 40, "topP": 0.8},
+        }
+        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
+        logger.info(f"Invocando Gemini para validar aserción (preview): api_url {self.api_url}, texto: {texto[:80]}...")
+        resp = requests.post(f"{self.api_url}/models/{self.model}:generateContent", headers=headers, json=payload)
+        if resp.status_code == 200:
+            result = resp.json()
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+        logger.error(f"Gemini API error {resp.status_code}: {resp.text}")
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+
+class OpenRouterValidator:
+    """Integración con OpenRouter (API compatible con OpenAI)."""
+    
+    def __init__(self, api_url: str, api_key: str, model: str):
+        self.api_url = api_url
+        self.api_key = api_key
+        self.model = model
+
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+        if not self.api_key:
+            raise HTTPException(status_code=500, detail="OpenRouter API key missing")
+
+        # Encabezados requeridos por OpenRouter
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            # Recomendado: identifica tu app (requerido en producción)
+            "HTTP-Referer": "https://trust-news",
+            "X-Title": "AIValidator-OpenRouter"
+        }
+
+        contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
+        if contexto:
+            contenido += f"\nContexto adicional:\n{contexto}"
+
+        data = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": contenido}],
+            "temperature": 0.3
+        }
+
+        logger.info(f"Invocando OpenRouter ({self.model}) para validar aserción: {texto[:80]}...")
+
+        resp = requests.post(self.api_url, headers=headers, json=data)
+        if resp.status_code == 200:
+            try:
+                return resp.json()["choices"][0]["message"]["content"]
+            except Exception as e:
+                logger.error(f"Error parsing OpenRouter response: {e} | Body: {resp.text}")
+                raise HTTPException(status_code=500, detail="Error parsing OpenRouter response")
+
+        logger.error(f"OpenRouter API error {resp.status_code}: {resp.text}")
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+# =========================================================
+# Helpers: AI layer
+# =========================================================
+
+def build_ai_validator() -> AIValidator:
+    if AI_PROVIDER == "mistral":
+        return MistralValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "mistral-tiny"))
+    elif AI_PROVIDER == "gemini":
+        return GeminiValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gemini-1.5-flash"))
+    elif AI_PROVIDER == "openrouter":
+        return OpenRouterValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gpt-4o-mini"))
+    else:
+        raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
+
+# =========================================================
+# Instanciar AI Validator
+# =========================================================
+ai_validator = build_ai_validator()
+logger.info(f"AI Validator inicializado con proveedor: {AI_PROVIDER.upper()}")
 
 # =========================================================
 # Web3 + contract (cargar ABI desde JSON)
@@ -87,50 +233,22 @@ else:
     w3 = None
     contract = None
 
+
 # =========================================================
 # FastAPI app
 # =========================================================
 app = FastAPI(title="Validate Asertions API")
 
+
+    
+    
 # =========================================================
-# Pydantic Models
+# hashing, tx send/wait
 # =========================================================
-class VerificarEntrada(BaseModel):
-    texto: str
-    contexto: Optional[str] = None
-
-class RegistroValidacionModel(BaseModel):
-    postId: int
-    assertion_id: int
-    texto: str
-    contexto: Optional[str] = None
-
-class RegistroValidadorInput(BaseModel):
-    nombre: str
-    categorias: Optional[List[int]] = None
-
-# =========================================================
-# Helpers: Mistral call, hashing, tx send/wait
-# =========================================================
-
-
 def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
-    """Llama a la API de Mistral usando el prompt configurado en .env"""
-    if not API_URL or not MISTRAL_API_KEY:
-        raise HTTPException(status_code=500, detail="Mistral API configuration missing")
+    return ai_validator.verificar_asercion(texto, contexto)
 
-    headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
-    contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-    if contexto:
-        contenido += f"\nContexto adicional:\n{contexto}"
 
-    data = {"model": MISTRAL_MODEL, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
-    logger.info(f"Invocando Mistral para validar aserción (preview): {texto[:80]}...")
-    resp = requests.post(API_URL, headers=headers, json=data)
-    if resp.status_code == 200:
-        return resp.json()["choices"][0]["message"]["content"]
-    logger.error(f"Mistral API returned {resp.status_code}: {resp.text}")
-    raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 def hash_text_to_bytes(text: str) -> bytes:
     """SHA256 hex -> bytes (32 bytes)"""
@@ -482,7 +600,7 @@ async def startup_event():
     if ENABLE_KAFKA_CONSUMER :
         asyncio.create_task(consume_and_process())
         logger.info("Kafka consumer iniciado en background")
-
+        
     # registrar validador en startup (si no está registrado)
     if EMULATE_BLOCKCHAIN_REQUESTS == "false":
         try:
@@ -510,3 +628,6 @@ async def startup_event():
             logger.exception(f"Error en startup registrar validador: {e}")
     else:
         logger.info("[EMULADO] Saltando registro real de validador en startup.")
+    
+
+

@@ -10,7 +10,13 @@ show collections
 db.news.find().pretty()
 
 # Consultar un documento específico por order_id
-db.news.findOne({ order_id: "5eaead55-3d1e-4576-b3d8-b110495145c9" })
+db.news.findOne({ order_id: "257f92df-6545-4803-a5d5-ed72bc556c54" })
 
 # Contar documentos
 db.news.countDocuments()
+
+#Consultar Eventos
+ db.events.find({ order_id: "257f92df-6545-4803-a5d5-ed72bc556c54" }).pretty()
+
+#borrar todos los postIds
+db.news.deleteMany({})

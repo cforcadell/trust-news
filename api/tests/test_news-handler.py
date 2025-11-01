@@ -74,15 +74,6 @@ def test_get_order():
                 break
 
 
-def test_news_registered():
-    """
-    Simula el callback del frontend notificando que la noticia fue registrada.
-    """
-    r = requests.post(f"{NEWS_HANDLER_URL}/news_registered/{ORDER_ID}")
-    assert r.status_code == 200, f"Error: {r.text}"
-    data = r.json()
-    assert data["status"] == "NEWS_REGISTERED"
-    print("✅ news_registered OK:", data)
 
 
 

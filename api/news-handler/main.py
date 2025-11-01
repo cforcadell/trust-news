@@ -15,6 +15,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
 
+
 # =========================================================
 # Cargar .env
 # =========================================================
@@ -60,6 +61,12 @@ order_locks = {}
 # ---------- Models ----------
 class PublishRequest(BaseModel):
     text: str
+    
+class EventModel(BaseModel):
+    action: str
+    topic: str
+    timestamp: str
+    payload: dict
 
 # =========================================================
 # Helpers DB & Kafka security
@@ -108,7 +115,6 @@ async def get_order_doc(order_id: str) -> Optional[dict]:
 # Helpers para hashes
 # ===========================
 
-
 def hash_text_to_multihash(text: str) -> dict:
     """Genera un hash SHA-256 tipo multihash para enviar al smart contract."""
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -118,12 +124,59 @@ def hash_text_to_multihash(text: str) -> dict:
         "digest": "0x" + h
     }
 
-
-
 async def get_order_lock(order_id: str):
     if order_id not in order_locks:
         order_locks[order_id] = asyncio.Lock()
     return order_locks[order_id]
+
+# =========================================================
+# 🟢 Helpers para logging de eventos y validaciones
+# =========================================================
+async def log_event(order_id: str, action: str, topic: str, payload: dict):
+    """
+    Registra un evento (entrada o salida) en la colección 'events'
+    con formato uniforme: action, topic, timestamp, payload.
+    """
+    global db
+    if not order_id:
+        # Evitar insertar eventos sin order_id
+        logger.warning(f"Evento con order_id vacío ignorado: action={action}, topic={topic}")
+        return
+
+    events_col = db["events"]
+    event_doc = {
+        "order_id": order_id,
+        "action": action,
+        "topic": topic,
+        "timestamp": asyncio.get_event_loop().time(),
+        "payload": payload,
+    }
+    await events_col.insert_one(event_doc)
+    logger.info(f"[{order_id}] 🟢 Evento '{action}' registrado en MongoDB ({topic}).")
+
+
+async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: bool, tx_hash: str, payload: dict):
+    """
+    Registra una validación completada en la colección 'validations'.
+    """
+    global db
+    if not order_id:
+        logger.warning(f"Intento de log_validation sin order_id, ignorado.")
+        return
+
+    validations_col = db["validations"]
+    val_doc = {
+        "order_id": order_id,
+        "postId": post_id,
+        "idAssertion": id_assertion,
+        "idValidator": id_validator,
+        "approval": approval,
+        "tx_hash": tx_hash,
+        "payload": payload,
+        "timestamp": asyncio.get_event_loop().time()
+    }
+    await validations_col.insert_one(val_doc)
+    logger.info(f"[{order_id}] 🟢 Validación registrada en MongoDB (Assertion={id_assertion}, Validator={id_validator}).")
 
 # ===========================
 # Emulación / manejo blockchain
@@ -148,7 +201,6 @@ async def handle_blockchain_request(order_id: str, text: str, cid: str, assertio
             fake_validators = ["VAL1", "VAL2"]
             validator_addresses_matrix.append([{"Address": v} for v in fake_validators])
 
-
         simulated_msg = {
             "action": "blockchain_registered",
             "order_id": order_id,
@@ -162,6 +214,9 @@ async def handle_blockchain_request(order_id: str, text: str, cid: str, assertio
         }
         await producer.send_and_wait(TOPIC_RESPONSES, json.dumps(simulated_msg).encode("utf-8"))
         logger.info(f"[{order_id}] Mensaje 'blockchain_registered' EMULADO publicado")
+
+        # Registrar evento de salida (publicación a topic responses)
+        await log_event(order_id, simulated_msg["action"], TOPIC_RESPONSES, simulated_msg["payload"])
     else:
         # Mensaje real al topic de blockchain
         message = {
@@ -176,6 +231,9 @@ async def handle_blockchain_request(order_id: str, text: str, cid: str, assertio
         }
         await producer.send_and_wait(TOPIC_REQUESTS_BLOCKCHAIN, json.dumps(message).encode("utf-8"))
         logger.info(f"[{order_id}] Mensaje enviado al topic {TOPIC_REQUESTS_BLOCKCHAIN}")
+
+        # Registrar evento de salida
+        await log_event(order_id, message["action"], TOPIC_REQUESTS_BLOCKCHAIN, message["payload"])
 
 # =========================================================
 # Procesador genérico de mensajes Kafka (reutilizable)
@@ -193,6 +251,9 @@ async def process_kafka_message(data: dict):
         if not action or not order_id:
             logger.warning("⚠️ Mensaje Kafka sin 'action' o 'order_id', ignorado.")
             return
+
+        # Registrar evento de entrada con formato uniforme
+        await log_event(order_id, action, TOPIC_RESPONSES, payload)
 
         logger.info(f"📨 [{order_id}] Procesando acción '{action}'...")
 
@@ -224,8 +285,8 @@ async def process_kafka_message(data: dict):
             await update_order(order_id, {
                 "assertions": assertions,
                 "document": document,
-                "status": "DOCUMENT_CREATED",
-                "$push": {"history": {"event": "assertions_generated", "payload": payload}}
+                "status": "DOCUMENT_CREATED"
+                #,"$push": {"history": {"event": "assertions_generated", "payload": payload}}
             })
             logger.info(f"[{order_id}] 📄 Documento y aserciones guardadas en MongoDB.")
 
@@ -238,9 +299,12 @@ async def process_kafka_message(data: dict):
             await producer.send_and_wait(TOPIC_REQUESTS_IPFS, json.dumps(msg_ipfs).encode("utf-8"))
             logger.info(f"[{order_id}] 🌐 Documento enviado al servicio IPFS ({TOPIC_REQUESTS_IPFS}).")
 
+            # Registrar evento de salida (upload_ipfs)
+            await log_event(order_id, msg_ipfs["action"], TOPIC_REQUESTS_IPFS, msg_ipfs["payload"])
+
             await update_order(order_id, {
-                "status": "IPFS_PENDING",
-                "$push": {"history": {"event": "upload_ipfs_requested"}}
+                "status": "IPFS_PENDING"
+                #,"$push": {"history": {"event": "upload_ipfs_requested"}}
             })
 
         # ================================================================
@@ -261,18 +325,18 @@ async def process_kafka_message(data: dict):
             text = doc.get("text", "")
             await update_order(order_id, {
                 "cid": cid,
-                "status": "IPFS_UPLOADED",
-                "$push": {"history": {"event": "ipfs_uploaded", "payload": payload}}
+                "status": "IPFS_UPLOADED"
+                #,"$push": {"history": {"event": "ipfs_uploaded", "payload": payload}}
             })
             logger.info(f"[{order_id}] ✅ IPFS subido con CID={cid}")
 
-            # Modo emulado → Generar blockchain_registered
+            # Modo emulado → Generar blockchain_registered o mandar request real
             await handle_blockchain_request(order_id, text, cid, doc.get("assertions", []))
             await update_order(order_id, {
-                "status": "BLOCKCHAIN_PENDING",
-                "$push": {"history": {"event": "register_blockchain_sent"}}
+                "status": "BLOCKCHAIN_PENDING"
+                #,"$push": {"history": {"event": "register_blockchain_sent"}}
             })
-            logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain enviada (emulada).")
+            logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain enviada (emulada o real según configuración).")
 
         # ================================================================
         # 3️⃣ blockchain_registered
@@ -282,6 +346,8 @@ async def process_kafka_message(data: dict):
             logger.info(f"[{order_id}] 🧾 Payload blockchain_registered: {json.dumps(payload, indent=2)}")
 
             postId = payload.get("postId")
+            tx_hash = payload.get("tx_hash")
+            
             assertions_payload = payload.get("assertions", [])
 
             if not assertions_payload:
@@ -307,7 +373,7 @@ async def process_kafka_message(data: dict):
 
                 validator_addresses = list(validator_addresses)  # volver a lista
 
-                logger.info(f"[{order_id}] 🧩 Aserción #{i+1}: id={assertion_id}, texto='{assertion_text[:70]}...', categoria={category_id}")
+                logger.info(f"[{order_id}] 🧩 Aserción #{i+1}: id={assertion_id}, texto='{(assertion_text or '')[:70]}...', categoria={category_id}")
                 logger.debug(f"[{order_id}] ⚙️ Validadores únicos: {validator_addresses}")
 
                 validators_info.append({
@@ -321,9 +387,10 @@ async def process_kafka_message(data: dict):
                 "validators": validators_info,
                 "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
                 "status": "VALIDATION_PENDING",
-                "$push": {"history": {"event": "blockchain_registered", "payload": payload}}
+                "postId": postId,
+                "tx_hash": tx_hash
+                #,"$push": {"history": {"event": "blockchain_registered", "payload": payload}}
             })
-            await update_order(order_id, {"postId": payload.get("postId")})
             
             logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones).")
 
@@ -349,6 +416,9 @@ async def process_kafka_message(data: dict):
                         json.dumps(msg_validation).encode("utf-8")
                     )
                     logger.info(f"[{order_id}] 📤 Enviada validación a {validator_addr} para aserción {id_assert} y postId {payload.get('postId')}.")
+
+                    # Registrar evento de salida (request_validation)
+                    await log_event(order_id, msg_validation["action"], TOPIC_REQUESTS_VALIDATE, msg_validation["payload"])
 
             total_validators = sum(len(v['validatorAddresses']) for v in validators_info)
             logger.info(f"[{order_id}] 🎯 Envío de validaciones completado ({total_validators} totales).")
@@ -395,6 +465,9 @@ async def process_kafka_message(data: dict):
                 await update_order(order_id, {"$set": {"validations": validations}})
                 logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
 
+                # Registrar validación en colección 'validations'
+                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, payload)
+
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
                 for v in validators_cfg:
@@ -424,7 +497,6 @@ async def process_kafka_message(data: dict):
 
     except Exception as e:
         logger.exception(f"❌ Error procesando mensaje Kafka: {e}")
-
 
 # =========================================================
 # Kafka consumer loop
@@ -470,11 +542,13 @@ async def publish_new(req: PublishRequest):
         "order_id": order_id,
         "status": "PENDING",
         "text": text,
+        "cid": None,
+        "postId": None,
+        "tx_hash": None,
+        "validators_pending": None,
         "assertions": None,
         "document": None,
-        "cid": None,
-        "smart_token": None,
-        "history": []
+        "validators": None
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
@@ -488,8 +562,12 @@ async def publish_new(req: PublishRequest):
     await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, json.dumps(message).encode("utf-8"))
     logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
 
+    # Registrar evento de salida (generate_assertions)
+    await log_event(order_id, message["action"], TOPIC_REQUESTS_GENERATE, message["payload"])
+
     # update status
-    await update_order(order_id, {"status": "ASSERTIONS_REQUESTED", "$push": {"history": {"event": "sent_generate_assertions"}}})
+    await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"#, "$push": {"history": {"event": "sent_generate_assertions"}}
+                                  })
     return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
 
 @app.get("/orders/{order_id}")
@@ -502,22 +580,42 @@ async def get_order(order_id: str):
     order["_id"] = str(order["_id"])
     return order
 
-@app.post("/news_registered/{order_id}")
-async def news_registered(order_id: str):
-    doc = await get_order_doc(order_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Order not found")
+@app.get("/news/{order_id}/events", response_model=List[EventModel])
+async def get_news_events(order_id: str):
+    """Devuelve todos los eventos asociados a una noticia."""
+    cursor = db.events.find({"order_id": order_id}, {"_id": 0})
+    events = await cursor.to_list(length=100)
 
-    # Solo actualizar si no estaba ya registrado
-    if doc.get("status") != "NEWS_REGISTERED":
-        await update_order(order_id, {
-            "status": "NEWS_REGISTERED",
-            "$push": {"history": {"event": "news_registered"}}
-        })
-        logger.info(f"[{order_id}] Status actualizado a NEWS_REGISTERED por frontend")
-        return {"order_id": order_id, "status": "NEWS_REGISTERED"}
-    else:
-        return {"order_id": order_id, "status": doc.get("status"), "msg": "Already registered"}
+    if not events:
+        raise HTTPException(status_code=404, detail="No hay eventos para esta noticia")
+
+    # 🔹 Convertir timestamp numérico a string
+    for e in events:
+        if not isinstance(e.get("timestamp"), str):
+            e["timestamp"] = str(e["timestamp"])
+
+    return events
+
+
+
+@app.get("/news")
+async def list_news():
+    """Devuelve todas las noticias con order_id, fecha de creación (derivada del _id) y estado."""
+    cursor = db.news.find({}, {"_id": 1, "order_id": 1, "status": 1})
+    news_list = await cursor.to_list(length=1000)
+
+    if not news_list:
+        raise HTTPException(status_code=404, detail="No hay noticias registradas")
+
+    # Convertir _id a fecha de creación
+    for news in news_list:
+        oid = ObjectId(news["_id"])
+        news["created_at"] = oid.generation_time.isoformat()
+        del news["_id"]
+
+    return news_list
+
+
 
 @app.get("/extract_text_from_url")
 def extract_text_from_url(url: str = Query(..., description="URL de la noticia")):
@@ -558,6 +656,15 @@ async def startup_event():
     db = mongo_client[MONGO_DBNAME]
     orders_collection = db[MONGO_COLLECTION]
     logger.info(f"MongoDB connected at {MONGO_COLLECTION}")
+
+    # Crear índices útiles
+    try:
+        await db["events"].create_index([("order_id", 1)])
+        await db["events"].create_index([("action", 1)])
+        await db["validations"].create_index([("order_id", 1)])
+        logger.info("MongoDB indexes for events and validations ensured")
+    except Exception as e:
+        logger.warning(f"Could not create indexes: {e}")
 
     # Kafka producer
     producer = AIOKafkaProducer(

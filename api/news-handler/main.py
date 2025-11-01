@@ -347,6 +347,7 @@ async def process_kafka_message(data: dict):
 
             postId = payload.get("postId")
             tx_hash = payload.get("tx_hash")
+            hash_text = payload.get("hash_text")
             
             assertions_payload = payload.get("assertions", [])
 
@@ -388,7 +389,8 @@ async def process_kafka_message(data: dict):
                 "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
                 "status": "VALIDATION_PENDING",
                 "postId": postId,
-                "tx_hash": tx_hash
+                "tx_hash": tx_hash,
+                "hash_text": hash_text
                 #,"$push": {"history": {"event": "blockchain_registered", "payload": payload}}
             })
             
@@ -544,6 +546,7 @@ async def publish_new(req: PublishRequest):
         "text": text,
         "cid": None,
         "postId": None,
+        "hash_text": None,
         "tx_hash": None,
         "validators_pending": None,
         "assertions": None,
@@ -615,6 +618,49 @@ async def list_news():
 
     return news_list
 
+# =========================================================
+# 🧩 API para buscar por hash_text
+# =========================================================
+@app.post("/find-order-by-text")
+async def find_order_by_text(request: PublishRequest):
+    """
+    Recibe un texto, calcula su hash SHA256 (multihash) y busca
+    en MongoDB un order_id cuyo hash_text.digest coincida.
+    """
+    global orders_collection
+    try:
+        if not request.text:
+            raise HTTPException(status_code=400, detail="El campo 'text' no puede estar vacío.")
+
+        # 1️⃣ Calcular hash SHA256 tipo multihash
+        mh = hash_text_to_multihash(request.text)
+        digest_hex = mh["digest"]  # ejemplo: "0xabc123..."
+
+        logger.info(f"🧮 Buscando order con hash_text.digest={digest_hex}")
+
+        # 2️⃣ Buscar en MongoDB
+        doc = await orders_collection.find_one({"hash_text": digest_hex})
+
+        if not doc:
+            logger.warning("❌ No se encontró ningún order con ese hash_text.")
+            raise HTTPException(status_code=404, detail="No se encontró ninguna orden con ese hash.")
+
+        # 3️⃣ Responder con info del order_id encontrado
+        order_id = doc.get("order_id")
+        logger.info(f"✅ Coincidencia encontrada: order_id={order_id}")
+
+        return {
+            "result": True,
+            "order_id": order_id,
+            "hash_text": doc.get("hash_text"),
+            "status": doc.get("status", "UNKNOWN")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error en find_order_by_text: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/extract_text_from_url")

@@ -1,0 +1,115 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: #f9f9f9;
+  color: #222;
+}
+
+header {
+  background: #222;
+  color: white;
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+header h1 {
+  margin: 0;
+}
+
+nav button {
+  background: #444;
+  border: none;
+  color: white;
+  margin-right: 10px;
+  padding: 8px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+nav button:hover {
+  background: #666;
+}
+
+.section {
+  display: none;
+  padding: 20px;
+}
+
+.section.active {
+  display: block;
+}
+
+textarea {
+  width: 80%;
+  height: 80px;
+  margin: 5px 0;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+button {
+  background: #0078d4;
+  border: none;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #005fa3;
+}
+
+table {
+  border-collapse: collapse;
+  margin-top: 15px;
+  width: 100%;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+th {
+  background: #eee;
+}
+
+a {
+  color: #0078d4;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.tabs {
+  margin: 10px 0;
+}
+
+.tabs button {
+  margin-right: 5px;
+  background: #ddd;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+
+.tabs button:hover {
+  background: #bbb;
+}
+
+footer {
+  text-align: center;
+  background: #222;
+  color: white;
+  padding: 10px;
+  position: fixed;
+  width: 100%;
+  bottom: 0;
+}

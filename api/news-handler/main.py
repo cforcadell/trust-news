@@ -601,10 +601,12 @@ async def get_news_events(order_id: str):
 
 
 
+from bson import ObjectId
+
 @app.get("/news")
 async def list_news():
-    """Devuelve todas las noticias con order_id, fecha de creación (derivada del _id) y estado."""
-    cursor = db.news.find({}, {"_id": 1, "order_id": 1, "status": 1})
+    """Devuelve todas las noticias con order_id, estado, hash_text y fecha de creación (derivada del _id)."""
+    cursor = db.news.find({}, {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1})
     news_list = await cursor.to_list(length=1000)
 
     if not news_list:
@@ -618,14 +620,16 @@ async def list_news():
 
     return news_list
 
-# =========================================================
-# 🧩 API para buscar por hash_text
-# =========================================================
+
+
+from bson import ObjectId
+
 @app.post("/find-order-by-text")
 async def find_order_by_text(request: PublishRequest):
     """
     Recibe un texto, calcula su hash SHA256 (multihash) y busca
-    en MongoDB un order_id cuyo hash_text.digest coincida.
+    en MongoDB todas las órdenes cuyo hash_text.digest coincida.
+    Devuelve order_id, estado y fecha de creación derivada del _id.
     """
     global orders_collection
     try:
@@ -634,27 +638,31 @@ async def find_order_by_text(request: PublishRequest):
 
         # 1️⃣ Calcular hash SHA256 tipo multihash
         mh = hash_text_to_multihash(request.text)
-        digest_hex = mh["digest"]  # ejemplo: "0xabc123..."
+        digest_hex = mh["digest"]
 
-        logger.info(f"🧮 Buscando order con hash_text.digest={digest_hex}")
+        logger.info(f"🧮 Buscando órdenes con hash_text={digest_hex}")
 
-        # 2️⃣ Buscar en MongoDB
-        doc = await orders_collection.find_one({"hash_text": digest_hex})
+        # 2️⃣ Buscar todas las coincidencias en MongoDB
+        cursor = orders_collection.find(
+            {"hash_text": digest_hex},
+            {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1}
+        )
+        docs = await cursor.to_list(length=1000)
 
-        if not doc:
-            logger.warning("❌ No se encontró ningún order con ese hash_text.")
+        if not docs:
+            logger.warning("❌ No se encontró ninguna orden con ese hash_text.digest")
             raise HTTPException(status_code=404, detail="No se encontró ninguna orden con ese hash.")
 
-        # 3️⃣ Responder con info del order_id encontrado
-        order_id = doc.get("order_id")
-        logger.info(f"✅ Coincidencia encontrada: order_id={order_id}")
+        # 3️⃣ Convertir _id a fecha de creación
+        for doc in docs:
+            oid = ObjectId(doc["_id"])
+            doc["created_at"] = oid.generation_time.isoformat()
+            del doc["_id"]
 
-        return {
-            "result": True,
-            "order_id": order_id,
-            "hash_text": doc.get("hash_text"),
-            "status": doc.get("status", "UNKNOWN")
-        }
+        logger.info(f"✅ {len(docs)} coincidencia(s) encontrada(s).")
+
+        # 4️⃣ Respuesta homogénea con /news
+        return docs
 
     except HTTPException:
         raise

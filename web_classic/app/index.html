@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Trust News</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <h1>📰 Trust News</h1>
+    <nav>
+      <button onclick="showSection('news')">News</button>
+      <button onclick="showSection('orders')">Orders</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- NEWS -->
+    <section id="news" class="section active">
+      <h2>Verificación de Noticias</h2>
+      <textarea id="newsText" placeholder="Introduce el texto de la noticia..."></textarea><br>
+      <button onclick="publishNew()">Publicar y verificar</button>
+
+      <h3>Encuentra verificaciones previas</h3>
+      <textarea id="findText" placeholder="Introduce texto a buscar..."></textarea><br>
+      <button onclick="findPrevious()">Buscar</button>
+
+      <table id="findResults"></table>
+    </section>
+
+    <!-- ORDERS -->
+    <section id="orders" class="section">
+      <h2>Orders</h2>
+      <div class="toolbar">
+        <button onclick="listOrders()">List Orders</button>
+        <input type="text" id="orderId" placeholder="Introduce order_id..." />
+        <button onclick="findOrder()">Find Order</button>
+      </div>
+
+      <div id="orderTabs" class="tabs"></div>
+      <table id="ordersTable"></table>
+    </section>
+  </main>
+
+  <footer>
+    <small>Trust News © 2025</small>
+  </footer>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

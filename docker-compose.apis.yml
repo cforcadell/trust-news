@@ -126,6 +126,24 @@ services:
       - ./api/news-chain:/app
       - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
+    # -------------------------
+  # Frontend Web
+  # -------------------------
+  frontend-web_classic:
+    build: ./web_classic
+    container_name: trustnews-frontend_classic
+    ports:
+      - "8000:80"
+    depends_on:
+      - news-handler
+    environment:
+      - API_BASE_URL=http://news-handler:8072
+    volumes:
+      - ./web_classic/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  
+
+
 networks:
   default:
     name: tfm_network

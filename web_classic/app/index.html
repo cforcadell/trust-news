@@ -16,15 +16,15 @@
 </header>
 
 <div class="section" id="news">
-  <h2>Verificación de Noticias</h2>
-  <textarea id="newsText" placeholder="Escribe la noticia aquí..."></textarea><br>
-  <button id="btn-publishNew">Publicar Noticia</button>
+    <h2>Verificación y Búsqueda de Noticias</h2>
+    
+    <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar."></textarea><br>
+    
+    <button id="btn-publishNew">Publicar Noticia</button>
+    <button id="btn-findPrevious">Buscar Verificación</button>
 
-  <h3>Buscar verificaciones previas</h3>
-  <textarea id="findText" placeholder="Introduce texto a buscar..."></textarea><br>
-  <button id="btn-findPrevious">Buscar</button>
-
-  <table id="findResults"></table>
+    <h3>Resultados de búsqueda</h3>
+    <table id="findResults"></table>
 </div>
 
 <div class="section" id="orders">
@@ -33,8 +33,11 @@
   <button id="btn-findOrder">Buscar Order</button>
   <button id="btn-listOrders">Listar Orders</button>
 
-  <div id="orderTabs" class="tabs"></div>
-  <div id="ordersTable"></div>
+    <div id="fixedDetailsContainer"></div> 
+  
+    <div id="orderTabs" class="tabs"></div>
+
+    <div id="tabContent"></div> 
 </div>
 
 <script src="js/app.js"></script> 

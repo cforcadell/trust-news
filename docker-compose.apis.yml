@@ -40,7 +40,9 @@ services:
   # Validate Asertions Workers
   # -------------------------
   validate-asertions-worker_1:
-    build: ./api/validate-asertions
+    build: 
+      context: ./api  
+      dockerfile: ./validate-asertions/Dockerfile 
     container_name: validate-asertions-worker_1
     ports:
       - "8070:8070"
@@ -58,7 +60,9 @@ services:
       - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
   validate-asertions-worker_2:
-    build: ./api/validate-asertions
+    build: 
+      context: ./api  
+      dockerfile: ./validate-asertions/Dockerfile 
     container_name: validate-asertions-worker_2
     ports:
       - "8069:8070"
@@ -97,7 +101,9 @@ services:
   # News Handler
   # -------------------------
   news-handler:
-    build: ./api/news-handler
+    build: 
+      context: ./api  
+      dockerfile: ./news-handler/Dockerfile 
     container_name: news-handler
     ports:
       - "8072:8072"
@@ -108,6 +114,7 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8072
     volumes:
       - ./api/news-handler:/app
+      - ./api/common:/app/common
 
   # -------------------------
   # News Chain

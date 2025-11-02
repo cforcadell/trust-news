@@ -3,6 +3,13 @@ pragma solidity ^0.8.0;
 
 contract TrustNews {
 
+
+    enum evaluation {
+        Unknown, // Valor por defecto (índice 0)
+        True,    // Índice 1
+        False    // Índice 2
+    }
+
     address public owner;
     uint256 public postCounter;
     mapping(uint256 => Post) public postsById;
@@ -20,7 +27,7 @@ contract TrustNews {
 
     struct Validation {
         Validator validator;
-        bool veredict;  
+        evaluation veredict;  
         Multihash hash_description; 
     }
 
@@ -47,7 +54,7 @@ contract TrustNews {
         address validatorAddress;
         string domain;
         uint256 reputation;
-        bool veredict;
+        evaluation veredict;
         Multihash hash_description;
     }
 
@@ -225,7 +232,7 @@ function registerNew(
     function addValidation(
         uint256 postId,
         uint256 asertionIndex,
-        bool veredict,
+        evaluation veredict,
         Multihash memory hash_description
     ) public {
         // Asegurar que el validador está registrado

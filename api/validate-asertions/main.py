@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 from web3 import Web3
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from abc import ABC, abstractmethod
-
+from common.veredicto import Veredicto
+from common.veredicto import Validacion
 
 # =========================================================
 # Cargar .env
@@ -81,6 +82,8 @@ class RegistroValidacionModel(BaseModel):
 class RegistroValidadorInput(BaseModel):
     nombre: str
     categorias: Optional[List[int]] = None
+    
+
     
     
 # =========================================================
@@ -329,10 +332,10 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, co
     """
     try:
         veredict_text = verificar_asercion(texto, contexto)
-        veredict_bool = "TRUE" in veredict_text.upper()
+        veredict_bool = Veredicto(veredict_text)
         digest_bytes = hash_text_to_bytes(veredict_text)
 
-        logger.info(f"Veredicto (bool): {veredict_bool} — preparando tx addValidation (post {postId}, assertion {assertion_id})")
+        logger.info(f"Veredicto (bool): {veredict_bool.estado} — preparando tx addValidation (post {postId}, assertion {assertion_id})")
 
         if EMULATE_BLOCKCHAIN_REQUESTS == "true":
             tx_hash = f"0x{uuid.uuid4().hex[:64]}"
@@ -343,7 +346,7 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, co
         func_call = contract.functions.addValidation(
             postId,          # ✅ ahora el postId también se convierte
             int(assertion_id)-1,     # ✅ igual que assertion_id
-            bool(veredict_bool),
+            int(veredict_bool.estado),
             {
                 "hash_function": b"\x12",
                 "hash_size": b"\x20",
@@ -522,9 +525,9 @@ async def consume_and_process():
                 # 2️⃣ Registrar en blockchain
                 # =====================================================
                 try:
-                    veredict_bool = "TRUE" in result_text.upper()
+                    veredict_bool = Veredicto(result_text)
                     digest_bytes = hash_text_to_bytes(result_text)
-                    logger.info(f"Veredicto (bool): {veredict_bool} — registrando en blockchain")
+                    logger.info(f"Veredicto (bool): {veredict_bool.estado} — registrando en blockchain")
 
                     if EMULATE_BLOCKCHAIN_REQUESTS == "true":
                         tx_hash = f"0x{uuid.uuid4().hex[:64]}"
@@ -535,7 +538,7 @@ async def consume_and_process():
                         func_call = contract.functions.addValidation(
                             int(postId),
                             int(assertion_id) - 1,   # 👈 índice 0-based
-                            bool(veredict_bool),
+                            int(veredict_bool.estado),
                             {
                                 "hash_function": b"\x12",
                                 "hash_size": b"\x20",
@@ -572,7 +575,7 @@ async def consume_and_process():
                         "postId": postId,
                         "idAssertion": assertion_id,
                         "idValidator": ACCOUNT_ADDRESS,
-                        "approval": "TRUE" if veredict_bool else "FALSE",
+                        "approval": veredict_bool.estado,
                         "text": result_text,
                         "tx_hash": tx_hash,
                         "receipt": receipt

@@ -32,12 +32,10 @@ docker compose -f docker-compose.base.yml build
 docker compose -f docker-compose.base.yml up
 docker compose -f docker-compose.base.yml down
 
-#docker compose  -f docker-compose.blockchain.yml build
-#docker compose  -f docker-compose.blockchain.yml up
-#docker compose  -f docker-compose.blockchain.yml down
 
 docker compose  -f docker-compose.apis.yml build
 docker compose  -f docker-compose.apis.yml up
+
 # si nomes volem aixecar un validador
 docker compose  -f docker-compose.apis.yml up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'news-chain'  'validate-asertions-worker_1' 'validate-asertions-worker_2'
 docker compose  -f docker-compose.apis.yml down

@@ -14,6 +14,7 @@ from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
+from common.veredicto import Validacion
 
 
 # =========================================================
@@ -155,7 +156,7 @@ async def log_event(order_id: str, action: str, topic: str, payload: dict):
     logger.info(f"[{order_id}] 🟢 Evento '{action}' registrado en MongoDB ({topic}).")
 
 
-async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: bool, tx_hash: str, payload: dict):
+async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: Validacion, tx_hash: str, payload: dict):
     """
     Registra una validación completada en la colección 'validations'.
     """
@@ -432,7 +433,7 @@ async def process_kafka_message(data: dict):
             postId = str(payload.get("postId", ""))
             id_val = payload.get("idValidator")
             id_assert = str(payload.get("idAssertion"))
-            status_val = payload.get("approval")
+            status_val = Validacion(payload.get("approval"))
             assertion_text = payload.get("text", "")
             tx_hash = payload.get("tx_hash", "")
 

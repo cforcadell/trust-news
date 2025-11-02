@@ -6,6 +6,32 @@ const POLLING_INTERVAL = 1000; // 1 segundo
 // Variable global para almacenar los datos de la última orden cargada
 let currentOrderData = {};
 
+// =========================================================
+// 🆕 NUEVA FUNCIÓN DE UTILIDAD: Mapeo de Valores de Validación
+// =========================================================
+function getValidationLiteral(value) {
+    // 1. Convertir el valor a un entero base 10 de manera segura.
+    // Esto asegura que '1' (string), 1 (número), '1.0' (string), o 1.0 (número)
+    // se conviertan a 1. Si no es un número válido, resulta en NaN.
+    const numericValue = parseInt(value, 10); 
+    
+    // 2. Si es NaN (No es un número), o null/undefined, se trata como desconocido.
+    if (isNaN(numericValue)) {
+        return "DESCONOCIDO"; 
+    }
+
+    // 3. Usar el switch sobre el valor numérico para una comparación estricta.
+    switch (numericValue) {
+        case 1:
+            return "APROBADA"; 
+        case 2:
+            return "RECHAZADA"; 
+        case 0:
+            return "DESCONOCIDO";
+        default:
+            return "VALOR ERRONEO";
+    }
+}
 // --- Funciones de Lógica de la Aplicación ---
 
 // Mostrar sección activa
@@ -279,32 +305,34 @@ function renderTabContent(tabName, data, assertions=[]) {
 function renderDetails(container, data) {
     container.innerHTML = '<h3>Detalles de la Orden</h3>';
     
-    // --- NUEVA LÓGICA PARA EL ESTADO DE VERIFICACIÓN GENERAL ---
+    // --- LÓGICA PARA EL ESTADO DE VERIFICACIÓN GENERAL (Adaptada) ---
     let overallStatusTag = "Sin Validaciones"; // Estado por defecto
     let overallStatusClass = "unknown";
     let totalValidations = 0;
-    let trueValidations = 0;
+    let approvedValidations = 0; // Contaremos los que son '1' (APROBADA)
 
     if (data.validations) {
-        // Contar el total y el número de validaciones TRUE
+        // Contar el total y el número de validaciones APROBADAS (valor 1)
         for (const assertionId in data.validations) {
             const validators = data.validations[assertionId];
             for (const validatorId in validators) {
                 totalValidations++;
-                if (validators[validatorId].approval === "TRUE") {
-                    trueValidations++;
+                // 🛑 CAMBIO CLAVE: Compara con el literal "APROBADA" o el valor numérico 1
+                const approvalLiteral = getValidationLiteral(validators[validatorId].approval);
+                if (approvalLiteral === "APROBADA") {
+                    approvedValidations++;
                 }
             }
         }
     }
 
     if (totalValidations > 0) {
-        const percentageTrue = (trueValidations / totalValidations) * 100;
+        const percentageApproved = (approvedValidations / totalValidations) * 100;
 
-        if (percentageTrue === 100) {
+        if (percentageApproved === 100) {
             overallStatusTag = "Noticia Cierta";
             overallStatusClass = "true-news";
-        } else if (percentageTrue === 0) {
+        } else if (percentageApproved === 0) {
             overallStatusTag = "Fake News";
             overallStatusClass = "fake-news";
         } else {
@@ -314,7 +342,7 @@ function renderDetails(container, data) {
     }
 
     const verificationRow = `<tr><th>Verificación General</th><td><span class="verification-tag ${overallStatusClass}">${overallStatusTag}</span></td></tr>`;
-    // --- FIN LÓGICA NUEVA ---
+    // --- FIN LÓGICA DE VERIFICACIÓN ---
 
     // Filtramos solo propiedades planas para el summary (excluyendo objects/arrays grandes)
     const simpleEntries = Object.entries(data).filter(([k, v]) => typeof v !== "object" || v === null); 
@@ -404,7 +432,7 @@ function renderEventsTable(container, events){
     `;
 }
 
-// MODIFICADA: Aplicación de clases CSS a las columnas
+// MODIFICADA: Aplicación de clases CSS a las columnas y lógica de resultados 0, 1, 2
 function renderValidationsTree(container, validations, assertions){
     if(!validations || Object.keys(validations).length===0){ container.innerHTML="<p>No hay validaciones</p>"; return; }
     
@@ -412,12 +440,28 @@ function renderValidationsTree(container, validations, assertions){
     
     for(const [id, valObj] of Object.entries(validations)){
         const atext = assertions.find(a=>a.idAssertion===id)?.text || "(sin texto)";
-        const approvalList = Object.values(valObj).map(v=>v.approval === "TRUE");
-        const allTrue = approvalList.every(v=>v===true);
-        const allFalse = approvalList.every(v=>v===false);
-        const status = allTrue?"TRUE":allFalse?"FALSE":"TRUE/FALSE";
         
-        html += `<details><summary style="color:${allTrue?'green':allFalse?'red':'orange'}"><b>${id}</b> - ${atext} → <b>${status}</b></summary>
+        // 1. Calcular el estado general de la aserción (usa los literales)
+        const approvalLiterals = Object.values(valObj).map(v => getValidationLiteral(v.approval));
+        
+        const allApproved = approvalLiterals.every(v => v === "APROBADA");
+        const allRejected = approvalLiterals.every(v => v === "RECHAZADA");
+        
+        let status;
+        let summaryColor;
+        
+        if (allApproved) {
+            status = "APROBADA";
+            summaryColor = 'green';
+        } else if (allRejected) {
+            status = "RECHAZADA";
+            summaryColor = 'red';
+        } else {
+            status = "MIXTA";
+            summaryColor = 'orange';
+        }
+        
+        html += `<details><summary style="color:${summaryColor}"><b>${id}</b> - ${atext} → <b>${status}</b></summary>
             <table>
                 <thead>
                     <tr>
@@ -429,36 +473,35 @@ function renderValidationsTree(container, validations, assertions){
                 </thead>
                 <tbody>`;
         for(const [validator, info] of Object.entries(valObj)){
-            const resultClass = info.approval === "TRUE" ? 'true' : 'false';
+            // 2. Obtener el literal para la fila
+            const approvalLiteral = getValidationLiteral(info.approval);
+            
+            // Determinar la clase CSS en base al literal
+            const resultClass = (approvalLiteral === "APROBADA") ? 'true' : 
+                                (approvalLiteral === "RECHAZADA") ? 'false' : 'unknown';
+
             let descriptionText = info.text;
 
+            // 3. Bloque de extracción/limpieza de descripción
             const jsonMatch = info.text.match(/```json\s*([\s\S]*?)\s*```/);
             if (jsonMatch && jsonMatch[1]) {
                 try {
                     const jsonPayload = JSON.parse(jsonMatch[1]);
-                    descriptionText = jsonPayload.descripcion || descriptionText;
+                    descriptionText = jsonPayload.descripcion || info.text; 
                 } catch (e) {
-                    console.error("Error al parsear el JSON de validación:", e);
+                    console.error("Error al parsear el JSON de validación, usando texto original:", e);
+                    descriptionText = info.text;
                 }
             } 
-            else {
-                const plaintextMatch = info.text.match(/(?:resultado:\s*(?:TRUE|FALSE|UNKNOWN)\s*descripcion:\s*)([\s\S]*)/i);
-                
-                if (plaintextMatch && plaintextMatch[1]) {
-                    descriptionText = plaintextMatch[1].trim();
-                } else {
-                    descriptionText = descriptionText.replace(/Resultado:\s*(TRUE|FALSE|UNKNOWN)\s*/i, '')
-                                                     .replace(/Descripción:\s*/i, '')
-                                                     .replace(/Descripci(on|ón):\s*/i, '')
-                                                     .trim();
-                }
-            }
             
             descriptionText = descriptionText.replace(/\n/g, '<br>');
 
+            // 4. Inyección de la celda de resultado (NO incluye el valor info.approval)
             html += `<tr>
                 <td class="validator-col">${validator}</td>
-                <td class="validator-col ${resultClass}"><b>${info.approval}</b></td> 
+                
+                <td class="validator-col ${resultClass}"><b>${approvalLiteral}</b></td> 
+                
                 <td class="description-col">${descriptionText}</td> 
                 <td>${info.tx_hash}</td>
             </tr>`;

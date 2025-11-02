@@ -255,7 +255,7 @@ def hash_text_to_bytes(text: str) -> bytes:
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return bytes.fromhex(h)
 
-def send_signed_tx(function_call, gas_estimate: int = 1000000) -> str:
+def send_signed_tx(function_call, gas_estimate: int = 10000000) -> str:
     """Construye, firma y envía tx; devuelve tx_hash (hex) — no espera minado."""
     if EMULATE_BLOCKCHAIN_REQUESTS == "true":
         fake_hash = f"0x{uuid.uuid4().hex[:64]}"

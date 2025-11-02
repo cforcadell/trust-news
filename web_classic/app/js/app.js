@@ -1,5 +1,10 @@
 const API = "/api";
 const MAX_EVENTS_ROWS = 15;
+const POLLING_DURATION = 20000; // 20 segundos
+const POLLING_INTERVAL = 1000; // 1 segundo
+
+// Variable global para almacenar los datos de la última orden cargada
+let currentOrderData = {};
 
 // --- Funciones de Lógica de la Aplicación ---
 
@@ -21,20 +26,67 @@ function showSection(section) {
         document.getElementById("fixedDetailsContainer").innerHTML = '';
         document.getElementById("orderTabs").innerHTML = '';
         document.getElementById("tabContent").innerHTML = '';
+        // Reiniciar datos al salir de la vista de órdenes
+        currentOrderData = {}; 
     }
+}
+
+// NUEVA FUNCIÓN: Inicia el sondeo de la orden
+async function pollOrder(orderId, startTime) {
+    const start = startTime || Date.now();
+    
+    // 1. Carga la orden (en modo no-cleanup/polling)
+    await loadOrderById(orderId, false); 
+    
+    const detailsContainer = document.getElementById("fixedDetailsContainer");
+    const statusElement = detailsContainer.querySelector('.status-value');
+    let currentStatus = statusElement ? statusElement.getAttribute('data-status') : 'UNKNOWN';
+
+    // 2. Comprobar si se cumple la condición de parada o tiempo límite
+    if (currentStatus === 'VALIDATED' || (Date.now() - start > POLLING_DURATION)) {
+        // Detener el parpadeo si existe
+        if (statusElement) {
+            statusElement.classList.remove('polling', 'blinking');
+        }
+        console.log(`Polling finalizado para ${orderId}. Estado: ${currentStatus}`);
+        
+        // Cargar los datos finales de las pestañas tras la validación
+        if (currentStatus === 'VALIDATED') {
+            await loadOrderById(orderId, true); 
+        }
+        
+        return; 
+    }
+
+    // 3. Continuar el sondeo
+    setTimeout(() => pollOrder(orderId, start), POLLING_INTERVAL);
 }
 
 // Publicar nueva noticia
 async function publishNew() {
     const text = document.getElementById("newsText").value;
     if (!text.trim()) return alert("Introduce un texto para verificar.");
+    
+    // 1. Mostrar loading o pre-estado 
+    showSection('orders');
+    document.getElementById("orderId").value = "Publicando...";
+    
     const res = await fetch(`${API}/publishNew`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({text})
     });
+    
+    if (!res.ok) {
+        return alert("Error al publicar la noticia. Inténtalo de nuevo.");
+    }
+    
     const data = await res.json();
-    alert(`✅ Order creada: ${data.order_id}\nEstado: ${data.status}`); 
+    const newOrderId = data.order_id;
+
+    // 2. Iniciar el sondeo y mostrar la vista de la orden
+    document.getElementById("orderId").value = newOrderId;
+    pollOrder(newOrderId);
 }
 
 // Buscar verificaciones previas
@@ -81,53 +133,121 @@ async function listOrders() {
 async function findOrder() {
     const orderId = document.getElementById("orderId").value.trim();
     if (!orderId) return alert("Introduce un order_id.");
+    
+    // Llama a la función central de carga
+    await loadOrderById(orderId, true);
+}
 
-    const res = await fetch(`${API}/orders/${orderId}`);
-    const data = await res.json();
-
+// FUNCIÓN CENTRAL DE CARGA Y RENDERIZADO (Con manejo de errores y refactorizada)
+async function loadOrderById(orderId, cleanup = true) {
     const tabs = document.getElementById("orderTabs");
     const detailsContainer = document.getElementById("fixedDetailsContainer");
     const tabContent = document.getElementById("tabContent"); 
-
-    tabs.innerHTML = "";
-    detailsContainer.innerHTML = "";
-    tabContent.innerHTML = ""; 
-
-    renderDetails(detailsContainer, data); 
-
-    const sections = [
-        {name: "Asertions", data: data.assertions || []},
-        {name: "Documento", data: data.document || null},
-        {name: "Validations", data: data.validations || {}}
-    ];
+    
+    // Limpiar contenedores al inicio de la búsqueda (si es la primera carga)
+    if (cleanup) {
+        tabs.innerHTML = "";
+        detailsContainer.innerHTML = "";
+        tabContent.innerHTML = ""; 
+    }
 
     try {
-        const resEv = await fetch(`${API}/news/${orderId}/events`);
-        
-        if (resEv.ok) {
-            const ev = await resEv.json();
-            sections.push({name: "Eventos", data: ev});
+        const res = await fetch(`${API}/orders/${orderId}`);
+
+        if (!res.ok) {
+            // Si la respuesta no es OK (404, 500, etc.)
+            const errorText = await res.text();
+            detailsContainer.innerHTML = `<div style="color: red; padding: 10px; border: 1px solid red; border-radius: 4px;">
+                Error ${res.status}: No se pudo encontrar la orden con ID: <strong>${orderId}</strong>.
+                <br>Mensaje del servidor: ${errorText || 'Error desconocido'}.
+            </div>`;
+            tabs.innerHTML = '';
+            tabContent.innerHTML = '';
+            return; // Detener la ejecución
+        }
+
+        // Si el estado es 304 (Not Modified), el cuerpo es vacío y JSON.parse fallaría.
+        // Solo intentamos parsear si el estado no es 304.
+        let data;
+        if (res.status !== 304) {
+             data = await res.json();
+             currentOrderData = data; // Almacenar los datos más recientes
         } else {
-            console.error(`Error al cargar eventos: ${resEv.status} ${resEv.statusText}`);
+            // Usar los datos de la última carga si es 304 (polling)
+            data = currentOrderData; 
+            if (!data.order_id) {
+                 // Si no hay datos previos (lo que puede ocurrir en un 304 inicial)
+                 return;
+            }
+        }
+        
+        // El renderizado de detalles siempre ocurre
+        renderDetails(detailsContainer, data); 
+
+        // Si es la primera carga (cleanup=true) o si los datos se han modificado, creamos/actualizamos las pestañas
+        if (cleanup || res.status !== 304) {
+            
+            // 1. Obtener datos de Eventos (Se hace siempre porque los eventos cambian a menudo)
+            let eventsData = [];
+            try {
+                const resEv = await fetch(`${API}/news/${orderId}/events`);
+                if (resEv.ok) {
+                    eventsData = await resEv.json();
+                } else {
+                    console.error(`Error al cargar eventos: ${resEv.status} ${resEv.statusText}`);
+                }
+            } catch (error) {
+                console.error("Error de red al intentar cargar eventos:", error);
+            }
+
+            const sections = [
+                {name: "Asertions", data: data.assertions || []},
+                {name: "Documento", data: data.document || null},
+                {name: "Validations", data: data.validations || {}},
+                {name: "Eventos", data: eventsData} 
+            ];
+
+            // Si es la primera carga (cleanup=true), crea las pestañas
+            if (cleanup) {
+                tabs.innerHTML = '';
+                sections.forEach((s, i) => {
+                    const btn = document.createElement("button");
+                    btn.innerText = s.name;
+                    btn.onclick = () => {
+                        document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
+                        btn.classList.add("activeTab");
+                        renderTabContent(s.name, s.data, data.assertions); 
+                    };
+                    
+                    if(i===0) btn.classList.add("activeTab");
+                    tabs.appendChild(btn);
+                    
+                    if(i===0) renderTabContent(s.name, s.data, data.assertions);
+                });
+            } else {
+                // En modo polling (cleanup=false), solo refrescar el contenido de la pestaña activa
+                const activeTabButton = tabs.querySelector('.activeTab');
+                if (activeTabButton) {
+                    const tabName = activeTabButton.innerText;
+                    
+                    // Buscar la sección de datos correcta (incluyendo la nueva data de eventos)
+                    const currentSection = sections.find(s => s.name === tabName);
+
+                    if (currentSection) {
+                        renderTabContent(tabName, currentSection.data, data.assertions);
+                    }
+                }
+            }
         }
     } catch (error) {
-        console.error("Error de red al intentar cargar eventos:", error);
+        // Manejar errores de red o errores al parsear JSON
+        detailsContainer.innerHTML = `<div style="color: red; padding: 10px; border: 1px solid red; border-radius: 4px;">
+            Error de Conexión o JSON Inválido: ${error.message}.
+        </div>`;
+        tabs.innerHTML = '';
+        tabContent.innerHTML = '';
+        console.error("Error en loadOrderById (Catch Block):", error);
     }
-    
-    sections.forEach((s, i) => {
-        const btn = document.createElement("button");
-        btn.innerText = s.name;
-        btn.onclick = () => {
-            document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
-            btn.classList.add("activeTab");
-            renderTabContent(s.name, s.data, data.assertions); 
-        };
-        
-        if(i===0) btn.classList.add("activeTab");
-        tabs.appendChild(btn);
-        
-        if(i===0) renderTabContent(s.name, s.data, data.assertions);
-    });
 }
 
 // Renderizar contenido de pestañas
@@ -153,15 +273,23 @@ function renderTabContent(tabName, data, assertions=[]) {
     }
 }
 
+// MODIFICADA: Aplica estilos de color y parpadeo al status
 function renderDetails(container, data) {
     container.innerHTML = '<h3>Detalles de la Orden</h3>';
-    const simpleEntries = Object.entries(data).filter(([k, v]) => typeof v !== "object" || v === null);
+    // Filtramos solo propiedades planas para el summary (excluyendo objects/arrays grandes)
+    const simpleEntries = Object.entries(data).filter(([k, v]) => typeof v !== "object" || v === null); 
 
     if (simpleEntries.length) {
         const formattedEntries = simpleEntries.map(([k, v]) => {
             let displayValue = v;
+            let valueClass = '';
             
-            if (k.toLowerCase().includes('timestamp') && v) {
+            if (k.toLowerCase() === 'status') {
+                // Lógica de color y animación
+                valueClass = (v !== 'VALIDATED') ? 'polling blinking' : 'validated';
+                // Añadir el valor como atributo para que pollOrder pueda leerlo
+                displayValue = `<span class="status-value ${valueClass}" data-status="${v}">${v}</span>`;
+            } else if (k.toLowerCase().includes('timestamp') && v) {
                 displayValue = formatDate(v);
             }
             
@@ -185,7 +313,7 @@ function renderTableData(container, data){
     container.innerHTML = `
         <table>
             <thead><tr>${keys.map(k=>`<th>${k}</th>`).join("")}</tr></thead>
-            <tbody>${data.map(r=>`<tr>${keys.map(k=>k==="order_id"?`<td><a href="#" onclick="loadOrderById('${r[k]}')">${r[k]}</a></td>`:`<td>${r[k]}</td>`).join("")}</tr>`).join("")}</tbody>
+            <tbody>${data.map(r=>`<tr>${keys.map(k=>k==="order_id"?`<td><a href="#" onclick="navigateToOrderDetails('${r[k]}')">${r[k]}</a></td>`:`<td>${r[k]}</td>`).join("")}</tr>`).join("")}</tbody>
         </table>
     `;
 }
@@ -307,12 +435,14 @@ function formatDate(ts){
     return d.toISOString().replace("T"," ").split(".")[0];
 }
 
-function loadOrderById(orderId){
+// RENOMBRADA y CORREGIDA: Esta función auxiliar ahora solo navega a la vista de órdenes
+// y llama a la función principal de carga directamente. Esto rompe la recursión.
+function navigateToOrderDetails(orderId){
     document.getElementById("orderId").value = orderId;
     showSection("orders");
-    findOrder();
+    // Llama directamente a la función principal de carga, eliminando la llamada a findOrder()
+    loadOrderById(orderId, true);
 }
-
 
 // --- Lógica de Inicialización y Escuchadores de Eventos ---
 

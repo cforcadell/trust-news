@@ -160,6 +160,41 @@ td a {
     color: #333;
 }
 
+/* --- ESTILOS PARA EL STATUS DE LA ORDEN --- */
+
+/* 1. Keyframes para el parpadeo */
+@keyframes blink {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+/* 2. Estilo base para el valor del status */
+.status-value {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    display: inline-block;
+    color: white; /* Color de texto predeterminado */
+}
+
+/* 3. Estado "Polling" (En proceso / No VALIDATED) */
+.status-value.polling {
+    background-color: #007bff; /* Azul */
+}
+
+/* 4. Animación de parpadeo para el estado "Polling" */
+.status-value.blinking {
+    animation: blink 1s step-end infinite;
+}
+
+/* 5. Estado "VALIDATED" (Finalizado y exitoso) */
+.status-value.validated {
+    background-color: #28a745; /* Verde */
+    animation: none; /* Asegura que no parpadee si llega a VALIDATED */
+}
+
+
 /* Estilos de Validaciones (Árbol) */
 details {
     margin-top: 10px;

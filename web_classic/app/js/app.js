@@ -207,8 +207,10 @@ async function loadOrderById(orderId, cleanup = true) {
                 {name: "Eventos", data: eventsData} 
             ];
 
-            // Si es la primera carga (cleanup=true), crea las pestañas
-            if (cleanup) {
+            // FIX: Si cleanup=true O si el contenedor de pestañas está vacío, se crean las pestañas
+            const shouldCreateTabs = cleanup || tabs.children.length === 0;
+
+            if (shouldCreateTabs) {
                 tabs.innerHTML = '';
                 sections.forEach((s, i) => {
                     const btn = document.createElement("button");
@@ -225,7 +227,7 @@ async function loadOrderById(orderId, cleanup = true) {
                     if(i===0) renderTabContent(s.name, s.data, data.assertions);
                 });
             } else {
-                // En modo polling (cleanup=false), solo refrescar el contenido de la pestaña activa
+                // En modo polling (cleanup=false) y tabs ya creadas, solo refrescar el contenido de la pestaña activa
                 const activeTabButton = tabs.querySelector('.activeTab');
                 if (activeTabButton) {
                     const tabName = activeTabButton.innerText;
@@ -362,7 +364,7 @@ function renderEventsTable(container, events){
     `;
 }
 
-// Validations en árbol con colores según resultado
+// MODIFICADA: Aplicación de clases CSS a las columnas
 function renderValidationsTree(container, validations, assertions){
     if(!validations || Object.keys(validations).length===0){ container.innerHTML="<p>No hay validaciones</p>"; return; }
     
@@ -379,9 +381,9 @@ function renderValidationsTree(container, validations, assertions){
             <table>
                 <thead>
                     <tr>
-                        <th>Validator</th>
-                        <th>Resultado</th>
-                        <th>Descripción</th>
+                        <th class="validator-col">Validator</th>
+                        <th class="validator-col">Resultado</th>
+                        <th class="description-col">Descripción</th>
                         <th>Tx Hash</th>
                     </tr>
                 </thead>
@@ -415,9 +417,9 @@ function renderValidationsTree(container, validations, assertions){
             descriptionText = descriptionText.replace(/\n/g, '<br>');
 
             html += `<tr>
-                <td>${validator}</td>
-                <td class="${resultClass}"><b>${info.approval}</b></td> 
-                <td>${descriptionText}</td> 
+                <td class="validator-col">${validator}</td>
+                <td class="validator-col ${resultClass}"><b>${info.approval}</b></td> 
+                <td class="description-col">${descriptionText}</td> 
                 <td>${info.tx_hash}</td>
             </tr>`;
         }
@@ -435,12 +437,10 @@ function formatDate(ts){
     return d.toISOString().replace("T"," ").split(".")[0];
 }
 
-// RENOMBRADA y CORREGIDA: Esta función auxiliar ahora solo navega a la vista de órdenes
-// y llama a la función principal de carga directamente. Esto rompe la recursión.
+// Función auxiliar para navegar y cargar detalles (evita la recursión)
 function navigateToOrderDetails(orderId){
     document.getElementById("orderId").value = orderId;
     showSection("orders");
-    // Llama directamente a la función principal de carga, eliminando la llamada a findOrder()
     loadOrderById(orderId, true);
 }
 

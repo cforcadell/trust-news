@@ -83,6 +83,13 @@ button:hover {
 
 /* --- Estilos de Tablas --- */
 
+/* Contenedor que permite el scroll horizontal en tablas grandes */
+#tabContent table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
 table {
     width: 100%;
     border-collapse: collapse;
@@ -99,6 +106,20 @@ th, td {
 th {
     background-color: #f2f2f2;
     font-weight: 600;
+}
+
+/* Estilo específico para la columna de Validator/Resultado */
+.validator-col {
+    width: 80px !important; /* Limita el ancho del Validator */
+    min-width: 80px;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Asegura que las columnas de descripción tomen el espacio restante */
+.description-col {
+    width: auto !important;
 }
 
 /* Enlaces en tablas (order_id) */
@@ -246,6 +267,6 @@ pre {
     padding: 15px;
     border-radius: 4px;
     overflow-x: auto;
-    white-space: pre-wrap;       
+    white-space: pre-wrap;      
     word-wrap: break-word;        
 }

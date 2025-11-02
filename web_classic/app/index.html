@@ -3,258 +3,40 @@
 <head>
 <meta charset="UTF-8">
 <title>Trust News</title>
-<style>
-body { font-family: Arial, sans-serif; margin: 0; background: #f9f9f9; color: #222; }
-header { background: #222; color: white; padding: 12px; display: flex; justify-content: space-between; align-items: center; }
-header h1 { margin: 0; }
-nav button { background: #444; border: none; color: white; margin-right: 10px; padding: 8px 14px; border-radius: 5px; cursor: pointer; }
-nav button:hover, nav button.active { background: #0078d4; }
-.section { display: none; padding: 20px; }
-.section.active { display: block; }
-textarea { width: 80%; height: 80px; margin: 5px 0; padding: 8px; border-radius: 4px; border: 1px solid #ccc; }
-button { background: #0078d4; border: none; color: white; padding: 8px 14px; border-radius: 5px; cursor: pointer; }
-button:hover { background: #005fa3; }
-table { border-collapse: collapse; margin-top: 15px; width: 100%; }
-th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
-th { background: #eee; }
-a { color: #0078d4; text-decoration: none; }
-a:hover { text-decoration: underline; }
-.tooltip { position: relative; display: inline-block; cursor: pointer; color: #0078d4; }
-.tooltip .tooltiptext { visibility: hidden; width: 400px; background-color: #333; color: #fff; text-align: left; border-radius: 5px; padding: 8px; position: absolute; z-index: 1; bottom: 125%; left: 50%; margin-left: -200px; opacity: 0; transition: opacity 0.3s; white-space: pre-wrap; }
-.tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
-details summary { cursor: pointer; padding: 4px; margin: 2px 0; }
-.true { color: green; font-weight: bold; }
-.false { color: red; font-weight: bold; }
-.mixed { color: orange; font-weight: bold; }
-.tabs { margin: 10px 0; }
-.tabs button { margin-right: 5px; background: #ddd; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
-.tabs button:hover, .tabs button.activeTab { background: #bbb; }
-</style>
+<link rel="stylesheet" href="css/style.css"> 
 </head>
 <body>
 
 <header>
-  <h1>Trust News</h1>
-  <nav>
-    <button onclick="showSection('news')">News</button>
-    <button onclick="showSection('orders')">Orders</button>
-  </nav>
+  <h1>Trust News</h1>
+  <nav>
+    <button id="nav-news">News</button>
+    <button id="nav-orders">Orders</button>
+  </nav>
 </header>
 
 <div class="section" id="news">
-  <h2>Verificación de Noticias</h2>
-  <textarea id="newsText" placeholder="Escribe la noticia aquí..."></textarea><br>
-  <button onclick="publishNew()">Publicar Noticia</button>
+  <h2>Verificación de Noticias</h2>
+  <textarea id="newsText" placeholder="Escribe la noticia aquí..."></textarea><br>
+  <button id="btn-publishNew">Publicar Noticia</button>
 
-  <h3>Buscar verificaciones previas</h3>
-  <textarea id="findText" placeholder="Introduce texto a buscar..."></textarea><br>
-  <button onclick="findPrevious()">Buscar</button>
+  <h3>Buscar verificaciones previas</h3>
+  <textarea id="findText" placeholder="Introduce texto a buscar..."></textarea><br>
+  <button id="btn-findPrevious">Buscar</button>
 
-  <table id="findResults"></table>
+  <table id="findResults"></table>
 </div>
 
 <div class="section" id="orders">
-  <h2>Orders</h2>
-  <input type="text" id="orderId" placeholder="order_id"/>
-  <button onclick="findOrder()">Buscar Order</button>
-  <button onclick="listOrders()">Listar Orders</button>
+  <h2>Orders</h2>
+  <input type="text" id="orderId" placeholder="order_id"/>
+  <button id="btn-findOrder">Buscar Order</button>
+  <button id="btn-listOrders">Listar Orders</button>
 
-  <div id="orderTabs" class="tabs"></div>
-  <div id="ordersTable"></div>
+  <div id="orderTabs" class="tabs"></div>
+  <div id="ordersTable"></div>
 </div>
 
-<script>
-const API = "/api";
-
-// Mostrar sección activa
-function showSection(section) {
-  document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
-  document.getElementById(section).classList.add("active");
-}
-
-// Publicar nueva noticia
-async function publishNew() {
-  const text = document.getElementById("newsText").value;
-  if (!text.trim()) return alert("Introduce un texto para verificar.");
-  const res = await fetch(`${API}/publishNew`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({text})
-  });
-  const data = await res.json();
-  alert(`✅ Order creada: ${data.order_id}\nEstado: ${data.status}`);
-}
-
-// Buscar verificaciones previas
-async function findPrevious() {
-  const text = document.getElementById("findText").value;
-  if (!text.trim()) return alert("Introduce un texto a buscar.");
-  const res = await fetch(`${API}/find-order-by-text`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({text})
-  });
-  const data = await res.json();
-  renderTable("findResults", data);
-}
-
-// Listar todas las orders
-async function listOrders() {
-  const res = await fetch(`${API}/news`);
-  const data = await res.json();
-  // Crear pestaña Detalles temporal para mostrar lista
-  const tabs = document.getElementById("orderTabs");
-  tabs.innerHTML = "";
-  const btn = document.createElement("button");
-  btn.innerText = "Lista Orders";
-  btn.classList.add("activeTab");
-  btn.onclick = () => {
-    document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
-    btn.classList.add("activeTab");
-    renderTableData(document.getElementById("ordersTable"), data);
-  };
-  tabs.appendChild(btn);
-  renderTableData(document.getElementById("ordersTable"), data);
-}
-
-// Buscar una order por ID
-async function findOrder() {
-  const orderId = document.getElementById("orderId").value.trim();
-  if (!orderId) return alert("Introduce un order_id.");
-
-  const res = await fetch(`${API}/orders/${orderId}`);
-  const data = await res.json();
-
-  const tabs = document.getElementById("orderTabs");
-  tabs.innerHTML = "";
-
-  const sections = [
-    {name: "Detalles", data: data},
-    {name: "Asertions", data: data.assertions || []},
-    {name: "Documento", data: data.document || null},
-    {name: "Validations", data: data.validations || {}}
-  ];
-
-  try {
-    const resEv = await fetch(`${API}/news/${orderId}/events`);
-    if (resEv.ok) {
-      const ev = await resEv.json();
-      sections.push({name: "Eventos", data: ev});
-    }
-  } catch (_) {}
-
-  sections.forEach((s, i) => {
-    const btn = document.createElement("button");
-    btn.innerText = s.name;
-    btn.onclick = () => {
-      document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
-      btn.classList.add("activeTab");
-      renderTabContent(s.name, s.data, data.assertions);
-    };
-    if(i===0) btn.classList.add("activeTab");
-    tabs.appendChild(btn);
-    if(i===0) renderTabContent(s.name, s.data, data.assertions);
-  });
-}
-
-// Renderizar contenido de pestañas
-function renderTabContent(tabName, data, assertions=[]) {
-  const table = document.getElementById("ordersTable");
-  table.innerHTML = "";
-  switch(tabName) {
-    case "Documento":
-      table.innerHTML = `<pre>${JSON.stringify(data,null,2)}</pre>`;
-      break;
-    case "Validations":
-      renderValidationsTree(data, assertions);
-      break;
-    case "Eventos":
-      renderEventsTable(data);
-      break;
-    case "Asertions":
-      renderTableData(table, data);
-      break;
-    case "Detalles":
-      renderDetails(table, data);
-      break;
-    default:
-      table.innerHTML = `<pre>${JSON.stringify(data,null,2)}</pre>`;
-  }
-}
-
-function renderDetails(container, data) {
-  const simpleEntries = Object.entries(data).filter(([_,v])=>typeof v!=="object");
-  if(simpleEntries.length){
-    const rows = simpleEntries.map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join("");
-    container.innerHTML = `<table>${rows}</table>`;
-  } else {
-    container.innerHTML = `<pre>${JSON.stringify(data,null,2)}</pre>`;
-  }
-}
-
-function renderTableData(container, data){
-  if(!data?.length){ container.innerHTML="<p>No hay datos</p>"; return; }
-  const keys = Object.keys(data[0]);
-  container.innerHTML = `
-    <table>
-      <thead><tr>${keys.map(k=>`<th>${k}</th>`).join("")}</tr></thead>
-      <tbody>${data.map(r=>`<tr>${keys.map(k=>k==="order_id"?`<td><a href="#" onclick="loadOrderById('${r[k]}')">${r[k]}</a></td>`:`<td>${r[k]}</td>`).join("")}</tr>`).join("")}</tbody>
-    </table>
-  `;
-}
-
-// Eventos con tooltip y fecha
-function renderEventsTable(events){
-  const container = document.getElementById("ordersTable");
-  if(!events?.length){ container.innerHTML="<p>No hay eventos</p>"; return; }
-  const rows = events.map(e=>`<tr>
-    <td>${formatDate(e.timestamp)}</td>
-    <td>${e.action}</td>
-    <td class="tooltip">Ver
-      <span class="tooltiptext">${JSON.stringify(e.payload,null,2)}</span>
-    </td>
-  </tr>`).join("");
-  container.innerHTML = `<table><thead><tr><th>Fecha</th><th>Acción</th><th>Payload</th></tr></thead>${rows}</table>`;
-}
-
-// Validations en árbol con colores según resultado
-function renderValidationsTree(validations, assertions){
-  const container = document.getElementById("ordersTable");
-  if(!validations || Object.keys(validations).length===0){ container.innerHTML="<p>No hay validaciones</p>"; return; }
-  let html = "";
-  for(const [id, valObj] of Object.entries(validations)){
-    const atext = assertions.find(a=>a.idAssertion===id)?.text || "(sin texto)";
-    const approvalList = Object.values(valObj).map(v=>v.approval === "TRUE");
-    const allTrue = approvalList.every(v=>v===true);
-    const allFalse = approvalList.every(v=>v===false);
-    const status = allTrue?"TRUE":allFalse?"FALSE":"TRUE/FALSE";
-    const statusClass = allTrue?"true":allFalse?"false":"mixed";
-
-    html += `<details><summary style="color:${allTrue?'green':allFalse?'red':'orange'}"><b>${id}</b> - ${atext} → <b>${status}</b></summary>
-      <table><thead><tr><th>Validator</th><th>Validator Text</th><th>Tx Hash</th></tr></thead><tbody>`;
-    for(const [validator, info] of Object.entries(valObj)){
-      const text = `Resultado: ${info.approval}\nDescripcion: ${info.text}`;
-      html += `<tr>
-        <td>${validator}</td>
-        <td><pre>${text}</pre></td>
-        <td>${info.tx_hash}</td>
-      </tr>`;
-    }
-    html += `</tbody></table></details>`;
-  }
-  container.innerHTML = html;
-}
-
-function formatDate(ts){
-  const d = new Date(ts);
-  return d.toISOString().replace("T"," ").split(".")[0];
-}
-
-function loadOrderById(orderId){
-  document.getElementById("orderId").value = orderId;
-  showSection("orders");
-  findOrder();
-}
-</script>
+<script src="js/app.js"></script> 
 </body>
 </html>

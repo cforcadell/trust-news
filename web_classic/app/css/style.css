@@ -55,7 +55,8 @@ nav button:hover {
 
 /* --- Estilos de Controles y Entradas --- */
 
-textarea, input[type="text"] {
+/* CAMBIO: Solo el textarea es grande para la noticia */
+textarea {
     width: 100%;
     padding: 10px;
     margin-bottom: 15px;
@@ -63,6 +64,18 @@ textarea, input[type="text"] {
     border-radius: 4px;
     box-sizing: border-box;
     resize: vertical;
+    font-size: 1rem;
+    height: 400px; /* Altura aumentada para el área de texto de news */
+}
+
+/* Selector para inputs de texto (como orderId) */
+input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
     font-size: 1rem;
 }
 
@@ -181,7 +194,7 @@ td a {
     color: #333;
 }
 
-/* --- ESTILOS PARA EL STATUS DE LA ORDEN --- */
+/* --- ESTILOS PARA EL STATUS DE LA ORDEN (POLLING) --- */
 
 /* 1. Keyframes para el parpadeo */
 @keyframes blink {
@@ -213,6 +226,33 @@ td a {
 .status-value.validated {
     background-color: #28a745; /* Verde */
     animation: none; /* Asegura que no parpadee si llega a VALIDATED */
+}
+
+/* --- ESTILOS PARA LA ETIQUETA DE VERIFICACIÓN GENERAL --- */
+.verification-tag {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    display: inline-block;
+    color: white;
+    text-shadow: 0 0 1px rgba(0,0,0,0.2);
+}
+
+.verification-tag.true-news {
+    background-color: #28a745; /* Verde para Noticia Cierta */
+}
+
+.verification-tag.fake-news {
+    background-color: #dc3545; /* Rojo para Fake News */
+}
+
+.verification-tag.partial-news {
+    background-color: #ffc107; /* Amarillo/Naranja para Parcialmente Cierta */
+    color: #333; /* Texto oscuro para contraste */
+}
+
+.verification-tag.unknown {
+    background-color: #6c757d; /* Gris para Sin Validaciones */
 }
 
 
@@ -267,6 +307,6 @@ pre {
     padding: 15px;
     border-radius: 4px;
     overflow-x: auto;
-    white-space: pre-wrap;      
-    word-wrap: break-word;        
+    white-space: pre-wrap; 		
+    word-wrap: break-word; 		
 }

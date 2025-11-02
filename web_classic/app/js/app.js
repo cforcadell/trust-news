@@ -275,9 +275,47 @@ function renderTabContent(tabName, data, assertions=[]) {
     }
 }
 
-// MODIFICADA: Aplica estilos de color y parpadeo al status
+// MODIFICADA: Aplica estilos de color y parpadeo al status + NUEVO STATUS DE VERIFICACIÓN
 function renderDetails(container, data) {
     container.innerHTML = '<h3>Detalles de la Orden</h3>';
+    
+    // --- NUEVA LÓGICA PARA EL ESTADO DE VERIFICACIÓN GENERAL ---
+    let overallStatusTag = "Sin Validaciones"; // Estado por defecto
+    let overallStatusClass = "unknown";
+    let totalValidations = 0;
+    let trueValidations = 0;
+
+    if (data.validations) {
+        // Contar el total y el número de validaciones TRUE
+        for (const assertionId in data.validations) {
+            const validators = data.validations[assertionId];
+            for (const validatorId in validators) {
+                totalValidations++;
+                if (validators[validatorId].approval === "TRUE") {
+                    trueValidations++;
+                }
+            }
+        }
+    }
+
+    if (totalValidations > 0) {
+        const percentageTrue = (trueValidations / totalValidations) * 100;
+
+        if (percentageTrue === 100) {
+            overallStatusTag = "Noticia Cierta";
+            overallStatusClass = "true-news";
+        } else if (percentageTrue === 0) {
+            overallStatusTag = "Fake News";
+            overallStatusClass = "fake-news";
+        } else {
+            overallStatusTag = "Parcialmente Cierta";
+            overallStatusClass = "partial-news";
+        }
+    }
+
+    const verificationRow = `<tr><th>Verificación General</th><td><span class="verification-tag ${overallStatusClass}">${overallStatusTag}</span></td></tr>`;
+    // --- FIN LÓGICA NUEVA ---
+
     // Filtramos solo propiedades planas para el summary (excluyendo objects/arrays grandes)
     const simpleEntries = Object.entries(data).filter(([k, v]) => typeof v !== "object" || v === null); 
 
@@ -300,10 +338,12 @@ function renderDetails(container, data) {
             return `<tr><th>${keyDisplay}</th><td>${displayValue}</td></tr>`;
         });
         
-        const rows = formattedEntries.join("");
+        // Agregar la nueva fila de verificación general al principio de la tabla.
+        const rows = verificationRow + formattedEntries.join("");
         container.innerHTML += `<div class="order-details-summary"><table>${rows}</table></div><hr/>`;
 
     } else {
+        container.innerHTML += `<div class="order-details-summary"><table>${verificationRow}</table></div><hr/>`;
         container.innerHTML += `<pre>${JSON.stringify(data, null, 2)}</pre><hr/>`;
     }
 }
@@ -408,9 +448,9 @@ function renderValidationsTree(container, validations, assertions){
                     descriptionText = plaintextMatch[1].trim();
                 } else {
                     descriptionText = descriptionText.replace(/Resultado:\s*(TRUE|FALSE|UNKNOWN)\s*/i, '')
-                                                 .replace(/Descripción:\s*/i, '')
-                                                 .replace(/Descripci(on|ón):\s*/i, '')
-                                                 .trim();
+                                                     .replace(/Descripción:\s*/i, '')
+                                                     .replace(/Descripci(on|ón):\s*/i, '')
+                                                     .trim();
                 }
             }
             

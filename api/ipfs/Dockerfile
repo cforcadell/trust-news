@@ -4,14 +4,19 @@ FROM python:3.11-slim
 # Setea el directorio de trabajo
 WORKDIR /app
 
-# Copia requirements
-COPY requirements.txt .
+COPY ipfs/requirements.txt .
 
-# Instala dependencias
+# Instalar dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia el código
-COPY main.py .
+# Copiar el código de la aplicación
+#COPY . .
+
+# Copia la carpeta 'common' y todo su contenido
+COPY common /app/common
+
+# Copia la carpeta 'news' y todo su contenido
+COPY ipfs /app/ipfs
 
 # Variables de entorno con valores por defecto
 # cambiables en build con --build-arg o en runtime con -e
@@ -25,4 +30,4 @@ ENV IPFS_API_CAT=http://${IPFS_API_HOST}:${IPFS_API_PORT}/api/v0/cat
 EXPOSE 8060
 
 # Comando para correr FastAPI con Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8060", "--log-level", "debug"]
+CMD ["uvicorn", "ipfs.main:app", "--host", "0.0.0.0", "--port", "8060", "--log-level", "debug"]

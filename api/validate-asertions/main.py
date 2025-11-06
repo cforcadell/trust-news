@@ -25,8 +25,8 @@ load_dotenv()
 # Config desde .env
 # =========================================================
 RPC_URL = os.getenv("RPC_URL")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # 0x...
-ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")  # 0x...
+PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustManager.json")
 
@@ -44,7 +44,7 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
 REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "fake_news_requests")
 RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses")
 ENABLE_KAFKA_CONSUMER = os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true"
-AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()  # "mistral" | "gemini" | "copilot"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 
 EMULATE_BLOCKCHAIN_REQUESTS = os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "false").lower()  # True or False
 
@@ -67,8 +67,30 @@ except Exception as e:
     VALIDATOR_CATEGORIES = []
     
 # =========================================================
-# Pydantic Models
+# Pydantic Models (Added missing models here)
 # =========================================================
+class RequestValidation(BaseModel):
+    """Model for an incoming validation request, often from a queue."""
+    order_id: str
+    postId: int
+    idAssertion: int
+    text: str
+    context: Optional[str] = None
+    idValidator: str
+
+class ValidationCompleted(BaseModel):
+    """Model for a successful validation response."""
+    order_id: str
+    is_valid: bool
+    tx_hash: str
+    receipt: Dict[str, Any]
+
+class ValidationFailed(BaseModel):
+    """Model for a failed validation response."""
+    order_id: str
+    error_message: str
+    error_type: str = "ProcessingError"
+
 class VerificarEntrada(BaseModel):
     texto: str
     contexto: Optional[str] = None
@@ -82,9 +104,6 @@ class RegistroValidacionModel(BaseModel):
 class RegistroValidadorInput(BaseModel):
     nombre: str
     categorias: Optional[List[int]] = None
-    
-
-    
     
 # =========================================================
 # AI classes
@@ -631,6 +650,3 @@ async def startup_event():
             logger.exception(f"Error en startup registrar validador: {e}")
     else:
         logger.info("[EMULADO] Saltando registro real de validador en startup.")
-    
-
-

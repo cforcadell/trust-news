@@ -32,7 +32,7 @@ docker compose -f docker-compose.base.yml build
 docker compose -f docker-compose.base.yml up
 docker compose -f docker-compose.base.yml down
 
-
+docker compose  -f docker-compose.apis.yml down
 docker compose  -f docker-compose.apis.yml build
 docker compose  -f docker-compose.apis.yml up
 

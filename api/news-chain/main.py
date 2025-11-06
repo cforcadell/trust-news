@@ -6,10 +6,13 @@ import logging
 import asyncio
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError # BaseModel necesario si no se importa en common.async_models
 from dotenv import load_dotenv
 from web3 import Web3
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
+# Importar modelos comunes
+from common.async_models import Multihash, Assertion, RegisterBlockchainRequest, BlockchainRegisteredResponse, RegisterBlockchainPayload 
 
 # =========================================================
 # Config
@@ -33,73 +36,95 @@ logger = logging.getLogger("TrustNewsAPI")
 # =========================================================
 # Web3 / Contract
 # =========================================================
+# Inicialización de Web3
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-with open(CONTRACT_ABI_PATH) as f:
-    artifact = json.load(f)
-abi = artifact["abi"]
-contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
-
-# =========================================================
-# Models
-# =========================================================
-class MultihashModel(BaseModel):
-    hash_function: str
-    hash_size: str
-    digest: str
-
-class AsertionInputModel(BaseModel):
-    idAssertion: Optional[str] = None
-    text: str
-    categoryId: int
-
-class PublishRequestModel(BaseModel):
-    text: str
-    cid: str
-    assertions: List[AsertionInputModel]
-    publisher: str
-
+# Carga del ABI del contrato
+try:
+    with open(CONTRACT_ABI_PATH) as f:
+        artifact = json.load(f)
+    abi = artifact["abi"]
+    contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
+except Exception as e:
+    logger.error(f"Error cargando ABI o inicializando contrato: {e}")
+    # Usar un contrato placeholder si la carga falla para permitir que el worker continúe
+    class DummyContract:
+        def __init__(self):
+            self.functions = self
+            self.events = self
+            self.process_receipt = lambda x: []
+            self.registerNew = lambda *args: self
+            self.build_transaction = lambda x: {}
+    contract = DummyContract()
+    
 # =========================================================
 # Helpers
 # =========================================================
 
-def safe_multihash_to_tuple(mh: MultihashModel):
+# NOTA: Se ha eliminado una definición duplicada de hash_text_to_multihash
+
+def safe_multihash_to_tuple(mh: Multihash) -> tuple:
     """
-    Convierte SHA256 (hex) a bytes, pero si digest no es hex (ej. CID IPFS),
-    devolvemos 32 bytes vacíos y lo guardamos como string en el contrato (emulado).
+    Convierte Multihash (Pydantic) a la tupla (bytes, bytes, bytes32)
+    requerida por el contrato Solidity.
     """
-    hf = bytes.fromhex(mh.hash_function[2:])
-    hs = bytes.fromhex(mh.hash_size[2:])
-    
     try:
-        dg = bytes.fromhex(mh.digest[2:])
-        if len(dg) != 32:
+        # Aseguramos que los campos sean strings
+        hash_function = getattr(mh, "hash_function", "0x00")
+        hash_size = getattr(mh, "hash_size", "0x00")
+        digest = getattr(mh, "digest", "")
+
+        # Si digest es un objeto (por ejemplo otro modelo Pydantic), lo convertimos a string
+        if not isinstance(digest, str):
+            digest = str(digest)
+
+        hf = bytes.fromhex(hash_function.removeprefix("0x"))
+        hs = bytes.fromhex(hash_size.removeprefix("0x"))
+
+        # Limpieza del digest (puede venir con o sin 0x)
+        digest_clean = digest[2:] if digest.startswith("0x") else digest
+        dg = bytes.fromhex(digest_clean)
+
+        # Rellenar o truncar a 32 bytes (bytes32 en Solidity)
+        if len(dg) > 32:
+            dg = dg[:32]
+        elif len(dg) < 32:
             dg = dg.ljust(32, b'\0')
-    except ValueError:
-        dg = b'\0' * 32  # fallback para CID no hex
-        logger.warning(f"Digest no hex, usando bytes vacíos: {mh.digest}")
+
+    except Exception as e:
+        logger.warning(f"Error en safe_multihash_to_tuple con digest '{mh}': {e}. Usando fallback.")
+        # Fallback si el digest no es un hex válido
+        hf = b'\x00'
+        hs = b'\x00'
+        dg = b'\0' * 32
 
     return (hf, hs, dg)
 
-def hash_text_to_multihash(text: str) -> MultihashModel:
+
+def hash_text_to_multihash(text: str) -> Multihash:
+    """Calcula el SHA256 y lo envuelve en el modelo Multihash."""
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x" + h)
+    # 0x12 es SHA256, 0x20 es 32 bytes (256 bits)
+    return Multihash(hash_function="0x12", hash_size="0x20", digest="0x" + h)
 
-
-
-def hash_text_to_multihash(text: str) -> MultihashModel:
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return MultihashModel(hash_function="0x12", hash_size="0x20", digest="0x" + h)
-
-def multihash_to_tuple(mh: MultihashModel):
+def multihash_to_tuple(mh: Multihash) -> tuple:
+    """Convierte Multihash a la tupla requerida (usado para aserciones)."""
     hf = bytes.fromhex(mh.hash_function[2:])
     hs = bytes.fromhex(mh.hash_size[2:])
     dg = bytes.fromhex(mh.digest[2:])
+    
     if len(dg) != 32:
-        raise ValueError("Digest must be 32 bytes")
+        # Esto debería fallar si el hash no es SHA256
+        raise ValueError("Digest debe ser exactamente 32 bytes.")
     return (hf, hs, dg)
 
 def send_tx_async(function_call, gas_estimate=3_000_000):
+    """Firma y envía la transacción a la red."""
+    if not w3.is_connected():
+        raise ConnectionError("Web3 no está conectado al RPC.")
+    if not PRIVATE_KEY or not ACCOUNT_ADDRESS:
+        raise ValueError("Variables PRIVATE_KEY o ACCOUNT_ADDRESS no definidas.")
+        
     nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
     tx = function_call.build_transaction({
         "from": ACCOUNT_ADDRESS,
@@ -113,15 +138,17 @@ def send_tx_async(function_call, gas_estimate=3_000_000):
     return tx_hash.hex()
 
 def wait_for_receipt(tx_hash: str):
+    """Espera a que la transacción sea minada."""
     logger.info(f"Esperando minado de {tx_hash}...")
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
     logger.info(f"TX minada en bloque {receipt.blockNumber}")
     return receipt
 
-def parse_registernew_event(receipt, data: PublishRequestModel):
+def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
+    """Extrae datos relevantes del evento RegisterNewResult de la transacción minada."""
     events = contract.events.RegisterNewResult().process_receipt(receipt)
     if not events:
-        logger.warning("No RegisterNewResult event found; returning minimal info")
+        logger.warning("No se encontró evento RegisterNewResult; devolviendo info mínima.")
         return {
             "postId": None,
             "hash_text": "",
@@ -136,10 +163,17 @@ def parse_registernew_event(receipt, data: PublishRequestModel):
     # reconstrucción hashes
     asertions_output = []
     for i, a in enumerate(data.assertions):
+        # Se genera el hash de la aserción original para la respuesta
         mh = hash_text_to_multihash(a.text)
         digest_hex = mh.digest[2:]
+        
+        # Obtener las direcciones de los validadores para esta aserción
         addrs_raw = validator_addresses_by_asertion[i] if i < len(validator_addresses_by_asertion) else []
-        addrs = [str(x) for x in addrs_raw]
+        logger.info(f"Aserción {i} tiene {len(addrs_raw)} validadores registrados. {addrs_raw}")
+        addrs = [{"address": str(x)} for x in addrs_raw]
+        logger.info(f"Direcciones de validadores para aserción {i}: {addrs}")
+        
+        # El modelo Assertion ya garantiza que a.categoryId es un int
         asertions_output.append({
             "hash_asertion": "0x" + digest_hex,
             "idAssertion": a.idAssertion or str(uuid.uuid4().hex[:8]),
@@ -163,12 +197,14 @@ def parse_registernew_event(receipt, data: PublishRequestModel):
 app = FastAPI(title="TrustNews Smart Contract API")
 
 @app.post("/registerNew")
-def register_new(data: PublishRequestModel):
+def register_new(data: RegisterBlockchainRequest):
     """Lanza la transacción sin esperar al minado, devolviendo tx_hash."""
     try:
         logger.info(f"registerNew() invoked by {data.publisher}")
         hash_new = hash_text_to_multihash(data.text)
-        hash_ipfs = MultihashModel(
+        
+        # El CID de IPFS/Arweave se convierte a Multihash para el contrato
+        hash_ipfs = Multihash(
             hash_function="0x12",
             hash_size="0x20",
             digest=data.cid if data.cid.startswith("0x") else "0x" + data.cid
@@ -178,9 +214,12 @@ def register_new(data: PublishRequestModel):
         categoryIds = []
         for a in data.assertions:
             mh = hash_text_to_multihash(a.text)
-            as_tuple = (multihash_to_tuple(mh), tuple([]), int(a.categoryId))
+            
+            # Formato de aserción para el contrato (Multihash, array de validadores [vacío], categoryId)
+            as_tuple = (multihash_to_tuple(mh), tuple([]), a.categoryId) 
             asertions_struct.append(as_tuple)
-            categoryIds.append(int(a.categoryId))
+            # categoryId ya es int gracias a Pydantic
+            categoryIds.append(a.categoryId)
 
         func_call = contract.functions.registerNew(
             safe_multihash_to_tuple(hash_new),
@@ -206,11 +245,8 @@ def tx_status(tx_hash: str):
             return {"result": False, "status": "pending"}
 
         if receipt.status == 1:
-            # Intenta reconstruir los eventos como la parte asíncrona
+            # Transacción minada y exitosa
             try:
-                # Necesitamos un PublishRequestModel para el parseo completo, si lo tenemos cacheado.
-                # Si no lo tenemos (porque no se guarda), devolvemos solo la info del receipt.
-                # Por simplicidad: devolvemos solo los datos del evento.
                 events = contract.events.RegisterNewResult().process_receipt(receipt)
                 if not events:
                     return {
@@ -251,16 +287,19 @@ def tx_status(tx_hash: str):
                 }
 
         else:
-            return {"result": False, "status": "pending"}
+            # Transacción fallida
+            return {"result": False, "status": "failed", "blockNumber": receipt.blockNumber}
 
-    except Exception:
-        return {"result": False, "status": "pending"}
+    except Exception as e:
+        logger.error(f"Error consultando estado de TX {tx_hash}: {e}")
+        return {"result": False, "status": "error"}
 
 
 # =========================================================
 # Kafka consumer opcional (asincrónico)
 # =========================================================
 async def consume_register_blockchain():
+    """Consume mensajes de Kafka para registrarlos en la Blockchain."""
     consumer = AIOKafkaConsumer(
         REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
@@ -268,33 +307,52 @@ async def consume_register_blockchain():
         auto_offset_reset="earliest"
     )
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
-    await consumer.start()
-    await producer.start()
-    logger.info("Kafka consumer y producer iniciados")
-
+    
     try:
+        await consumer.start()
+        await producer.start()
+        logger.info("Kafka consumer y producer iniciados")
+
         async for msg in consumer:
+            payload_msg = {}
             try:
                 payload_msg = json.loads(msg.value.decode())
-                publish_input = PublishRequestModel(**payload_msg.get("payload", {}))
+                order_id = payload_msg.get("order_id", str(uuid.uuid4()))
+                logger.info(f"[{order_id}] Mensaje recibido de Kafka.")
                 
-                # Paso 1: enviar transacción
-                tx_info = register_new(publish_input)
+                # Validar el payload usando el nuevo modelo común
+                # Asumo que el payload del mensaje Kafka es de tipo RegisterBlockchainPayload
+                publish_input = RegisterBlockchainPayload(**payload_msg.get("payload", {}))
+
+                # Paso 1: enviar transacción (sincrónico, pero ejecutado por to_thread)
+                tx_info = await asyncio.to_thread(register_new, publish_input)
                 tx_hash = tx_info["tx_hash"]
+                logger.info(f"[{order_id}] TX enviada: {tx_hash}")
 
-                # Paso 2: esperar hasta que se mine
+                # Paso 2: esperar hasta que se mine (sincrónico, en otro thread)
                 receipt = await asyncio.to_thread(wait_for_receipt, tx_hash)
-                result = parse_registernew_event(receipt, publish_input)
+                
+                # Paso 3: parsear el resultado (sincrónico)
+                result = await asyncio.to_thread(parse_registernew_event, receipt, publish_input)
+                
+                # Crear la respuesta Kafka (asumo BlockchainRegisteredResponse para el tipo de respuesta)
+                response_model = BlockchainRegisteredResponse(
+                    action="blockchain_registered",
+                    order_id=order_id,
+                    payload=result
+                )
 
-                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps({
-                    "action": "blockchain_registered",
-                    "order_id": payload_msg.get("order_id"),
-                    "payload": result
-                }).encode())
-                logger.info(f"Respuesta enviada para order_id={payload_msg.get('order_id')} payload={json.dumps(result, indent=2)}")
+                # Paso 4: Publicar el resultado
+                await producer.send_and_wait(
+                    RESPONSE_TOPIC, 
+                    response_model.model_dump_json(exclude_none=True).encode("utf-8")
+                )
+                logger.info(f"[{order_id}] Respuesta publicada en {RESPONSE_TOPIC}")
 
+            except ValidationError as ve:
+                logger.error(f"[{payload_msg.get('order_id', 'N/A')}] Error de validación del payload de Kafka: {ve}")
             except Exception as e:
-                logger.error(f"Error procesando mensaje Kafka: {e}")
+                logger.exception(f"Error procesando mensaje Kafka: {e}")
 
     finally:
         await consumer.stop()

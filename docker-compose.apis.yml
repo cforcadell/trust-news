@@ -11,7 +11,9 @@ services:
   # IPFS FastAPI
   # -------------------------
   ipfs-fastapi:
-    build: ./api/ipfs
+    build: 
+      context: ./api  
+      dockerfile: ./ipfs/Dockerfile 
     container_name: ipfs-fastapi
     ports:
       - "8060:8060"
@@ -23,7 +25,9 @@ services:
   # Generate Asertions API
   # -------------------------
   generate-asertions:
-    build: ./api/generate-asertions
+    build: 
+      context: ./api  
+      dockerfile: ./generate-asertions/Dockerfile
     container_name: generate-asertions
     ports:
       - "8071:8071"
@@ -120,7 +124,9 @@ services:
   # News Chain
   # -------------------------
   news-chain:
-    build: ./api/news-chain
+    build:
+      context: ./api  
+      dockerfile: ./news-chain/Dockerfile
     container_name: news-chain
     ports:
       - "8073:8073"
@@ -131,6 +137,7 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8073
     volumes:
       - ./api/news-chain:/app
+      - ./api/common:/app/common
       - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
     # -------------------------

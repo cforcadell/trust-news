@@ -10,7 +10,7 @@ show collections
 db.news.find().pretty()
 
 # Consultar un documento específico por order_id
-db.news.findOne({ order_id: "257f92df-6545-4803-a5d5-ed72bc556c54" })
+db.news.findOne({ order_id: "cf8f901d-dca1-4922-aaa7-d77116c07f8c" })
 
 # Contar documentos
 db.news.countDocuments()

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from enum import IntEnum
+from common.veredicto import Validacion
 
 
 # ============================================================
@@ -190,7 +190,7 @@ class ValidationCompletedPayload(BaseModel):
     postId: str
     idValidator: str
     idAssertion: str
-    approval: IntEnum
+    approval: Validacion
     text: str
     tx_hash: str
 

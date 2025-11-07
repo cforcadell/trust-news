@@ -25,7 +25,8 @@ from common.async_models import (
     ValidationFailedPayload,
     ValidationCompletedResponse,
     ValidationFailedResponse,
-    RequestValidationPayload, # Usado por el consumer para tipado (aunque el payload viene en RequestValidationRequest)
+    RequestValidationPayload, 
+    ValidatorAPIResponse # Usado por el consumer para tipado (aunque el payload viene en RequestValidationRequest)
 )
 
 # =========================================================
@@ -107,8 +108,8 @@ class MistralValidator(AIValidator):
 
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-        if contexto:
-            contenido += f"\nContexto adicional:\n{contexto}"
+        #if contexto:
+        #    contenido += f"\nContexto adicional:\n{contexto}"
 
         data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
         logger.info(f"Invocando Mistral para validar aserción (preview): {texto[:80]}...")
@@ -193,7 +194,7 @@ class OpenRouterValidator:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 # =========================================================
-# Helpers: AI layer
+# Helpers: 
 # =========================================================
 
 def build_ai_validator() -> AIValidator:
@@ -205,6 +206,18 @@ def build_ai_validator() -> AIValidator:
         return OpenRouterValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gpt-4o-mini"))
     else:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
+    
+    
+def clean_ai_response_text(text: str) -> str:
+    """Elimina los bloques de código Markdown que envuelven el JSON."""
+    text = text.strip()
+    # Eliminar el inicio: ```json
+    if text.startswith('```json'):
+        text = text[len('```json'):].strip()
+    # Eliminar el final: ```
+    if text.endswith('```'):
+        text = text[:-len('```')].strip()
+    return text
 
 # =========================================================
 # Instanciar AI Validator
@@ -522,7 +535,9 @@ async def consume_and_process():
                 try:
                     # Ejecutar la verificación de IA en un thread
                     result_text = await asyncio.to_thread(verificar_asercion, assertion_text, context)
-                    logger.info(f"Resultado verificación: {result_text[:120]}...")
+                    logger.info(f"Verificación completada (preview): {result_text}")
+                    result_text_parsed = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
+                    logger.info(f"Resultado verificación: {result_text_parsed}")
                 except Exception as e:
                     logger.exception(f"Error ejecutando verificar_asercion(): {e}")
                     # ✅ Usando ValidationFailedResponse/Payload
@@ -546,7 +561,7 @@ async def consume_and_process():
                 # =====================================================
                 tx_hash = None
                 receipt = None
-                veredict_bool = Veredicto(result_text) # Intentamos la conversión del veredicto
+                veredict_bool = Veredicto(result_text_parsed.resultado) # Intentamos la conversión del veredicto
 
                 try:
                     # Los IDs vienen como str desde Kafka, la función interna los convierte a int/uint256 para Web3
@@ -585,7 +600,7 @@ async def consume_and_process():
                         idAssertion=assertion_id,
                         idValidator=ACCOUNT_ADDRESS,
                         approval=veredict_bool.estado, # El enum Validacion
-                        text=result_text,
+                        text=result_text_parsed.descripcion,
                         tx_hash=tx_hash,
                         validator_alias=AI_PROVIDER.upper(),
                         # Receipt no está en el Payload original, lo omitimos para consistencia con common.async_models

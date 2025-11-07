@@ -518,7 +518,7 @@ function renderValidationsTree(container, validations, assertions) {
                 try {
                     const jsonPayload = JSON.parse(jsonMatch[1]);
                     // ⭐️ MODIFICACIÓN 2.A: Solo extraer 'descripcion' del JSON
-                    descriptionText = jsonPayload.descripcion || info.text;
+                    descriptionText = jsonPayload.descripcion || info.text
                 } catch (e) {
                     console.error("Error al parsear el JSON de validación, usando texto original:", e);
                     descriptionText = info.text;

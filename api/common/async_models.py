@@ -217,3 +217,8 @@ class ValidationFailedResponse(BaseModel):
     action: str = "validation_failed"
     order_id: str
     payload: ValidationFailedPayload
+    
+class ValidatorAPIResponse(BaseModel):
+    resultado: str
+    descripcion: str
+    

@@ -587,6 +587,7 @@ async def consume_and_process():
                         approval=veredict_bool.estado, # El enum Validacion
                         text=result_text,
                         tx_hash=tx_hash,
+                        validator_alias=AI_PROVIDER.upper(),
                         # Receipt no está en el Payload original, lo omitimos para consistencia con common.async_models
                     )
                 )

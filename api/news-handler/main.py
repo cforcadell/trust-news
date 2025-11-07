@@ -476,6 +476,7 @@ async def process_kafka_message(data: dict):
 
             assertion_text = payload.get("text", "")
             tx_hash = payload.get("tx_hash", "")
+            validator_alias = payload.get("validator_alias", "")
 
             logger.info(f"[{order_id}] 🧩 Validación recibida -> postId={postId}, Assertion={id_assert}, Validator={id_val}, Approval={status_val}")
 
@@ -502,7 +503,8 @@ async def process_kafka_message(data: dict):
                 validations[id_assert][id_val] = {
                     "approval": status_val,
                     "text": assertion_text,
-                    "tx_hash": tx_hash
+                    "tx_hash": tx_hash,
+                    "validator_alias": validator_alias
                 }
 
                 await update_order(order_id, {"$set": {"validations": validations}})

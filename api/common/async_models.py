@@ -193,6 +193,7 @@ class ValidationCompletedPayload(BaseModel):
     approval: Validacion
     text: str
     tx_hash: str
+    validator_alias: str
 
 
 class ValidationCompletedResponse(BaseModel):

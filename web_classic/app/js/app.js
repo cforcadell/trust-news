@@ -448,92 +448,108 @@ function renderEventsTable(container, events){
 }
 
 // MODIFICADA: Aplicación de clases CSS a las columnas y lógica de resultados 0, 1, 2
-function renderValidationsTree(container, validations, assertions){
-    if(!validations || Object.keys(validations).length===0){ container.innerHTML="<p>No hay validaciones</p>"; return; }
-    
-    let html = "";
+function renderValidationsTree(container, validations, assertions) {
+    if (!validations || Object.keys(validations).length === 0) {
+        container.innerHTML = "<p>No hay validaciones</p>";
+        return;
+    }
 
-    for(const [id, valObj] of Object.entries(validations)){
-        
-        // MODIFICACIÓN: Extraer solo el texto de la aserción
-        let assertionText = assertions.find(a=>a.idAssertion===id)?.text || "(sin texto)";
-        // Asegurarse de extraer solo la propiedad 'text' si el campo 'text' es un objeto
-        if (typeof assertionText === 'object' && assertionText !== null && assertionText.text) {
-            assertionText = assertionText.text;
-        }
-        const atext = assertionText; // Ahora atext es solo la cadena de texto de la aserción
-        
-        // 1. Calcular el estado general de la aserción (usa los literales)
-        const approvalLiterals = Object.values(valObj).map(v => getValidationLiteral(v.approval));
-        
-        const allApproved = approvalLiterals.every(v => v === "APROBADA");
-        const allRejected = approvalLiterals.every(v => v === "RECHAZADA");
-        
-        let status;
-        let summaryColor;
-        
-        if (allApproved) {
-            status = "APROBADA";
-            summaryColor = 'green';
-        } else if (allRejected) {
-            status = "RECHAZADA";
-            summaryColor = 'red';
-        } else {
-            status = "MIXTA";
-            summaryColor = 'orange';
-        }
-        
-        // Utilizamos atext que ahora solo contiene la cadena de texto
-        html += `<details><summary style="color:${summaryColor}"><b>${id}</b> - ${atext} → <b>${status}</b></summary>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="validator-col">Validator</th>
-                        <th class="validator-col">Resultado</th>
-                        <th class="description-col">Descripción</th>
-                        <th>Tx Hash</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-        for(const [validator, info] of Object.entries(valObj)){
-            // 2. Obtener el literal para la fila
-            const approvalLiteral = getValidationLiteral(info.approval);
-            
-            // Determinar la clase CSS en base al literal
-            const resultClass = (approvalLiteral === "APROBADA") ? 'true' : 
-                                (approvalLiteral === "RECHAZADA") ? 'false' : 'unknown';
+    let html = "";
 
-            let descriptionText = info.text;
+    for (const [id, valObj] of Object.entries(validations)) {
 
-            // 3. Bloque de extracción/limpieza de descripción
-            const jsonMatch = info.text.match(/```json\s*([\s\S]*?)\s*```/);
-            if (jsonMatch && jsonMatch[1]) {
-                try {
-                    const jsonPayload = JSON.parse(jsonMatch[1]);
-                    descriptionText = jsonPayload.descripcion || info.text; 
-                } catch (e) {
-                    console.error("Error al parsear el JSON de validación, usando texto original:", e);
-                    descriptionText = info.text;
-                }
-            } 
-            
-            descriptionText = descriptionText.replace(/\n/g, '<br>');
+        // MODIFICACIÓN: Extraer solo el texto de la aserción
+        let assertionText = assertions.find(a => a.idAssertion === id)?.text || "(sin texto)";
+        // Asegurarse de extraer solo la propiedad 'text' si el campo 'text' es un objeto
+        if (typeof assertionText === 'object' && assertionText !== null && assertionText.text) {
+            assertionText = assertionText.text;
+        }
+        const atext = assertionText; // Ahora atext es solo la cadena de texto de la aserción
 
-            // 4. Inyección de la celda de resultado (NO incluye el valor info.approval)
-            html += `<tr>
-                <td class="validator-col">${validator}</td>
-                
-                <td class="validator-col ${resultClass}"><b>${approvalLiteral}</b></td> 
-                
-                <td class="description-col">${descriptionText}</td> 
-                <td>${info.tx_hash}</td>
-            </tr>`;
-        }
-        html += `</tbody></table></details>`;
-    }
-    container.innerHTML = html;
+        // 1. Calcular el estado general de la aserción (usa los literales)
+        const approvalLiterals = Object.values(valObj).map(v => getValidationLiteral(v.approval));
+
+        const allApproved = approvalLiterals.every(v => v === "APROBADA");
+        const allRejected = approvalLiterals.every(v => v === "RECHAZADA");
+
+        let status;
+        let summaryColor;
+
+        if (allApproved) {
+            status = "APROBADA";
+            summaryColor = 'green';
+        } else if (allRejected) {
+            status = "RECHAZADA";
+            summaryColor = 'red';
+        } else {
+            status = "MIXTA";
+            summaryColor = 'orange';
+        }
+
+        // Utilizamos atext que ahora solo contiene la cadena de texto
+        html += `<details><summary style="color:${summaryColor}"><b>${id}</b> - ${atext} → <b>${status}</b></summary>
+            <table>
+                <thead>
+                    <tr>
+                        <th class="validator-col">Validator</th>
+                        <th class="validator-col">Resultado</th>
+                        <th class="description-col">Descripción</th>
+                        <th>Tx Hash</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        for (const [validatorAddress, info] of Object.entries(valObj)) {
+            // ⭐️ MODIFICACIÓN 1: Usar validator_alias o la dirección
+            const validatorDisplay = info.validator_alias || validatorAddress;
+
+            // 2. Obtener el literal para la fila
+            const approvalLiteral = getValidationLiteral(info.approval);
+
+            // Determinar la clase CSS en base al literal
+            const resultClass = (approvalLiteral === "APROBADA") ? 'true' :
+                (approvalLiteral === "RECHAZADA") ? 'false' : 'unknown';
+
+            let descriptionText = info.text;
+
+            // 3. Bloque de extracción/limpieza de descripción
+            const jsonMatch = info.text.match(/```json\s*([\s\S]*?)\s*```/);
+            if (jsonMatch && jsonMatch[1]) {
+                try {
+                    const jsonPayload = JSON.parse(jsonMatch[1]);
+                    // ⭐️ MODIFICACIÓN 2.A: Solo extraer 'descripcion' del JSON
+                    descriptionText = jsonPayload.descripcion || info.text;
+                } catch (e) {
+                    console.error("Error al parsear el JSON de validación, usando texto original:", e);
+                    descriptionText = info.text;
+                }
+            } else {
+                // ⭐️ MODIFICACIÓN 2.B: Si no hay JSON (formato antiguo/simple), eliminar el tag 'Resultado: XXX'
+                // Reemplazar "Resultado: XXXX\n" o "resultado: XXXX\n" al inicio del texto simple
+                descriptionText = descriptionText.replace(/^\s*Resultado:\s*(TRUE|FALSE|UNKNOWN|DESCONOCIDA)\s*\n/i, '');
+                descriptionText = descriptionText.replace(/^\s*resultado:\s*(TRUE|FALSE|UNKNOWN|DESCONOCIDA)\s*\n/i, '');
+                // También eliminar la descripción si solo está el tag de resultado
+                if (descriptionText.toLowerCase().trim().startsWith("resultado:")) {
+                     descriptionText = ""; // O dejar el texto original si no se puede parsear
+                }
+            }
+
+            descriptionText = descriptionText.replace(/\n/g, '<br>');
+
+            // 4. Inyección de la celda de resultado (usa validatorDisplay)
+            html += `<tr>
+                <td class="validator-col">${validatorDisplay}</td> 
+                
+                <td class="validator-col ${resultClass}"><b>${approvalLiteral}</b></td> 
+                
+                <td class="description-col">${descriptionText}</td> 
+                <td>${info.tx_hash}</td>
+            </tr>`;
+        }
+        html += `</tbody></table></details>`;
+    }
+    container.innerHTML = html;
 }
-
 function formatDate(ts){
     const timestampValue = parseFloat(ts); 
     if (isNaN(timestampValue) || timestampValue === 0) { return "N/A"; }

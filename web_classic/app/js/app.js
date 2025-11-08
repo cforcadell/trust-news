@@ -310,6 +310,7 @@ function renderDetails(container, data) {
     let overallStatusClass = "unknown";
     let totalValidations = 0;
     let approvedValidations = 0; // Contaremos los que son '1' (APROBADA)
+    let unknownValidations = 0; // Contaremos los que son '0' (DESCONOCIDO)
 
     if (data.validations) {
         // Contar el total y el número de validaciones APROBADAS (valor 1)
@@ -317,17 +318,21 @@ function renderDetails(container, data) {
             const validators = data.validations[assertionId];
             for (const validatorId in validators) {
                 totalValidations++;
-                // 🛑 CAMBIO CLAVE: Compara con el literal "APROBADA" o el valor numérico 1
+                
                 const approvalLiteral = getValidationLiteral(validators[validatorId].approval);
                 if (approvalLiteral === "APROBADA") {
                     approvedValidations++;
+                }
+            
+                if (approvalLiteral === "DESCONOCIDO") {
+                    unknownValidations++;
                 }
             }
         }
     }
 
     if (totalValidations > 0) {
-        const percentageApproved = (approvedValidations / totalValidations) * 100;
+        const percentageApproved = (approvedValidations / (totalValidations - unknownValidations)) * 100;
 
         if (percentageApproved === 100) {
             overallStatusTag = "Noticia Cierta";
@@ -336,7 +341,7 @@ function renderDetails(container, data) {
             overallStatusTag = "Fake News";
             overallStatusClass = "fake-news";
         } else {
-            overallStatusTag = "Parcialmente Cierta";
+            overallStatusTag = "Parcialmente Cierta: " + percentageApproved.toFixed(2) + "% Aprobada";
             overallStatusClass = "partial-news";
         }
     }
@@ -469,8 +474,10 @@ function renderValidationsTree(container, validations, assertions) {
         // 1. Calcular el estado general de la aserción (usa los literales)
         const approvalLiterals = Object.values(valObj).map(v => getValidationLiteral(v.approval));
 
-        const allApproved = approvalLiterals.every(v => v === "APROBADA");
-        const allRejected = approvalLiterals.every(v => v === "RECHAZADA");
+        const filtered = approvalLiterals.filter(v => v !== "DESCONOCIDO");
+
+        const allApproved = filtered.length > 0 && filtered.every(v => v === "APROBADA");
+        const allRejected = filtered.length > 0 && filtered.every(v => v === "RECHAZADA");
 
         let status;
         let summaryColor;

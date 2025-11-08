@@ -1,4 +1,4 @@
-/* Estilos Globales */
+/* =================== ESTILOS GLOBALES =================== */
 body {
     font-family: 'Inter', sans-serif;
     margin: 0;
@@ -14,7 +14,10 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
 }
 
 header h1 {
@@ -22,40 +25,38 @@ header h1 {
     font-size: 1.5rem;
 }
 
-nav button {
+header nav {
+    display: flex;
+    gap: 10px;
+}
+
+header nav button {
     background-color: #0066cc;
     color: white;
     border: none;
     padding: 10px 15px;
-    margin-left: 10px;
     border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.2s;
 }
 
-nav button:hover {
+header nav button:hover {
     background-color: #005bb5;
 }
 
-/* --- Lógica de Navegación de Pestañas Principales --- */
-
 .section {
-    display: none; /* Oculta todas las secciones por defecto */
+    display: none;
     padding: 20px;
     max-width: 1000px;
     margin: 20px auto;
     background-color: white;
     border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
 }
 
-.section.active {
-    display: block; /* Muestra solo la sección activa */
-}
+.section.active { display: block; }
 
-/* --- Estilos de Controles y Entradas --- */
-
-/* CAMBIO: Solo el textarea es grande para la noticia */
+/* =================== CONTROLES Y ENTRADAS =================== */
 textarea {
     width: 100%;
     padding: 10px;
@@ -65,55 +66,46 @@ textarea {
     box-sizing: border-box;
     resize: vertical;
     font-size: 1rem;
-    height: 400px; /* Altura aumentada para el área de texto de news */
+    height: 400px;
 }
 
-/* Selector para inputs de texto (como orderId) */
 input[type="text"] {
     width: 100%;
-    padding: 10px;
+    padding: 6px 8px;
     margin-bottom: 15px;
     border: 1px solid #ccc;
     border-radius: 4px;
     box-sizing: border-box;
-    font-size: 1rem;
+    font-size: 0.85rem;
+    line-height: 1.2;
 }
 
 button {
     background-color: #28a745;
     color: white;
     border: none;
-    padding: 10px 15px;
+    padding: 6px 12px;
     border-radius: 4px;
     cursor: pointer;
     margin-right: 10px;
     transition: background-color 0.2s;
 }
 
-button:hover {
-    background-color: #218838;
-}
+button:hover { background-color: #218838; }
 
-/* --- Estilos de Tablas --- */
-
-/* Contenedor que permite el scroll horizontal en tablas grandes */
-#tabContent table {
-    display: block;
-    overflow-x: auto;
-    white-space: nowrap;
-}
-
-table {
+/* =================== TABLAS =================== */
+table, .compact-table {
     width: 100%;
     border-collapse: collapse;
+    font-size: 0.8rem;
+    line-height: 1.1;
     margin-top: 20px;
 }
 
 th, td {
     border: 1px solid #ddd;
-    padding: 12px;
+    padding: 2px 4px;
     text-align: left;
-    font-size: 0.9rem;
 }
 
 th {
@@ -121,162 +113,133 @@ th {
     font-weight: 600;
 }
 
-/* Estilo específico para la columna de Validator/Resultado */
+td a {
+    color: #0066cc;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 0.85rem;
+}
+
 .validator-col {
-    width: 80px !important; /* Limita el ancho del Validator */
+    width: 80px !important;
     min-width: 80px;
     max-width: 100px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-/* Asegura que las columnas de descripción tomen el espacio restante */
-.description-col {
-    width: auto !important;
+
+.description-col { width: auto !important; }
+
+/* =================== ORDERS =================== */
+#orders {
+    padding: 5px 10px;
+    max-width: 900px;
+    margin: 10px auto;
+    font-size: 0.85rem;
+    background-color: white;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    position: relative;
 }
 
-/* Enlaces en tablas (order_id) */
-td a {
-    color: #0066cc;
-    text-decoration: none;
-    font-weight: bold;
+#ordersTopBar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 0;
+    position: sticky;
+    top: 0;
+    background-color: white;
+    z-index: 100;
+    border-bottom: 1px solid #ddd;
 }
 
-/* --- Estilos de la Sección Orders (Pestañas Secundarias) --- */
+#ordersTopBar input[type="text"] { flex: 1; }
 
-.tabs {
+#ordersTopBar button,
+.sub-tabs button {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border-radius: 4px;
+}
+
+#fixedDetailsContainer, #orderTabs, #tabContent {
+    margin-top: 5px;
+    padding: 5px;
+}
+
+#orderTabs {
     border-bottom: 2px solid #ddd;
     margin-bottom: 15px;
 }
 
-.tabs button {
+#orderTabs button {
     background: none;
     color: #555;
     border: none;
-    padding: 10px 15px;
-    margin-right: 5px;
+    border-bottom: 3px solid transparent;
+    margin-right: 3px;
+    padding: 3px 6px;
+    font-size: 0.8rem;
     cursor: pointer;
     border-radius: 0;
-    border-bottom: 3px solid transparent;
 }
 
-.tabs button.activeTab {
+#orderTabs button.activeTab {
     color: #004d99;
     border-bottom: 3px solid #004d99;
     font-weight: 600;
 }
 
-/* --- Estilos de Detalles Fijos (Detalles de la Orden) --- */
-#fixedDetailsContainer {
-    margin-bottom: 20px;
-    padding: 15px;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    background-color: #f9f9f9;
-}
+/* =================== STATUS =================== */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
-.order-details-summary table {
-    margin-top: 0;
-    width: 50%;
-}
-.order-details-summary th, .order-details-summary td {
-    border: none;
-    padding: 5px 10px;
-}
-.order-details-summary th {
-    background-color: transparent;
-    font-weight: normal;
-    text-align: right;
-    width: 30%;
-}
-.order-details-summary td {
-    font-weight: bold;
-    color: #333;
-}
-
-/* --- ESTILOS PARA EL STATUS DE LA ORDEN (POLLING) --- */
-
-/* 1. Keyframes para el parpadeo */
-@keyframes blink {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
-}
-
-/* 2. Estilo base para el valor del status */
 .status-value {
     padding: 2px 8px;
     border-radius: 4px;
     font-weight: bold;
     display: inline-block;
-    color: white; /* Color de texto predeterminado */
+    color: white;
 }
 
-/* 3. Estado "Polling" (En proceso / No VALIDATED) */
-.status-value.polling {
-    background-color: #007bff; /* Azul */
-}
+.status-value.polling { background-color: #007bff; }
+.status-value.blinking { animation: blink 1s step-end infinite; }
+.status-value.validated { background-color: #28a745; animation: none; }
 
-/* 4. Animación de parpadeo para el estado "Polling" */
-.status-value.blinking {
-    animation: blink 1s step-end infinite;
-}
-
-/* 5. Estado "VALIDATED" (Finalizado y exitoso) */
-.status-value.validated {
-    background-color: #28a745; /* Verde */
-    animation: none; /* Asegura que no parpadee si llega a VALIDATED */
-}
-
-/* --- ESTILOS PARA LA ETIQUETA DE VERIFICACIÓN GENERAL --- */
+/* =================== VERIFICACIÓN =================== */
 .verification-tag {
     padding: 2px 8px;
     border-radius: 4px;
     font-weight: bold;
     display: inline-block;
-    color: white;
     text-shadow: 0 0 1px rgba(0,0,0,0.2);
 }
 
-.verification-tag.true-news {
-    background-color: #28a745; /* Verde para Noticia Cierta */
-}
+.verification-tag.true-news { background-color: #28a745; color: white; }
+.verification-tag.fake-news { background-color: #dc3545; color: white; }
+.verification-tag.partial-news { background-color: #ffc107; color: #333; }
+.verification-tag.unknown { background-color: #6c757d; color: white; }
 
-.verification-tag.fake-news {
-    background-color: #dc3545; /* Rojo para Fake News */
-}
-
-.verification-tag.partial-news {
-    background-color: #ffc107; /* Amarillo/Naranja para Parcialmente Cierta */
-    color: #333; /* Texto oscuro para contraste */
-}
-
-.verification-tag.unknown {
-    background-color: #6c757d; /* Gris para Sin Validaciones */
-}
-
-
-/* Estilos de Validaciones (Árbol) */
+/* =================== DETALLES / VALIDACIONES =================== */
 details {
     margin-top: 10px;
     border: 1px solid #eee;
     padding: 10px;
     border-radius: 4px;
 }
+
 details summary {
     cursor: pointer;
     font-size: 1.1rem;
     padding: 5px 0;
 }
+
 .true { color: green; font-weight: bold; }
 .false { color: red; font-weight: bold; }
 
-/* Tooltip (para eventos) */
-.tooltip {
-    position: relative;
-    display: inline-block;
-    cursor: help;
-}
+/* =================== TOOLTIP =================== */
+.tooltip { position: relative; display: inline-block; cursor: help; }
 .tooltiptext {
     visibility: hidden;
     width: 300px;
@@ -296,12 +259,9 @@ details summary {
     font-family: monospace;
     font-size: 0.8rem;
 }
-.tooltip:hover .tooltiptext {
-    visibility: visible;
-    opacity: 1;
-}
+.tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
 
-/* Estilo para pre (JSON) */
+/* =================== PRE / JSON =================== */
 pre {
     background-color: #f4f4f4;
     padding: 15px;
@@ -309,4 +269,22 @@ pre {
     overflow-x: auto;
     white-space: pre-wrap; 		
     word-wrap: break-word; 		
+}
+
+/* =================== CLASES DE NOTICIAS =================== */
+.true-news { background-color: #28a745; color: white; padding: 2px 6px; border-radius: 4px; }
+.partial-news { background-color: #ffc107; color: #333; padding: 2px 6px; border-radius: 4px; }
+.fake-news { background-color: #dc3545; color: white; padding: 2px 6px; border-radius: 4px; }
+.unknown { background-color: #6c757d; color: white; padding: 2px 6px; border-radius: 4px; }
+
+/* =================== RESPONSIVE =================== */
+@media (max-width: 600px) {
+    #ordersTopBar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    #ordersTopBar input[type="text"], #ordersTopBar button {
+        width: 100%;
+        margin: 3px 0;
+    }
 }

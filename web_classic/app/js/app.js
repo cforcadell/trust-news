@@ -243,10 +243,11 @@ function renderTabContent(tabName, data, assertions=[]) {
 function renderDetails(container, data) {
     container.innerHTML = '<h3>Detalles de la Orden</h3>';
 
-    // --- Estadísticas básicas (Resumen)
+    // --- Estadísticas (Resumen)
     let totalAssertions = 0, trueAssertions = 0, falseAssertions = 0, unknownCount = 0;
     if (data.validations) {
         for (const assertionId in data.validations) {
+            totalAssertions++;
             const validators = data.validations[assertionId];
             let approved = 0, rejected = 0;
             Object.values(validators).forEach(v => {
@@ -255,16 +256,14 @@ function renderDetails(container, data) {
                 else if (lit === "RECHAZADA") rejected++;
                 else if (lit === "DESCONOCIDO") unknownCount++;
             });
-            const known = approved + rejected;
-            if (known > 0) {
-                totalAssertions++;
-                if (rejected === 0) trueAssertions++;
-                else falseAssertions++;
-            }
+            const known = approved - rejected;
+            
+            if (known > 0)  trueAssertions++;
+            else if (known < 0) falseAssertions++;
         }
     }
-    const percentTrue = totalAssertions ? (trueAssertions / totalAssertions) * 100 : 0;
-    const percentFalse = totalAssertions ? (falseAssertions / totalAssertions) * 100 : 0;
+    const percentTrue = totalAssertions ? (trueAssertions / (totalAssertions-unknownCount)) * 100 : 0;
+    const percentFalse = totalAssertions ? (falseAssertions / (totalAssertions-unknownCount)) * 100 : 0;
 
     let overallTag = "Sin Validaciones", overallClass = "unknown";
     if (totalAssertions > 0) {
@@ -273,31 +272,24 @@ function renderDetails(container, data) {
         else { overallTag = `Parcialmente Cierta: ${percentTrue.toFixed(2)}%`; overallClass = "partial-news"; }
     }
 
-    // --- Contenido de la pestaña Detalles
+    // --- Contenido de las subpestañas
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
-              .filter(([k, v]) => 
-                  k !== "_id" && 
-                  k !== "document" && 
-                  k !== "assertions" && 
-                  k !== "validations" && 
-                  k !== "text" &&
-                  k !== "validators_pending" &&
-                  k !== "status" &&
-                  k !== "validators"
-              )
+              .filter(([k, v]) => k !== "_id" && k !== "document" && k !== "assertions" && k !== "validations" && k !== "validators" && k !== "text" && k !== "status" && k !== "validators_pending")
               .map(([k, v]) => {
                   if (k === "text" && typeof v === "object" && v?.text) v = v.text;
                   return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
               }).join('') +
         `</table>`;
 
-    // --- Contenido de la pestaña Resumen
     const summaryHtml = `<table class="compact-table">
         <tr><th>Estado General</th><td class="${overallClass}">${overallTag}</td></tr>
         <tr><th>Estado</th><td>${data.status || "N/A"}</td></tr>
+        <tr><th>texto</th><td>${data.text || "N/A"}</td></tr>
         <tr><th>Validators Pending</th><td>${data.validators_pending ?? 0}</td></tr>
-        <tr><th>Texto</th><td>${typeof data.text === 'string' ? data.text : (data.text?.text || '')}</td></tr>
+        <tr><th>Aserciones Ciertas</th><td class="${overallClass}">${trueAssertions}</td></tr>
+        <tr><th>Aserciones Falsas</th><td class="${overallClass}">${falseAssertions}</td></tr>
+        <tr><th>Validaciones Desconocidas</th><td class="${overallClass}">${unknownCount}</td></tr>
     </table>`;
 
     // --- Subpestañas internas

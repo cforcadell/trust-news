@@ -45,6 +45,6 @@ npx hardhat run scripts/registeredValidators.js   --network localhost # deberia 
 
 cd ~/blockchain/tfm/api/tests
 source venv/bin/activate
-pytest -v
+ pytest -c test_news-handler.py 
 
 

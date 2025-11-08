@@ -140,6 +140,8 @@ async def call_mistral(text: str) -> List[Assertion]:
                     
                     # 3. Validar y convertir la lista de diccionarios a List[Assertion]
                     try:
+                        for idx, item in enumerate(parsed_list, start=1):
+                            item["idAssertion"] = str(idx)
                         return [Assertion(**item) for item in parsed_list]
                     except ValidationError as e:
                         logger.error(f"Mistral devolvió un JSON que no cumple el esquema Assertion: {e}")
@@ -174,12 +176,13 @@ async def call_gemini(text: str) -> List[Assertion]:
 
     payload = {
         "contents": [{"parts": [{"text": full_prompt}]}],
-        "config": {
+        "generationConfig": {
+            "temperature": 0.2,
             "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-            "temperature": 0.2
+            "responseSchema": response_schema
         }
     }
+
 
     async with aiohttp.ClientSession() as session:
         for attempt in range(1, MAX_RETRIES + 1):
@@ -207,6 +210,8 @@ async def call_gemini(text: str) -> List[Assertion]:
                         raise ValueError("Gemini devolvió un tipo inesperado (no es lista JSON).")
 
                     try:
+                        for idx, item in enumerate(parsed_list, start=1):
+                            item["idAssertion"] = str(idx)
                         # Convertimos los dicts resultantes a modelos Pydantic
                         return [Assertion(**item) for item in parsed_list]
                     except ValidationError as e:
@@ -334,7 +339,7 @@ async def consume_and_process():
 # Endpoint HTTP (sin Kafka) para probar /extraer
 # ============================================================
 class TextoEntrada(BaseModel):
-    texto: str
+    text: str
 
 @app.post("/extraer")
 async def extraer_endpoint(body: TextoEntrada):

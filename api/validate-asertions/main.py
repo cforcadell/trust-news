@@ -25,7 +25,7 @@ from common.async_models import (
     ValidationFailedPayload,
     ValidationCompletedResponse,
     ValidationFailedResponse,
-    RequestValidationPayload, 
+    RequestValidationRequest,
     ValidatorAPIResponse # Usado por el consumer para tipado (aunque el payload viene en RequestValidationRequest)
 )
 
@@ -108,8 +108,8 @@ class MistralValidator(AIValidator):
 
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-        #if contexto:
-        #    contenido += f"\nContexto adicional:\n{contexto}"
+        if contexto:
+            contenido += f"\nContexto adicional:\n{contexto}"
 
         data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
         logger.info(f"Invocando Mistral para validar aserción (preview): {texto[:80]}...")
@@ -502,15 +502,15 @@ async def consume_and_process():
     try:
         async for msg in consumer:
             try:
-                payload_json = json.loads(msg.value.decode())
-                action = payload_json.get("action")
-                val_payload_data = payload_json.get("payload", {})
-                idValidator = val_payload_data.get("idValidator")
-                order_id = str(payload_json.get("order_id", ""))
 
-                # Usamos RequestValidationPayload para validar la estructura del contenido del payload
+                # Usamos RequestValidationRequest para validar la estructura del contenido del payload
                 try:
-                    val_payload = RequestValidationPayload(**val_payload_data)
+                    payload_msg = json.loads(msg.value.decode("utf-8"))
+                    message = RequestValidationRequest(**payload_msg)
+                    action = message.action
+                    order_id = message.order_id
+                    val_payload = message.payload
+                    idValidator = val_payload.idValidator
                 except Exception as e:
                     logger.error(f"Error de Pydantic en payload Kafka: {e}")
                     # No podemos enviar un failed response completo si el order_id/action es inválido

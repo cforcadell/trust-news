@@ -15,7 +15,6 @@ class Multihash(BaseModel):
 
 
 class ValidatorAddress(BaseModel):
-    # Using alias to map 'Address' key from source data to 'address' field name
     address: str 
 
 

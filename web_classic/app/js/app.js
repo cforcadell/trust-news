@@ -6,6 +6,19 @@ const MAX_EVENTS_ROWS = 15;
 const POLLING_DURATION = 20000; // 20 segundos
 const POLLING_INTERVAL = 1000;  // 1 segundo
 
+const CATEGORY_MAP = {
+    1: "ECONOMÍA",
+    2: "DEPORTES",
+    3: "POLÍTICA",
+    4: "TECNOLOGÍA",
+    5: "SALUD",
+    6: "ENTRETENIMIENTO",
+    7: "CIENCIA",
+    8: "CULTURA",
+    9: "MEDIO AMBIENTE",
+    10: "SOCIAL"
+};
+
 // Variable global para almacenar la última orden cargada
 let currentOrderData = {};
 
@@ -231,7 +244,7 @@ function renderTabContent(tabName, data, assertions=[]) {
         case "Documento": container.innerHTML = `<pre>${JSON.stringify(data,null,2)}</pre>`; break;
         case "Validations": renderValidationsTree(container, data, assertions); break;
         case "Eventos": renderEventsTable(container, data); break;
-        case "Asertions": renderTableData(container, data); break;
+        case "Asertions": renderAssertions(container, data); break;
         default: container.innerHTML = `<pre>${JSON.stringify(data,null,2)}</pre>`;
     }
 }
@@ -474,6 +487,44 @@ function renderEventsTable(container, events){
     container.innerHTML = `<h3>Eventos (Últimos ${limited.length} de ${events.length})</h3>
         <table class="compact-table"><thead><tr><th>Acción</th><th>Topic</th><th>Fecha</th><th>Payload</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
+
+
+// =========================
+// Renderizado de aserciones
+// =========================
+function renderAssertions(container, assertions) {
+    if (!assertions || assertions.length === 0) {
+        container.innerHTML = "<p>No hay aserciones disponibles.</p>";
+        return;
+    }
+
+    let html = `
+        <table class="compact-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Texto</th>
+                    <th>Categoría</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    assertions.forEach(a => {
+        const catDesc = CATEGORY_MAP[a.categoryId] || `(${a.categoryId})`;
+        html += `
+            <tr>
+                <td>${a.idAssertion || "-"}</td>
+                <td>${a.text || "-"}</td>
+                <td>${catDesc}</td>
+            </tr>
+        `;
+    });
+
+    html += "</tbody></table>";
+    container.innerHTML = html;
+}
+
 
 // =========================================================
 // INICIALIZACIÓN

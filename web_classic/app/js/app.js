@@ -262,9 +262,13 @@ function renderDetails(container, data) {
             else if (known < 0) falseAssertions++;
         }
     }
-    const percentTrue = totalAssertions ? (trueAssertions / (totalAssertions-unknownCount)) * 100 : 0;
-    const percentFalse = totalAssertions ? (falseAssertions / (totalAssertions-unknownCount)) * 100 : 0;
-
+    
+    let percentTrue=0;
+    let percentFalse=0;
+    if (totalAssertions -unknownCount != 0) {
+        percentTrue = totalAssertions ? (trueAssertions / (totalAssertions-unknownCount)) * 100 : 0;
+        percentFalse = totalAssertions ? (falseAssertions / (totalAssertions-unknownCount)) * 100 : 0;
+    } 
     let overallTag = "Sin Validaciones", overallClass = "unknown";
     if (totalAssertions > 0) {
         if (percentTrue === 100) { overallTag = "Noticia Cierta"; overallClass = "true-news"; }

@@ -236,22 +236,14 @@ function renderTabContent(tabName, data, assertions=[]) {
     }
 }
 
-// =========================================================
-// RENDER DETALLES Y RESUMEN
-// =========================================================
-// =========================================================
-// RENDER DETALLES Y RESUMEN
-// =========================================================
-// =========================================================
-// RENDER DETALLES Y RESUMEN
-// =========================================================
+
 // =========================================================
 // RENDER DETALLES Y RESUMEN
 // =========================================================
 function renderDetails(container, data) {
     container.innerHTML = '<h3>Detalles de la Orden</h3>';
 
-    // --- 1. Estadísticas (Resumen)
+    // --- Estadísticas básicas (Resumen)
     let totalAssertions = 0, trueAssertions = 0, falseAssertions = 0, unknownCount = 0;
     if (data.validations) {
         for (const assertionId in data.validations) {
@@ -280,59 +272,35 @@ function renderDetails(container, data) {
         else if (percentFalse === 100) { overallTag = "Fake News"; overallClass = "fake-news"; }
         else { overallTag = `Parcialmente Cierta: ${percentTrue.toFixed(2)}%`; overallClass = "partial-news"; }
     }
-    
-    // ⬇️ Obtener el texto para el resumen
-    let newsText = data.text || (data.document?.text) || "Texto no disponible";
-    
-    // --- 2. Contenido de las subpestañas (Detalles)
+
+    // --- Contenido de la pestaña Detalles
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
-            // FILTRA _id y document completamente
-            .filter(([k, v]) => k !== "_id" && k !== "document") 
-            .map(([k, v]) => {
-                let displayValue = v || '';
-
-                // Transformar campos complejos para una visualización simple en la tabla
-                switch (k) {
-                    case "text":
-                        // Usamos un resumen del texto aquí, el completo va a la pestaña Resumen
-                        displayValue = String(newsText).length > 150
-                            ? String(newsText).substring(0, 150) + "..."
-                            : String(newsText);
-                        break;
-                    case "assertions":
-                    case "validators":
-                        displayValue = Array.isArray(v) ? `${v.length} elementos` : v;
-                        break;
-                    case "validations":
-                        displayValue = v ? `${Object.keys(v).length} aserciones validadas` : 0;
-                        break;
-                    case "validators_pending":
-                        displayValue = v; 
-                        break;
-                }
-
-                return `<tr><th>${k}</th><td>${displayValue}</td></tr>`;
-            }).join('') +
+              .filter(([k, v]) => 
+                  k !== "_id" && 
+                  k !== "document" && 
+                  k !== "assertions" && 
+                  k !== "validations" && 
+                  k !== "text" &&
+                  k !== "validators_pending" &&
+                  k !== "status" &&
+                  k !== "validators"
+              )
+              .map(([k, v]) => {
+                  if (k === "text" && typeof v === "object" && v?.text) v = v.text;
+                  return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
+              }).join('') +
         `</table>`;
 
-    // --- 3. HTML del Resumen (Añadiendo el texto)
-    const summaryHtml = `
-        <p><strong>Texto Analizado:</strong></p>
-        <div style="border: 1px dashed #ccc; padding: 10px; margin-bottom: 15px; background-color: #f9f9f9;">
-            ${newsText}
-        </div>
-        
-        <table class="compact-table">
-            <tr><th>Estado General</th><td><span class="${overallClass}">${overallTag}</span></td></tr>
-            <tr><th>% Aserciones Ciertas</th><td><span class="${overallClass}">${percentTrue.toFixed(2)}%</span></td></tr>
-            <tr><th>% Aserciones Falsas</th><td><span class="${overallClass}">${percentFalse.toFixed(2)}%</span></td></tr>
-            <tr><th>Validaciones Desconocidas</th><td><span class="unknown">${unknownCount}</span></td></tr>
-            <tr><th>Total Aserciones Evaluadas</th><td>${totalAssertions}</td></tr>
-        </table>
-    `;
+    // --- Contenido de la pestaña Resumen
+    const summaryHtml = `<table class="compact-table">
+        <tr><th>Estado General</th><td class="${overallClass}">${overallTag}</td></tr>
+        <tr><th>Estado</th><td>${data.status || "N/A"}</td></tr>
+        <tr><th>Validators Pending</th><td>${data.validators_pending ?? 0}</td></tr>
+        <tr><th>Texto</th><td>${typeof data.text === 'string' ? data.text : (data.text?.text || '')}</td></tr>
+    </table>`;
 
-    // --- 4. Subpestañas internas
+    // --- Subpestañas internas
     container.innerHTML += `
         <div class="sub-tabs">
             <button class="subTab activeSubTab" data-target="summaryTab">Resumen</button>
@@ -342,7 +310,7 @@ function renderDetails(container, data) {
         <div id="detailsTab" style="display:none;">${detailsHtml}</div>
     `;
 
-    // --- 5. Lógica de subpestañas
+    // --- Lógica de subpestañas
     const subTabs = container.querySelectorAll(".subTab");
     subTabs.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -487,18 +455,28 @@ function renderTableData(container, data) {
 function renderEventsTable(container, events){
     if(!events?.length){ container.innerHTML="<p>No hay eventos</p>"; return; }
     const limited = events.slice(0, MAX_EVENTS_ROWS);
+
     const rows = limited.map(e=>{
         const payloadStr = JSON.stringify(e.payload,null,2);
-        const visible = payloadStr.substring(0,15)+"...";
+        
+        // El texto visible en la celda será un resumen del JSON
+        const visibleSummary = payloadStr.substring(0, 50).trim() + (payloadStr.length > 50 ? '...' : '');
+
         return `<tr>
             <td>${e.action}</td>
             <td>${e.topic}</td>
             <td>${formatDate(e.timestamp)}</td>
-            <td class="tooltip" title="${payloadStr}">${visible}<span class="tooltiptext">${payloadStr}</span></td>
+            <td>
+                <details class="event-payload-details">
+                    <summary>Payload: ${visibleSummary}</summary>
+                    <pre class="event-payload-pre">${payloadStr}</pre>
+                </details>
+            </td>
         </tr>`;
     }).join("");
+
     container.innerHTML = `<h3>Eventos (Últimos ${limited.length} de ${events.length})</h3>
-        <table><thead><tr><th>Acción</th><th>Topic</th><th>Fecha</th><th>Payload</th></tr></thead><tbody>${rows}</tbody></table>`;
+        <table class="compact-table"><thead><tr><th>Acción</th><th>Topic</th><th>Fecha</th><th>Payload</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // =========================================================

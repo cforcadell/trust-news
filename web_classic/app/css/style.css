@@ -288,3 +288,37 @@ pre {
         margin: 3px 0;
     }
 }
+
+
+/* =================== ESTILOS ESPECÍFICOS PARA EVENTOS =================== */
+
+/* =================== ESTILOS ESPECÍFICOS PARA EVENTOS (ACTUALIZADO) =================== */
+
+.event-payload-details {
+    /* Eliminar el estilo por defecto de 'details' que usamos para Validaciones */
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+.event-payload-details summary {
+    /* Ajustado para coincidir con el font-size de .compact-table */
+    font-size: 0.8rem; /* <-- Aseguramos el mismo tamaño */
+    font-weight: normal;
+    color: #004d99;
+    padding: 0;
+    margin: 0;
+}
+
+.event-payload-pre {
+    /* Estilo para el JSON expandido */
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+    padding: 10px;
+    margin-top: 5px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.75rem; /* Más pequeño para el código JSON */
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}

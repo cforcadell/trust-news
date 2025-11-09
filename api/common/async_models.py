@@ -39,7 +39,6 @@ class Metadata(BaseModel):
 
 class Document(BaseModel):
     """Document structure used before blockchain registration."""
-    order_id: str
     text: str
     assertions: List[Assertion]
     metadata: Optional[Metadata]

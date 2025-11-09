@@ -45,6 +45,15 @@ npx hardhat run scripts/registeredValidators.js   --network localhost # deberia 
 
 cd ~/blockchain/tfm/api/tests
 source venv/bin/activate
- pytest -c test_news-handler.py 
+ pytest -v test_news-handler.py 
 
 
+swaggers:
+
+- fe: http://127.0.0.1:8000/
+- ipfs-fastapi: http://127.0.0.1:8060/docs
+- news-handler: http://127.0.0.1:8072/docs
+- generate-asertions : http://127.0.0.1:8071/docs
+- news-chain : http://127.0.0.1:8073/docs
+- validate-asertions-worker_1 : http://127.0.0.1:8070/docs
+- validate-asertions-worker_2 : http://127.0.0.1:8069/docs

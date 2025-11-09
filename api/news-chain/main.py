@@ -236,7 +236,7 @@ def register_new(data: RegisterBlockchainRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/tx-status/{tx_hash}")
+@app.get("/tx/status/{tx_hash}")
 def tx_status(tx_hash: str):
     """Consulta si la transacción está minada y devuelve el payload completo si lo está."""
     try:
@@ -293,6 +293,98 @@ def tx_status(tx_hash: str):
     except Exception as e:
         logger.error(f"Error consultando estado de TX {tx_hash}: {e}")
         return {"result": False, "status": "error"}
+
+@app.get("/tx/{tx_hash}")
+def get_transaction(tx_hash: str):
+    """
+    Consulta una transacción concreta en la blockchain y devuelve su estado,
+    bloque, emisor, receptor y gas utilizado.
+    Convierte todos los campos binarios a hex para evitar errores UTF-8.
+    """
+    try:
+        tx = w3.eth.get_transaction(tx_hash)
+        receipt = w3.eth.get_transaction_receipt(tx_hash)
+
+        if not tx:
+            raise HTTPException(status_code=404, detail=f"No existe la transacción {tx_hash}")
+
+        def safe_hex(value):
+            if isinstance(value, bytes):
+                return "0x" + value.hex()
+            return value
+
+        result = {
+            "tx_hash": safe_hex(tx.hash),
+            "from": tx["from"],
+            "to": tx["to"],
+            "blockNumber": tx.blockNumber,
+            "gas": tx.gas,
+            "gasPrice": tx.gasPrice,
+            "nonce": tx.nonce,
+            "input": safe_hex(tx.input),
+            "value": tx.value,
+        }
+
+        if receipt:
+            result.update({
+                "status": "success" if receipt.status == 1 else "failed",
+                "blockHash": safe_hex(receipt.blockHash),
+                "transactionIndex": receipt.transactionIndex,
+                "gasUsed": receipt.gasUsed,
+                "cumulativeGasUsed": receipt.cumulativeGasUsed,
+                "contractAddress": receipt.contractAddress,
+                "logs": [
+                    {
+                        "address": log["address"],
+                        "topics": [safe_hex(t) for t in log["topics"]],
+                        "data": safe_hex(log["data"]),
+                    }
+                    for log in receipt["logs"]
+                ],
+            })
+        else:
+            result["status"] = "pending"
+
+        return {"result": True, "payload": result}
+
+    except Exception as e:
+        logger.error(f"Error consultando transacción {tx_hash}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/block/{block_id}")
+def get_block(block_id: int):
+    """
+    Devuelve información del bloque y las transacciones que contiene.
+    """
+    try:
+        block = w3.eth.get_block(block_id, full_transactions=True)
+        if not block:
+            raise HTTPException(status_code=404, detail=f"No existe el bloque {block_id}")
+
+        block_info = {
+            "blockNumber": block.number,
+            "blockHash": block.hash.hex(),
+            "timestamp": block.timestamp,
+            "miner": block.miner,
+            "transactionCount": len(block.transactions),
+            "transactions": [
+                {
+                    "tx_hash": tx.hash.hex(),
+                    "from": tx["from"],
+                    "to": tx["to"],
+                    "value": tx["value"],
+                    "gas": tx["gas"],
+                }
+                for tx in block.transactions
+            ],
+        }
+
+        return {"result": True, "payload": block_info}
+
+    except Exception as e:
+        logger.error(f"Error consultando bloque {block_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =========================================================

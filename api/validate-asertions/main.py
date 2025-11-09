@@ -464,7 +464,7 @@ async def endpoint_registrar_validacion(body: ValidationRegistrationModel):
         logger.exception(f"endpoint_registrar_validacion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/tx-status/{tx_hash}")
+@app.get("/tx/status/{tx_hash}")
 async def endpoint_tx_status(tx_hash: str):
     """Consulta el estado de la tx (no bloqueante)."""
     result = consultar_tx_status_internal(tx_hash)

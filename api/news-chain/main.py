@@ -190,6 +190,19 @@ def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
         "assertions": asertions_output,
         "tx_hash": receipt.transactionHash.hex()
     }
+    
+def safe_hex(value):
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        h = value.hex()
+        if not h.startswith("0x"):
+            h = "0x" + h
+        return h
+    if isinstance(value, str) and value.startswith("0x0x"):
+        return "0x" + value[4:]
+    return value
+
 
 # =========================================================
 # FastAPI
@@ -308,10 +321,7 @@ def get_transaction(tx_hash: str):
         if not tx:
             raise HTTPException(status_code=404, detail=f"No existe la transacción {tx_hash}")
 
-        def safe_hex(value):
-            if isinstance(value, bytes):
-                return "0x" + value.hex()
-            return value
+
 
         result = {
             "tx_hash": safe_hex(tx.hash),
@@ -321,7 +331,6 @@ def get_transaction(tx_hash: str):
             "gas": tx.gas,
             "gasPrice": tx.gasPrice,
             "nonce": tx.nonce,
-            "input": safe_hex(tx.input),
             "value": tx.value,
         }
 
@@ -333,14 +342,7 @@ def get_transaction(tx_hash: str):
                 "gasUsed": receipt.gasUsed,
                 "cumulativeGasUsed": receipt.cumulativeGasUsed,
                 "contractAddress": receipt.contractAddress,
-                "logs": [
-                    {
-                        "address": log["address"],
-                        "topics": [safe_hex(t) for t in log["topics"]],
-                        "data": safe_hex(log["data"]),
-                    }
-                    for log in receipt["logs"]
-                ],
+
             })
         else:
             result["status"] = "pending"

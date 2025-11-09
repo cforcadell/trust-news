@@ -12,6 +12,7 @@
   <nav>
     <button id="nav-news">News</button>
     <button id="nav-orders">Orders</button>
+    <button id="nav-tx">Transacciones</button>
   </nav>
 </header>
 
@@ -40,6 +41,27 @@
 
     <div id="orderTabs" class="tabs"></div>
     <div id="tabContent"></div> 
+</div>
+
+<div class="section" id="tx">
+    <h2>Consulta de Transacciones</h2>
+
+    <div style="margin-bottom:10px;">
+        <input type="text" id="txHash" placeholder="Introduce transaction hash (ej: 0x55d2817a...)"/>
+        <button id="btn-findTx">Buscar Transacción</button>
+    </div>
+
+    <table id="txTable"></table>
+
+    <hr style="margin:25px 0;">
+
+    <h3>Consulta por bloque</h3>
+    <div style="margin-bottom:10px;">
+        <input type="text" id="blockId" placeholder="Introduce block number o hash"/>
+        <button id="btn-findBlock">Buscar Bloque</button>
+    </div>
+
+    <table id="blockTable"></table>
 </div>
 
 <script src="js/app.js"></script> 

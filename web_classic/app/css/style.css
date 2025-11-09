@@ -3,12 +3,12 @@ body {
     font-family: 'Inter', sans-serif;
     margin: 0;
     padding: 0;
-    background-color: #f4f7f9;
-    color: #333;
+    background-color: #111827; /* Dark background */
+    color: #E5E7EB; /* Light text */
 }
 
 header {
-    background-color: #004d99;
+    background-color: #1F2937; /* Darker header */
     color: white;
     padding: 15px 20px;
     display: flex;
@@ -17,12 +17,14 @@ header {
     position: sticky;
     top: 0;
     z-index: 1000;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    border-bottom: 2px solid #0D9488; /* Primary color border */
 }
 
 header h1 {
     margin: 0;
     font-size: 1.5rem;
+    color: #0D9488;
 }
 
 header nav {
@@ -31,7 +33,7 @@ header nav {
 }
 
 header nav button {
-    background-color: #0066cc;
+    background-color: #0D9488; /* Primary color */
     color: white;
     border: none;
     padding: 10px 15px;
@@ -41,17 +43,17 @@ header nav button {
 }
 
 header nav button:hover {
-    background-color: #005bb5;
+    background-color: #0F766E; /* Darker primary */
 }
 
 .section {
     display: none;
-    padding: 20px;
+    padding-top: 5rem;
     max-width: 1000px;
     margin: 20px auto;
-    background-color: white;
+    background-color: #111827; /* Match body for seamless look */
     border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15);
 }
 
 .section.active { display: block; }
@@ -61,172 +63,177 @@ textarea {
     width: 100%;
     padding: 10px;
     margin-bottom: 15px;
-    border: 1px solid #ccc;
+    border: 1px solid #374151;
     border-radius: 4px;
     box-sizing: border-box;
     resize: vertical;
     font-size: 1rem;
     height: 400px;
+    background-color: #1F2937;
+    color: #E5E7EB;
 }
 
 input[type="text"] {
     width: 100%;
     padding: 6px 8px;
     margin-bottom: 15px;
-    border: 1px solid #ccc;
+    border: 1px solid #374151;
     border-radius: 4px;
     box-sizing: border-box;
     font-size: 0.85rem;
     line-height: 1.2;
+    background-color: #1F2937;
+    color: #E5E7EB;
 }
 
 button {
-    background-color: #28a745;
-    color: white;
+    background-color: #10B981; /* Secondary color (Green) */
+    color: #111827; /* Dark text for contrast */
     border: none;
     padding: 6px 12px;
     border-radius: 4px;
     cursor: pointer;
     margin-right: 10px;
     transition: background-color 0.2s;
+    font-weight: 600;
 }
 
-button:hover { background-color: #218838; }
+button:hover { background-color: #059669; }
 
 /* =================== TABLAS =================== */
 table, .compact-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.8rem;
-    line-height: 1.1;
+    line-height: 1.2;
     margin-top: 20px;
+    background-color: #1F2937;
+    color: #D1D5DB;
 }
 
 th, td {
-    border: 1px solid #ddd;
-    padding: 2px 4px;
+    border: 1px solid #374151;
+    padding: 8px 12px;
     text-align: left;
 }
 
 th {
-    background-color: #f2f2f2;
+    background-color: #374151;
     font-weight: 600;
+    color: #9CA3AF;
 }
 
 td a {
-    color: #0066cc;
+    color: #0D9488;
     text-decoration: none;
     font-weight: bold;
     font-size: 0.85rem;
 }
 
-.validator-col {
-    width: 80px !important;
-    min-width: 80px;
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+/* Compact Table specific for Details */
+.compact-table th { 
+    background-color: #1F2937;
+    text-align: right;
+    width: 30%; 
+    font-weight: 600; 
+    color: #9CA3AF; 
 }
-
-.description-col { width: auto !important; }
+.compact-table td {
+    background-color: #111827;
+}
 
 /* =================== ORDERS =================== */
 #orders {
-    padding: 5px 10px;
-    max-width: 900px;
-    margin: 10px auto;
-    font-size: 0.85rem;
-    background-color: white;
-    border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    position: relative;
+    /* Reduced padding/margin as it's handled by main/section padding */
 }
 
 #ordersTopBar {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 3px 0;
-    position: sticky;
-    top: 0;
-    background-color: white;
-    z-index: 100;
-    border-bottom: 1px solid #ddd;
+    gap: 10px;
+    padding: 10px;
+    background-color: #1F2937;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
 
 #ordersTopBar input[type="text"] { flex: 1; }
 
 #ordersTopBar button,
 .sub-tabs button {
-    padding: 6px 12px;
+    padding: 8px 15px;
     font-size: 0.85rem;
-    border-radius: 4px;
+    border-radius: 6px;
+    background-color: #374151;
+    color: #D1D5DB;
+}
+#ordersTopBar button:hover,
+.sub-tabs button:hover {
+    background-color: #4B5563;
 }
 
 #fixedDetailsContainer, #orderTabs, #tabContent {
-    margin-top: 5px;
-    padding: 5px;
+    margin-top: 15px;
+    padding: 0;
+}
+
+#fixedDetailsContainer {
+    background-color: #1F2937;
+    padding: 15px;
+    border-left: 4px solid #0D9488;
 }
 
 #orderTabs {
-    border-bottom: 2px solid #ddd;
+    border-bottom: 2px solid #374151;
     margin-bottom: 15px;
 }
 
 #orderTabs button {
-    background: none;
-    color: #555;
+    background: #1F2937;
+    color: #D1D5DB;
     border: none;
     border-bottom: 3px solid transparent;
-    margin-right: 3px;
-    padding: 3px 6px;
-    font-size: 0.8rem;
+    margin-right: 5px;
+    padding: 8px 15px;
+    font-size: 0.9rem;
     cursor: pointer;
-    border-radius: 0;
+    border-radius: 6px 6px 0 0;
 }
 
 #orderTabs button.activeTab {
-    color: #004d99;
-    border-bottom: 3px solid #004d99;
+    color: #0D9488;
+    border-bottom: 3px solid #0D9488;
     font-weight: 600;
+    background-color: #111827;
 }
 
-/* =================== STATUS =================== */
+/* =================== STATUS / VERIFICACIÓN =================== */
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
 .status-value {
-    padding: 2px 8px;
+    padding: 4px 10px;
     border-radius: 4px;
     font-weight: bold;
     display: inline-block;
     color: white;
 }
 
-.status-value.polling { background-color: #007bff; }
+.status-value.polling { background-color: #FCD34D; color: #111827; }
 .status-value.blinking { animation: blink 1s step-end infinite; }
-.status-value.validated { background-color: #28a745; animation: none; }
+.status-value.validated { background-color: #10B981; animation: none; }
 
-/* =================== VERIFICACIÓN =================== */
-.verification-tag {
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-weight: bold;
-    display: inline-block;
-    text-shadow: 0 0 1px rgba(0,0,0,0.2);
-}
-
-.verification-tag.true-news { background-color: #28a745; color: white; }
-.verification-tag.fake-news { background-color: #dc3545; color: white; }
-.verification-tag.partial-news { background-color: #ffc107; color: #333; }
-.verification-tag.unknown { background-color: #6c757d; color: white; }
+.verification-tag.true-news, .true-news { background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px; }
+.verification-tag.fake-news, .fake-news { background-color: #EF4444; color: white; padding: 2px 6px; border-radius: 4px; }
+.verification-tag.partial-news, .partial-news { background-color: #F59E0B; color: #111827; padding: 2px 6px; border-radius: 4px; }
+.verification-tag.unknown { background-color: #6B7280; color: white; padding: 2px 6px; border-radius: 4px; }
 
 /* =================== DETALLES / VALIDACIONES =================== */
 details {
     margin-top: 10px;
-    border: 1px solid #eee;
+    border: 1px solid #374151;
     padding: 10px;
-    border-radius: 4px;
+    border-radius: 8px;
+    background-color: #1F2937;
 }
 
 details summary {
@@ -235,50 +242,53 @@ details summary {
     padding: 5px 0;
 }
 
-.true { color: green; font-weight: bold; }
-.false { color: red; font-weight: bold; }
-
-/* =================== TOOLTIP =================== */
-.tooltip { position: relative; display: inline-block; cursor: help; }
-.tooltiptext {
-    visibility: hidden;
-    width: 300px;
-    background-color: #555;
-    color: #fff;
-    text-align: left;
-    border-radius: 6px;
-    padding: 10px;
-    position: absolute;
-    z-index: 1;
-    bottom: 125%;
-    left: 50%;
-    margin-left: -150px;
-    opacity: 0;
-    transition: opacity 0.3s;
-    white-space: pre-wrap;
-    font-family: monospace;
-    font-size: 0.8rem;
+/* Estilos de tabla dentro de detalles de validaciones */
+details .compact-table {
+    margin-top: 10px;
 }
-.tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+details .compact-table th {
+    text-align: left;
+    width: auto;
+    background-color: #374151;
+}
 
 /* =================== PRE / JSON =================== */
-pre {
-    background-color: #f4f4f4;
+pre, .event-payload-pre {
+    background-color: #111827;
     padding: 15px;
     border-radius: 4px;
     overflow-x: auto;
-    white-space: pre-wrap; 		
-    word-wrap: break-word; 		
+    white-space: pre-wrap; 
+    word-wrap: break-word; 
+    border: 1px solid #374151;
 }
 
-/* =================== CLASES DE NOTICIAS =================== */
-.true-news { background-color: #28a745; color: white; padding: 2px 6px; border-radius: 4px; }
-.partial-news { background-color: #ffc107; color: #333; padding: 2px 6px; border-radius: 4px; }
-.fake-news { background-color: #dc3545; color: white; padding: 2px 6px; border-radius: 4px; }
-.unknown { background-color: #6c757d; color: white; padding: 2px 6px; border-radius: 4px; }
+/* =================== FIX: Overflow en tablas largas (Transacciones / Bloques) =================== */
+#txTable, #blockTable {
+    table-layout: fixed; /* ✅ evita que las celdas crezcan más que el ancho */
+    width: 100%;
+    word-break: break-all;
+}
+
+#txTable th, #txTable td,
+#blockTable th, #blockTable td {
+    border: 1px solid #374151;
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+    white-space: normal;
+    word-break: break-all; /* ✅ rompe cadenas largas como hashes */
+    max-width: 600px;
+    overflow-wrap: anywhere;
+}
 
 /* =================== RESPONSIVE =================== */
 @media (max-width: 600px) {
+    header {
+        flex-direction: column;
+        gap: 10px;
+        padding-bottom: 10px;
+    }
     #ordersTopBar {
         flex-direction: column;
         align-items: stretch;
@@ -287,38 +297,4 @@ pre {
         width: 100%;
         margin: 3px 0;
     }
-}
-
-
-/* =================== ESTILOS ESPECÍFICOS PARA EVENTOS =================== */
-
-/* =================== ESTILOS ESPECÍFICOS PARA EVENTOS (ACTUALIZADO) =================== */
-
-.event-payload-details {
-    /* Eliminar el estilo por defecto de 'details' que usamos para Validaciones */
-    border: none;
-    padding: 0;
-    margin: 0;
-}
-
-.event-payload-details summary {
-    /* Ajustado para coincidir con el font-size de .compact-table */
-    font-size: 0.8rem; /* <-- Aseguramos el mismo tamaño */
-    font-weight: normal;
-    color: #004d99;
-    padding: 0;
-    margin: 0;
-}
-
-.event-payload-pre {
-    /* Estilo para el JSON expandido */
-    background-color: #f4f4f4;
-    border: 1px solid #ddd;
-    padding: 10px;
-    margin-top: 5px;
-    max-height: 200px;
-    overflow-y: auto;
-    font-size: 0.75rem; /* Más pequeño para el código JSON */
-    white-space: pre-wrap;
-    word-wrap: break-word;
 }

@@ -369,12 +369,11 @@ function renderDetails(container, data) {
                 else if (lit === "DESCONOCIDO") unknownCount++;
             });
             const known = approved - rejected;
-            
             if (known > 0)  trueAssertions++;
             else if (known < 0) falseAssertions++;
         }
     }
-    
+
     let percentTrue=0;
     let percentFalse=0;
     const knownAssertions = totalAssertions - unknownCount;
@@ -382,15 +381,15 @@ function renderDetails(container, data) {
         percentTrue = (trueAssertions / knownAssertions) * 100;
         percentFalse = (falseAssertions / knownAssertions) * 100;
     } 
-    
+
     let overallTag = "Sin Validaciones", overallClass = "unknown";
     if (totalAssertions > 0) {
         if (trueAssertions > falseAssertions && trueAssertions > 0) { 
-            overallTag = "Mayormente Cierta"; 
+            overallTag = "Parcialmente Cierta"; 
             overallClass = "true-news"; 
         }
         else if (falseAssertions > trueAssertions && falseAssertions > 0) { 
-            overallTag = "Mayormente Falsa"; 
+            overallTag = "Parcialmente Falsa"; 
             overallClass = "fake-news"; 
         }
         else if (trueAssertions === falseAssertions && knownAssertions > 0) {
@@ -399,13 +398,20 @@ function renderDetails(container, data) {
         }
         else { overallTag = "Pendiente / Indefinido"; overallClass = "unknown"; }
     }
-    
+
     // --- Contenido de las subpestañas
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
               .filter(([k, v]) => k !== "_id" && k !== "document" && k !== "assertions" && k !== "validations" && k !== "validators" && k !== "text" && k !== "status" && k !== "validators_pending")
               .map(([k, v]) => {
                   if (k === "text" && typeof v === "object" && v?.text) v = v.text;
+
+                  // Hacer tx_hash clicable
+                  if (k === "tx_hash" && v) {
+                      const safeHash = v.replace(/'/g, "\\'");
+                      v = `<a href="#" onclick="navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a>`;
+                  }
+
                   return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
               }).join('') +
         `</table>`;
@@ -441,7 +447,6 @@ function renderDetails(container, data) {
             container.querySelector(`#${btn.getAttribute('data-target')}`).style.display = 'block';
         });
     });
-    // Set initial active state for styling
     container.querySelector(".subTab.activeSubTab")?.classList.add('text-primary');
 
     // Add polling indicator if status is PENDING/SUBMITTED
@@ -452,6 +457,7 @@ function renderDetails(container, data) {
         }
     }
 }
+
 
 
 
@@ -502,7 +508,12 @@ function renderValidationsTree(container, validations, assertions) {
                 <td class="text-primary">${info.validator_alias || validator}</td>
                 <td class="${cls}"><b>${lit}</b></td>
                 <td><pre class="event-payload-pre mt-0">${desc}</pre></td>
-                <td><span class="text-xs text-gray-500">${info.tx_hash ? info.tx_hash.substring(0, 10) + '...' : ""}</span></td>
+                <td>
+                        ${info.tx_hash 
+                        ? `<a href="#" onclick="navigateToTx('${info.tx_hash}')">${shortHex(info.tx_hash)}</a>` 
+                        : ""
+                    }
+                </td>
             </tr>`;
         }
 
@@ -517,7 +528,7 @@ function renderValidationsTree(container, validations, assertions) {
                             <th>Validator</th>
                             <th>Resultado</th>
                             <th>Descripción</th>
-                            <th>Tx Hash</th>
+                            <th>tx_hash</th>                        
                         </tr>
                     </thead>
                     <tbody>${tableRows}</tbody>
@@ -571,11 +582,10 @@ function renderTableData(container, data) {
                     if (k === "order_id") {
                         return `<td><a href="#" onclick="navigateToOrderDetails('${row[k]}')">${row[k]}</a></td>`;
                     }
-                    
-                    // Tx Hash (corta)
-                    if (k.toLowerCase().includes('hash') && typeof val === 'string' && val.length > 10) {
-                        val = val.substring(0, 10) + '...';
+                    if (k==='tx_hash') {
+                         return `<td><a href="#" onclick="navigateToTx('${val}')">${shortHex(val)}</a></td>`;
                     }
+
 
                     return `<td>${val}</td>`;
                 }).join("")}</tr>`;
@@ -716,6 +726,19 @@ function renderTxTable(apiData) {
     `;
 }
 
+function navigateToTx(hash) {
+    if (!hash) return;
+    
+    // Cambiar a la sección de transacciones
+    showSection('tx');
+    
+    // Poner hash en el input
+    const txInput = document.getElementById("txHash");
+    txInput.value = hash;
+
+    // Llamar a findTx para cargar los datos
+    findTx();
+}
 
 // ===============================
 // 🔹 BLOQUES

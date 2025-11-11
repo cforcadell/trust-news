@@ -298,3 +298,9 @@ pre, .event-payload-pre {
         margin: 3px 0;
     }
 }
+
+.compact-table th:nth-child(5),
+.compact-table td:nth-child(5) {
+  min-width: 120px;
+  text-align: right;
+}

@@ -37,7 +37,7 @@ const API = "/api";
 const TX_API = "/ethereum";
 
 const MAX_EVENTS_ROWS = 15;
-const POLLING_DURATION = 30000; // 20 segundos
+const POLLING_DURATION = 0; // 20 segundos
 const POLLING_INTERVAL = 1000;  // 1 segundo
 
 const CATEGORY_MAP = {
@@ -714,7 +714,12 @@ function renderTxTable(apiData) {
     const rows = [
         ["from", data.from],
         ["to", data.to],
-        ["blockNumber", data.blockNumber],
+        [
+            "blockNumber",
+            data.blockNumber
+                ? `<a href="#" onclick="event.preventDefault(); navigateToBlock(${data.blockNumber})">${data.blockNumber}</a>`
+                : ""
+        ],
         ["gas", data.gas],
         ["gasPrice", data.gasPrice],
         ["nonce", data.nonce],
@@ -745,6 +750,21 @@ function navigateToTx(hash) {
     // Llamar a findTx para cargar los datos
     findTx();
 }
+
+function navigateToBlock(hash) {
+    if (!hash) return;
+    
+    // Cambiar a la sección de bloques
+    showSection('blocks');
+    
+    // Poner hash en el input
+    const blockInput = document.getElementById("blockId");
+    blockInput.value = hash;
+
+    // Llamar a findBlock para cargar los datos
+    findBlock();
+}
+
 
 // ===============================
 // 🔹 BLOQUES
@@ -777,56 +797,89 @@ async function findBlock() {
 }
 
 function renderBlockTable(data) {
-    const blockTable = document.createElement("table");
-    blockTable.className = "min-w-full border border-gray-300 text-sm";
-    blockTable.innerHTML = "<tr><th>Campo</th><th>Valor</th></tr>";
+  const container = document.createElement("div");
 
-    const timestamp = Number(data.timestamp);
-    const formattedTime = !isNaN(timestamp)
-        ? new Date(timestamp * 1000).toLocaleString("es-ES", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-        })
-        : "";
+  // ======= 🧱 Tabla principal del bloque =======
+  const blockTable = document.createElement("table");
+  blockTable.className = "compact-table";
 
-    const rows = [
-        ["blockNumber", data.blockNumber],
-        ["blockHash", shortHex(data.blockHash)],
-        ["timestamp", formattedTime],
-        ["miner", data.miner],
-        ["transactionCount", data.transactionCount]
-    ];
+  const timestamp = Number(data.timestamp);
+  const formattedTime = !isNaN(timestamp)
+    ? new Date(timestamp * 1000).toLocaleString("es-ES", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      })
+    : "";
 
-    blockTable.innerHTML += rows
-        .map(([k, v]) => `<tr><td class="font-medium">${k}</td><td>${v ?? ""}</td></tr>`)
-        .join("");
+  const blockRows = [
+    ["blockNumber", data.blockNumber],
+    ["blockHash", shortHex(data.blockHash)],
+    ["timestamp", formattedTime],
+    ["miner", data.miner],
+    ["transactionCount", data.transactionCount]
+  ];
 
-    // 🔹 Si hay transacciones, las mostramos
-    if (Array.isArray(data.transactions) && data.transactions.length > 0) {
-        const txRows = data.transactions.map(tx => `
-            <tr>
-                <td colspan="2" class="border-t pt-2">
-                    <b>TX:</b> 
-                    <a href="#" class="text-blue-500 underline" onclick="event.preventDefault(); navigateToTx('${tx.tx_hash}')">
-                        ${shortHex(tx.tx_hash)}
-                    </a><br>
-                    From: ${tx.from}<br>
-                    To: ${tx.to}<br>
-                    Value: ${tx.value}<br>
-                    Gas: ${tx.gas}
-                </td>
-            </tr>
-        `).join("");
+  blockTable.innerHTML = `
+    <tr><th>Campo</th><th>Valor</th></tr>
+    ${blockRows.map(([k, v]) => `
+      <tr>
+        <th>${k}</th>
+        <td>${v ?? ""}</td>
+      </tr>
+    `).join("")}
+  `;
+  container.appendChild(blockTable);
 
-        blockTable.innerHTML += `<tr><th colspan="2" class="bg-gray-100">Transacciones</th></tr>${txRows}`;
-    }
+  // ======= 📦 Tabla de transacciones =======
+  if (Array.isArray(data.transactions) && data.transactions.length > 0) {
+    const txTitle = document.createElement("h3");
+    txTitle.textContent = "Transacciones del bloque";
+    txTitle.style.marginTop = "20px";
+    txTitle.style.color = "#0D9488";
+    container.appendChild(txTitle);
 
-    return blockTable;
+    const txTable = document.createElement("table");
+    txTable.className = "compact-table";
+
+    txTable.innerHTML = `
+      <tr>
+        <th>tx_hash</th>
+        <th>from</th>
+        <th>to</th>
+        <th>value</th>
+        <th>gas</th>
+      </tr>
+      ${data.transactions.map(tx => `
+        <tr>
+          <td>
+            <a href="#" onclick="event.preventDefault(); navigateToTx('${tx.tx_hash}')">
+              ${shortHex(tx.tx_hash)}
+            </a>
+          </td>
+          <td>${tx.from}</td>
+          <td>${tx.to}</td>
+          <td>${tx.value}</td>
+          <td>${tx.gas}</td>
+        </tr>
+      `).join("")}
+    `;
+    container.appendChild(txTable);
+  }
+
+  // Reemplaza contenido actual del contenedor
+  const blockTableContainer = document.getElementById("blockTable");
+  if (blockTableContainer) {
+    blockTableContainer.innerHTML = "";
+    blockTableContainer.appendChild(container);
+  }
+
+  return container;
 }
+
 
 
 
@@ -838,6 +891,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('nav-news').addEventListener('click',()=>showSection('news'));
     document.getElementById('nav-orders').addEventListener('click',()=>showSection('orders'));
     document.getElementById("nav-tx").addEventListener("click", () => showSection("tx"));
+    document.getElementById("nav-blocks").addEventListener("click", () => showSection("blocks"));
     
     // News Listeners
     document.getElementById('btn-publishNew').addEventListener('click',publishNew);
@@ -849,6 +903,8 @@ document.addEventListener('DOMContentLoaded',()=>{
     
     // TX Listeners
     document.getElementById("btn-findTx").addEventListener("click", findTx);
+
+    // Blocks Listeners
     document.getElementById("btn-findBlock").addEventListener("click", findBlock);
 
     // Initial view

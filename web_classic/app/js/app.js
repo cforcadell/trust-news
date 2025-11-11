@@ -525,7 +525,7 @@ function renderValidationsTree(container, validations, assertions) {
 
         html += `<details class="p-3 bg-gray-700 rounded-lg mb-3">
             <summary class="cursor-pointer" style="color:${color}; font-weight:bold; font-size:1rem;">
-                ${assertionId.substring(0, 8)}... - ${assertionText} → <span style="font-size:0.9rem;">(${approvedCount} A / ${rejectedCount} R)</span>
+                ${assertionId}. ${assertionText} → <span style="font-size:0.9rem;">(${approvedCount} A / ${rejectedCount} R)</span>
             </summary>
             <div class="mt-3">
                 <table class="compact-table">
@@ -600,43 +600,74 @@ function renderTableData(container, data) {
     </table>`;
 }
 
-function renderEventsTable(container, events){
-    if(!events?.length){ container.innerHTML="<p class='text-gray-400 p-4'>No hay eventos registrados.</p>"; return; }
-    const limited = events.slice(0, MAX_EVENTS_ROWS);
+function renderEventsTable(container, events) {
+    if (!events?.length) {
+        container.innerHTML = "<p class='text-gray-400 p-4'>No hay eventos registrados.</p>";
+        return;
+    }
 
-    const rows = limited.map(e=>{
-        const payloadStr = JSON.stringify(e.payload,null,2);
-        
-        // El texto visible en la celda será un resumen del JSON
-        const visibleSummary = payloadStr.substring(0, 50).trim() + (payloadStr.length > 50 ? '...' : '');
+    let currentPage = 1;
+    const perPage = MAX_EVENTS_ROWS;
+    const totalPages = Math.ceil(events.length / perPage);
 
-        return `<tr>
-            <td class="text-primary">${e.action}</td>
-            <td>${e.topic}</td>
-            <td>${formatDate(e.timestamp)}</td>
-            <td>
-                <details class="event-payload-details">
-                    <summary>Payload: ${visibleSummary}</summary>
-                    <pre class="event-payload-pre">${payloadStr}</pre>
-                </details>
-            </td>
-        </tr>`;
-    }).join("");
+    function renderPage(page) {
+        const start = (page - 1) * perPage;
+        const end = start + perPage;
+        const pageData = events.slice(start, end);
 
-    container.innerHTML = `
-        <h3 class="text-lg font-bold mb-3">Eventos (Últimos ${limited.length} de ${events.length})</h3>
-        <table class="compact-table">
-            <thead>
+        const rows = pageData.map(e => {
+            const payloadStr = JSON.stringify(e.payload, null, 2);
+            const visibleSummary = payloadStr.substring(0, 80).trim() + (payloadStr.length > 80 ? '...' : '');
+            
+            return `
                 <tr>
-                    <th class="uppercase text-xs">Acción</th>
-                    <th class="uppercase text-xs">Topic</th>
-                    <th class="uppercase text-xs">Fecha</th>
-                    <th class="uppercase text-xs">Payload</th>
-                </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-        </table>`;
+                    <td class="col-action">${e.action}</td>
+                    <td class="col-topic">${e.topic}</td>
+                    <td class="col-date">${formatDate(e.timestamp)}</td>
+                    <td class="col-payload">
+                        <details class="event-payload-details">
+                            <summary><span class="summary-text">${visibleSummary}</span></summary>
+                            <pre class="event-payload-pre">${payloadStr}</pre>
+                        </details>
+                    </td>
+                </tr>`;
+        }).join("");
+
+        container.innerHTML = `
+            <h3 class="text-lg font-bold mb-3">
+                Eventos (${events.length} total) — Página ${page}/${totalPages}
+            </h3>
+            <table class="compact-table w-full">
+                <thead>
+                    <tr>
+                        <th class="col-action">Acción</th>
+                        <th class="col-topic">Topic</th>
+                        <th class="col-date">Fecha</th>
+                        <th class="col-payload">Payload</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <div class="flex justify-between items-center mt-3">
+                <button id="prevPage" class="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">⟵ Anterior</button>
+                <span class="text-sm text-gray-300">Página ${page} de ${totalPages}</span>
+                <button id="nextPage" class="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">Siguiente ⟶</button>
+            </div>
+        `;
+
+        const prevBtn = container.querySelector("#prevPage");
+        const nextBtn = container.querySelector("#nextPage");
+        prevBtn.disabled = page === 1;
+        nextBtn.disabled = page === totalPages;
+
+        prevBtn.onclick = () => renderPage(page - 1);
+        nextBtn.onclick = () => renderPage(page + 1);
+    }
+
+    renderPage(currentPage);
 }
+
+
 
 
 // =========================
@@ -649,12 +680,12 @@ function renderAssertions(container, assertions) {
     }
 
     let html = `
-        <table class="compact-table">
+        <table id="assertionsTable">
             <thead>
                 <tr>
-                    <th class="uppercase text-xs">ID</th>
-                    <th class="uppercase text-xs">Texto</th>
-                    <th class="uppercase text-xs">Categoría</th>
+                    <th class="id-col">ID</th>
+                    <th class="text-col">Texto</th>
+                    <th class="cat-col">Categoría</th>
                 </tr>
             </thead>
             <tbody>
@@ -666,9 +697,9 @@ function renderAssertions(container, assertions) {
         
         html += `
             <tr>
-                <td><span class="text-xs text-gray-500">${a.idAssertion ? a.idAssertion.substring(0, 8) + '...' : "-"}</span></td>
-                <td>${textValue || "-"}</td>
-                <td>${catDesc}</td>
+                <td class="id-col"><span>${a.idAssertion}</span></td>
+                <td class="text-col">${textValue || "-"}</td>
+                <td class="cat-col">${catDesc}</td>
             </tr>
         `;
     });
@@ -676,6 +707,7 @@ function renderAssertions(container, assertions) {
     html += "</tbody></table>";
     container.innerHTML = html;
 }
+
 
 
 //=========================================================

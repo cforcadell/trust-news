@@ -304,3 +304,77 @@ pre, .event-payload-pre {
   min-width: 120px;
   text-align: right;
 }
+
+/* =================== TABLA DE EVENTOS =================== */
+.compact-table th.col-action,
+.compact-table td.col-action,
+.compact-table th.col-topic,
+.compact-table td.col-topic,
+.compact-table th.col-date,
+.compact-table td.col-date {
+    width: 10%; /* Acción, Topic y Fecha iguales */
+    text-align: left;
+}
+
+.compact-table th.col-payload,
+.compact-table td.col-payload {
+    width: 60%; /* Payload ocupa el resto */
+}
+
+/* Evita que el payload rompa el diseño */
+.compact-table td.col-payload pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.compact-table td .summary-text {
+    font-size: 0.80rem; /* Ajusta según lo necesites */
+    color: #D1D5DB; /* Mantener tono gris claro */
+}
+
+/* =================== TABLA DE ASSERTIONS =================== */
+#assertionsTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    margin-top: 15px;
+    background-color: #1F2937;
+    color: #D1D5DB;
+}
+
+#assertionsTable th, #assertionsTable td {
+    border: 1px solid #374151;
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+}
+
+#assertionsTable th {
+    background-color: #374151;
+    font-weight: 600;
+    color: #9CA3AF;
+    text-transform: uppercase;
+    font-size: 0.7rem; /* Más pequeña */
+}
+
+#assertionsTable td {
+    font-size: 0.75rem;
+}
+
+#assertionsTable th.id-col,
+#assertionsTable td.id-col {
+    width: 10%;
+}
+
+#assertionsTable th.text-col,
+#assertionsTable td.text-col {
+    width: 70%;
+}
+
+#assertionsTable th.cat-col,
+#assertionsTable td.cat-col {
+    width: 20%;
+}

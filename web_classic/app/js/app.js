@@ -415,7 +415,7 @@ function renderDetails(container, data) {
                   // Hacer tx_hash clicable
                   if (k === "tx_hash" && v) {
                       const safeHash = v.replace(/'/g, "\\'");
-                      v = `<a href="#" onclick="navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a>`;
+                      v = `<a href="#" onclick="event.preventDefault(); navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a>`;
                   }
 
                   return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
@@ -516,7 +516,7 @@ function renderValidationsTree(container, validations, assertions) {
                 <td><pre class="event-payload-pre mt-0">${desc}</pre></td>
                 <td>
                         ${info.tx_hash 
-                        ? `<a href="#" onclick="navigateToTx('${info.tx_hash}')">${shortHex(info.tx_hash)}</a>` 
+                        ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${info.tx_hash}')">${shortHex(info.tx_hash)}</a>` 
                         : ""
                     }
                 </td>
@@ -586,10 +586,10 @@ function renderTableData(container, data) {
 
                     // order_id clicable
                     if (k === "order_id") {
-                        return `<td><a href="#" onclick="navigateToOrderDetails('${row[k]}')">${row[k]}</a></td>`;
+                        return `<td><a href="#" onclick="event.preventDefault(); navigateToOrderDetails('${row[k]}')">${row[k]}</a></td>`;
                     }
                     if (k==='tx_hash') {
-                         return `<td><a href="#" onclick="navigateToTx('${val}')">${shortHex(val)}</a></td>`;
+                         return `<td><a href="#" onclick="event.preventDefault(); navigateToTx('${val}')">${shortHex(val)}</a></td>`;
                     }
 
 
@@ -751,8 +751,8 @@ function navigateToTx(hash) {
 // ===============================
 async function findBlock() {
     const blockId = document.getElementById("blockId").value.trim();
-    const table = document.getElementById("blockTable");
-    table.innerHTML = "";
+    const tableContainer = document.getElementById("blockTable");
+    tableContainer.innerHTML = "";
 
     if (!blockId) return alertMessage("Introduce un número o hash de bloque", 'error');
     alertMessage("Buscando bloque...", 'info');
@@ -762,50 +762,72 @@ async function findBlock() {
         if (!res.ok) throw new Error("Error al obtener el bloque");
         
         const responseData = await res.json();
-        // 🎯 CORRECCIÓN APLICADA: Usar el campo 'payload'
         if (!responseData.payload) throw new Error("Payload missing in block response."); 
 
-        renderBlockTable(responseData.payload);
+        // 🔹 Renderiza e inserta la tabla
+        const blockTable = renderBlockTable(responseData.payload);
+        tableContainer.appendChild(blockTable);
+
         alertMessage("Bloque encontrado.", 'primary');
     } catch (err) {
         console.error(err);
-        table.innerHTML = "<tbody><tr><td><div class='p-3 text-red-400'>Error al obtener bloque o ID/Hash inválido.</div></td></tr></tbody>";
+        tableContainer.innerHTML = "<tbody><tr><td><div class='p-3 text-red-400'>Error al obtener bloque o ID/Hash inválido.</div></td></tr></tbody>";
         alertMessage("Error al buscar el bloque.", 'error');
     }
 }
 
-function renderBlockTable(apiData) {
-  const data = apiData?.payload || apiData || {};
-  const blockTable = document.createElement("table");
-  blockTable.id = "blockTable";
+function renderBlockTable(data) {
+    const blockTable = document.createElement("table");
+    blockTable.className = "min-w-full border border-gray-300 text-sm";
+    blockTable.innerHTML = "<tr><th>Campo</th><th>Valor</th></tr>";
 
-  const timestamp = Number(data.timestamp);
-  const formattedTime = !isNaN(timestamp)
-    ? new Date(timestamp * 1000).toLocaleString("es-ES", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      })
-    : "";
+    const timestamp = Number(data.timestamp);
+    const formattedTime = !isNaN(timestamp)
+        ? new Date(timestamp * 1000).toLocaleString("es-ES", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        })
+        : "";
 
-  const rows = [
-    ["blockHash", shortHex(data.blockHash)],
-    ["timestamp", formattedTime],
-    ["miner", data.miner],
-    ["transactionCount", data.transactionCount]
-  ];
+    const rows = [
+        ["blockNumber", data.blockNumber],
+        ["blockHash", shortHex(data.blockHash)],
+        ["timestamp", formattedTime],
+        ["miner", data.miner],
+        ["transactionCount", data.transactionCount]
+    ];
 
-  blockTable.innerHTML = `
-    <tr><th>Campo</th><th>Valor</th></tr>
-    ${rows
-      .map(([k, v]) => `<tr><td>${k}</td><td>${v ?? ""}</td></tr>`)
-      .join("")}
-  `;
-  return blockTable;
+    blockTable.innerHTML += rows
+        .map(([k, v]) => `<tr><td class="font-medium">${k}</td><td>${v ?? ""}</td></tr>`)
+        .join("");
+
+    // 🔹 Si hay transacciones, las mostramos
+    if (Array.isArray(data.transactions) && data.transactions.length > 0) {
+        const txRows = data.transactions.map(tx => `
+            <tr>
+                <td colspan="2" class="border-t pt-2">
+                    <b>TX:</b> 
+                    <a href="#" class="text-blue-500 underline" onclick="event.preventDefault(); navigateToTx('${tx.tx_hash}')">
+                        ${shortHex(tx.tx_hash)}
+                    </a><br>
+                    From: ${tx.from}<br>
+                    To: ${tx.to}<br>
+                    Value: ${tx.value}<br>
+                    Gas: ${tx.gas}
+                </td>
+            </tr>
+        `).join("");
+
+        blockTable.innerHTML += `<tr><th colspan="2" class="bg-gray-100">Transacciones</th></tr>${txRows}`;
+    }
+
+    return blockTable;
 }
+
 
 
 // =========================================================

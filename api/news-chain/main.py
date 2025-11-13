@@ -204,6 +204,7 @@ def safe_hex(value):
     return value
 
 
+
 # =========================================================
 # FastAPI
 # =========================================================
@@ -356,69 +357,100 @@ def get_transaction(tx_hash: str):
 
 
 
-VEREDICT_MAP = {0: "Unknown", 1: "True", 2: "False"}
+
 
 @app.get("/blockchain/post/{post_id}")
 def get_info_by_postid(post_id: int):
     try:
-        # --- 1️⃣ Recuperar los campos planos del Post ---
-        # document: Multihash, publisher: address, hash_new: Multihash
+        # =====================================================
+        # 1️⃣ Recuperar los campos planos del Post
+        # =====================================================
         document, publisher, hash_new = contract.functions.getPostFlat(post_id).call()
 
-        logger.info(f"Recuperados datos planos para postId {post_id}: publisher={publisher}, document={document}, hash_new={hash_new}")
+        logger.info(f"Recuperados datos planos para postId {post_id}: "
+                    f"publisher={publisher}, document={document}, hash_new={hash_new}")
+
         post_info = {
             "postId": post_id,
             "publisher": publisher,
             "document": multihash_to_base58(document),
             "hash_new": safe_hex(hash_new[2])
-            }
-        
+        }
 
-        # --- 2️⃣ Recuperar aserciones y validaciones (AsertionView[]) ---
-        # asertions_raw = contract.functions.getAsertionsWithValidations(post_id).call()
-        # asertions = []
+        # =====================================================
+        # 2️⃣ Recuperar aserciones y validaciones
+        # =====================================================
+        asertions_raw = contract.functions.getAsertionsWithValidations(post_id).call()
+        logger.info(f"Recuperadas {len(asertions_raw)} aserciones para postId {post_id}.")
+        asertions = []
 
-        # for a in asertions_raw:
-        #     # a = (Multihash, categoryId, ValidationView[])
-        #     hash_asertion = {
-        #         "hash_function": safe_hex(a[0][0]),
-        #         "hash_size": safe_hex(a[0][1]),
-        #         "digest": safe_hex(a[0][2]),
-        #     }
-        #     category_id = a[1]
+        for idx_a, a in enumerate(asertions_raw):
+            try:
+                logger.info(f"Procesando aserción #{idx_a}: {a}")
 
-        #     # Manejar el caso en que no haya validaciones
-        #     # a[2] es ValidationView[]
-        #     raw_validations = a[2] if isinstance(a[2], (list, tuple)) else []
-        #     validations = []
+                # a = (Multihash, ValidationView[], categoryId)
+                hash_asertion_raw = a[0]
+                category_id = a[2] if len(a) > 2 else a[1]
+                raw_validations = a[1] if isinstance(a[1], (list, tuple)) else []
 
-        #     for v in raw_validations:
-        #         # v = (validatorAddress, domain, reputation, veredict, hash_description)
-        #         validations.append({
-        #             "validatorAddress": v[0],
-        #             "domain": str(v[1]), 
-        #             "reputation": v[2],
-        #             "veredict": VEREDICT_MAP.get(v[3], "Error"),
-        #             "hash_description": {
-        #                 "hash_function": safe_hex(v[4][0]),
-        #                 "hash_size": safe_hex(v[4][1]),
-        #                 "digest": safe_hex(v[4][2]),
-        #             }
-        #         })
+                hash_asertion = {
+                    "hash_function": safe_hex(hash_asertion_raw[0]),
+                    "hash_size": safe_hex(hash_asertion_raw[1]),
+                    "digest": safe_hex(hash_asertion_raw[2]),
+                }
 
-        #     asertions.append({
-        #         "hash_asertion": hash_asertion,
-        #         "categoryId": category_id,
-        #         "validations": validations
-        #     })
+                logger.info(f"Aserción #{idx_a} tiene {len(raw_validations)} validaciones.")
+                validations = []
 
-        # post_info["asertions"] = asertions
+                for idx_v, v in enumerate(raw_validations):
+                    try:
+                        logger.info(f"  Validación #{idx_v} cruda: {v}, tipos: {[type(x) for x in v]}")
+
+                        validator_addr = safe_hex(v[0])
+                        domain_val = str(v[1])
+                        reputation_val = v[2]
+                        veredict_val = v[3]
+                        hash_desc = v[4]
+
+                        hash_description = {
+                            "hash_function": safe_hex(hash_desc[0]),
+                            "hash_size": safe_hex(hash_desc[1]),
+                            "digest": safe_hex(hash_desc[2]),
+                        }
+
+                        validation_entry = {
+                            "validatorAddress": validator_addr,
+                            "domain": domain_val,
+                            "reputation": reputation_val,
+                            "veredict": veredict_val,
+                            "hash_description": hash_description
+                        }
+                        validations.append(validation_entry)
+
+                        logger.info(f"  ✅ Validación #{idx_v} procesada correctamente")
+
+                    except Exception as inner_e:
+                        logger.exception(f"⚠️ Error procesando validación #{idx_v} de la aserción #{idx_a}: {inner_e}")
+
+                asertions.append({
+                    "hash_asertion": hash_asertion,
+                    "categoryId": category_id,
+                    "validations": validations
+                })
+
+            except Exception as inner_a:
+                logger.exception(f"⚠️ Error procesando aserción #{idx_a}: {inner_a}")
+
+        post_info["asertions"] = asertions
+
+        logger.info(f"✅ Post {post_id} procesado correctamente.")
         return {"result": True, "post": post_info}
 
     except Exception as e:
-        logger.exception(f"Error al recuperar post {post_id}: {e}")
-        # En caso de error (e.g., PostId no existe), se lanza una HTTPException 500
+        logger.exception(f"❌ Error al recuperar post {post_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 

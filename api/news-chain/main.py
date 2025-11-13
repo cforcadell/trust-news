@@ -13,6 +13,8 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 # Importar modelos comunes
 from common.async_models import Multihash, Assertion, RegisterBlockchainRequest, BlockchainRegisteredResponse, RegisterBlockchainPayload 
+from fastapi import Query
+import base58
 
 # =========================================================
 # Config
@@ -61,45 +63,52 @@ except Exception as e:
 # Helpers
 # =========================================================
 
-# NOTA: Se ha eliminado una definición duplicada de hash_text_to_multihash
+
+
+
 
 def safe_multihash_to_tuple(mh: Multihash) -> tuple:
     """
-    Convierte Multihash (Pydantic) a la tupla (bytes, bytes, bytes32)
-    requerida por el contrato Solidity.
+    Convierte Multihash (Pydantic) a la tupla (bytes1, bytes1, bytes32)
+    requerida por Solidity. Soporta digest en 0x... o Base58 (CID IPFS).
     """
     try:
-        # Aseguramos que los campos sean strings
-        hash_function = getattr(mh, "hash_function", "0x00")
-        hash_size = getattr(mh, "hash_size", "0x00")
-        digest = getattr(mh, "digest", "")
+        digest = mh.digest
+        # Si digest es base58 (CID tipo Qm...), lo decodificamos completo
+        if isinstance(digest, str) and digest.startswith("Qm"):
+            decoded = base58.b58decode(digest)
+            hf = decoded[0:1]
+            hs = decoded[1:2]
+            dg = decoded[2:34]  # digest real
+        else:
+            # Si digest ya es hex (0x...), usar hash_function y hash_size explícitos
+            hf = bytes.fromhex(mh.hash_function.removeprefix("0x"))
+            hs = bytes.fromhex(mh.hash_size.removeprefix("0x"))
+            dg = bytes.fromhex(digest.removeprefix("0x"))
 
-        # Si digest es un objeto (por ejemplo otro modelo Pydantic), lo convertimos a string
-        if not isinstance(digest, str):
-            digest = str(digest)
+        # Validación de longitud
+        if len(dg) != 32:
+            raise ValueError(f"Digest debe tener 32 bytes, tiene {len(dg)}")
 
-        hf = bytes.fromhex(hash_function.removeprefix("0x"))
-        hs = bytes.fromhex(hash_size.removeprefix("0x"))
-
-        # Limpieza del digest (puede venir con o sin 0x)
-        digest_clean = digest[2:] if digest.startswith("0x") else digest
-        dg = bytes.fromhex(digest_clean)
-
-        # Rellenar o truncar a 32 bytes (bytes32 en Solidity)
-        if len(dg) > 32:
-            dg = dg[:32]
-        elif len(dg) < 32:
-            dg = dg.ljust(32, b'\0')
+        return (hf, hs, dg)
 
     except Exception as e:
-        logger.warning(f"Error en safe_multihash_to_tuple con digest '{mh}': {e}. Usando fallback.")
-        # Fallback si el digest no es un hex válido
-        hf = b'\x00'
-        hs = b'\x00'
-        dg = b'\0' * 32
+        logger.warning(f"Error en safe_multihash_to_tuple({mh}): {e}")
+        return (b'\x00', b'\x00', b'\x00' * 32)
 
-    return (hf, hs, dg)
+def multihash_to_base58(multihash_tuple: tuple) -> str:
+    """
+    Convierte un Multihash (bytes1, bytes1, bytes32) en un CID base58 (IPFS-style).
 
+    """
+    try:
+        hf, hs, dg = multihash_tuple
+        # Concatenar bytes: [hash_function][hash_size][digest]
+        multihash_bytes = hf + hs + dg
+        return base58.b58encode(multihash_bytes).decode("utf-8")
+    except Exception as e:
+        logger.warning(f"Error en multihash_to_base58: {e}")
+        return None
 
 def hash_text_to_multihash(text: str) -> Multihash:
     """Calcula el SHA256 y lo envuelve en el modelo Multihash."""
@@ -107,16 +116,7 @@ def hash_text_to_multihash(text: str) -> Multihash:
     # 0x12 es SHA256, 0x20 es 32 bytes (256 bits)
     return Multihash(hash_function="0x12", hash_size="0x20", digest="0x" + h)
 
-def multihash_to_tuple(mh: Multihash) -> tuple:
-    """Convierte Multihash a la tupla requerida (usado para aserciones)."""
-    hf = bytes.fromhex(mh.hash_function[2:])
-    hs = bytes.fromhex(mh.hash_size[2:])
-    dg = bytes.fromhex(mh.digest[2:])
-    
-    if len(dg) != 32:
-        # Esto debería fallar si el hash no es SHA256
-        raise ValueError("Digest debe ser exactamente 32 bytes.")
-    return (hf, hs, dg)
+
 
 def send_tx_async(function_call, gas_estimate=3_000_000):
     """Firma y envía la transacción a la red."""
@@ -209,6 +209,7 @@ def safe_hex(value):
 # =========================================================
 app = FastAPI(title="TrustNews Smart Contract API")
 
+
 @app.post("/registerNew")
 def register_new(data: RegisterBlockchainRequest):
     """Lanza la transacción sin esperar al minado, devolviendo tx_hash."""
@@ -220,7 +221,7 @@ def register_new(data: RegisterBlockchainRequest):
         hash_ipfs = Multihash(
             hash_function="0x12",
             hash_size="0x20",
-            digest=data.cid if data.cid.startswith("0x") else "0x" + data.cid
+            digest=data.cid 
         )
 
         asertions_struct = []
@@ -229,11 +230,12 @@ def register_new(data: RegisterBlockchainRequest):
             mh = hash_text_to_multihash(a.text)
             
             # Formato de aserción para el contrato (Multihash, array de validadores [vacío], categoryId)
-            as_tuple = (multihash_to_tuple(mh), tuple([]), a.categoryId) 
+            as_tuple = (safe_multihash_to_tuple(mh), tuple([]), a.categoryId) 
             asertions_struct.append(as_tuple)
             # categoryId ya es int gracias a Pydantic
             categoryIds.append(a.categoryId)
 
+        logger.info(f"Preparando llamada a registerNew con ipfs:{hash_ipfs} hash_new:{hash_new}.")
         func_call = contract.functions.registerNew(
             safe_multihash_to_tuple(hash_new),
             safe_multihash_to_tuple(hash_ipfs),
@@ -247,7 +249,6 @@ def register_new(data: RegisterBlockchainRequest):
     except Exception as e:
         logger.exception(f"Error en registerNew: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/tx/status/{tx_hash}")
 def tx_status(tx_hash: str):
@@ -354,39 +355,71 @@ def get_transaction(tx_hash: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/block/{block_id}")
-def get_block(block_id: int):
-    """
-    Devuelve información del bloque y las transacciones que contiene.
-    """
+
+VEREDICT_MAP = {0: "Unknown", 1: "True", 2: "False"}
+
+@app.get("/blockchain/post/{post_id}")
+def get_info_by_postid(post_id: int):
     try:
-        block = w3.eth.get_block(block_id, full_transactions=True)
-        if not block:
-            raise HTTPException(status_code=404, detail=f"No existe el bloque {block_id}")
+        # --- 1️⃣ Recuperar los campos planos del Post ---
+        # document: Multihash, publisher: address, hash_new: Multihash
+        document, publisher, hash_new = contract.functions.getPostFlat(post_id).call()
 
-        block_info = {
-            "blockNumber": block.number,
-            "blockHash": block.hash.hex(),
-            "timestamp": block.timestamp,
-            "miner": block.miner,
-            "transactionCount": len(block.transactions),
-            "transactions": [
-                {
-                    "tx_hash": tx.hash.hex(),
-                    "from": tx["from"],
-                    "to": tx["to"],
-                    "value": tx["value"],
-                    "gas": tx["gas"],
-                }
-                for tx in block.transactions
-            ],
-        }
+        logger.info(f"Recuperados datos planos para postId {post_id}: publisher={publisher}, document={document}, hash_new={hash_new}")
+        post_info = {
+            "postId": post_id,
+            "publisher": publisher,
+            "document": multihash_to_base58(document),
+            "hash_new": safe_hex(hash_new[2])
+            }
+        
 
-        return {"result": True, "payload": block_info}
+        # --- 2️⃣ Recuperar aserciones y validaciones (AsertionView[]) ---
+        # asertions_raw = contract.functions.getAsertionsWithValidations(post_id).call()
+        # asertions = []
+
+        # for a in asertions_raw:
+        #     # a = (Multihash, categoryId, ValidationView[])
+        #     hash_asertion = {
+        #         "hash_function": safe_hex(a[0][0]),
+        #         "hash_size": safe_hex(a[0][1]),
+        #         "digest": safe_hex(a[0][2]),
+        #     }
+        #     category_id = a[1]
+
+        #     # Manejar el caso en que no haya validaciones
+        #     # a[2] es ValidationView[]
+        #     raw_validations = a[2] if isinstance(a[2], (list, tuple)) else []
+        #     validations = []
+
+        #     for v in raw_validations:
+        #         # v = (validatorAddress, domain, reputation, veredict, hash_description)
+        #         validations.append({
+        #             "validatorAddress": v[0],
+        #             "domain": str(v[1]), 
+        #             "reputation": v[2],
+        #             "veredict": VEREDICT_MAP.get(v[3], "Error"),
+        #             "hash_description": {
+        #                 "hash_function": safe_hex(v[4][0]),
+        #                 "hash_size": safe_hex(v[4][1]),
+        #                 "digest": safe_hex(v[4][2]),
+        #             }
+        #         })
+
+        #     asertions.append({
+        #         "hash_asertion": hash_asertion,
+        #         "categoryId": category_id,
+        #         "validations": validations
+        #     })
+
+        # post_info["asertions"] = asertions
+        return {"result": True, "post": post_info}
 
     except Exception as e:
-        logger.error(f"Error consultando bloque {block_id}: {e}")
+        logger.exception(f"Error al recuperar post {post_id}: {e}")
+        # En caso de error (e.g., PostId no existe), se lanza una HTTPException 500
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # =========================================================

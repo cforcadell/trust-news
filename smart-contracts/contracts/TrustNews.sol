@@ -12,7 +12,7 @@ contract TrustNews {
 
     address public owner;
     uint256 public postCounter;
-    mapping(uint256 => Post) public postsById;
+    
 
     struct Category {
         uint256 id;
@@ -69,6 +69,7 @@ contract TrustNews {
     mapping (address => Validator) public validators;
     mapping (uint256 => Validator[]) public validatorsByCategory;
     mapping (uint256 => string) public categories; 
+    mapping(uint256 => Post) public postsById;
 
     event RegisterNewResult(uint256  postId,Multihash hashNews,address[][] validatorAddressesByAsertion);
 
@@ -188,6 +189,19 @@ function registerNew(
         return asertionViews;
     }
 
+
+    function getPostFlat(uint256 postId)
+        public
+        view
+        returns (
+            Multihash memory document,
+            address publisher,
+            Multihash memory hashNew
+        )
+    {
+        Post storage p = postsById[postId];
+        return (p.document, p.publisher, p.hashNew);
+    }
 
     // ======================================
     // VALIDADORES Y CATEGORÍAS

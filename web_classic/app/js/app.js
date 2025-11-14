@@ -506,19 +506,19 @@ function renderValidationsTree(container, validations, assertions) {
         const approvedCount = known.filter(v => v === "True").length;
         const rejectedCount = known.filter(v => v === "Fake").length;
 
-        let statusClass;
-        if (approvedCount > rejectedCount) statusClass = "true-news";
-        else if (rejectedCount > approvedCount) statusClass = "fake-news";
-        else if (known.length > 0) statusClass = "partial-news";
-        else statusClass = "unknown";
+        let status;
+        if (approvedCount > rejectedCount) status = "True";
+        else if (rejectedCount > approvedCount) status = "Fake";
+        else if (known.length > 0) status = "Unknown";
+        else status = "Pending";
 
         let tableRows = "";
         for (const [validator, info] of Object.entries(validatorsObj)) {
             const lit = getValidationLiteral(info.approval);
-            let cls = 'unknown';
+            let cls = 'unknown'; // Por defecto gris
             if (lit === "True") cls = "true-news";
             else if (lit === "Fake") cls = "fake-news";
-            else if (lit === "Unknown / Draw") cls = "partial-news";
+            else if (lit === "Unknown") cls = "partial-news";
 
             let desc = info.text || "";
             if (typeof desc === 'object') desc = JSON.stringify(desc, null, 2);
@@ -531,12 +531,11 @@ function renderValidationsTree(container, validations, assertions) {
             </tr>`;
         }
 
-        html += `<div class="assertion-box">
-            <div class="assertion-header">
-                <span class="arrow"></span>
-                ${assertionId}. ${assertionText} → <span class="${statusClass}" style="margin-left: 10px;">(${approvedCount} A / ${rejectedCount} R)</span>
-            </div>
-            <div class="assertion-content">
+        html += `<details class="p-3 bg-gray-700 rounded-lg mb-3">
+            <summary class="cursor-pointer" style="font-weight:bold; font-size:1rem;">
+                ${assertionId}. ${assertionText} → <span style="font-size:0.9rem;">(${approvedCount} A / ${rejectedCount} R)</span>
+            </summary>
+            <div class="mt-3">
                 <table class="compact-table">
                     <thead>
                         <tr>
@@ -549,22 +548,11 @@ function renderValidationsTree(container, validations, assertions) {
                     <tbody>${tableRows}</tbody>
                 </table>
             </div>
-        </div>`;
+        </details>`;
     }
 
     container.innerHTML = html;
-
-    // Toggle para abrir/cerrar assertions
-    document.querySelectorAll('.assertion-header').forEach(header => {
-        header.addEventListener('click', () => {
-            const content = header.nextElementSibling;
-            const arrow = header.querySelector('.arrow');
-            content.style.display = content.style.display === 'block' ? 'none' : 'block';
-            header.classList.toggle('open');
-        });
-    });
 }
-
 
 
 // =========================================================

@@ -356,7 +356,39 @@ def get_transaction(tx_hash: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/block/{block_id}")
+def get_block(block_id: int):
+    """
+    Devuelve información del bloque y las transacciones que contiene.
+    """
+    try:
+        block = w3.eth.get_block(block_id, full_transactions=True)
+        if not block:
+            raise HTTPException(status_code=404, detail=f"No existe el bloque {block_id}")
 
+        block_info = {
+            "blockNumber": block.number,
+            "blockHash": block.hash.hex(),
+            "timestamp": block.timestamp,
+            "miner": block.miner,
+            "transactionCount": len(block.transactions),
+            "transactions": [
+                {
+                    "tx_hash": tx.hash.hex(),
+                    "from": tx["from"],
+                    "to": tx["to"],
+                    "value": tx["value"],
+                    "gas": tx["gas"],
+                }
+                for tx in block.transactions
+            ],
+        }
+
+        return {"result": True, "payload": block_info}
+
+    except Exception as e:
+        logger.error(f"Error consultando bloque {block_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/blockchain/post/{post_id}")

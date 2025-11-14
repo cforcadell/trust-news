@@ -51,7 +51,7 @@ header nav button:hover {
     padding-top: 5rem;
     max-width: 1000px;
     margin: 20px auto;
-    background-color: #111827; /* Match body for seamless look */
+    background-color: #111827; /* Match body */
     border-radius: 8px;
     box-shadow: 0 4px 6px rgba(0,0,0,0.15);
 }
@@ -59,36 +59,23 @@ header nav button:hover {
 .section.active { display: block; }
 
 /* =================== CONTROLES Y ENTRADAS =================== */
-textarea {
+textarea, input[type="text"] {
     width: 100%;
     padding: 10px;
     margin-bottom: 15px;
     border: 1px solid #374151;
     border-radius: 4px;
     box-sizing: border-box;
-    resize: vertical;
     font-size: 1rem;
-    height: 400px;
     background-color: #1F2937;
     color: #E5E7EB;
 }
 
-input[type="text"] {
-    width: 100%;
-    padding: 6px 8px;
-    margin-bottom: 15px;
-    border: 1px solid #374151;
-    border-radius: 4px;
-    box-sizing: border-box;
-    font-size: 0.85rem;
-    line-height: 1.2;
-    background-color: #1F2937;
-    color: #E5E7EB;
-}
+textarea { resize: vertical; height: 400px; }
 
 button {
-    background-color: #10B981; /* Secondary color (Green) */
-    color: #111827; /* Dark text for contrast */
+    background-color: #10B981; /* Green */
+    color: #111827;
     border: none;
     padding: 6px 12px;
     border-radius: 4px;
@@ -130,23 +117,7 @@ td a {
     font-size: 0.85rem;
 }
 
-/* Compact Table specific for Details */
-.compact-table th { 
-    background-color: #1F2937;
-    text-align: right;
-    width: 30%; 
-    font-weight: 600; 
-    color: #9CA3AF; 
-}
-.compact-table td {
-    background-color: #111827;
-}
-
 /* =================== ORDERS =================== */
-#orders {
-    /* Reduced padding/margin as it's handled by main/section padding */
-}
-
 #ordersTopBar {
     display: flex;
     align-items: center;
@@ -167,10 +138,9 @@ td a {
     background-color: #374151;
     color: #D1D5DB;
 }
+
 #ordersTopBar button:hover,
-.sub-tabs button:hover {
-    background-color: #4B5563;
-}
+.sub-tabs button:hover { background-color: #4B5563; }
 
 #fixedDetailsContainer, #orderTabs, #tabContent {
     margin-top: 15px;
@@ -222,9 +192,9 @@ td a {
 .status-value.blinking { animation: blink 1s step-end infinite; }
 .status-value.validated { background-color: #10B981; animation: none; }
 
-.verification-tag.true-news, .true-news { background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px; }
-.verification-tag.fake-news, .fake-news { background-color: #EF4444; color: white; padding: 2px 6px; border-radius: 4px; }
-.verification-tag.partial-news, .partial-news { background-color: #F59E0B; color: #111827; padding: 2px 6px; border-radius: 4px; }
+.verification-tag.true-news { background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px; }
+.verification-tag.fake-news { background-color: #EF4444; color: white; padding: 2px 6px; border-radius: 4px; }
+.verification-tag.partial-news { background-color: #F59E0B; color: #111827; padding: 2px 6px; border-radius: 4px; }
 .verification-tag.unknown { background-color: #6B7280; color: white; padding: 2px 6px; border-radius: 4px; }
 
 /* =================== DETALLES / VALIDACIONES =================== */
@@ -242,10 +212,10 @@ details summary {
     padding: 5px 0;
 }
 
-/* Estilos de tabla dentro de detalles de validaciones */
 details .compact-table {
     margin-top: 10px;
 }
+
 details .compact-table th {
     text-align: left;
     width: auto;
@@ -258,14 +228,14 @@ pre, .event-payload-pre {
     padding: 15px;
     border-radius: 4px;
     overflow-x: auto;
-    white-space: pre-wrap; 
-    word-wrap: break-word; 
+    white-space: pre-wrap;
+    word-wrap: break-word;
     border: 1px solid #374151;
 }
 
-/* =================== FIX: Overflow en tablas largas (Transacciones / Bloques) =================== */
+/* =================== FIX: Overflow en tablas largas =================== */
 #txTable, #blockTable {
-    table-layout: fixed; /* ✅ evita que las celdas crezcan más que el ancho */
+    table-layout: fixed;
     width: 100%;
     word-break: break-all;
 }
@@ -277,7 +247,7 @@ pre, .event-payload-pre {
     text-align: left;
     vertical-align: top;
     white-space: normal;
-    word-break: break-all; /* ✅ rompe cadenas largas como hashes */
+    word-break: break-all;
     max-width: 600px;
     overflow-wrap: anywhere;
 }
@@ -299,88 +269,65 @@ pre, .event-payload-pre {
     }
 }
 
-.compact-table th:nth-child(5),
-.compact-table td:nth-child(5) {
-  min-width: 120px;
-  text-align: right;
+/* =================== ASSERTIONS (CONTRACT & ORDERS) =================== */
+.assertion-box {
+    margin-bottom: 15px;
+    border: 1px solid #374151;
+    border-radius: 5px;
+    overflow: hidden;
+    background: #111827;
 }
 
-/* =================== TABLA DE EVENTOS =================== */
-.compact-table th.col-action,
-.compact-table td.col-action,
-.compact-table th.col-topic,
-.compact-table td.col-topic,
-.compact-table th.col-date,
-.compact-table td.col-date {
-    width: 10%; /* Acción, Topic y Fecha iguales */
-    text-align: left;
+.assertion-header {
+    background: #1F2937;
+    color: #E5E7EB;
+    cursor: pointer;
+    padding: 8px 12px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
 }
 
-.compact-table th.col-payload,
-.compact-table td.col-payload {
-    width: 60%; /* Payload ocupa el resto */
+.assertion-header .arrow {
+    display: inline-block;
+    margin-right: 8px; /* Flecha a la izquierda */
+    transition: transform 0.3s ease;
 }
 
-/* Evita que el payload rompa el diseño */
-.compact-table td.col-payload pre {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    max-width: 100%;
-    overflow-x: auto;
+.assertion-header .arrow::after {
+    content: '▶';
 }
 
-.compact-table td .summary-text {
-    font-size: 0.80rem; /* Ajusta según lo necesites */
-    color: #D1D5DB; /* Mantener tono gris claro */
+.assertion-header.open .arrow {
+    transform: rotate(90deg);
 }
 
-/* =================== TABLA DE ASSERTIONS =================== */
-#assertionsTable {
+.assertion-content {
+    display: none; /* colapsado por defecto */
+    padding: 8px 12px;
+    background: #111827;
+}
+
+.assertion-content h4 {
+    color: #F59E0B;
+    margin-top: 10px;
+}
+
+.assertion-content .compact-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.8rem;
-    line-height: 1.2;
-    margin-top: 15px;
-    background-color: #1F2937;
-    color: #D1D5DB;
+    margin-top: 5px;
+    margin-bottom: 10px;
 }
 
-#assertionsTable th, #assertionsTable td {
+.assertion-content .compact-table th,
+.assertion-content .compact-table td {
     border: 1px solid #374151;
-    padding: 8px 12px;
+    padding: 5px 8px;
     text-align: left;
-    vertical-align: top;
 }
 
-#assertionsTable th {
-    background-color: #374151;
-    font-weight: 600;
-    color: #9CA3AF;
-    text-transform: uppercase;
-    font-size: 0.7rem; /* Más pequeña */
-}
-
-#assertionsTable td {
-    font-size: 0.75rem;
-}
-
-#assertionsTable th.id-col,
-#assertionsTable td.id-col {
-    width: 10%;
-}
-
-#assertionsTable th.text-col,
-#assertionsTable td.text-col {
-    width: 70%;
-}
-
-#assertionsTable th.cat-col,
-#assertionsTable td.cat-col {
-    width: 20%;
-}
-
-/* ================= BUSQUEDA POST ================= */
-
+/* =================== BUSQUEDA POST ================= */
 #postSearchBox {
     background: #1F2937;
     padding: 15px;
@@ -402,14 +349,6 @@ pre, .event-payload-pre {
     margin-top: 20px;
 }
 
-.assertion-box {
-    margin-top: 15px;
-    padding: 12px;
-    background: #111827;
-    border-left: 3px solid #0D9488;
-    border-radius: 6px;
-}
-
 .validation-box {
     margin-top: 10px;
     padding: 10px;
@@ -421,7 +360,6 @@ pre, .event-payload-pre {
 .loading { color: #FCD34D; }
 .error { color: #EF4444; font-weight: bold; }
 
-/* Ya tienes estas, pero por si falta */
 .true-news { background: #10B981; padding: 3px 6px; border-radius: 4px; }
 .fake-news { background: #EF4444; padding: 3px 6px; border-radius: 4px; }
 .partial-news { background: #F59E0B; padding: 3px 6px; border-radius: 4px; }

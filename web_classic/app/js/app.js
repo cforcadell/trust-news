@@ -965,24 +965,21 @@ async function findPostById() {
 }
 
 
-
-// =======================================================
-// RENDER POST PRINCIPAL
-// =======================================================
-function renderPost(data) {
+function renderPost(post) {
     const container = document.createElement("div");
 
-    const contractTable = document.createElement("table");
-    contractTable.className = "compact-table";
+    // ===== Tabla principal del Post =====
+    const postTable = document.createElement("table");
+    postTable.className = "compact-table";
 
     const rows = [
-        ["postId", data.postId],
-        ["publisher", data.publisher],
-        ["document", data.document],
-        ["hash_new", data.hash_new]
+        ["postId", post.postId],
+        ["publisher", post.publisher],
+        ["document", post.document],
+        ["hash_new", post.hash_new]
     ];
 
-    contractTable.innerHTML = `
+    postTable.innerHTML = `
         <tr><th>Campo</th><th>Valor</th></tr>
         ${rows.map(([k, v]) => `
             <tr>
@@ -991,18 +988,87 @@ function renderPost(data) {
             </tr>
         `).join("")}
     `;
+    container.appendChild(postTable);
 
-    container.appendChild(contractTable);
+    // ===== Árbol de Aserciones =====
+    if (Array.isArray(post.asertions) && post.asertions.length > 0) {
+        const assertionsTitle = document.createElement("h3");
+        assertionsTitle.textContent = `Aserciones (${post.asertions.length})`;
+        container.appendChild(assertionsTitle);
+
+        post.asertions.forEach((a, i) => {
+            const assertionBox = document.createElement("div");
+            assertionBox.className = "assertion-box";
+
+            // ===== Header colapsable con flecha a la izquierda =====
+            const header = document.createElement("div");
+            header.className = "assertion-header";
+
+            const arrow = document.createElement("span");
+            arrow.className = "arrow"; // flecha
+            header.appendChild(arrow);
+
+            const headerText = document.createElement("span");
+            headerText.textContent = `Aserción ${i + 1} Digest: ${a.hash_asertion?.digest ?? ""}`;
+            header.appendChild(headerText);
+
+            // Contenido colapsable
+            const content = document.createElement("div");
+            content.className = "assertion-content";
+
+            // Tabla categoría
+            const assertionTable = document.createElement("table");
+            assertionTable.className = "compact-table";
+            assertionTable.innerHTML = `
+                <tr><th>Categoría</th><td>${a.categoryId}</td></tr>
+            `;
+            content.appendChild(assertionTable);
+
+            // Validaciones
+            if (Array.isArray(a.validations) && a.validations.length > 0) {
+                const validationsTitle = document.createElement("h4");
+                validationsTitle.textContent = `Validaciones (${a.validations.length})`;
+                content.appendChild(validationsTitle);
+
+                a.validations.forEach((v) => {
+                    const validationTable = document.createElement("table");
+                    validationTable.className = "compact-table";
+                    validationTable.innerHTML = `
+                        <tr><th>Validator</th><td>${v.validatorAddress}</td></tr>
+                        <tr><th>Dominio</th><td>${v.domain}</td></tr>
+                        <tr><th>Reputación</th><td>${v.reputation}</td></tr>
+                        <tr><th>Veredicto</th><td>${mapVeredict(v.veredict)}</td></tr>
+                        <tr><th>Digest Descripción</th><td>${v.hash_description?.digest ?? ""}</td></tr>
+                    `;
+                    content.appendChild(validationTable);
+                });
+            }
+
+            // Toggle colapsado al hacer click
+            header.addEventListener("click", () => {
+                const isOpen = content.style.display === "block";
+                content.style.display = isOpen ? "none" : "block";
+                header.classList.toggle("open", !isOpen);
+            });
+
+            assertionBox.appendChild(header);
+            assertionBox.appendChild(content);
+            container.appendChild(assertionBox);
+        });
+    }
 
     // Reemplaza contenido
-    const contractTableContainer = document.getElementById("contractTable");
-    if (contractTableContainer) {
-        contractTableContainer.innerHTML = "";
-        contractTableContainer.appendChild(container);
+    const postTableContainer = document.getElementById("postTable");
+    if (postTableContainer) {
+        postTableContainer.innerHTML = "";
+        postTableContainer.appendChild(container);
     }
 
     return container;
 }
+
+
+
 
 // =========================================================
 // INICIALIZACIÓN

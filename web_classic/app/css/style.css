@@ -378,3 +378,51 @@ pre, .event-payload-pre {
 #assertionsTable td.cat-col {
     width: 20%;
 }
+
+/* ================= BUSQUEDA POST ================= */
+
+#postSearchBox {
+    background: #1F2937;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+#postSearchBox input {
+    width: 200px;
+    padding: 6px 8px;
+    margin-right: 10px;
+}
+
+.post-box {
+    background: #1F2937;
+    padding: 15px;
+    border-left: 4px solid #0D9488;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.assertion-box {
+    margin-top: 15px;
+    padding: 12px;
+    background: #111827;
+    border-left: 3px solid #0D9488;
+    border-radius: 6px;
+}
+
+.validation-box {
+    margin-top: 10px;
+    padding: 10px;
+    background: #1F2937;
+    border-radius: 6px;
+}
+
+/* Pequeños helpers */
+.loading { color: #FCD34D; }
+.error { color: #EF4444; font-weight: bold; }
+
+/* Ya tienes estas, pero por si falta */
+.true-news { background: #10B981; padding: 3px 6px; border-radius: 4px; }
+.fake-news { background: #EF4444; padding: 3px 6px; border-radius: 4px; }
+.partial-news { background: #F59E0B; padding: 3px 6px; border-radius: 4px; }
+.unknown { background: #6B7280; padding: 3px 6px; border-radius: 4px; }

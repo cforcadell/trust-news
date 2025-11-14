@@ -14,6 +14,7 @@
     <button id="nav-orders">Orders</button>
     <button id="nav-tx">Transacciones</button>
     <button id="nav-blocks">Bloques</button>
+    <button id="nav-contract">Contrato</button>
   </nav>
 </header>
 
@@ -30,7 +31,7 @@
 </div>
 
 <div class="section" id="orders">
-    <h2 style="font-size:1.2rem;margin-bottom:5px;">Orders</h2>
+    <h2>Orders</h2>
     
     <div id="ordersTopBar">
         <input type="text" id="orderId" placeholder="order_id"/>
@@ -58,17 +59,25 @@
 
 </div>
 <div class="section" id="blocks">
-    <h2>Consulta de Transacciones</h2>
+    <h2>Consulta de Bloques</h2>
 
-
-
-    <h3>Consulta por bloque</h3>
     <div style="margin-bottom:10px;">
         <input type="text" id="blockId" placeholder="Introduce block number o hash"/>
         <button id="btn-findBlock">Buscar Bloque</button>
     </div>
 
     <table id="blockTable"></table>
+</div>
+<div class="section" id="contract">
+    <h2>Smart Contract</h2>
+
+    <h3>Consulta por Post Id</h3>
+    <div style="margin-bottom:10px;">
+        <input type="text" id="postId" placeholder="Introduce post Id"/>
+        <button id="btn-findPost">Buscar Post</button>
+    </div>
+
+    <table id="postTable"></table>
 </div>
 <script src="js/app.js"></script> 
 </body>

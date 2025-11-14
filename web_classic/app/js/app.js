@@ -1,3 +1,28 @@
+
+
+// =========================================================
+// CONFIGURACIÓN GLOBAL
+// =========================================================
+const API = "/api";
+const TX_API = "/ethereum";
+
+const MAX_EVENTS_ROWS = 15;
+const POLLING_DURATION = 0; // 20 segundos
+const POLLING_INTERVAL = 1000;  // 1 segundo
+
+const CATEGORY_MAP = {
+    1: "ECONOMÍA",
+    2: "DEPORTES",
+    3: "POLÍTICA",
+    4: "TECNOLOGÍA",
+    5: "SALUD",
+    6: "ENTRETENIMIENTO",
+    7: "CIENCIA",
+    8: "CULTURA",
+    9: "MEDIO AMBIENTE",
+    10: "SOCIAL"
+};
+
 // =========================================================
 // UTILIDAD: Reemplazo de alert() con UI no bloqueante
 // =========================================================
@@ -30,28 +55,7 @@ function alertMessage(message, type = 'info', duration = 3000) {
 
 
 
-// =========================================================
-// CONFIGURACIÓN GLOBAL
-// =========================================================
-const API = "/api";
-const TX_API = "/ethereum";
 
-const MAX_EVENTS_ROWS = 15;
-const POLLING_DURATION = 0; // 20 segundos
-const POLLING_INTERVAL = 1000;  // 1 segundo
-
-const CATEGORY_MAP = {
-    1: "ECONOMÍA",
-    2: "DEPORTES",
-    3: "POLÍTICA",
-    4: "TECNOLOGÍA",
-    5: "SALUD",
-    6: "ENTRETENIMIENTO",
-    7: "CIENCIA",
-    8: "CULTURA",
-    9: "MEDIO AMBIENTE",
-    10: "SOCIAL"
-};
 
 // Variable global para almacenar la última orden cargada
 let currentOrderData = {};
@@ -93,6 +97,15 @@ function navigateToOrderDetails(orderId){
     document.getElementById("orderId").value = orderId;
     showSection("orders");
     loadOrderById(orderId, true);
+}
+
+function mapVeredict(v) {
+    switch (v) {
+        case 0: return "<span class='fake-news'>Fake</span>";
+        case 1: return "<span class='true-news'>True</span>";
+        case 2: return "<span class='partial-news'>Parcial</span>";
+        default: return "<span class='unknown'>?</span>";
+    }
 }
 
 // =========================================================
@@ -913,7 +926,83 @@ function renderBlockTable(data) {
 }
 
 
+// =======================================================
+// BUSCAR POST POR ID
+// =======================================================
+async function findPostById() {
+    const postId = document.getElementById("postId").value.trim();
+    const tableContainer = document.getElementById("postTable");
+    tableContainer.innerHTML = "";
 
+    if (!postId) {
+        return alertMessage("Introduce un contract address o nombre", "error");
+    }
+
+    alertMessage("Buscando contrato...", "info");
+
+    try {
+        const res = await fetch(`${TX_API}/blockchain/post/${postId}`);
+
+        if (!res.ok) throw new Error("Error al obtener Post");
+
+        const responseData = await res.json();
+
+        if (!responseData.post)
+            throw new Error("Payload missing in contract response");
+
+        // Renderiza tabla igual que bloque
+        const contractPost = renderPost(responseData.post);
+        tableContainer.appendChild(contractPost);
+
+        alertMessage("Contrato encontrado.", "primary");
+
+    } catch (err) {
+        console.error(err);
+        tableContainer.innerHTML =
+            "<tbody><tr><td><div class='p-3 text-red-400'>Error al obtener el contrato o ID inválido.</div></td></tr></tbody>";
+        alertMessage("Error al buscar contrato.", "error");
+    }
+}
+
+
+
+// =======================================================
+// RENDER POST PRINCIPAL
+// =======================================================
+function renderPost(data) {
+    const container = document.createElement("div");
+
+    const contractTable = document.createElement("table");
+    contractTable.className = "compact-table";
+
+    const rows = [
+        ["postId", data.postId],
+        ["publisher", data.publisher],
+        ["document", data.document],
+        ["hash_new", data.hash_new]
+    ];
+
+    contractTable.innerHTML = `
+        <tr><th>Campo</th><th>Valor</th></tr>
+        ${rows.map(([k, v]) => `
+            <tr>
+                <th>${k}</th>
+                <td>${v ?? ""}</td>
+            </tr>
+        `).join("")}
+    `;
+
+    container.appendChild(contractTable);
+
+    // Reemplaza contenido
+    const contractTableContainer = document.getElementById("contractTable");
+    if (contractTableContainer) {
+        contractTableContainer.innerHTML = "";
+        contractTableContainer.appendChild(container);
+    }
+
+    return container;
+}
 
 // =========================================================
 // INICIALIZACIÓN
@@ -924,6 +1013,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('nav-orders').addEventListener('click',()=>showSection('orders'));
     document.getElementById("nav-tx").addEventListener("click", () => showSection("tx"));
     document.getElementById("nav-blocks").addEventListener("click", () => showSection("blocks"));
+    document.getElementById("nav-contract").addEventListener("click", () => showSection("contract"));
     
     // News Listeners
     document.getElementById('btn-publishNew').addEventListener('click',publishNew);
@@ -938,6 +1028,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 
     // Blocks Listeners
     document.getElementById("btn-findBlock").addEventListener("click", findBlock);
+
+    // Contract Listeners
+    document.getElementById("btn-findPost").addEventListener("click", findPostById);
 
     // Initial view
     showSection('news');

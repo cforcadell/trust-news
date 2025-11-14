@@ -78,9 +78,9 @@ function getValidationLiteral(value) {
     if (isNaN(numericValue)) return "DESCONOCIDO";
 
     switch (numericValue) {
-        case 1: return "APROBADA";
-        case 2: return "RECHAZADA";
-        case 0: return "DESCONOCIDO";
+        case 1: return "True";
+        case 2: return "Fake";
+        case 0: return "Unkworn";
         default: return "VALOR ERRONEO";
     }
 }
@@ -383,9 +383,9 @@ function renderDetails(container, data) {
             let approved = 0, rejected = 0;
             Object.values(validators).forEach(v => {
                 const lit = getValidationLiteral(v.approval);
-                if (lit === "APROBADA") approved++;
-                else if (lit === "RECHAZADA") rejected++;
-                else if (lit === "DESCONOCIDO") unknownCount++;
+                if (lit === "True") approved++;
+                else if (lit === "False") rejected++;
+                else if (lit === "Unknown") unknownCount++;
             });
             const known = approved - rejected;
             if (known > 0)  trueAssertions++;
@@ -430,6 +430,10 @@ function renderDetails(container, data) {
                       const safeHash = v.replace(/'/g, "\\'");
                       v = `<a href="#" onclick="event.preventDefault(); navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a>`;
                   }
+                  if (k === "postId" && v) { 
+                      v = `<a href="#" onclick="event.preventDefault(); navigateToPost('${v}'); return false;">${v}</a>`;
+                  }
+
 
                   return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
               }).join('') +
@@ -447,7 +451,7 @@ function renderDetails(container, data) {
     </table>`;
 
     // --- Subpestañas internas
-    container.innerHTML = `
+     container.innerHTML = `
         <div class="sub-tabs flex space-x-2 border-b border-gray-600 mb-4">
             <button class="subTab activeSubTab p-2 text-sm font-medium" data-target="summaryTab">Resumen</button>
             <button class="subTab p-2 text-sm font-medium" data-target="detailsTab">Detalles</button>
@@ -456,7 +460,7 @@ function renderDetails(container, data) {
         <div id="detailsTab" style="display:none;" class="bg-gray-800 p-4 rounded-lg">${detailsHtml}</div>
     `;
 
-    // --- Lógica de subpestañas
+    // Lógica de subpestañas
     const subTabs = container.querySelectorAll(".subTab");
     subTabs.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -492,55 +496,47 @@ function renderValidationsTree(container, validations, assertions) {
     let html = "";
 
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
-        // Texto de la aserción
         let assertionText = assertions.find(a => a.idAssertion === assertionId)?.text || "(Asersión sin texto)";
         if (typeof assertionText === 'object' && assertionText !== null && assertionText.text) {
             assertionText = assertionText.text;
         }
 
-        // Determinar status global de esta aserción
         const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
-        const known = literals.filter(v => v !== "DESCONOCIDO");
-        const approvedCount = known.filter(v => v === "APROBADA").length;
-        const rejectedCount = known.filter(v => v === "RECHAZADA").length;
+        const known = literals.filter(v => v !== "Unknown");
+        const approvedCount = known.filter(v => v === "True").length;
+        const rejectedCount = known.filter(v => v === "Fake").length;
 
-        let status, color;
-        if (approvedCount > rejectedCount) { status = "APROBADA"; color = "#10B981"; }
-        else if (rejectedCount > approvedCount) { status = "RECHAZADA"; color = "#EF4444"; }
-        else if (known.length > 0) { status = "MIXTA / EMPATE"; color = "#F59E0B"; }
-        else { status = "PENDIENTE"; color = "#6B7280"; }
+        let statusClass;
+        if (approvedCount > rejectedCount) statusClass = "true-news";
+        else if (rejectedCount > approvedCount) statusClass = "fake-news";
+        else if (known.length > 0) statusClass = "partial-news";
+        else statusClass = "unknown";
 
-
-        // Generar tabla de validators compacta
         let tableRows = "";
         for (const [validator, info] of Object.entries(validatorsObj)) {
             const lit = getValidationLiteral(info.approval);
             let cls = 'unknown';
-            if (lit === "APROBADA") cls = "true-news";
-            else if (lit === "RECHAZADA") cls = "fake-news";
-            
-            // Descripción formateada
+            if (lit === "True") cls = "true-news";
+            else if (lit === "Fake") cls = "fake-news";
+            else if (lit === "Unknown / Draw") cls = "partial-news";
+
             let desc = info.text || "";
             if (typeof desc === 'object') desc = JSON.stringify(desc, null, 2);
-            
+
             tableRows += `<tr>
                 <td class="text-primary">${info.validator_alias || validator}</td>
                 <td class="${cls}"><b>${lit}</b></td>
                 <td><pre class="event-payload-pre mt-0">${desc}</pre></td>
-                <td>
-                        ${info.tx_hash 
-                        ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${info.tx_hash}')">${shortHex(info.tx_hash)}</a>` 
-                        : ""
-                    }
-                </td>
+                <td>${info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${info.tx_hash}')">${shortHex(info.tx_hash)}</a>` : ""}</td>
             </tr>`;
         }
 
-        html += `<details class="p-3 bg-gray-700 rounded-lg mb-3">
-            <summary class="cursor-pointer" style="color:${color}; font-weight:bold; font-size:1rem;">
-                ${assertionId}. ${assertionText} → <span style="font-size:0.9rem;">(${approvedCount} A / ${rejectedCount} R)</span>
-            </summary>
-            <div class="mt-3">
+        html += `<div class="assertion-box">
+            <div class="assertion-header">
+                <span class="arrow"></span>
+                ${assertionId}. ${assertionText} → <span class="${statusClass}" style="margin-left: 10px;">(${approvedCount} A / ${rejectedCount} R)</span>
+            </div>
+            <div class="assertion-content">
                 <table class="compact-table">
                     <thead>
                         <tr>
@@ -553,11 +549,22 @@ function renderValidationsTree(container, validations, assertions) {
                     <tbody>${tableRows}</tbody>
                 </table>
             </div>
-        </details>`;
+        </div>`;
     }
 
     container.innerHTML = html;
+
+    // Toggle para abrir/cerrar assertions
+    document.querySelectorAll('.assertion-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const content = header.nextElementSibling;
+            const arrow = header.querySelector('.arrow');
+            content.style.display = content.style.display === 'block' ? 'none' : 'block';
+            header.classList.toggle('open');
+        });
+    });
 }
+
 
 
 // =========================================================
@@ -794,6 +801,20 @@ function navigateToTx(hash) {
 
     // Llamar a findTx para cargar los datos
     findTx();
+}
+
+function navigateToPost(postId) {
+    if (!postId) return;
+    
+    // Cambiar a la sección de transacciones
+    showSection('contract');
+    
+    // Poner hash en el input
+    const txInput = document.getElementById("postId");
+    txInput.value = postId;
+
+    // Llamar a findTx para cargar los datos
+    findPostById();
 }
 
 function navigateToBlock(hash) {

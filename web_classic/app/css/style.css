@@ -295,7 +295,7 @@ pre, .event-payload-pre {
 }
 
 .assertion-header .arrow::after {
-    content: '▶';
+    content: '>';
 }
 
 .assertion-header.open .arrow {

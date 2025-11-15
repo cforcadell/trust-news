@@ -15,6 +15,7 @@ class Veredicto:
 
     def __post_init__(self):
         # Convertir a mayúsculas una sola vez
+        
         texto_upper = self.texto.upper()
 
         if "TRUE" in texto_upper:

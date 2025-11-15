@@ -79,7 +79,7 @@ function getValidationLiteral(value) {
 
     switch (numericValue) {
         case 1: return "True";
-        case 2: return "Fake";
+        case 2: return "False";
         case 0: return "Unkworn";
         default: return "VALOR ERRONEO";
     }
@@ -101,7 +101,7 @@ function navigateToOrderDetails(orderId){
 
 function mapVeredict(v) {
     switch (v) {
-        case 0: return "<span class='fake-news'>Fake</span>";
+        case 0: return "<span class='false-news'>False</span>";
         case 1: return "<span class='true-news'>True</span>";
         case 2: return "<span class='partial-news'>Parcial</span>";
         default: return "<span class='unknown'>?</span>";
@@ -433,8 +433,9 @@ function renderDetails(container, data) {
                   if (k === "postId" && v) { 
                       v = `<a href="#" onclick="event.preventDefault(); navigateToPost('${v}'); return false;">${v}</a>`;
                   }
-                  if (k === "order_id" && v) { 
+                  if (k === "order_id" && v) {                       
                       v = `<a href="#" onclick="event.preventDefault(); navigateToConsistency('${v}'); return false;">${v}</a>`;
+                      return `<tr><th>Validar vs blockchain</th><td>${v || ''}</td></tr>`;
                   }
 
 
@@ -507,11 +508,11 @@ function renderValidationsTree(container, validations, assertions) {
         const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
         const known = literals.filter(v => v !== "Unknown");
         const approvedCount = known.filter(v => v === "True").length;
-        const rejectedCount = known.filter(v => v === "Fake").length;
+        const rejectedCount = known.filter(v => v === "False").length;
 
         let status;
         if (approvedCount > rejectedCount) status = "True";
-        else if (rejectedCount > approvedCount) status = "Fake";
+        else if (rejectedCount > approvedCount) status = "False";
         else if (known.length > 0) status = "Unknown";
         else status = "Pending";
 
@@ -520,7 +521,7 @@ function renderValidationsTree(container, validations, assertions) {
             const lit = getValidationLiteral(info.approval);
             let cls = 'unknown'; // Por defecto gris
             if (lit === "True") cls = "true-news";
-            else if (lit === "Fake") cls = "fake-news";
+            else if (lit === "False") cls = "false-news";
             else if (lit === "Unknown") cls = "partial-news";
 
             let desc = info.text || "";
@@ -1175,8 +1176,8 @@ function renderConsistencyTable(results) {
         <thead>
             <tr>
                 <th>Prueba</th>
-                <th>Comparado (Order/IPFS)</th>
-                <th>Comparado (Blockchain)</th>
+                <th>Argumento Base</th>
+                <th>Argumento a Comparar</th>
                 <th>Resultado</th>
             </tr>
         </thead>

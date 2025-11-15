@@ -26,7 +26,8 @@ from common.async_models import (
     ValidationCompletedResponse,
     ValidationFailedResponse,
     RequestValidationRequest,
-    ValidatorAPIResponse # Usado por el consumer para tipado (aunque el payload viene en RequestValidationRequest)
+    ValidatorAPIResponse,
+    Multihash
 )
 
 # =========================================================
@@ -264,10 +265,7 @@ def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
     return ai_validator.verificar_asercion(texto, contexto)
 
 
-def hash_text_to_bytes(text: str) -> bytes:
-    """SHA256 hex -> bytes (32 bytes)"""
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return bytes.fromhex(h)
+
 
 def send_signed_tx(function_call, gas_estimate: int = 10000000) -> str:
     """Construye, firma y envía tx; devuelve tx_hash (hex) — no espera minado."""
@@ -325,18 +323,20 @@ def uuid_to_uint256(u: str) -> int:
         # Reducción modular para asegurar que cabe en un uint256 (aunque el UUID original ya cabe)
         return int(hashlib.sha256(u.encode()).hexdigest(), 16) % (2**256)
 
-def hash_text_to_bytes(text: str) -> bytes:
-    """
-    Calcula el hash SHA256 de un texto y lo devuelve como bytes.
-    Usado para registrar el digest en la blockchain.
-    """
-    digest_hex = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return bytes.fromhex(digest_hex)
+
+
+def hash_text_to_multihash(text: str) -> Multihash:
+    """Calcula el SHA256 y lo envuelve en el modelo Multihash."""
+    logger.info(f"Calculando multihash para texto (preview): {text[:80]}...")
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    # 0x12 es SHA256, 0x20 es 32 bytes (256 bits)
+    return Multihash(hash_function="0x12", hash_size="0x20", digest="0x" + h)
 
 # =========================================================
 # Funciones internas reutilizables
 # =========================================================
-def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, contexto: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+
+def registrar_validacion_internal(postId: Any, assertion_id: Any, veredicto: Veredicto) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
     1) Verifica la aserción (IA)
     2) Envía la transacción addValidation
@@ -344,11 +344,10 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, co
     Nota: función BLOQUEANTE; ejecutar con asyncio.to_thread desde handlers async.
     """
     try:
-        veredict_text = verificar_asercion(texto, contexto)
-        veredict_bool = Veredicto(veredict_text)
-        digest_bytes = hash_text_to_bytes(veredict_text)
 
-        logger.info(f"Veredicto (bool): {veredict_bool.estado} — preparando tx addValidation (post {postId}, assertion {assertion_id})")
+        multihash = hash_text_to_multihash(veredicto.texto)
+
+        logger.info(f"Veredicto (bool): {veredicto.estado} — preparando tx addValidation (post {postId}, assertion {assertion_id})")
 
         # Conversión segura: aseguramos que los IDs sean enteros antes de pasarlos a Web3
         postId_int = int(postId) if str(postId).isdigit() else uuid_to_uint256(str(postId))
@@ -363,11 +362,11 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, co
         func_call = contract.functions.addValidation(
             postId_int,             # ✅ Ahora postId se pasa como int (Web3/Solidity)
             assertion_id_int - 1,   # ✅ assertion_id como índice 0-based
-            int(veredict_bool.estado),
+            int(veredicto.estado),
             {
-                "hash_function": b"\x12",
-                "hash_size": b"\x20",
-                "digest": digest_bytes
+                "hash_function": multihash.hash_function,
+                "hash_size": multihash.hash_size,
+                "digest": multihash.digest
             }
         )
         tx_hash = send_signed_tx(func_call)
@@ -445,24 +444,7 @@ def endpoint_verificar(body: VerifyInputModel):
     resultado = verificar_asercion(body.text, body.context)
     return {"verificación": resultado}
 
-@app.post("/registrar_validacion")
-# ✅ Usando ValidationRegistrationModel
-async def endpoint_registrar_validacion(body: ValidationRegistrationModel):
-    """
-    Ejecuta registrar_validacion_internal en un thread para no bloquear event loop.
-    Devuelve tx_hash y receipt (o error).
-    """
-    try:
-        # Pasamos los IDs como strings/Any; la función interna maneja la conversión a int/uint256
-        tx_hash, receipt = await asyncio.to_thread(registrar_validacion_internal, body.postId, body.assertion_id, body.text, body.context)
-        if tx_hash is None:
-            raise HTTPException(status_code=500, detail="Error al registrar validación (ver logs).")
-        return {"tx_hash": tx_hash, "receipt": receipt}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"endpoint_registrar_validacion error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/tx/status/{tx_hash}")
 async def endpoint_tx_status(tx_hash: str):
@@ -561,11 +543,11 @@ async def consume_and_process():
                 # =====================================================
                 tx_hash = None
                 receipt = None
-                veredict_bool = Veredicto(result_text_parsed.resultado) # Intentamos la conversión del veredicto
+                veredict = Veredicto(result_text_parsed.descripcion) # Intentamos la conversión del veredicto
 
                 try:
                     # Los IDs vienen como str desde Kafka, la función interna los convierte a int/uint256 para Web3
-                    tx_hash, receipt = await asyncio.to_thread(registrar_validacion_internal, postId, assertion_id, result_text, None) 
+                    tx_hash, receipt = await asyncio.to_thread(registrar_validacion_internal, postId, assertion_id,veredict) 
 
                     if not tx_hash or receipt is None or receipt.get("status") != 1:
                          raise RuntimeError(f"Transacción de validación fallida o no minada. Receipt: {receipt}")
@@ -599,7 +581,7 @@ async def consume_and_process():
                         postId=postId,
                         idAssertion=assertion_id,
                         idValidator=ACCOUNT_ADDRESS,
-                        approval=veredict_bool.estado, # El enum Validacion
+                        approval=veredict.estado, # El enum Validacion
                         text=result_text_parsed.descripcion,
                         tx_hash=tx_hash,
                         validator_alias=AI_PROVIDER.upper(),

@@ -6,8 +6,9 @@ import asyncio
 import logging
 import hashlib
 import requests
+import httpx
 from bs4 import BeautifulSoup
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ValidationError
@@ -33,6 +34,8 @@ from common.async_models import (
     Assertion,
     AssertionExtended,
     ValidatorAddress,
+    ConsistencyCheckResult,
+    Multihash
 )
 
 # =========================================================
@@ -65,6 +68,9 @@ MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "orders")
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 
 EMULATE_BLOCKCHAIN_REQUESTS = os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "true").lower() == "true"
+
+IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
+NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain:8073")
 
 # =========================================================
 # App & globals
@@ -569,6 +575,414 @@ async def consume_responses_loop():
         logger.exception("Fatal error in consume_responses_loop: %s", e)
     finally:
         await consumer.stop()
+        
+# =========================================================
+# Sub-Endpoints/Funciones Auxiliares de Consistencia
+# =========================================================
+
+
+
+
+async def _check_order_retrieval(order_id: str) -> Tuple[List[ConsistencyCheckResult], Optional[Dict[str, Any]]]:
+    """Prueba 1: Recuperar Order y validar el OrderId llamando directamente a get_order."""
+    logger.info(f"-> INICIO: Chequeo de recuperación de Order para ID: {order_id}")
+    results: List[ConsistencyCheckResult] = []
+    order_data = None
+    
+    try:
+        # 1. Llamada directa a la función get_order con 'await'
+        order_data = await get_order(order_id)
+        
+        # 2. Validación del OrderId (si get_order devuelve datos)
+        if order_data and order_data.get("order_id") == order_id:
+            results.append(ConsistencyCheckResult(
+                test="Recuperando Order con OrderId",
+                toCompare=order_id,
+                compared=order_data.get("order_id"),
+                result="OK"
+            ))
+            logger.info(f"<- FIN: Order Retrieval OK. Order ID: {order_id}")
+        else:
+            details = "Order ID recuperado no coincide o el cuerpo está vacío/formato incorrecto."
+            results.append(ConsistencyCheckResult(
+                test="Recuperando Order con OrderId",
+                toCompare=order_id,
+                compared=order_data.get("order_id") if order_data else "N/A",
+                result="KO",
+                details=details
+            ))
+            logger.error(f"<- FIN: Order Retrieval KO. Detalles: {details}")
+
+    except HTTPException as e:
+        # 3. Captura la excepción de FastAPI (404 Not Found) lanzada por get_order
+        details = f"Error {e.status_code} al llamar a get_order: {e.detail}"
+        results.append(ConsistencyCheckResult(
+            test="Recuperando Order con OrderId",
+            toCompare=order_id,
+            result="KO",
+            details=details
+        ))
+        logger.error(f"<- FIN: Order Retrieval KO. {details}")
+    except Exception as e:
+        # 4. Captura cualquier otra excepción inesperada
+        details = f"Error inesperado: {str(e)}"
+        results.append(ConsistencyCheckResult(
+            test="Recuperando Order con OrderId",
+            toCompare=order_id,
+            result="KO",
+            details=details
+        ))
+        logger.error(f"<- FIN: Order Retrieval KO. {details}")
+        
+    return results, order_data
+
+# --------------------------------------------------------------------------------
+
+async def _check_ipfs_consistency(client: httpx.AsyncClient, order_data: Dict[str, Any]) -> Tuple[List[ConsistencyCheckResult], Optional[Dict[str, Any]]]:
+    """Pruebas 2, 3, 4, 5: Comparar Order con el contenido de IPFS."""
+    cid = order_data.get("cid")
+    logger.info(f"-> INICIO: Chequeo de consistencia IPFS para CID: {cid}")
+    results: List[ConsistencyCheckResult] = []
+    ipfs_content = None
+    order_text = order_data.get("text", "")
+    order_assertions = order_data.get("assertions", [])
+
+    if not cid:
+        logger.warning("-> FIN: Chequeo IPFS SKIPPED. CID no disponible en Order.")
+        results.append(ConsistencyCheckResult(test="Recuperando documento ipfs", result="SKIP", details="CID no disponible en Order."))
+        return results, None
+
+    # --- Prueba 2: Recuperar documento ipfs ---
+    try:
+        ipfs_url = f"{IPFS_FASTAPI_URL}/ipfs/{cid}"
+        logger.info(f"--- Prueba 2: Llamando a IPFS en {ipfs_url}")
+        response = await client.get(ipfs_url)
+        response.raise_for_status()
+        ipfs_response = response.json()
+        ipfs_content = json.loads(ipfs_response.get("content", "{}"))
+        
+        test_ok = ipfs_response.get("cid") == cid
+        results.append(ConsistencyCheckResult(
+            test=f"Recuperando documento ipfs con cid {cid}",
+            toCompare=cid,
+            compared=ipfs_response.get("cid"),
+            result="OK" if test_ok else "KO",
+            details=None if test_ok else "CID devuelto no coincide."
+        ))
+        logger.info(f"--- Prueba 2 (IPFS Retrieval): {'OK' if test_ok else 'KO'}")
+
+    except httpx.HTTPStatusError as e:
+        details = f"HTTP Error: {e.response.status_code}"
+        results.append(ConsistencyCheckResult(test=f"Recuperando documento ipfs con cid {cid}", toCompare=cid, result="KO", details=details))
+        logger.error(f"--- Prueba 2 (IPFS Retrieval) KO. {details}")
+        return results, None
+    except Exception as e:
+        details = f"Error inesperado: {str(e)}"
+        results.append(ConsistencyCheckResult(test=f"Recuperando documento ipfs con cid {cid}", toCompare=cid, result="KO", details=details))
+        logger.error(f"--- Prueba 2 (IPFS Retrieval) KO. {details}")
+        return results, None
+    
+    if not ipfs_content:
+        logger.warning("--- Pruebas 3-5 SKIPPED. Contenido IPFS vacío o no parseable.")
+        results.append(ConsistencyCheckResult(test="Comparación de texto y aserciones", result="SKIP", details="Contenido IPFS vacío o no parseable."))
+        return results, ipfs_content
+        
+    ipfs_text = ipfs_content.get("text", "")
+    ipfs_assertions = ipfs_content.get("assertions", [])
+    
+    # --- Prueba 3: Comparar texto de la noticia ---
+    text_ok = order_text == ipfs_text
+    results.append(ConsistencyCheckResult(
+        test="Comparando texto de la notícia",
+        toCompare="Order Text",
+        compared="IPFS Text",
+        result="OK" if text_ok else "KO",
+        details=None if text_ok else f"Longitudes: Order={len(order_text)}, IPFS={len(ipfs_text)}. Verifique el contenido."
+    ))
+    logger.info(f"--- Prueba 3 (Texto): {'OK' if text_ok else 'KO'}")
+
+    # --- Prueba 4: Comparar num de assertions entre order e ipfs ---
+    len_assertions_order = len(order_assertions)
+    len_assertions_ipfs = len(ipfs_assertions)
+    len_assertions_ok = len_assertions_order == len_assertions_ipfs
+    results.append(ConsistencyCheckResult(
+        test="Comparando num de assertions entre orden e ipfs",
+        toCompare=len_assertions_order,
+        compared=len_assertions_ipfs,
+        result="OK" if len_assertions_ok else "KO"
+    ))
+    logger.info(f"--- Prueba 4 (Num Assertions): {'OK' if len_assertions_ok else 'KO'}")
+    
+    # --- Prueba 5: Comparar assertions de la noticia (solo si el número es OK) ---
+    if len_assertions_ok and len_assertions_order > 0:
+        for idx, a_order in enumerate(order_assertions):
+            a_ipfs = ipfs_assertions[idx]
+            assertion_id = a_order.get("idAssertion", f"Idx {idx}")
+            text_a_order = a_order.get("text")
+            text_a_ipfs = a_ipfs.get("text")
+            assertion_ok = text_a_order == text_a_ipfs
+            
+            results.append(ConsistencyCheckResult(
+                test=f"Comparando assertion num {assertion_id} (Texto)",
+                toCompare=text_a_order,
+                compared=text_a_ipfs,
+                result="OK" if assertion_ok else "KO"
+            ))
+            logger.info(f"--- Prueba 5 (Assertion {assertion_id} Texto): {'OK' if assertion_ok else 'KO'}")
+    elif not len_assertions_ok and len_assertions_order > 0:
+        logger.warning("--- Prueba 5 SKIPPED. Número de aserciones no coincide.")
+        results.append(ConsistencyCheckResult(
+            test="Comparando assertions numéricas (texto)", 
+            result="SKIP", 
+            details="Se saltó la prueba porque el número de aserciones no coincidía."
+        ))
+
+    logger.info(f"<- FIN: Chequeo de consistencia IPFS para CID: {cid}")
+    return results, ipfs_content
+
+# --------------------------------------------------------------------------------
+
+async def _check_blockchain_consistency(client: httpx.AsyncClient, order_data: Dict[str, Any]) -> Tuple[List[ConsistencyCheckResult], Optional[Dict[str, Any]]]:
+    """Pruebas 6, 7, 8: Comparar Order con el Post de la Blockchain."""
+    postId = order_data.get("postId")
+    logger.info(f"-> INICIO: Chequeo de consistencia Blockchain para PostID: {postId}")
+    results: List[ConsistencyCheckResult] = []
+    post_data = None
+    order_cid = order_data.get("cid")
+    order_hash_text = order_data.get("hash_text")
+    order_assertions = order_data.get("assertions", [])
+
+    if not postId:
+         logger.warning("-> FIN: Chequeo Blockchain SKIPPED. postId no disponible en Order.")
+         results.append(ConsistencyCheckResult(test="Recuperar Post de Ethereum", result="SKIP", details="postId no disponible en Order."))
+         return results, None
+         
+    # --- Prueba 6: Recuperar Post de Ethereum ---
+    try:
+        post_url = f"{NEWS_CHAIN_URL}/blockchain/post/{postId}"
+        logger.info(f"--- Prueba 6: Llamando a Blockchain en {post_url}")
+        response = await client.get(post_url)
+        response.raise_for_status()
+        post_response = response.json()
+        
+        is_success = post_response.get("result") is True and post_response.get("post")
+        if is_success:
+            post_data = post_response.get("post")
+            results.append(ConsistencyCheckResult(
+                test=f"Recuperando post de Ethereum a traves del smart contract con postId: {postId}",
+                toCompare=str(postId),
+                compared=str(post_data.get("postId")),
+                result="OK"
+            ))
+            logger.info(f"--- Prueba 6 (Blockchain Retrieval): OK")
+        else:
+            details = "Respuesta de Blockchain no exitosa o sin datos de 'post'."
+            results.append(ConsistencyCheckResult(
+                test=f"Recuperando post de Ethereum a traves del smart contract con postId: {postId}",
+                toCompare=str(postId),
+                result="KO",
+                details=details
+            ))
+            logger.error(f"--- Prueba 6 (Blockchain Retrieval): KO. {details}")
+            return results, None
+            
+    except httpx.HTTPStatusError as e:
+        details = f"HTTP Error: {e.response.status_code}"
+        results.append(ConsistencyCheckResult(test=f"Recuperando post de Ethereum... {postId}", result="KO", details=details))
+        logger.error(f"--- Prueba 6 (Blockchain Retrieval): KO. {details}")
+        return results, None
+    except Exception as e:
+        details = f"Error inesperado: {str(e)}"
+        results.append(ConsistencyCheckResult(test=f"Recuperando post de Ethereum... {postId}", result="KO", details=details))
+        logger.error(f"--- Prueba 6 (Blockchain Retrieval): KO. {details}")
+        return results, None
+
+    # --- Prueba 7: Comparar CID de Order con Post.document ---
+    post_cid = post_data.get("document")
+    cid_post_ok = order_cid == post_cid
+    results.append(ConsistencyCheckResult(
+        test="Comparando cid de Order con cid de blockchain",
+        toCompare=order_cid,
+        compared=post_cid,
+        result="OK" if cid_post_ok else "KO"
+    ))
+    logger.info(f"--- Prueba 7 (CID): {'OK' if cid_post_ok else 'KO'}")
+
+    # --- Prueba 8: Comparar hash_text de Order con Post.hash_new ---
+    hash_text_ok = order_hash_text == post_data.get("hash_new")
+    results.append(ConsistencyCheckResult(
+        test='Comparando hash de "text" de Order con hash de blockchain',
+        toCompare=order_hash_text,
+        compared=post_data.get("hash_new"),
+        result="OK" if hash_text_ok else "KO"
+    ))
+    logger.info(f"--- Prueba 8 (Hash Text): {'OK' if hash_text_ok else 'KO'}")
+    
+    # --- Prueba 9: Comparar num de assertions entre order y post ---
+    post_assertions = post_data.get("asertions", [])
+    len_assertions_order = len(order_assertions)
+    len_assertions_post = len(post_assertions)
+    len_assertions_ok = len_assertions_order == len_assertions_post
+    results.append(ConsistencyCheckResult(
+        test="Comparando num de assertions entre orden y ethereum",
+        toCompare=len_assertions_order,
+        compared=len_assertions_post,
+        result="OK" if len_assertions_ok else "KO"
+    ))
+    logger.info(f"--- Prueba 9 (Num Assertions): {'OK' if len_assertions_ok else 'KO'}")
+
+    logger.info(f"<- FIN: Chequeo de consistencia Blockchain para PostID: {postId}")
+    return results, post_data
+
+# --------------------------------------------------------------------------------
+
+def _check_assertion_details_consistency(order_data: Dict[str, Any], post_data: Dict[str, Any]) -> List[ConsistencyCheckResult]:
+    """Pruebas 10 y 11: Comparar hashes de aserciones y cardinalidad de validaciones."""
+    logger.info("-> INICIO: Chequeo de detalles de aserciones (Blockchain)")
+    results: List[ConsistencyCheckResult] = []
+    order_assertions = order_data.get("assertions", [])
+    post_assertions = post_data.get("asertions", [])
+    len_assertions_ok = len(order_assertions) == len(post_assertions)
+    
+    if not len_assertions_ok:
+        logger.warning("-> FIN: Detalles de aserciones SKIPPED. Número de aserciones no coincide.")
+        results.append(ConsistencyCheckResult(
+            test="Comparación de detalles de aserciones", 
+            result="SKIP", 
+            details="Se saltó la prueba porque el número de aserciones no coincidía."
+        ))
+        return results
+        
+    for idx, a_order in enumerate(order_assertions):
+        a_post = post_assertions[idx]
+        
+        assertion_id = a_order.get("idAssertion", f"Idx {idx}")
+        order_text = a_order.get("text", "")
+        
+        # --- Prueba 10: Comparar hash de text de assertion con hash de post ---
+        calculated_digest = hash_text_to_multihash(order_text).digest.lower().removeprefix("0x")
+        post_digest = a_post.get("hash_asertion", {}).get("digest", "").lower().removeprefix("0x")
+        hash_ok = calculated_digest == post_digest
+        
+        results.append(ConsistencyCheckResult(
+            test=f'Comparando hash de "assertions"."text" (Order vs Blockchain) para idAssertion {assertion_id}',
+            toCompare="0x" + calculated_digest,
+            compared="0x" + post_digest,
+            result="OK" if hash_ok else "KO",
+            details=None if hash_ok else "El hash calculado del texto de la aserción no coincide con el digest en Blockchain."
+        ))
+        logger.info(f"--- Prueba 10 (Hash Assertions {assertion_id}): {'OK' if hash_ok else 'KO'}")
+
+        # --- Prueba 11: Comparar num de validations entre order y post ---
+        order_validations_map = order_data.get("validations", {}).get(assertion_id, {})
+        post_validations_list = a_post.get("validations", [])
+        
+        len_validations_order = len(order_validations_map)
+        len_validations_post = len(post_validations_list)
+        len_validations_ok = len_validations_order == len_validations_post
+        
+        results.append(ConsistencyCheckResult(
+            test=f"Comparando num de validaciones para la asercion para idAssertion {assertion_id}",
+            toCompare=len_validations_order,
+            compared=len_validations_post,
+            result="OK" if len_validations_ok else "KO"
+        ))
+        logger.info(f"--- Prueba 11 (Num Validations {assertion_id}): {'OK' if len_validations_ok else 'KO'}")
+        
+    logger.info("<- FIN: Chequeo de detalles de aserciones (Blockchain)")
+    return results
+
+# --------------------------------------------------------------------------------
+
+def _check_validation_details_consistency(order_data: Dict[str, Any], post_data: Dict[str, Any]) -> List[ConsistencyCheckResult]:
+    """Pruebas 12, 13, 14: Comparar detalles de validación (address, approval/veredict, hash_text)."""
+    logger.info("-> INICIO: Chequeo de detalles de validación (Blockchain)")
+    results: List[ConsistencyCheckResult] = []
+    order_assertions = order_data.get("assertions", [])
+    post_assertions = post_data.get("asertions", [])
+    
+    if len(order_assertions) != len(post_assertions):
+        logger.warning("-> FIN: Detalles de validación SKIPPED. Número de aserciones no coincide.")
+        results.append(ConsistencyCheckResult(
+            test="Comparación de detalles de validación", 
+            result="SKIP", 
+            details="Se saltó la prueba porque el número de aserciones no coincidía entre Order y Blockchain."
+        ))
+        return results
+
+    for idx, a_order in enumerate(order_assertions):
+        a_post = post_assertions[idx]
+        assertion_id = a_order.get("idAssertion", f"Idx {idx}")
+
+        order_validations_map = order_data.get("validations", {}).get(assertion_id, {})
+        post_validations_list = a_post.get("validations", [])
+        
+        # Saltarse si el número de validaciones no coincide (se chequeó en Prueba 11)
+        if len(order_validations_map) != len(post_validations_list):
+             logger.warning(f"--- Detalles de validación para {assertion_id} SKIPPED. Cardinalidad de validaciones KO.")
+             results.append(ConsistencyCheckResult(
+                 test=f"Detalles de validación para idAssertion {assertion_id}", 
+                 result="SKIP", 
+                 details=f"Se saltó la prueba porque el número de validaciones no coincidía para {assertion_id}."
+             ))
+             continue
+        
+        post_validations_by_address = {v.get("validatorAddress", "").lower(): v for v in post_validations_list}
+        
+        for validator_address, v_order in order_validations_map.items():
+            validator_address_lower = validator_address.lower()
+            v_post = post_validations_by_address.get(validator_address_lower)
+            
+            if not v_post:
+                results.append(ConsistencyCheckResult(
+                    test=f"Comparando address de validators (Order vs Blockchain) para idAssertion {assertion_id}",
+                    toCompare=validator_address,
+                    compared="N/A",
+                    result="KO",
+                    details="Validador de la Order no encontrado en las validaciones de Blockchain."
+                ))
+                logger.error(f"--- Prueba 12 (Address {assertion_id} {validator_address}): KO (No encontrado)")
+                continue
+
+            # --- Prueba 12: Comparar address de validator ---
+            address_ok = validator_address_lower == v_post.get("validatorAddress", "").lower()
+            results.append(ConsistencyCheckResult(
+                test=f"Comparando address de validators entre order y ethereum para idAssertion {assertion_id}",
+                toCompare=validator_address,
+                compared=v_post.get("validatorAddress"),
+                result="OK" if address_ok else "KO"
+            ))
+            logger.info(f"--- Prueba 12 (Address {assertion_id} {validator_address}): {'OK' if address_ok else 'KO'}")
+
+            # --- Prueba 13: Comparar resultado de validation (approval vs veredict) ---
+            order_approval = v_order.get("approval")
+            post_veredict = v_post.get("veredict")
+            approval_ok = order_approval == post_veredict
+            results.append(ConsistencyCheckResult(
+                test=f"Comparando resultado de validaciones (approval/veredict) para idAssertion {assertion_id} y validador {validator_address}",
+                toCompare=order_approval,
+                compared=post_veredict,
+                result="OK" if approval_ok else "KO",
+                details=None if approval_ok else f"Order: {order_approval}, Blockchain: {post_veredict}"
+            ))
+            logger.info(f"--- Prueba 13 (Veredict {assertion_id} {validator_address}): {'OK' if approval_ok else 'KO'}")
+
+            # --- Prueba 14: Comparar hash de veredicto de validaciones ---
+            order_validation_text = v_order.get("text", "")
+            calculated_hash_digest = hash_text_to_multihash(order_validation_text).digest.lower().removeprefix("0x")
+            post_hash_digest = v_post.get("hash_description", {}).get("digest", "").lower().removeprefix("0x")
+            hash_veredict_ok = calculated_hash_digest == post_hash_digest
+            
+            results.append(ConsistencyCheckResult(
+                test=f"Comparando hash de validacion (texto) entre orden y Ethereum paraidAssertion {assertion_id} y validador {validator_address}",
+                toCompare="0x" + calculated_hash_digest,
+                compared="0x" + post_hash_digest,
+                result="OK" if hash_veredict_ok else "KO"
+            ))
+            logger.info(f"--- Prueba 14 (Hash Veredict {assertion_id} {validator_address}): {'OK' if hash_veredict_ok else 'KO'}")
+            
+    logger.info("<- FIN: Chequeo de detalles de validación (Blockchain)")
+    return results
 
 # =========================================================
 # FastAPI endpoints
@@ -707,6 +1121,50 @@ def extract_text_from_url(url: str = Query(..., description="URL de la noticia")
     except requests.RequestException as e:
         logger.error(f"Error accediendo a URL {url}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/checkOrderConsistency/{order_id}", response_model=List[ConsistencyCheckResult])
+async def check_order_consistency(order_id: str):
+    """
+    Orquesta las pruebas de consistencia Order -> IPFS -> Blockchain.
+    """
+    logger.info(f"Iniciando checkOrderConsistency para OrderID: {order_id}")
+    all_results: List[ConsistencyCheckResult] = []
+    order_data = None
+    ipfs_content = None
+    post_data = None
+    
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # 1. Chequeo de Order (Base)
+        order_results, order_data = await _check_order_retrieval( order_id)
+        all_results.extend(order_results)
+        
+        if not order_data:
+            logger.error(f"Fallo crítico: No se pudo recuperar la Order {order_id}. Deteniendo.")
+            return all_results
+
+        # 2. Chequeo de IPFS vs Order
+        ipfs_results, ipfs_content = await _check_ipfs_consistency(client, order_data)
+        all_results.extend(ipfs_results)
+        
+        # 3. Chequeo de Blockchain vs Order (General)
+        blockchain_results, post_data = await _check_blockchain_consistency(client, order_data)
+        all_results.extend(blockchain_results)
+        
+        if not post_data:
+            logger.error(f"Fallo crítico: No se pudo recuperar el Post de Blockchain. Deteniendo chequeos detallados.")
+            return all_results
+            
+        # 4. Chequeo de Assertions (Detalles de las Aserciones)
+        assertion_detail_results = _check_assertion_details_consistency(order_data, post_data)
+        all_results.extend(assertion_detail_results)
+
+        # 5. Chequeo de Validations (Detalles de las Validaciones)
+        validation_detail_results = _check_validation_details_consistency(order_data, post_data)
+        all_results.extend(validation_detail_results)
+
+    logger.info(f"checkOrderConsistency para OrderID: {order_id} finalizado. {len(all_results)} tests ejecutados.")
+    return all_results
 
 # =========================================================
 # Startup / Shutdown

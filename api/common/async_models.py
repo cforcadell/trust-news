@@ -219,4 +219,14 @@ class ValidationFailedResponse(BaseModel):
 class ValidatorAPIResponse(BaseModel):
     resultado: str
     descripcion: str
-    
+
+# ============================================================
+# 🔹 CONSISTENCY MODELS
+# ============================================================
+class ConsistencyCheckResult(BaseModel):
+    """Modelo para un resultado de prueba de consistencia."""
+    test: str
+    toCompare: Optional[str | int | float] = None
+    compared: Optional[str | int | float] = None
+    result: str # "OK", "KO", o "SKIP"
+    details: Optional[str] = None # Para añadir información de error si es KO

@@ -143,6 +143,11 @@ def hash_text_to_multihash(text: str) -> dict:
         "hash_size": "0x20",      # 32 bytes
         "digest": "0x" + h
     }
+    
+def hash_text_to_hash(text: str) -> str:
+    """Genera un hash SHA-256 tipo multihash para enviar al smart contract."""
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return h
 
 async def get_order_lock(order_id: str):
     if order_id not in order_locks:
@@ -858,9 +863,11 @@ def _check_assertion_details_consistency(order_data: Dict[str, Any], post_data: 
         
         assertion_id = a_order.get("idAssertion", f"Idx {idx}")
         order_text = a_order.get("text", "")
+        logger.info(f"--- Calculando digest para idAssertion {assertion_id}: {order_text}")
         
         # --- Prueba 10: Comparar hash de text de assertion con hash de post ---
-        calculated_digest = hash_text_to_multihash(order_text).digest.lower().removeprefix("0x")
+        calculated_digest = hash_text_to_hash(order_text).lower().removeprefix("0x")
+        
         post_digest = a_post.get("hash_asertion", {}).get("digest", "").lower().removeprefix("0x")
         hash_ok = calculated_digest == post_digest
         
@@ -969,7 +976,7 @@ def _check_validation_details_consistency(order_data: Dict[str, Any], post_data:
 
             # --- Prueba 14: Comparar hash de veredicto de validaciones ---
             order_validation_text = v_order.get("text", "")
-            calculated_hash_digest = hash_text_to_multihash(order_validation_text).digest.lower().removeprefix("0x")
+            calculated_hash_digest = hash_text_to_hash(order_validation_text).lower().removeprefix("0x")
             post_hash_digest = v_post.get("hash_description", {}).get("digest", "").lower().removeprefix("0x")
             hash_veredict_ok = calculated_hash_digest == post_hash_digest
             

@@ -1077,7 +1077,120 @@ function renderPost(post) {
 }
 
 
+// =========================================================
+// CONSISTENCY CHECK
+// =========================================================
 
+/**
+     * Llama al endpoint local para verificar la consistencia de la orden
+     * con IPFS y Ethereum.
+     */
+    async function checkOrderConsistency() {
+    const orderIdInput = document.getElementById('orderIdCons');
+    const orderId = orderIdInput.value.trim();
+    const table = document.getElementById('postConsistency');
+
+    const apiUrl = `${API}/checkOrderConsistency/${orderId}`;
+
+    if (!orderId) {
+        table.innerHTML = '<tr><td colspan="5" class="error">Por favor, introduce un Order ID válido.</td></tr>';
+        return;
+    }
+
+    // Mostrar indicador de carga con estilo
+    table.innerHTML = `
+        <tr>
+            <td colspan="5" class="loading">
+                Comprobando consistencia para Order ID: ${orderId}...
+            </td>
+        </tr>
+    `;
+
+    try {
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+            throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        // Renderiza la tabla con los datos obtenidos
+        renderConsistencyTable(data);
+
+    } catch (error) {
+        console.error('Error al verificar la consistencia:', error);
+
+        table.innerHTML = `
+            <tr>
+                <td colspan="5" class="error">
+                    Error al conectar con el servicio local.<br>
+                    Detalle: ${error.message}
+                </td>
+            </tr>`;
+    }
+}
+
+window.onload = () => {
+    switchSection('news');
+    initializeFirebase();
+    console.log(`Trust News App. ID: ${appId}`);
+
+    document
+        .getElementById('btn-checkConsistency')
+        .addEventListener('click', checkOrderConsistency);
+};
+
+
+// =======================
+//   RENDER TABLA
+// =======================
+function renderConsistencyTable(results) {
+    const table = document.getElementById('postConsistency');
+    table.innerHTML = '';
+
+    if (!results || results.length === 0) {
+        table.innerHTML = '<tr><td class="error">No se encontraron resultados.</td></tr>';
+        return;
+    }
+
+    let html = `
+        <thead>
+            <tr>
+                <th>Prueba</th>
+                <th>Comparado (Order/IPFS)</th>
+                <th>Comparado (Blockchain)</th>
+                <th>Resultado</th>
+                <th>Detalles</th>
+            </tr>
+        </thead>
+        <tbody>
+    `;
+
+    results.forEach(item => {
+        const resultClass =
+            item.result === 'OK'
+                ? 'result-ok'
+                : 'result-ko';
+
+        html += `
+            <tr>
+                <td>${item.test || ''}</td>
+                <td><pre>${String(item.toCompare || '')}</pre></td>
+                <td><pre>${String(item.compared || '')}</pre></td>
+                <td>
+                    <span class="${resultClass}">
+                        ${item.result || ''}
+                    </span>
+                </td>
+                <td>${item.details || '-'}</td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody>';
+    table.innerHTML = html;
+}
 
 // =========================================================
 // INICIALIZACIÓN
@@ -1089,6 +1202,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById("nav-tx").addEventListener("click", () => showSection("tx"));
     document.getElementById("nav-blocks").addEventListener("click", () => showSection("blocks"));
     document.getElementById("nav-contract").addEventListener("click", () => showSection("contract"));
+    document.getElementById("nav-consistency").addEventListener("click", () => showSection("consistency"));
     
     // News Listeners
     document.getElementById('btn-publishNew').addEventListener('click',publishNew);
@@ -1106,6 +1220,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 
     // Contract Listeners
     document.getElementById("btn-findPost").addEventListener("click", findPostById);
+
+    // Consistency Listeners
+    document.getElementById("btn-checkConsistency").addEventListener("click", checkOrderConsistency);
 
     // Initial view
     showSection('news');

@@ -382,3 +382,34 @@ pre, .event-payload-pre {
 /* Pequeños helpers */
 .loading { color: #FCD34D; }
 .error { color: #EF4444; font-weight: bold; }
+
+.result-ok {
+    color: #10B981;      /* verde */
+    font-weight: bold;
+}
+
+.result-ko {
+    color: #EF4444;      /* rojo */
+    font-weight: bold;
+}
+
+/* =================== TABLA CONSISTENCIA COMPACTA =================== */
+#postConsistency {
+    table-layout: fixed;
+    width: 100%;
+    font-size: 0.75rem;          /* Más pequeña */
+}
+
+#postConsistency th,
+#postConsistency td {
+    padding: 4px 6px;            /* Mucho más compacto */
+    max-width: 200px;            /* Reduce ancho de columnas */
+    overflow-wrap: anywhere;
+}
+
+#postConsistency pre {
+    font-size: 0.70rem;          /* JSON más pequeño */
+    padding: 8px;
+    max-height: 150px;
+    overflow-y: auto;            /* Scroll vertical dentro de la celda */
+}

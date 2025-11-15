@@ -15,6 +15,7 @@
     <button id="nav-tx">Transacciones</button>
     <button id="nav-blocks">Bloques</button>
     <button id="nav-contract">Contrato</button>
+    <button id="nav-consistency">Consistencia</button>
   </nav>
 </header>
 
@@ -71,13 +72,22 @@
 <div class="section" id="contract">
     <h2>Smart Contract</h2>
 
-    <h3>Consulta por Post Id</h3>
     <div style="margin-bottom:10px;">
         <input type="text" id="postId" placeholder="Introduce post Id"/>
         <button id="btn-findPost">Buscar Post</button>
     </div>
 
     <table id="postTable"></table>
+</div>
+<div class="section" id="consistency">
+    <h2>Check de Integridad con Ethereum</h2>
+
+    <div style="margin-bottom:10px;">
+        <input type="text" id="orderIdCons" placeholder="Introduce order Id"/>
+        <button id="btn-checkConsistency">Buscar Post</button>
+    </div>
+
+    <table id="postConsistency"></table>
 </div>
 <script src="js/app.js"></script> 
 </body>

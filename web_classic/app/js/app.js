@@ -433,6 +433,9 @@ function renderDetails(container, data) {
                   if (k === "postId" && v) { 
                       v = `<a href="#" onclick="event.preventDefault(); navigateToPost('${v}'); return false;">${v}</a>`;
                   }
+                  if (k === "order_id" && v) { 
+                      v = `<a href="#" onclick="event.preventDefault(); navigateToConsistency('${v}'); return false;">${v}</a>`;
+                  }
 
 
                   return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
@@ -791,6 +794,8 @@ function navigateToTx(hash) {
     findTx();
 }
 
+
+
 function navigateToPost(postId) {
     if (!postId) return;
     
@@ -819,6 +824,18 @@ function navigateToBlock(hash) {
     findBlock();
 }
 
+function navigateToConsistency(text) {
+    if (!text) return;
+    
+    // Cambiar a la sección de transacciones
+    showSection('consistency');
+    
+    // Poner hash en el input
+    const txInput = document.getElementById("orderIdCons");
+    txInput.value = text;
+
+    checkOrderConsistency();
+}
 
 // ===============================
 // 🔹 BLOQUES
@@ -1085,7 +1102,7 @@ function renderPost(post) {
      * Llama al endpoint local para verificar la consistencia de la orden
      * con IPFS y Ethereum.
      */
-    async function checkOrderConsistency() {
+async function checkOrderConsistency() {
     const orderIdInput = document.getElementById('orderIdCons');
     const orderId = orderIdInput.value.trim();
     const table = document.getElementById('postConsistency');
@@ -1161,7 +1178,6 @@ function renderConsistencyTable(results) {
                 <th>Comparado (Order/IPFS)</th>
                 <th>Comparado (Blockchain)</th>
                 <th>Resultado</th>
-                <th>Detalles</th>
             </tr>
         </thead>
         <tbody>
@@ -1183,7 +1199,6 @@ function renderConsistencyTable(results) {
                         ${item.result || ''}
                     </span>
                 </td>
-                <td>${item.details || '-'}</td>
             </tr>
         `;
     });

@@ -403,7 +403,7 @@ pre, .event-payload-pre {
 #postConsistency th,
 #postConsistency td {
     padding: 4px 6px;            /* Mucho más compacto */
-    max-width: 200px;            /* Reduce ancho de columnas */
+    max-width: 250px;            /* Reduce ancho de columnas */
     overflow-wrap: anywhere;
 }
 

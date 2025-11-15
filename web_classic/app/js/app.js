@@ -80,7 +80,7 @@ function getValidationLiteral(value) {
     switch (numericValue) {
         case 1: return "True";
         case 2: return "False";
-        case 0: return "Unkworn";
+        case 0: return "Unknown";
         default: return "VALOR ERRONEO";
     }
 }

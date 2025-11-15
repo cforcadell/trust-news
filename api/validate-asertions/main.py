@@ -543,7 +543,14 @@ async def consume_and_process():
                 # =====================================================
                 tx_hash = None
                 receipt = None
-                veredict = Veredicto(result_text_parsed.descripcion) # Intentamos la conversión del veredicto
+                if result_text_parsed.resultado == "TRUE":
+                    estado_enum = Validacion.TRUE
+                elif result_text_parsed.resultado == "FALSE":
+                    estado_enum = Validacion.FALSE
+                else:
+                    estado_enum = Validacion.UNKNOWN
+                    
+                veredict = Veredicto(result_text_parsed.descripcion,estado_enum) # Intentamos la conversión del veredicto
 
                 try:
                     # Los IDs vienen como str desde Kafka, la función interna los convierte a int/uint256 para Web3

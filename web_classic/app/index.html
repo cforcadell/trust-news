@@ -11,7 +11,8 @@
   <h1>Trust News</h1>
   <nav>
     <button id="nav-news">News</button>
-    <button id="nav-orders">Orders</button>
+    <button id="nav-order">Order</button>
+    <button id="nav-orders">ListOrders</button>
     <button id="nav-tx">Transacciones</button>
     <button id="nav-blocks">Bloques</button>
     <button id="nav-contract">Contrato</button>
@@ -36,9 +37,21 @@
     <h2>Orders</h2>
     
     <div id="ordersTopBar">
+        <button id="btn-listOrders">Listar Orders</button>
+    </div>
+
+    <div id="listFixedDetailsContainer"></div> 
+
+    <div id="listOrderTabs" class="tabs"></div>
+    <div id="listTabContent"></div> 
+</div>
+<div class="section" id="order">
+    <h2>Orders</h2>
+    
+    <div id="orderTopBar">
         <input type="text" id="orderId" placeholder="order_id"/>
         <button id="btn-findOrder">Buscar Order</button>
-        <button id="btn-listOrders">Listar Orders</button>
+
     </div>
 
     <div id="fixedDetailsContainer"></div> 

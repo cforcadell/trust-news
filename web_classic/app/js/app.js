@@ -174,7 +174,7 @@ async function publishNew() {
     const text = document.getElementById("newsText").value.trim();
     if (!text) return alertMessage("Introduce un texto para verificar.", 'error');
 
-    showSection('orders');
+    showSection('order');
     document.getElementById("orderId").value = "Publicando...";
 
     const res = await fetch(`${API}/publishNew`, {
@@ -232,23 +232,12 @@ async function listOrders() {
         
         const data = await res.json();
         
-        const tabs = document.getElementById("orderTabs");
-        const detailsContainer = document.getElementById("fixedDetailsContainer");
-        const tabContent = document.getElementById("tabContent");
+        const tabs = document.getElementById("listOrderTabs");
+        const detailsContainer = document.getElementById("listFixedDetailsContainer");
+        const tabContent = document.getElementById("listTabContent");
         tabs.innerHTML = detailsContainer.innerHTML = tabContent.innerHTML = "";
         
-        // Renderizar el botón 'Lista Orders' como una pestaña activa temporal
-        const btn = document.createElement("button");
-        btn.innerText = "Lista Orders";
-        btn.classList.add("activeTab");
-        
-        // Replicar la funcionalidad de la pestaña activa (aunque solo haya una)
-        btn.onclick = () => {
-            document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
-            btn.classList.add("activeTab");
-            renderTableData(tabContent, data); 
-        };
-        tabs.appendChild(btn);
+
         
         renderTableData(tabContent, data);
         alertMessage(`Órdenes cargadas: ${data.length}`, 'primary');
@@ -875,7 +864,7 @@ function navigateTo(section, inputId, value, loadFunction) {
 
 
 function navigateToOrderDetails(orderId) {
-    navigateTo("orders", "orderId", orderId, (v) => loadOrderById(v, true));
+    navigateTo("order", "orderId", orderId, (v) => loadOrderById(v, true));
 }
 
 function navigateToTx(hash) {
@@ -1292,6 +1281,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     // Navigation Listeners
     document.getElementById('nav-news').addEventListener('click',()=>showSection('news'));
     document.getElementById('nav-orders').addEventListener('click',()=>showSection('orders'));
+    document.getElementById('nav-order').addEventListener('click',()=>showSection('order'));
     document.getElementById("nav-tx").addEventListener("click", () => showSection("tx"));
     document.getElementById("nav-blocks").addEventListener("click", () => showSection("blocks"));
     document.getElementById("nav-contract").addEventListener("click", () => showSection("contract"));

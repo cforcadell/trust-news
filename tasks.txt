@@ -1,9 +1,9 @@
 - False de asercion en Rojo --> OK
 - Texto de resultado de verificacions en colores --> OK
-- APi ipfs con busqueda por cif  y botón de enlace de cid a esa pestaña
-- Navegación Atrás
+- APi ipfs con busqueda por cif  y botón de enlace de cid a esa pestaña --> OK
+- Navegación Atrás --> Parcial
 - Reestructurar Menú y convertir en panel a la derecha
-- Centrat Título
+- Centrar Título
 - Estadisticas de aserciones correctas
 - Cambiar x botón de Consistencia 
 - ícono Web

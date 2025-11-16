@@ -5,6 +5,7 @@
 // =========================================================
 const API = "/api";
 const TX_API = "/ethereum";
+const IPFS_API = "/ipfs";
 
 const MAX_EVENTS_ROWS = 15;
 const POLLING_DURATION = 0; // 20 segundos
@@ -63,6 +64,20 @@ let currentOrderData = {};
 // =========================================================
 // UTILIDADES
 // =========================================================
+
+
+function escapeHTML(str) {
+    return str.replace(/[&<>"']/g, function(match) {
+        return ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[match];
+    });
+}
+
 
 function shortHex(value) {
   if (!value || typeof value !== "string") return "";
@@ -432,6 +447,9 @@ function renderDetails(container, data) {
                       v = `<a href="#" onclick="event.preventDefault(); navigateToConsistency('${v}'); return false;">${v}</a>`;
                       return `<tr><th>Validar vs blockchain</th><td>${v || ''}</td></tr>`;
                   }
+                  if (k === "cid" && v) {
+                      v = `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${v}'); return false;">${v}</a>`;
+                  }
 
 
                   return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
@@ -725,6 +743,52 @@ function renderAssertions(container, assertions) {
 
 
 //=========================================================
+// IPFS
+//=========================================================
+async function findIpfs() {
+    const cid = document.getElementById("ipfsHash").value.trim();
+    const table = document.getElementById("ipfsTable");
+
+    // Limpiar tabla y contenedor previo
+    table.innerHTML = "";
+    const oldBox = document.getElementById("ipfsContentBox");
+    if (oldBox) oldBox.remove();
+
+    if (!cid) return alertMessage("Introduce un hash de IPFS", "error");
+
+    alertMessage("Buscando contenido en IPFS...", "info");
+
+    try {
+        const res = await fetch(`${IPFS_API}/ipfs/${cid}`);
+        if (!res.ok) throw new Error("Error al obtener datos de IPFS");
+
+        const data = await res.json();
+        if (!data.content) throw new Error("Campo 'content' no encontrado en la respuesta");
+
+        alertMessage("Contenido recuperado.", "primary");
+
+        const box = document.createElement("div");
+        box.id = "ipfsContentBox";
+        box.className = "post-box";
+        box.innerHTML = `<pre class="event-payload-pre">${escapeHTML(data.content)}</pre>`;
+
+        table.insertAdjacentElement("afterend", box);
+
+    } catch (err) {
+        console.error(err);
+
+        const box = document.createElement("div");
+        box.id = "ipfsContentBox";
+        box.className = "post-box";
+        box.innerHTML = `<div class="error">Error al obtener el contenido desde IPFS.</div>`;
+
+        table.insertAdjacentElement("afterend", box);
+        alertMessage("Error al buscar en IPFS.", "error");
+    }
+}
+
+
+//=========================================================
 // TX
 //=========================================================
 async function findTx() {
@@ -830,6 +894,9 @@ function navigateToConsistency(orderId) {
     navigateTo("consistency", "orderIdCons", orderId, checkOrderConsistency);
 }
 
+function navigateToIpfs(ipfsHash) {
+    navigateTo("ipfs", "ipfsHash", ipfsHash, findIpfs);
+}
 
 window.onpopstate = function(event) {
     if (!event.state) return;
@@ -1229,6 +1296,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById("nav-blocks").addEventListener("click", () => showSection("blocks"));
     document.getElementById("nav-contract").addEventListener("click", () => showSection("contract"));
     document.getElementById("nav-consistency").addEventListener("click", () => showSection("consistency"));
+    document.getElementById("nav-ipfs").addEventListener("click", () => showSection("ipfs"));
     
     // News Listeners
     document.getElementById('btn-publishNew').addEventListener('click',publishNew);
@@ -1249,6 +1317,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 
     // Consistency Listeners
     document.getElementById("btn-checkConsistency").addEventListener("click", checkOrderConsistency);
+
+    // IPFS Listeners
+    document.getElementById("btn-findIpfs").addEventListener("click", findIpfs);
 
     // Initial view
     showSection('news');

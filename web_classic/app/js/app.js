@@ -121,30 +121,24 @@ function mapVeredict(v) {
 // =========================================================
 // SECCIÓN Y NAVEGACIÓN
 // =========================================================
-function showSection(section) {
-    document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
-    const targetSection = document.getElementById(section);
-    if(targetSection) targetSection.classList.add("active");
-    else console.error(`Sección con ID "${section}" no encontrada.`);
-    
-    // Update nav button styles (using generic classes for separation)
-    document.querySelectorAll(".nav-button").forEach(button => {
-        if (button.id === `nav-${section}`) {
-            button.classList.remove('bg-gray-700', 'hover:bg-primary');
-            button.classList.add('bg-primary', 'hover:bg-teal-700');
-        } else {
-            button.classList.add('bg-gray-700', 'hover:bg-primary');
-            button.classList.remove('bg-primary', 'hover:bg-teal-700');
-        }
+function showSection(sectionId) {
+    // Selecciona todas las secciones
+    const sections = document.querySelectorAll("section");
+
+    sections.forEach(sec => {
+        sec.classList.remove("active"); // ocultar
     });
 
-    if (section === 'orders') {
-        document.getElementById("fixedDetailsContainer").innerHTML = '<p class="text-sm text-gray-400">Detalles de la Orden seleccionada aparecerán aquí.</p>';
-        document.getElementById("orderTabs").innerHTML = '';
-        document.getElementById("tabContent").innerHTML = '<p class="text-gray-300">Contenido de la pestaña activa.</p>';
-        currentOrderData = {}; 
+    const activeSection = document.getElementById(sectionId);
+    if (activeSection) {
+        activeSection.classList.add("active"); // mostrar
+    } else {
+        console.warn(`No se encontró la sección con id '${sectionId}'`);
     }
 }
+
+
+
 
 // =========================================================
 // POLLING DE ÓRDENES
@@ -1217,7 +1211,7 @@ async function checkOrderConsistency() {
 
 window.onload = () => {
     showSection('news');
-    initializeFirebase();
+    //initializeFirebase();
     console.log(`Trust News App. ID: ${appId}`);
 
     document
@@ -1279,14 +1273,14 @@ function renderConsistencyTable(results) {
 // =========================================================
 document.addEventListener('DOMContentLoaded',()=>{
     // Navigation Listeners
-    document.getElementById('nav-news').addEventListener('click',()=>showSection('news'));
-    document.getElementById('nav-orders').addEventListener('click',()=>showSection('orders'));
-    document.getElementById('nav-order').addEventListener('click',()=>showSection('order'));
-    document.getElementById("nav-tx").addEventListener("click", () => showSection("tx"));
-    document.getElementById("nav-blocks").addEventListener("click", () => showSection("blocks"));
-    document.getElementById("nav-contract").addEventListener("click", () => showSection("contract"));
-    document.getElementById("nav-consistency").addEventListener("click", () => showSection("consistency"));
-    document.getElementById("nav-ipfs").addEventListener("click", () => showSection("ipfs"));
+    document.querySelectorAll('.menu-title').forEach(title => {
+        title.addEventListener('click', () => {
+            const submenu = title.nextElementSibling;
+            if (submenu) {
+                submenu.style.display = submenu.style.display === 'block' ? 'none' : 'block';
+            }
+        });
+    });
     
     // News Listeners
     document.getElementById('btn-publishNew').addEventListener('click',publishNew);

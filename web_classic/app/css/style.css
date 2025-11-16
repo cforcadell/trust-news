@@ -434,3 +434,69 @@ pre, .event-payload-pre {
 .summary-yellow {
     color: #F59E0B; /* amarillo */
 }
+
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    display: flex;
+    background-color: #111827;
+    color: #E5E7EB;
+}
+
+/* Sidebar */
+#sidebar {
+    width: 250px;
+    background-color: #1F2937;
+    padding: 10px;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.menu-group {
+    margin-bottom: 10px;
+}
+
+.menu-title {
+    font-size: 1.1em;
+    cursor: pointer;
+    padding: 5px;
+    background-color: #374151;
+    margin: 0;
+}
+
+.submenu {
+    display: none; /* autoexpandible oculto por defecto */
+    margin-top: 5px;
+    padding-left: 10px;
+}
+
+.submenu button {
+    display: block;
+    width: 100%;
+    background: #4B5563;
+    color: #E5E7EB;
+    border: none;
+    padding: 5px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.submenu button:hover {
+    background-color: #6B7280;
+}
+
+/* Main content */
+#main {
+    flex: 1;
+    padding: 20px;
+    overflow-x: auto;
+}
+
+section {
+    display: none;
+}
+
+section.active {
+    display: block;
+}

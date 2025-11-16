@@ -199,7 +199,7 @@ td a {
     padding: 0;
 }
 
-.fake-news {
+.false-news {
     background: none;
     color: #EF4444;
     font-weight: bold;
@@ -297,7 +297,6 @@ pre, .event-payload-pre {
     margin-bottom: 15px;
     border: 1px solid #374151;
     border-radius: 5px;
-    overflow: hidden;
     background: #111827;
 }
 
@@ -414,4 +413,24 @@ pre, .event-payload-pre {
     padding: 8px;
     max-height: 150px;
     overflow-y: auto;            /* Scroll vertical dentro de la celda */
+}
+
+/* Summary base */
+.assertion-summary {
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+/* Colores dinámicos */
+.summary-green {
+    color: #22c55e; /* verde */
+}
+
+.summary-red {
+    color: #ef4444; /* rojo */
+}
+
+.summary-yellow {
+    color: #F59E0B; /* amarillo */
 }

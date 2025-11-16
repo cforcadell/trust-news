@@ -103,7 +103,7 @@ function mapVeredict(v) {
     switch (v) {
         case 0: return "<span class='false-news'>False</span>";
         case 1: return "<span class='true-news'>True</span>";
-        case 2: return "<span class='partial-news'>Parcial</span>";
+        case 2: return "<span class='partial-news'>Unknown</span>";
         default: return "<span class='unknown'>?</span>";
     }
 }
@@ -409,7 +409,7 @@ function renderDetails(container, data) {
         }
         else if (falseAssertions > trueAssertions && falseAssertions > 0) { 
             overallTag = "Parcialmente Falsa"; 
-            overallClass = "fake-news"; 
+            overallClass = "false-news"; 
         }
         else if (trueAssertions === falseAssertions && knownAssertions > 0) {
              overallTag = "Validación Mixta"; 
@@ -445,13 +445,13 @@ function renderDetails(container, data) {
 
     const summaryHtml = `<table class="compact-table">
         <tr><th>ID de Orden</th><td>${data.order_id || "N/A"}</td></tr>
-        <tr><th>Estado General</th><td class="status-value ${overallClass}" data-status="${data.status || 'UNKNOWN'}">${overallTag}</td></tr>
+        <tr><th>Estado General</th><td class="status-value ${overallClass}" data-status="${data.status || 'UNKNOWN'}"> ${overallTag}</td></tr>
         <tr><th>Estado de Procesamiento</th><td>${data.status || "N/A"}</td></tr>
         <tr><th>Noticia (Resumen)</th><td>${data.text || "N/A"}</td></tr>
         <tr><th>Validators Pendientes</th><td>${data.validators_pending ?? 0}</td></tr>
-        <tr><th>Aserciones Ciertas</th><td class="true-news">${trueAssertions} (${percentTrue.toFixed(1)}%)</td></tr>
-        <tr><th>Aserciones Falsas</th><td class="fake-news">${falseAssertions} (${percentFalse.toFixed(1)}%)</td></tr>
-        <tr><th>Validaciones Desconocidas</th><td class="unknown">${unknownCount}</td></tr>
+        <tr><th>Aserciones Ciertas</th><td class="true-news"> ${trueAssertions} (${percentTrue.toFixed(1)}%)</td></tr>
+        <tr><th>Aserciones Falsas</th><td class="false-news"> ${falseAssertions} (${percentFalse.toFixed(1)}%)</td></tr>
+        <tr><th>Validaciones Desconocidas</th><td class="unknown"> ${unknownCount}</td></tr>
     </table>`;
 
     // --- Subpestañas internas
@@ -500,7 +500,7 @@ function renderValidationsTree(container, validations, assertions) {
     let html = "";
 
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
-        let assertionText = assertions.find(a => a.idAssertion === assertionId)?.text || "(Asersión sin texto)";
+        let assertionText = assertions.find(a => a.idAssertion === assertionId)?.text || "(Aserción sin texto)";
         if (typeof assertionText === 'object' && assertionText !== null && assertionText.text) {
             assertionText = assertionText.text;
         }
@@ -535,8 +535,14 @@ function renderValidationsTree(container, validations, assertions) {
             </tr>`;
         }
 
+        // Definir clase según el resultado
+        let summaryClass = "";
+        if (approvedCount > rejectedCount) summaryClass = "summary-green";
+        else if (approvedCount < rejectedCount) summaryClass = "summary-red";
+        else summaryClass = "summary-yellow";
+
         html += `<details class="p-3 bg-gray-700 rounded-lg mb-3">
-            <summary class="cursor-pointer" style="font-weight:bold; font-size:1rem;">
+            <summary class="cursor-pointer ${summaryClass}" style="font-weight:bold; font-size:1rem;">
                 ${assertionId}. ${assertionText} → <span style="font-size:0.9rem;">(${approvedCount} A / ${rejectedCount} R)</span>
             </summary>
             <div class="mt-3">
@@ -557,6 +563,7 @@ function renderValidationsTree(container, validations, assertions) {
 
     container.innerHTML = html;
 }
+
 
 
 // =========================================================
@@ -1150,7 +1157,7 @@ async function checkOrderConsistency() {
 }
 
 window.onload = () => {
-    switchSection('news');
+    showSection('news');
     initializeFirebase();
     console.log(`Trust News App. ID: ${appId}`);
 

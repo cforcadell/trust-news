@@ -1,5 +1,5 @@
 - False de asercion en Rojo --> OK
-- Texto de resultado de verificacions en colores
+- Texto de resultado de verificacions en colores --> OK
 - APi ipfs con busqueda por cif  y botón de enlace de cid a esa pestaña
 - Navegación Atrás
 - Reestructurar Menú y convertir en panel a la derecha

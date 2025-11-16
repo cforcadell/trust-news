@@ -93,11 +93,6 @@ function formatDate(ts) {
     return isNaN(d.getTime()) ? "Fecha Inválida" : d.toISOString().replace("T"," ").split(".")[0];
 }
 
-function navigateToOrderDetails(orderId){
-    document.getElementById("orderId").value = orderId;
-    showSection("orders");
-    loadOrderById(orderId, true);
-}
 
 function mapVeredict(v) {
     switch (v) {
@@ -788,62 +783,70 @@ function renderTxTable(apiData) {
     `;
 }
 
-function navigateToTx(hash) {
-    if (!hash) return;
-    
-    // Cambiar a la sección de transacciones
-    showSection('tx');
-    
-    // Poner hash en el input
-    const txInput = document.getElementById("txHash");
-    txInput.value = hash;
+// =========================================================
+//Funciones de navegacion
+// =========================================================
 
-    // Llamar a findTx para cargar los datos
-    findTx();
+
+function navigateTo(section, inputId, value, loadFunction) {
+    if (!value) return;
+
+    // Cambiar de sección visualmente
+    showSection(section);
+
+    // Poner valor en el input
+    const input = document.getElementById(inputId);
+    input.value = value;
+
+    // Cargar datos
+    loadFunction(value);
+
+    // Guardar estado en historial
+    history.pushState(
+        { section, inputId, value }, 
+        "", 
+        `#${section}/${value}`
+    );
 }
 
 
+function navigateToOrderDetails(orderId) {
+    navigateTo("orders", "orderId", orderId, (v) => loadOrderById(v, true));
+}
+
+function navigateToTx(hash) {
+    navigateTo("tx", "txHash", hash, findTx);
+}
 
 function navigateToPost(postId) {
-    if (!postId) return;
-    
-    // Cambiar a la sección de transacciones
-    showSection('contract');
-    
-    // Poner hash en el input
-    const txInput = document.getElementById("postId");
-    txInput.value = postId;
-
-    // Llamar a findTx para cargar los datos
-    findPostById();
+    navigateTo("contract", "postId", postId, findPostById);
 }
 
 function navigateToBlock(hash) {
-    if (!hash) return;
-    
-    // Cambiar a la sección de bloques
-    showSection('blocks');
-    
-    // Poner hash en el input
-    const blockInput = document.getElementById("blockId");
-    blockInput.value = hash;
-
-    // Llamar a findBlock para cargar los datos
-    findBlock();
+    navigateTo("blocks", "blockId", hash, findBlock);
 }
 
-function navigateToConsistency(text) {
-    if (!text) return;
-    
-    // Cambiar a la sección de transacciones
-    showSection('consistency');
-    
-    // Poner hash en el input
-    const txInput = document.getElementById("orderIdCons");
-    txInput.value = text;
-
-    checkOrderConsistency();
+function navigateToConsistency(orderId) {
+    navigateTo("consistency", "orderIdCons", orderId, checkOrderConsistency);
 }
+
+
+window.onpopstate = function(event) {
+    if (!event.state) return;
+
+    const { section, inputId, value } = event.state;
+
+    showSection(section);
+    document.getElementById(inputId).value = value;
+
+    switch (section) {
+        case "orders": loadOrderById(value, true); break;
+        case "tx": findTx(); break;
+        case "contract": findPostById(); break;
+        case "blocks": findBlock(); break;
+        case "consistency": checkOrderConsistency(); break;
+    }
+};
 
 // ===============================
 // 🔹 BLOQUES

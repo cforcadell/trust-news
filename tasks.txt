@@ -2,8 +2,9 @@
 - Texto de resultado de verificacions en colores --> OK
 - APi ipfs con busqueda por cif  y botón de enlace de cid a esa pestaña --> OK
 - Navegación Atrás --> Parcial
-- Reestructurar Menú y convertir en panel a la derecha
-- Centrar Título
+- Reestructurar Menú y convertir en panel a la derecha -> OK
+- Centrar Título -> OK
+- Por defecto al clickar en ListaOrders que se consulte. Cambiar Nombre a Refrescar
 - Estadisticas de aserciones correctas
 - Cambiar x botón de Consistencia 
 - ícono Web

@@ -132,6 +132,8 @@ function showSection(sectionId) {
     const activeSection = document.getElementById(sectionId);
     if (activeSection) {
         activeSection.classList.add("active"); // mostrar
+        if (sectionId==="orders")
+            listOrders();
     } else {
         console.warn(`No se encontró la sección con id '${sectionId}'`);
     }

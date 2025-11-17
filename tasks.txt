@@ -4,8 +4,9 @@
 - Navegación Atrás --> Parcial
 - Reestructurar Menú y convertir en panel a la derecha -> OK
 - Centrar Título -> OK
-- Por defecto al clickar en ListaOrders que se consulte. Cambiar Nombre a Refrescar
-- Estadisticas de aserciones correctas
+- Por defecto al clickar en ListaOrders que se consulte. Cambiar Nombre a Refrescar -> OK
+- Estadisticas de aserciones correctas -> OK
+- Cuando cambiemos de pestaña resetar valores de fields antiguos y limpiar pantalla.
 - Cambiar x botón de Consistencia 
 - ícono Web
 - Fuente de eventos más pequeña
@@ -13,6 +14,7 @@
 - Valores de resumen de ordenes con un espacio delante 
 - Paginado de listado de órdenes
 - Barra de Estado común para los mensajes
+- Mostrar resultado global de comprobación de consistencia
 - Estilo de web más moderna
 - Estado de órdenes en lista ordenada con iconos y resaltado o estado final y entre parentesis lista de estados en verde los finalizados, Negro pendiente y negrita el ultimo
 - Desplegar en Geth [Opcional]

@@ -392,8 +392,8 @@ function renderDetails(container, data) {
     let percentFalse=0;
     const knownAssertions = totalAssertions - unknownCount;
     if (knownAssertions !== 0) {
-        percentTrue = (trueAssertions / knownAssertions) * 100;
-        percentFalse = (falseAssertions / knownAssertions) * 100;
+        percentTrue = (trueAssertions / totalAssertions) * 100;
+        percentFalse = (falseAssertions / totalAssertions) * 100;
     } 
 
     let overallTag = "Sin Validaciones", overallClass = "unknown";

@@ -11,6 +11,9 @@ const MAX_EVENTS_ROWS = 15;
 const POLLING_DURATION = 0; // 20 segundos
 const POLLING_INTERVAL = 1000;  // 1 segundo
 
+const TABLE_PAGE_SIZE_ORDERS = 10;   // cantidad por página
+let TABLE_PAGE_ORDERS = 1;           // página actual
+
 const CATEGORY_MAP = {
     1: "ECONOMÍA",
     2: "DEPORTES",
@@ -567,55 +570,112 @@ function renderValidationsTree(container, validations, assertions) {
 // =========================================================
 // RENDER TABLAS Y EVENTOS
 // =========================================================
+
+
 function renderTableData(container, data) {
+
+    // =====================================================
+    // Si no hay datos
+    // =====================================================
     if (!data?.length) {
         container.innerHTML = "<p class='text-gray-400 p-4'>No hay datos disponibles.</p>";
         return;
     }
 
+    // =====================================================
+    // Cálculos de paginación
+    // =====================================================
+    const totalItems = data.length;
+    const totalPages = Math.ceil(totalItems / TABLE_PAGE_SIZE_ORDERS);
+
+    if (TABLE_PAGE_ORDERS < 1) TABLE_PAGE_ORDERS = 1;
+    if (TABLE_PAGE_ORDERS > totalPages) TABLE_PAGE_ORDERS = totalPages;
+
+    const start = (TABLE_PAGE_ORDERS - 1) * TABLE_PAGE_SIZE_ORDERS;
+    const end = start + TABLE_PAGE_SIZE_ORDERS;
+    const pageData = data.slice(start, end);
+
+    // =====================================================
+    // Generación de tabla
+    // =====================================================
     const keys = Object.keys(data[0]);
-    container.innerHTML = `<table class="compact-table">
+
+    let html = `<table class="compact-table">
         <thead>
             <tr>${keys.map(k => `<th class="uppercase text-xs">${k}</th>`).join("")}</tr>
         </thead>
-        <tbody>
-            ${data.map(row => {
-                return `<tr>${keys.map(k => {
-                    let val = row[k];
+        <tbody>`;
 
-                    // Resumir campos complejos
-                    switch(k) {
-                        case "validators_pending":
-                            val = row[k]; 
-                            break;
-                        case "assertions":
-                        case "validators":
-                            val = Array.isArray(row[k]) ? row[k].length : 0;
-                            break;
-                        case "validations":
-                            val = row[k] ? Object.keys(row[k]).length : 0;
-                            break;
-                        case "text":
-                            if (typeof val === "object" && val?.text) val = val.text;
-                            if (typeof val === "string") val = val.substring(0, 50) + (val.length > 50 ? '...' : '');
-                            break;
-                    }
+    html += pageData.map(row => {
+        return `<tr>${keys.map(k => {
+            let val = row[k];
 
-                    // order_id clicable
-                    if (k === "order_id") {
-                        return `<td><a href="#" onclick="event.preventDefault(); navigateToOrderDetails('${row[k]}')">${row[k]}</a></td>`;
-                    }
-                    if (k==='tx_hash') {
-                         return `<td><a href="#" onclick="event.preventDefault(); navigateToTx('${val}')">${shortHex(val)}</a></td>`;
-                    }
+            // Resumir tipos complejos
+            switch(k) {
+                case "validators_pending":
+                    val = row[k];
+                    break;
+                case "assertions":
+                case "validators":
+                    val = Array.isArray(row[k]) ? row[k].length : 0;
+                    break;
+                case "validations":
+                    val = row[k] ? Object.keys(row[k]).length : 0;
+                    break;
+                case "text":
+                    if (typeof val === "object" && val?.text) val = val.text;
+                    if (typeof val === "string") val = val.substring(0, 50) + (val.length > 50 ? '...' : '');
+                    break;
+            }
 
+            // links especiales
+            if (k === "order_id") {
+                return `<td><a href="#" onclick="event.preventDefault(); navigateToOrderDetails('${row[k]}')">${row[k]}</a></td>`;
+            }
+            if (k === "tx_hash") {
+                return `<td><a href="#" onclick="event.preventDefault(); navigateToTx('${val}')">${shortHex(val)}</a></td>`;
+            }
 
-                    return `<td>${val}</td>`;
-                }).join("")}</tr>`;
-            }).join("")}
-        </tbody>
-    </table>`;
+            return `<td>${val}</td>`;
+        }).join("")}</tr>`;
+    }).join("");
+
+    html += `</tbody></table>`;
+
+    // =====================================================
+    // Controles de paginación
+    // =====================================================
+    html += `
+        <div class="pagination flex items-center justify-center gap-4 mt-4">
+            <button 
+                class="px-3 py-1 bg-gray-700 rounded disabled:opacity-40"
+                onclick="changeTablePage(-1)"
+                ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}
+            >Anterior</button>
+
+            <span class="text-sm">Página ${TABLE_PAGE_ORDERS} / ${totalPages}</span>
+
+            <button 
+                class="px-3 py-1 bg-gray-700 rounded disabled:opacity-40"
+                onclick="changeTablePage(1)"
+                ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}
+            >Siguiente</button>
+        </div>
+    `;
+
+    container.innerHTML = html;
+
+    // Guardar dataset para repintar
+    container._fullData = data;
 }
+
+function changeTablePage(delta) {
+    TABLE_PAGE_ORDERS += delta;
+
+    const container = document.getElementById("listTabContent");  
+    renderTableData(container, container._fullData);
+}
+
 
 function renderEventsTable(container, events) {
     if (!events?.length) {

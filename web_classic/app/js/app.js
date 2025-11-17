@@ -124,23 +124,36 @@ function mapVeredict(v) {
 // =========================================================
 // SECCIÓN Y NAVEGACIÓN
 // =========================================================
-function showSection(sectionId) {
-    // Selecciona todas las secciones
+function showSection(sectionId, reset = true) {
     const sections = document.querySelectorAll("section");
-
-    sections.forEach(sec => {
-        sec.classList.remove("active"); // ocultar
-    });
+    sections.forEach(sec => sec.classList.remove("active"));
 
     const activeSection = document.getElementById(sectionId);
-    if (activeSection) {
-        activeSection.classList.add("active"); // mostrar
-        if (sectionId==="orders")
-            listOrders();
-    } else {
+    if (!activeSection) {
         console.warn(`No se encontró la sección con id '${sectionId}'`);
+        return;
     }
+    activeSection.classList.add("active");
+
+    if(reset) {
+        // ===== RESET de inputs de usuario =====
+        const inputs = activeSection.querySelectorAll("input:not([type=button]):not([type=submit]), textarea");
+        inputs.forEach(input => input.value = "");
+
+        // ===== RESET de tablas generadas dinámicamente =====
+        const tables = activeSection.querySelectorAll("table");
+        tables.forEach(table => table.innerHTML = "");
+
+        // ===== RESET de divs dinámicos si los hay =====
+        const divsDinamicos = activeSection.querySelectorAll(".dynamic-content");
+        divsDinamicos.forEach(div => div.innerHTML = "");
+    }
+
+        if (sectionId === "orders") {
+            listOrders();
+        }
 }
+
 
 
 
@@ -814,10 +827,13 @@ async function findIpfs() {
 
         const box = document.createElement("div");
         box.id = "ipfsContentBox";
-        box.className = "post-box";
+        box.className = "post-box dynamic-content";
         box.innerHTML = `<pre class="event-payload-pre">${escapeHTML(data.content)}</pre>`;
 
-        table.insertAdjacentElement("afterend", box);
+        const activeSection = table.closest("section"); // ✅ sección contenedora
+        activeSection.appendChild(box); // ✅ dentro de la sección
+
+
 
     } catch (err) {
         console.error(err);
@@ -948,17 +964,19 @@ window.onpopstate = function(event) {
 
     const { section, inputId, value } = event.state;
 
-    showSection(section);
+    // No limpiar, solo mostrar
+    showSection(section, false);
     document.getElementById(inputId).value = value;
 
     switch (section) {
-        case "orders": loadOrderById(value, true); break;
+        case "orders": loadOrderById(value, false); break; // evita limpiar
         case "tx": findTx(); break;
         case "contract": findPostById(); break;
         case "blocks": findBlock(); break;
         case "consistency": checkOrderConsistency(); break;
     }
 };
+
 
 // ===============================
 // 🔹 BLOQUES

@@ -6,13 +6,14 @@
 - Centrar Título -> OK
 - Por defecto al clickar en ListaOrders que se consulte. Cambiar Nombre a Refrescar -> OK
 - Estadisticas de aserciones correctas -> OK
+- Paginado de listado de órdenes --> OK
 - Cuando cambiemos de pestaña resetar valores de fields antiguos y limpiar pantalla.
 - Cambiar x botón de Consistencia 
-- ícono Web
+- ícono Web --> OK
 - Fuente de eventos más pequeña
 - Centrar valores de true, False, etc...
 - Valores de resumen de ordenes con un espacio delante 
-- Paginado de listado de órdenes
+
 - Barra de Estado común para los mensajes
 - Mostrar resultado global de comprobación de consistencia
 - Estilo de web más moderna

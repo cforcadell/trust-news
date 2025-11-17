@@ -1273,8 +1273,6 @@ async function checkOrderConsistency() {
 
 window.onload = () => {
     showSection('news');
-    //initializeFirebase();
-    console.log(`Trust News App. ID: ${appId}`);
 
     document
         .getElementById('btn-checkConsistency')

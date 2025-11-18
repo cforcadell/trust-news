@@ -3,6 +3,7 @@ body {
     font-family: 'Inter', sans-serif;
     margin: 0;
     padding: 0;
+    display: flex;
     background-color: #111827; /* Dark background */
     color: #E5E7EB; /* Light text */
 }
@@ -46,7 +47,7 @@ header nav button:hover {
     background-color: #0F766E;
 }
 
-.section {
+.section, section {
     display: none;
     padding-top: 5rem;
     max-width: 1000px;
@@ -56,7 +57,7 @@ header nav button:hover {
     box-shadow: 0 4px 6px rgba(0,0,0,0.15);
 }
 
-.section.active { display: block; }
+.section.active, section.active { display: block; }
 
 /* =================== CONTROLES Y ENTRADAS =================== */
 textarea, input[type="text"] {
@@ -192,33 +193,10 @@ td a {
 .status-value.blinking { animation: blink 1s step-end infinite; }
 .status-value.validated { color: #10B981; animation: none; }
 
-.true-news {
-    background: none;
-    color: #10B981;
-    font-weight: bold;
-    padding: 0;
-}
-
-.false-news {
-    background: none;
-    color: #EF4444;
-    font-weight: bold;
-    padding: 0;
-}
-
-.partial-news {
-    background: none;
-    color: #F59E0B;
-    font-weight: bold;
-    padding: 0;
-}
-
-.unknown {
-    background: none;
-    color: #6B7280;
-    font-weight: bold;
-    padding: 0;
-}
+.true-news { background: none; color: #10B981; font-weight: bold; padding: 0; }
+.false-news { background: none; color: #EF4444; font-weight: bold; padding: 0; }
+.partial-news { background: none; color: #F59E0B; font-weight: bold; padding: 0; }
+.unknown { background: none; color: #6B7280; font-weight: bold; padding: 0; }
 
 /* =================== DETALLES / VALIDACIONES =================== */
 details {
@@ -242,7 +220,6 @@ details .compact-table {
 details .compact-table th {
     text-align: left;
     width: auto;
-    background-color: #374151;
 }
 
 /* =================== PRE / JSON =================== */
@@ -316,13 +293,9 @@ pre, .event-payload-pre {
     transition: transform 0.3s ease;
 }
 
-.assertion-header .arrow::after {
-    content: '>';
-}
+.assertion-header .arrow::after { content: '>'; }
 
-.assertion-header.open .arrow {
-    transform: rotate(90deg);
-}
+.assertion-header.open .arrow { transform: rotate(90deg); }
 
 .assertion-content {
     display: none;
@@ -382,37 +355,28 @@ pre, .event-payload-pre {
 .loading { color: #FCD34D; }
 .error { color: #EF4444; font-weight: bold; }
 
-.result-ok {
-    color: #10B981;      /* verde */
-    font-weight: bold;
-}
-
-.result-ko {
-    color: #EF4444;      /* rojo */
-    font-weight: bold;
-}
-
-
+.result-ok { color: #10B981; font-weight: bold; }
+.result-ko { color: #EF4444; font-weight: bold; }
 
 /* =================== TABLA CONSISTENCIA COMPACTA =================== */
 #postConsistency {
     table-layout: fixed;
     width: 100%;
-    font-size: 0.75rem;          /* Más pequeña */
+    font-size: 0.75rem;
 }
 
 #postConsistency th,
 #postConsistency td {
-    padding: 4px 6px;            /* Mucho más compacto */
-    max-width: 250px;            /* Reduce ancho de columnas */
+    padding: 4px 6px;
+    max-width: 250px;
     overflow-wrap: anywhere;
 }
 
 #postConsistency pre {
-    font-size: 0.70rem;          /* JSON más pequeño */
+    font-size: 0.70rem;
     padding: 8px;
     max-height: 150px;
-    overflow-y: auto;            /* Scroll vertical dentro de la celda */
+    overflow-y: auto;
 }
 
 /* Summary base */
@@ -423,25 +387,9 @@ pre, .event-payload-pre {
 }
 
 /* Colores dinámicos */
-.summary-green {
-    color: #22c55e; /* verde */
-}
-
-.summary-red {
-    color: #ef4444; /* rojo */
-}
-
-.summary-yellow {
-    color: #F59E0B; /* amarillo */
-}
-
-body {
-    font-family: 'Inter', sans-serif;
-    margin: 0;
-    display: flex;
-    background-color: #111827;
-    color: #E5E7EB;
-}
+.summary-green { color: #22c55e; }
+.summary-red { color: #ef4444; }
+.summary-yellow { color: #F59E0B; }
 
 /* Sidebar */
 #sidebar {
@@ -452,9 +400,7 @@ body {
     overflow-y: auto;
 }
 
-.menu-group {
-    margin-bottom: 10px;
-}
+.menu-group { margin-bottom: 10px; }
 
 .menu-title {
     font-size: 1.1em;
@@ -465,7 +411,7 @@ body {
 }
 
 .submenu {
-    display: none; /* autoexpandible oculto por defecto */
+    display: none;
     margin-top: 5px;
     padding-left: 10px;
 }
@@ -482,9 +428,7 @@ body {
     text-align: left;
 }
 
-.submenu button:hover {
-    background-color: #6B7280;
-}
+.submenu button:hover { background-color: #6B7280; }
 
 /* Main content */
 #main {
@@ -493,15 +437,7 @@ body {
     overflow-x: auto;
 }
 
-section {
-    display: none;
-}
-
-section.active {
-    display: block;
-}
-
-/* Headers Titulo*/
+/* Headers Titulo */
 .sidebar-header {
     padding: 15px;
     text-align: center;
@@ -513,8 +449,6 @@ section.active {
     justify-content: center;
     gap: 10px;
 }
-
-
 
 /* =================== STATUS BAR (BOTTOM) =================== */
 .status-bar {
@@ -528,26 +462,16 @@ section.active {
     font-weight: 600;
     font-size: 0.9rem;
     transition: transform 0.25s ease-in-out, opacity 0.25s ease-in-out;
-    transform: translateY(100%); /* oculto inicialmente */
+    transform: translateY(100%);
     opacity: 0;
     z-index: 9999;
 }
 
-/* Cuando está visible */
 .status-bar.show {
     transform: translateY(0);
     opacity: 1;
 }
 
-/* Colores por tipo */
-.status-bar.info {
-    background-color: #3B82F6; /* azul */
-}
-
-.status-bar.primary {
-    background-color: #0D9488; /* teal */
-}
-
-.status-bar.error {
-    background-color: #EF4444; /* rojo */
-}
+.status-bar.info { background-color: #3B82F6; }
+.status-bar.primary { background-color: #0D9488; }
+.status-bar.error { background-color: #EF4444; }

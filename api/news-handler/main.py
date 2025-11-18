@@ -16,6 +16,9 @@ from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
+from datetime import datetime, timedelta, timezone
+import time # Añadir import de time
+
 
 from common.veredicto import Validacion
 
@@ -164,11 +167,15 @@ async def log_event(order_id: str, action: str, topic: str, payload: dict):
         return
 
     events_col = db["events"]
+    
+    # 🚨 CAMBIO CLAVE: Usar time.time() * 1000 para obtener la marca de tiempo UNIX absoluta en milisegundos
+    current_ms_timestamp = int(time.time() * 1000) 
+    
     event_doc = {
         "order_id": order_id,
         "action": action,
         "topic": topic,
-        "timestamp": asyncio.get_event_loop().time(),
+        "timestamp": current_ms_timestamp, # Ahora es la marca de tiempo absoluta
         "payload": payload,
     }
     await events_col.insert_one(event_doc)
@@ -1041,11 +1048,24 @@ async def get_order(order_id: str):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    order["_id"] = str(order["_id"])
+    # Extraer el tiempo de creación del ObjectId y formatearlo
+    try:
+        order_object_id = order["_id"]
+        created_datetime = order_object_id.generation_time
+        # Formato MM/DD/YYY HH:mm:ss
+        order["created"] = created_datetime.strftime("%d/%m/%Y %H:%M:%S")
+    except Exception as e:
+        # Manejo de error si _id no es un ObjectId válido (aunque no debería pasar)
+        print(f"Error processing ObjectId: {e}")
+        order["created"] = "Format Error"
+
+    order["_id"] = str(order_object_id)
     return order
 
 @app.get("/news/{order_id}/events", response_model=List[EventModel])
 async def get_news_events(order_id: str):
+    # Ya no necesitamos buscar la noticia para su created_at
+    
     cursor = db.events.find({"order_id": order_id}, {"_id": 0})
     events = await cursor.to_list(length=100)
 
@@ -1053,8 +1073,20 @@ async def get_news_events(order_id: str):
         raise HTTPException(status_code=404, detail="No hay eventos para esta noticia")
 
     for e in events:
-        if not isinstance(e.get("timestamp"), str):
-            e["timestamp"] = str(e["timestamp"])
+        ms_timestamp = e.get("timestamp") # Marca de tiempo UNIX absoluta en MS
+        
+        if isinstance(ms_timestamp, (int, float)):
+
+            # 1. Convertir milisegundos a segundos (dividir por 1000)
+            unix_seconds = ms_timestamp / 1000.0 
+            
+            # 2. Crear objeto datetime
+            event_datetime = datetime.fromtimestamp(unix_seconds)
+            
+            # 3. Formatear a MM/DD/YYY HH:mm:ss
+            e["timestamp"] = event_datetime.strftime("%m/%d/%Y %H:%M:%S")
+        elif not isinstance(ms_timestamp, str):
+            e["timestamp"] = str(ms_timestamp)
 
     return events
 

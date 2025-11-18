@@ -10,7 +10,7 @@
 - Cuando cambiemos de pestaña resetar valores de fields antiguos y limpiar pantalla. --> Casi
 - Cambiar x botón de Consistencia 
 - ícono Web --> OK
-- Fuente de eventos más pequeña
+- Fuente de eventos más pequeña --> OK
 - Centrar valores de true, False, etc...
 - Valores de resumen de ordenes con un espacio delante 
 

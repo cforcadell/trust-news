@@ -704,7 +704,7 @@ function renderEventsTable(container, events) {
                 <tr>
                     <td class="col-action">${e.action}</td>
                     <td class="col-topic">${e.topic}</td>
-                    <td class="col-date">${formatDate(e.timestamp)}</td>
+                    <td class="col-date">${e.timestamp}</td>
                     <td class="col-payload">
                         <details class="event-payload-details">
                             <summary><span class="summary-text">${visibleSummary}</span></summary>

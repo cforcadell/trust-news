@@ -233,6 +233,20 @@ pre, .event-payload-pre {
     border: 1px solid #374151;
 }
 
+/* =================== EVENT PAYLOAD SUMMARY =================== */
+.event-payload-details summary {
+    font-size: 0.75rem;      /* más pequeño */
+    font-weight: 500;
+    cursor: pointer;
+    padding: 2px 4px;        /* menos padding */
+    color: #D1D5DB;
+    white-space: nowrap;      /* evita que se vaya a otra línea */
+    overflow: hidden;         /* recorta exceso */
+    text-overflow: ellipsis;  /* muestra "..." al final */
+    display: block;
+}
+
+
 /* =================== FIX: Overflow en tablas largas =================== */
 #txTable, #blockTable {
     table-layout: fixed;
@@ -476,3 +490,4 @@ pre, .event-payload-pre {
 .status-bar.info { background-color: #3B82F6; }
 .status-bar.primary { background-color: #0D9488; }
 .status-bar.error { background-color: #EF4444; }
+

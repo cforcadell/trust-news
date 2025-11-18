@@ -1338,6 +1338,46 @@ function renderConsistencyTable(results) {
 }
 
 // =========================================================
+// IMPORTAR NOTICIA 
+// =========================================================
+
+async function importarNoticia() {
+    const url = document.getElementById('newsUrl').value.trim();
+    const newsText = document.getElementById('newsText');
+
+    if (!url) {
+        alert('Introduce una URL para importar');
+        return;
+    }
+
+    try {
+        // Llamada POST al endpoint
+        
+        const response = await fetch(`${API}/extract_text_from_url`, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Error en la solicitud: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Coloca el texto recibido en el textarea
+        newsText.value = data.text || '';
+
+    } catch (err) {
+        console.error(err);
+        alert('Error al importar la noticia. Revisa la consola.');
+    }
+}
+
+// =========================================================
 // INICIALIZACIÓN
 // =========================================================
 document.addEventListener('DOMContentLoaded',()=>{
@@ -1352,6 +1392,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     });
     
     // News Listeners
+    document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
     document.getElementById('btn-publishNew').addEventListener('click',publishNew);
     document.getElementById('btn-findPrevious').addEventListener('click',findPrevious);
     
@@ -1373,6 +1414,8 @@ document.addEventListener('DOMContentLoaded',()=>{
 
     // IPFS Listeners
     document.getElementById("btn-findIpfs").addEventListener("click", findIpfs);
+
+    
 
     // Initial view
     showSection('news');

@@ -491,3 +491,40 @@ pre, .event-payload-pre {
 .status-bar.primary { background-color: #0D9488; }
 .status-bar.error { background-color: #EF4444; }
 
+
+/*URL NEWS IMPORT*/
+.news-import-container {
+    display: flex;
+    gap: 10px;           /* espacio entre botón y input */
+    margin-bottom: 15px; /* margen inferior */
+    align-items: stretch; /* hace que los elementos hijos se estiren verticalmente */
+}
+
+.news-import-container input[type="text"] {
+    flex: 1;              /* ocupa todo el espacio disponible */
+    padding: 10px;
+    border: 1px solid #374151;
+    border-radius: 4px;
+    background-color: #1F2937;
+    color: #E5E7EB;
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+
+
+.news-import-container button {
+    /* mismo estilo que botones generales */
+    background-color: #10B981;
+    color: #111827;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background-color 0.2s;
+    height: 100%;           /* igual altura que el input */
+}
+
+.news-import-container button:hover {
+    background-color: #059669;
+}

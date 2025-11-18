@@ -56,12 +56,19 @@
 <div id="main">
   <!-- Mantengo todos los sections con sus IDs -->
   <section id="news">
-    <h2>Verificación y Búsqueda de Noticias</h2>
-    <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar."></textarea><br>
-    <button id="btn-publishNew">Publicar Noticia</button>
-    <button id="btn-findPrevious">Buscar Verificación</button>
-    <h3>Resultados de búsqueda</h3>
-    <table id="findResults"></table>
+      <h2>Verificación y Búsqueda de Noticias</h2>
+
+      <div class="news-import-container">
+          <button id="btn-importarNew">Importar Noticia</button>
+          <input type="text" id="newsUrl" placeholder="Escribe la URL a importar">
+      </div>
+
+      <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar."></textarea><br>
+      <button id="btn-publishNew">Publicar Noticia</button>
+      <button id="btn-findPrevious">Buscar Verificación</button>
+
+      <h3>Resultados de búsqueda</h3>
+      <table id="findResults"></table>
   </section>
 
   <section id="orders">

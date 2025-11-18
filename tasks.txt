@@ -1,22 +1,11 @@
-- False de asercion en Rojo --> OK
-- Texto de resultado de verificacions en colores --> OK
-- APi ipfs con busqueda por cif  y botón de enlace de cid a esa pestaña --> OK
+
 - Navegación Atrás --> Parcial
-- Reestructurar Menú y convertir en panel a la derecha -> OK
-- Centrar Título -> OK
-- Por defecto al clickar en ListaOrders que se consulte. Cambiar Nombre a Refrescar -> OK
-- Estadisticas de aserciones correctas -> OK
-- Paginado de listado de órdenes --> OK
+
 - Cuando cambiemos de pestaña resetar valores de fields antiguos y limpiar pantalla. --> Casi
 - Cambiar x botón de Consistencia 
-- ícono Web --> OK
-- Fuente de eventos más pequeña --> OK
 - Centrar valores de true, False, etc...
 - Valores de resumen de ordenes con un espacio delante 
-- Corregir fecha de eventos --> OK
-- Ocultar Barra de Estado común para los mensajes ->OK 
 - Mostrar resultado global de comprobación de consistencia
-- Estilo de web más moderna
 - Estado de órdenes en lista ordenada con iconos y resaltado o estado final y entre parentesis lista de estados en verde los finalizados, Negro pendiente y negrita el ultimo
 - Desplegar en Geth [Opcional]
 

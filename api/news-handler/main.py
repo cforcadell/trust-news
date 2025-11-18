@@ -10,14 +10,19 @@ import httpx
 from bs4 import BeautifulSoup
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, ValidationError
+from fastapi import FastAPI, HTTPException, Query,APIRouter
+from pydantic import BaseModel, ValidationError,HttpUrl
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 import time # Añadir import de time
+
+import lxml.html
+from readability import Document
+
+from loguru import logger
 
 
 from common.veredicto import Validacion
@@ -38,7 +43,9 @@ from common.async_models import (
     AssertionExtended,
     ValidatorAddress,
     ConsistencyCheckResult,
-    Multihash
+    Multihash,
+    ExtractedTextResponse,
+    ExtractTextRequest
 )
 
 # =========================================================
@@ -1141,27 +1148,61 @@ async def find_order_by_text(request: PublishRequest):
         logger.exception(f"Error en find_order_by_text: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/extract_text_from_url")
-def extract_text_from_url(url: str = Query(..., description="URL de la noticia")):
+
+@app.post(
+    "/extract_text_from_url",
+    response_model=ExtractedTextResponse,
+    summary="Extrae el texto principal de una URL de noticia"
+)
+def extract_text_from_url(request: ExtractTextRequest):
+    """
+    Recupera una página web, elimina contenido no esencial (anuncios, menús) 
+    y retorna el título y el texto del artículo principal usando Readability.
+    """
+    
+    url = request.url
+    HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ArticleExtractor/1.0)"}
+    TIMEOUT_SECONDS = 15
+    
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=TIMEOUT_SECONDS, headers=HEADERS)
+        
         if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=f"No se pudo acceder a la URL: {url}")
+            logger.warning(f"Error HTTP {resp.status_code} al acceder a la URL: {url}")
+            raise HTTPException(status_code=resp.status_code, detail=f"No se pudo acceder a la URL.")
+        
+        doc = Document(resp.text)
+        title = doc.title()
+        main_content_html = doc.summary()
+        
+        if not main_content_html:
+            raise ValueError("No se pudo identificar el contenido principal.")
 
-        soup = BeautifulSoup(resp.content, "html.parser")
-        for script_or_style in soup(["script", "style"]):
-            script_or_style.extract()
+        root = lxml.html.fromstring(main_content_html)
+        clean_text = root.text_content().strip()
+        lines = [line.strip() for line in clean_text.splitlines() if line.strip()]
+        final_clean_text = "\n".join(lines)
+        
+        if not final_clean_text:
+            raise ValueError("El texto extraído está vacío.")
 
-        text = soup.get_text(separator="\n")
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        clean_text = "\n".join(lines)
+        return ExtractedTextResponse(url=str(url), title=title, text=final_clean_text)
 
-        return {"url": url, "text": clean_text}
-
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout al acceder a URL: {url}")
+        raise HTTPException(status_code=504, detail="Tiempo de espera agotado al acceder a la URL.")
+    
     except requests.RequestException as e:
-        logger.error(f"Error accediendo a URL {url}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(f"Error de conexión accediendo a URL {url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error de conexión: {e}")
+    
+    except ValueError as e:
+        logger.warning(f"Error de extracción para {url}: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    
+    except Exception as e:
+        logger.error(f"Error inesperado al procesar {url}: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor.")
 
 @app.get("/checkOrderConsistency/{order_id}", response_model=List[ConsistencyCheckResult])
 async def check_order_consistency(order_id: str):

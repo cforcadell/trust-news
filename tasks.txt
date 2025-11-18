@@ -13,7 +13,7 @@
 - Fuente de eventos más pequeña --> OK
 - Centrar valores de true, False, etc...
 - Valores de resumen de ordenes con un espacio delante 
-
+- Corregir fecha de eventos --> OK
 - Ocultar Barra de Estado común para los mensajes ->OK 
 - Mostrar resultado global de comprobación de consistencia
 - Estilo de web más moderna

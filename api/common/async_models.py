@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional, Dict, Any
 from common.veredicto import Validacion
 
@@ -230,3 +230,18 @@ class ConsistencyCheckResult(BaseModel):
     compared: Optional[str | int | float] = None
     result: str # "OK", "KO", o "SKIP"
     details: Optional[str] = None # Para añadir información de error si es KO
+    
+    
+# ============================================================
+# 🔹 EXTRACT FROM URL
+# ============================================================    
+    
+# Modelo Pydantic para la request
+class ExtractTextRequest(BaseModel):
+    url: HttpUrl  # Valida que sea una URL válida
+
+# Modelo Pydantic para la response
+class ExtractedTextResponse(BaseModel):
+    url: str
+    title: str
+    text: str

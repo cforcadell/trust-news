@@ -31,31 +31,22 @@ const CATEGORY_MAP = {
 // UTILIDAD: Reemplazo de alert() con UI no bloqueante
 // =========================================================
 function alertMessage(message, type = 'info', duration = 3000) {
-    const colorMap = {
-        'info': 'bg-blue-500',
-        'primary': 'bg-teal-500',
-        'error': 'bg-red-500'
-    };
+    const bar = document.getElementById('statusBar');
 
-    // Crear o reutilizar la barra de estado
-    let bar = document.getElementById('statusBar');
-    if (!bar) {
-        bar = document.createElement('div');
-        bar.id = 'statusBar';
-        bar.className = 'fixed top-0 left-0 w-full p-3 text-white text-sm text-center transition-transform duration-300 transform -translate-y-full z-50';
-        document.body.appendChild(bar);
-    }
+    // Quitar clases previas de color
+    bar.classList.remove('info', 'primary', 'error');
 
-    // Establecer mensaje y color
+    // Añadir clase de color y mensaje
     bar.textContent = message;
-    bar.className = `fixed top-0 left-0 w-full p-3 text-white text-sm text-center transition-transform duration-300 transform -translate-y-full z-50 ${colorMap[type] || colorMap.info}`;
+    bar.classList.add(type);
+    bar.classList.add('show');  // Mostrar barra
 
-    // Mostrar barra
-    setTimeout(() => bar.classList.remove('-translate-y-full'), 50);
-
-    // Ocultar barra después de 'duration'
-    setTimeout(() => bar.classList.add('-translate-y-full'), duration);
+    // Ocultar después del tiempo indicado
+    setTimeout(() => {
+        bar.classList.remove('show');
+    }, duration);
 }
+
 
 
 

@@ -514,3 +514,40 @@ section.active {
     gap: 10px;
 }
 
+
+
+/* =================== STATUS BAR (BOTTOM) =================== */
+.status-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 12px;
+    text-align: center;
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: transform 0.25s ease-in-out, opacity 0.25s ease-in-out;
+    transform: translateY(100%); /* oculto inicialmente */
+    opacity: 0;
+    z-index: 9999;
+}
+
+/* Cuando está visible */
+.status-bar.show {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+/* Colores por tipo */
+.status-bar.info {
+    background-color: #3B82F6; /* azul */
+}
+
+.status-bar.primary {
+    background-color: #0D9488; /* teal */
+}
+
+.status-bar.error {
+    background-color: #EF4444; /* rojo */
+}

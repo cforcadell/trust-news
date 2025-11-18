@@ -7,15 +7,19 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # Copiar requisitos primero (para aprovechar caché)
-COPY requirements.txt .
+COPY news-handler/requirements.txt .
 
 # Instalar dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+#COPY . .
+COPY common /app/common
+
+COPY news-handler /app/news-handler
 
 EXPOSE 8072
 
 # Ejecutar script de creación de topics antes de arrancar FastAPI
 #CMD python init_kafka_topics.py && uvicorn main:app --host 0.0.0.0 --port 8072
-CMD uvicorn main:app --host 0.0.0.0 --port 8072
+
+CMD ["uvicorn", "news-handler.main:app", "--host", "0.0.0.0", "--port", "8072"]

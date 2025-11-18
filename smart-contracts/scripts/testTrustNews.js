@@ -111,8 +111,8 @@ async function main() {
   const multihashVal2 = mkMultihash("Validación 2 de A2");
 
   // Añadir validaciones por los validadores registrados (índices de aserción 0 y 1)
-  await (await trustNews.connect(validator1).addValidation(postIdNum, 0, true, multihashVal1)).wait();
-  await (await trustNews.connect(validator2).addValidation(postIdNum, 1, false, multihashVal2)).wait();
+  await (await trustNews.connect(validator1).addValidation(postIdNum, 0, 0, multihashVal1)).wait();
+  await (await trustNews.connect(validator2).addValidation(postIdNum, 1, 1, multihashVal2)).wait();
   console.log("✅ Validaciones añadidas correctamente.");
 
   // 6️⃣ Consultar aserciones con sus validaciones y validadores

@@ -1,10 +1,12 @@
-- descomposar docker-compose OK
-- Parametro para levantar news-handler y validate sin parte blockchain OK
-- proves auto generate asertions OK 
-- proves auto validate asertions OK
-- proves auto ipfs 
-- proves handler 
-- proves auto smart contract
-- proves e2e
-- dockeritzar geth
-- levantar news-chain
+
+- Navegación Atrás --> Parcial
+
+- Cuando cambiemos de pestaña resetar valores de fields antiguos y limpiar pantalla. --> Casi
+- Cambiar x botón de Consistencia 
+- Centrar valores de true, False, etc...
+- Valores de resumen de ordenes con un espacio delante 
+- Mostrar resultado global de comprobación de consistencia
+- Estado de órdenes en lista ordenada con iconos y resaltado o estado final y entre parentesis lista de estados en verde los finalizados, Negro pendiente y negrita el ultimo
+- Desplegar en Geth [Opcional]
+
+- Categoria de Validaciones muy errática

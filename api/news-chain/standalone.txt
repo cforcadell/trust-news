@@ -22,5 +22,5 @@ curl -X 'POST' \
 
 
 curl -X 'GET' \
-  'http://localhost:8073/tx-status/0xb02d6b7d34eef63577ca616d0ef6dd62a2aae612e91efe52799ee91c1bdc5403' \
+  'http://localhost:8073/tx/status/0xb02d6b7d34eef63577ca616d0ef6dd62a2aae612e91efe52799ee91c1bdc5403' \
   -H 'accept: application/json'

@@ -14,6 +14,21 @@ from web3 import Web3
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from abc import ABC, abstractmethod
 
+# ✅ IMPORTAR MODELOS UNIFICADOS
+# Se asume que estos son los modelos que definiste en el primer mensaje
+from common.veredicto import Veredicto, Validacion
+from common.async_models import (
+    VerifyInputModel,
+    ValidationRegistrationModel,
+    ValidatorRegistrationInput,
+    ValidationCompletedPayload,
+    ValidationFailedPayload,
+    ValidationCompletedResponse,
+    ValidationFailedResponse,
+    RequestValidationRequest,
+    ValidatorAPIResponse,
+    Multihash
+)
 
 # =========================================================
 # Cargar .env
@@ -24,8 +39,8 @@ load_dotenv()
 # Config desde .env
 # =========================================================
 RPC_URL = os.getenv("RPC_URL")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # 0x...
-ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")  # 0x...
+PRIVATE_KEY = os.getenv("PRIVATE_KEY")
+ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustManager.json")
 
@@ -43,9 +58,9 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
 REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "fake_news_requests")
 RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses")
 ENABLE_KAFKA_CONSUMER = os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true"
-AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()  # "mistral" | "gemini" | "copilot"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 
-EMULATE_BLOCKCHAIN_REQUESTS = os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "false").lower()  # True or False
+EMULATE_BLOCKCHAIN_REQUESTS = os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "false").lower() # True or False
 
 # =========================================================
 # Logging
@@ -66,23 +81,12 @@ except Exception as e:
     VALIDATOR_CATEGORIES = []
     
 # =========================================================
-# Pydantic Models
+# Pydantic Models (Eliminadas las duplicadas)
 # =========================================================
-class VerificarEntrada(BaseModel):
-    texto: str
-    contexto: Optional[str] = None
+# NOTA: Las clases RequestValidation, ValidationCompleted, ValidationFailed, 
+# VerificarEntrada, RegistroValidacionModel y RegistroValidadorInput
+# han sido ELIMINADAS y se usan las importadas de common.async_models.
 
-class RegistroValidacionModel(BaseModel):
-    postId: int
-    assertion_id: int
-    texto: str
-    contexto: Optional[str] = None
-
-class RegistroValidadorInput(BaseModel):
-    nombre: str
-    categorias: Optional[List[int]] = None
-    
-    
 # =========================================================
 # AI classes
 # =========================================================
@@ -191,7 +195,7 @@ class OpenRouterValidator:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 # =========================================================
-# Helpers: AI layer
+# Helpers: 
 # =========================================================
 
 def build_ai_validator() -> AIValidator:
@@ -203,6 +207,18 @@ def build_ai_validator() -> AIValidator:
         return OpenRouterValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gpt-4o-mini"))
     else:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
+    
+    
+def clean_ai_response_text(text: str) -> str:
+    """Elimina los bloques de código Markdown que envuelven el JSON."""
+    text = text.strip()
+    # Eliminar el inicio: ```json
+    if text.startswith('```json'):
+        text = text[len('```json'):].strip()
+    # Eliminar el final: ```
+    if text.endswith('```'):
+        text = text[:-len('```')].strip()
+    return text
 
 # =========================================================
 # Instanciar AI Validator
@@ -250,12 +266,8 @@ def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
 
 
 
-def hash_text_to_bytes(text: str) -> bytes:
-    """SHA256 hex -> bytes (32 bytes)"""
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return bytes.fromhex(h)
 
-def send_signed_tx(function_call, gas_estimate: int = 1000000) -> str:
+def send_signed_tx(function_call, gas_estimate: int = 10000000) -> str:
     """Construye, firma y envía tx; devuelve tx_hash (hex) — no espera minado."""
     if EMULATE_BLOCKCHAIN_REQUESTS == "true":
         fake_hash = f"0x{uuid.uuid4().hex[:64]}"
@@ -290,7 +302,8 @@ def wait_for_receipt_blocking(tx_hash: str, timeout: Optional[int] = None) -> Op
             "transactionHash": receipt.transactionHash.hex() if hasattr(receipt, "transactionHash") else tx_hash,
             "blockNumber": getattr(receipt, "blockNumber", None),
             "status": getattr(receipt, "status", None),
-            "logs": [dict(l) for l in getattr(receipt, "logs", [])]  # logs no serializables completamente; kept minimal
+            # logs no serializables completamente; kept minimal
+            "logs": [dict(l) for l in getattr(receipt, "logs", []) if hasattr(receipt, "logs")] 
         }
         logger.info(f"Receipt obtenido: tx={receipt_dict['transactionHash']}, block={receipt_dict['blockNumber']}, status={receipt_dict['status']}")
         return receipt_dict
@@ -301,38 +314,44 @@ def wait_for_receipt_blocking(tx_hash: str, timeout: Optional[int] = None) -> Op
 def uuid_to_uint256(u: str) -> int:
     """
     Convierte un UUID (en formato string) a un entero uint256 compatible con Solidity.
-    Si el UUID no es válido, devuelve 0.
+    Si el UUID no es válido, usa el hash como fallback.
     """
     try:
         return uuid.UUID(u).int
     except Exception:
         # Si no es UUID válido (ej: "3" o "abc"), convertir hash como fallback
+        # Reducción modular para asegurar que cabe en un uint256 (aunque el UUID original ya cabe)
         return int(hashlib.sha256(u.encode()).hexdigest(), 16) % (2**256)
 
-def hash_text_to_bytes(text: str) -> bytes:
-    """
-    Calcula el hash SHA256 de un texto y lo devuelve como bytes.
-    Usado para registrar el digest en la blockchain.
-    """
-    digest_hex = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return bytes.fromhex(digest_hex)
+
+
+def hash_text_to_multihash(text: str) -> Multihash:
+    """Calcula el SHA256 y lo envuelve en el modelo Multihash."""
+    logger.info(f"Calculando multihash para texto (preview): {text[:80]}...")
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    # 0x12 es SHA256, 0x20 es 32 bytes (256 bits)
+    return Multihash(hash_function="0x12", hash_size="0x20", digest="0x" + h)
 
 # =========================================================
 # Funciones internas reutilizables
 # =========================================================
-def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, contexto: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+
+def registrar_validacion_internal(postId: Any, assertion_id: Any, veredicto: Veredicto) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
-    1) Verifica la aserción (Mistral)
+    1) Verifica la aserción (IA)
     2) Envía la transacción addValidation
     3) Espera al minado y devuelve (tx_hash, receipt_dict)
     Nota: función BLOQUEANTE; ejecutar con asyncio.to_thread desde handlers async.
     """
     try:
-        veredict_text = verificar_asercion(texto, contexto)
-        veredict_bool = "TRUE" in veredict_text.upper()
-        digest_bytes = hash_text_to_bytes(veredict_text)
 
-        logger.info(f"Veredicto (bool): {veredict_bool} — preparando tx addValidation (post {postId}, assertion {assertion_id})")
+        multihash = hash_text_to_multihash(veredicto.texto)
+
+        logger.info(f"Veredicto (bool): {veredicto.estado} — preparando tx addValidation (post {postId}, assertion {assertion_id})")
+
+        # Conversión segura: aseguramos que los IDs sean enteros antes de pasarlos a Web3
+        postId_int = int(postId) if str(postId).isdigit() else uuid_to_uint256(str(postId))
+        assertion_id_int = int(assertion_id)
 
         if EMULATE_BLOCKCHAIN_REQUESTS == "true":
             tx_hash = f"0x{uuid.uuid4().hex[:64]}"
@@ -341,20 +360,20 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, texto: str, co
             return tx_hash, receipt
 
         func_call = contract.functions.addValidation(
-            postId,          # ✅ ahora el postId también se convierte
-            int(assertion_id)-1,     # ✅ igual que assertion_id
-            bool(veredict_bool),
+            postId_int,             # ✅ Ahora postId se pasa como int (Web3/Solidity)
+            assertion_id_int - 1,   # ✅ assertion_id como índice 0-based
+            int(veredicto.estado),
             {
-                "hash_function": b"\x12",
-                "hash_size": b"\x20",
-                "digest": digest_bytes
+                "hash_function": multihash.hash_function,
+                "hash_size": multihash.hash_size,
+                "digest": multihash.digest
             }
         )
         tx_hash = send_signed_tx(func_call)
         receipt = wait_for_receipt_blocking(tx_hash)
         return tx_hash, receipt
     except HTTPException:
-        # propaga errores de Mistral al caller (para logging/response)
+        # propaga errores de IA al caller (para logging/response)
         raise
     except Exception as e:
         logger.exception(f"Error en registrar_validacion_internal: {e}")
@@ -420,39 +439,26 @@ def registrar_validador_blockchain(name: str, categories: List[int]) -> Tuple[Op
 # Endpoints HTTP (sincronicos desde la perspectiva del caller)
 # =========================================================
 @app.post("/verificar")
-def endpoint_verificar(body: VerificarEntrada):
-    resultado = verificar_asercion(body.texto, body.contexto)
+# ✅ Usando VerifyInputModel
+def endpoint_verificar(body: VerifyInputModel):
+    resultado = verificar_asercion(body.text, body.context)
     return {"verificación": resultado}
 
-@app.post("/registrar_validacion")
-async def endpoint_registrar_validacion(body: RegistroValidacionModel):
-    """
-    Ejecuta registrar_validacion_internal en un thread para no bloquear event loop.
-    Devuelve tx_hash y receipt (o error).
-    """
-    try:
-        tx_hash, receipt = await asyncio.to_thread(registrar_validacion_internal, body.postId, body.assertion_id, body.texto, body.contexto)
-        if tx_hash is None:
-            raise HTTPException(status_code=500, detail="Error al registrar validación (ver logs).")
-        return {"tx_hash": tx_hash, "receipt": receipt}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"endpoint_registrar_validacion error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/tx-status/{tx_hash}")
+
+@app.get("/tx/status/{tx_hash}")
 async def endpoint_tx_status(tx_hash: str):
     """Consulta el estado de la tx (no bloqueante)."""
     result = consultar_tx_status_internal(tx_hash)
     return result
 
 @app.post("/registrar_validador")
-async def endpoint_registrar_validador(input: RegistroValidadorInput):
+# ✅ Usando ValidatorRegistrationInput
+async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
     """Registra validador (usa VALIDATOR_CATEGORIES si no se pasan). Espera minado."""
-    categorias = input.categorias if input.categorias is not None else VALIDATOR_CATEGORIES
+    categorias = input.categories if input.categories is not None else VALIDATOR_CATEGORIES
     try:
-        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, input.nombre, categorias or [])
+        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, input.name, categorias or [])
         if tx_hash is None:
             raise HTTPException(status_code=500, detail="Error registrando validador.")
         return {"status": "ok", "tx_hash": tx_hash, "receipt": receipt}
@@ -478,108 +484,119 @@ async def consume_and_process():
     try:
         async for msg in consumer:
             try:
-                payload = json.loads(msg.value.decode())
-                action = payload.get("action")
-                val_payload = payload.get("payload", {})
-                idValidator = val_payload.get("idValidator")
+
+                # Usamos RequestValidationRequest para validar la estructura del contenido del payload
+                try:
+                    payload_msg = json.loads(msg.value.decode("utf-8"))
+                    message = RequestValidationRequest(**payload_msg)
+                    action = message.action
+                    order_id = message.order_id
+                    val_payload = message.payload
+                    idValidator = val_payload.idValidator
+                except Exception as e:
+                    logger.error(f"Error de Pydantic en payload Kafka: {e}")
+                    # No podemos enviar un failed response completo si el order_id/action es inválido
+                    continue
 
                 # Filtrar mensajes no dirigidos a este validador
                 if action != "request_validation" or idValidator != ACCOUNT_ADDRESS:
-                    logger.info(f"Ignorado mensaje Kafka (action={action}, idValidator={idValidator})")
+                    logger.debug(f"Ignorado mensaje Kafka (action={action}, idValidator={idValidator})")
                     continue
 
-                order_id = str(payload.get("order_id", ""))
-                postId = val_payload.get("postId")
-                assertion_id = val_payload.get("idAssertion", "0")
-                assertion_text = val_payload.get("text", "")
-                context = val_payload.get("context", "")
+                postId = val_payload.postId
+                assertion_id = val_payload.idAssertion
+                assertion_text = val_payload.text
+                context = val_payload.context
 
                 logger.info(f"Kafka: procesando request_validation para postId={postId}, assertion_id={assertion_id}")
 
                 # =====================================================
                 # 1️⃣ Verificar directamente 
                 # =====================================================
-
+                result_text = None
                 try:
-                    # Usa la misma función interna que el endpoint
-                    result_text = verificar_asercion(assertion_text, context)
-                    logger.info(f"Resultado verificación: {result_text[:120]}...")
+                    # Ejecutar la verificación de IA en un thread
+                    result_text = await asyncio.to_thread(verificar_asercion, assertion_text, context)
+                    logger.info(f"Verificación completada (preview): {result_text}")
+                    result_text_parsed = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
+                    logger.info(f"Resultado verificación: {result_text_parsed}")
                 except Exception as e:
                     logger.exception(f"Error ejecutando verificar_asercion(): {e}")
-                    await producer.send_and_wait(RESPONSE_TOPIC, json.dumps({
-                        "action": "validation_failed",
-                        "order_id": order_id,
-                        "payload": {
-                            "postId": postId,
-                            "idAssertion": assertion_id,
-                            "idValidator": ACCOUNT_ADDRESS,
-                            "error": f"verificar_error: {str(e)}"
-                        }
-                    }).encode())
+                    # ✅ Usando ValidationFailedResponse/Payload
+                    failed_response = ValidationFailedResponse(
+                        action="validation_failed",
+                        order_id=order_id,
+                        payload=ValidationFailedPayload(
+                            order_id=order_id,
+                            postId=postId,
+                            idAssertion=assertion_id,
+                            idValidator=ACCOUNT_ADDRESS,
+                            error_message=f"verificar_error: {str(e)}",
+                            error_type="AI_Validation_Error"
+                        )
+                    )
+                    await producer.send_and_wait(RESPONSE_TOPIC, failed_response.model_dump_json().encode())
                     continue
 
                 # =====================================================
                 # 2️⃣ Registrar en blockchain
                 # =====================================================
+                tx_hash = None
+                receipt = None
+                if result_text_parsed.resultado == "TRUE":
+                    estado_enum = Validacion.TRUE
+                elif result_text_parsed.resultado == "FALSE":
+                    estado_enum = Validacion.FALSE
+                else:
+                    estado_enum = Validacion.UNKNOWN
+                    
+                veredict = Veredicto(result_text_parsed.descripcion,estado_enum) # Intentamos la conversión del veredicto
+
                 try:
-                    veredict_bool = "TRUE" in result_text.upper()
-                    digest_bytes = hash_text_to_bytes(result_text)
-                    logger.info(f"Veredicto (bool): {veredict_bool} — registrando en blockchain")
+                    # Los IDs vienen como str desde Kafka, la función interna los convierte a int/uint256 para Web3
+                    tx_hash, receipt = await asyncio.to_thread(registrar_validacion_internal, postId, assertion_id,veredict) 
 
-                    if EMULATE_BLOCKCHAIN_REQUESTS == "true":
-                        tx_hash = f"0x{uuid.uuid4().hex[:64]}"
-                        receipt = {"transactionHash": tx_hash, "blockNumber": 0, "status": 1}
-                    else:
-                        logger.info(f"Registrando validación: postId={postId} ({uuid_to_uint256(str(postId))}), assertion_id={assertion_id}")
-
-                        func_call = contract.functions.addValidation(
-                            int(postId),
-                            int(assertion_id) - 1,   # 👈 índice 0-based
-                            bool(veredict_bool),
-                            {
-                                "hash_function": b"\x12",
-                                "hash_size": b"\x20",
-                                "digest": digest_bytes
-                            }
-                        )
-                        tx_hash = send_signed_tx(func_call)
-                        receipt = wait_for_receipt_blocking(tx_hash)
-
-                    if not tx_hash:
-                        raise RuntimeError("No se generó hash de transacción")
-
+                    if not tx_hash or receipt is None or receipt.get("status") != 1:
+                         raise RuntimeError(f"Transacción de validación fallida o no minada. Receipt: {receipt}")
+                         
                 except Exception as e:
                     logger.exception(f"Error registrando validación en blockchain: {e}")
-                    await producer.send_and_wait(RESPONSE_TOPIC, json.dumps({
-                        "action": "validation_failed",
-                        "order_id": order_id,
-                        "payload": {
-                            "postId": postId,
-                            "idAssertion": assertion_id,
-                            "idValidator": ACCOUNT_ADDRESS,
-                            "error": f"blockchain_error: {str(e)}"
-                        }
-                    }).encode())
+                    # ✅ Usando ValidationFailedResponse/Payload
+                    failed_response = ValidationFailedResponse(
+                        action="validation_failed",
+                        order_id=order_id,
+                        payload=ValidationFailedPayload(
+                            order_id=order_id,
+                            postId=postId,
+                            idAssertion=assertion_id,
+                            idValidator=ACCOUNT_ADDRESS,
+                            error_message=f"blockchain_error: {str(e)}",
+                            error_type="Blockchain_Transaction_Error"
+                        )
+                    )
+                    await producer.send_and_wait(RESPONSE_TOPIC, failed_response.model_dump_json().encode())
                     continue
 
                 # =====================================================
                 # 3️⃣ Publicar resultado final
                 # =====================================================
-                response_msg = {
-                    "action": "validation_completed",
-                    "order_id": order_id,
-                    "payload": {
-                        "postId": postId,
-                        "idAssertion": assertion_id,
-                        "idValidator": ACCOUNT_ADDRESS,
-                        "approval": "TRUE" if veredict_bool else "FALSE",
-                        "text": result_text,
-                        "tx_hash": tx_hash,
-                        "receipt": receipt
-                    }
-                }
+                # ✅ Usando ValidationCompletedResponse/Payload
+                completed_response = ValidationCompletedResponse(
+                    action="validation_completed",
+                    order_id=order_id,
+                    payload=ValidationCompletedPayload(
+                        postId=postId,
+                        idAssertion=assertion_id,
+                        idValidator=ACCOUNT_ADDRESS,
+                        approval=veredict.estado, # El enum Validacion
+                        text=result_text_parsed.descripcion,
+                        tx_hash=tx_hash,
+                        validator_alias=AI_PROVIDER.upper(),
+                        # Receipt no está en el Payload original, lo omitimos para consistencia con common.async_models
+                    )
+                )
 
-                await producer.send_and_wait(RESPONSE_TOPIC, json.dumps(response_msg).encode())
+                await producer.send_and_wait(RESPONSE_TOPIC, completed_response.model_dump_json().encode())
                 logger.info(f"✅ Publicado validation_completed (postId={postId}, assertion_id={assertion_id})")
 
             except Exception as e:
@@ -619,6 +636,7 @@ async def startup_event():
                 f"Validador no encontrado -> registrando en startup. "
                 f"Cuenta: {ACCOUNT_ADDRESS}, Categorías: {VALIDATOR_CATEGORIES or []} (esperando minado)..."
             )
+            # Usar 'default-' como nombre si es el registro automático
             tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, f"default-{ACCOUNT_ADDRESS}", VALIDATOR_CATEGORIES or [])
             if tx_hash:
                 logger.info(f"Validador registrado en startup: {tx_hash}")
@@ -628,6 +646,3 @@ async def startup_event():
             logger.exception(f"Error en startup registrar validador: {e}")
     else:
         logger.info("[EMULADO] Saltando registro real de validador en startup.")
-    
-
-

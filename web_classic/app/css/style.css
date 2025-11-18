@@ -1,0 +1,530 @@
+/* =================== ESTILOS GLOBALES =================== */
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    background-color: #111827; /* Dark background */
+    color: #E5E7EB; /* Light text */
+}
+
+header {
+    background-color: #1F2937;
+    color: white;
+    padding: 15px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    border-bottom: 2px solid #0D9488;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #0D9488;
+}
+
+header nav {
+    display: flex;
+    gap: 10px;
+}
+
+header nav button {
+    background-color: #0D9488;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+header nav button:hover {
+    background-color: #0F766E;
+}
+
+.section, section {
+    display: none;
+    padding-top: 5rem;
+    max-width: 1000px;
+    margin: 20px auto;
+    background-color: #111827;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+}
+
+.section.active, section.active { display: block; }
+
+/* =================== CONTROLES Y ENTRADAS =================== */
+textarea, input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid #374151;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-size: 1rem;
+    background-color: #1F2937;
+    color: #E5E7EB;
+}
+
+textarea { resize: vertical; height: 400px; }
+
+button {
+    background-color: #10B981;
+    color: #111827;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 10px;
+    transition: background-color 0.2s;
+    font-weight: 600;
+}
+
+button:hover { background-color: #059669; }
+
+/* =================== TABLAS =================== */
+table, .compact-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    margin-top: 20px;
+    background-color: #1F2937;
+    color: #D1D5DB;
+}
+
+th, td {
+    border: 1px solid #374151;
+    padding: 8px 12px;
+    text-align: left;
+}
+
+th {
+    background-color: #374151;
+    font-weight: 600;
+    color: #9CA3AF;
+}
+
+td a {
+    color: #0D9488;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 0.85rem;
+}
+
+/* =================== ORDERS =================== */
+#ordersTopBar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background-color: #1F2937;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+#ordersTopBar input[type="text"] { flex: 1; }
+
+#ordersTopBar button,
+.sub-tabs button {
+    padding: 8px 15px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    background-color: #374151;
+    color: #D1D5DB;
+}
+
+#ordersTopBar button:hover,
+.sub-tabs button:hover { background-color: #4B5563; }
+
+#fixedDetailsContainer, #orderTabs, #tabContent {
+    margin-top: 15px;
+    padding: 0;
+}
+
+#fixedDetailsContainer {
+    background-color: #1F2937;
+    padding: 15px;
+    border-left: 4px solid #0D9488;
+}
+
+#orderTabs {
+    border-bottom: 2px solid #374151;
+    margin-bottom: 15px;
+}
+
+#orderTabs button {
+    background: #1F2937;
+    color: #D1D5DB;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-right: 5px;
+    padding: 8px 15px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+}
+
+#orderTabs button.activeTab {
+    color: #0D9488;
+    border-bottom: 3px solid #0D9488;
+    font-weight: 600;
+    background-color: #111827;
+}
+
+/* =================== STATUS / VERIFICACIÓN SOLO TEXTO =================== */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+.status-value {
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-weight: bold;
+    display: inline-block;
+    color: white;
+}
+
+.status-value.polling { color: #FCD34D; }
+.status-value.blinking { animation: blink 1s step-end infinite; }
+.status-value.validated { color: #10B981; animation: none; }
+
+.true-news { background: none; color: #10B981; font-weight: bold; padding: 0; }
+.false-news { background: none; color: #EF4444; font-weight: bold; padding: 0; }
+.partial-news { background: none; color: #F59E0B; font-weight: bold; padding: 0; }
+.unknown { background: none; color: #6B7280; font-weight: bold; padding: 0; }
+
+/* =================== DETALLES / VALIDACIONES =================== */
+details {
+    margin-top: 10px;
+    border: 1px solid #374151;
+    padding: 10px;
+    border-radius: 8px;
+    background-color: #1F2937;
+}
+
+details summary {
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 5px 0;
+}
+
+details .compact-table {
+    margin-top: 10px;
+}
+
+details .compact-table th {
+    text-align: left;
+    width: auto;
+}
+
+/* =================== PRE / JSON =================== */
+pre, .event-payload-pre {
+    background-color: #111827;
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border: 1px solid #374151;
+}
+
+/* =================== EVENT PAYLOAD SUMMARY =================== */
+.event-payload-details summary {
+    font-size: 0.75rem;      /* más pequeño */
+    font-weight: 500;
+    cursor: pointer;
+    padding: 2px 4px;        /* menos padding */
+    color: #D1D5DB;
+    white-space: nowrap;      /* evita que se vaya a otra línea */
+    overflow: hidden;         /* recorta exceso */
+    text-overflow: ellipsis;  /* muestra "..." al final */
+    display: block;
+}
+
+
+/* =================== FIX: Overflow en tablas largas =================== */
+#txTable, #blockTable {
+    table-layout: fixed;
+    width: 100%;
+    word-break: break-all;
+}
+
+#txTable th, #txTable td,
+#blockTable th, #blockTable td {
+    border: 1px solid #374151;
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+    white-space: normal;
+    word-break: break-all;
+    max-width: 600px;
+    overflow-wrap: anywhere;
+}
+
+/* =================== RESPONSIVE =================== */
+@media (max-width: 600px) {
+    header {
+        flex-direction: column;
+        gap: 10px;
+        padding-bottom: 10px;
+    }
+    #ordersTopBar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    #ordersTopBar input[type="text"], #ordersTopBar button {
+        width: 100%;
+        margin: 3px 0;
+    }
+}
+
+/* =================== ASSERTIONS (CONTRACT & ORDERS) =================== */
+.assertion-box {
+    margin-bottom: 15px;
+    border: 1px solid #374151;
+    border-radius: 5px;
+    background: #111827;
+}
+
+.assertion-header {
+    background: #1F2937;
+    color: #E5E7EB;
+    cursor: pointer;
+    padding: 8px 12px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+}
+
+.assertion-header .arrow {
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 0.3s ease;
+}
+
+.assertion-header .arrow::after { content: '>'; }
+
+.assertion-header.open .arrow { transform: rotate(90deg); }
+
+.assertion-content {
+    display: none;
+    padding: 8px 12px;
+    background: #111827;
+}
+
+.assertion-content h4 {
+    color: #F59E0B;
+    margin-top: 10px;
+}
+
+.assertion-content .compact-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 5px;
+    margin-bottom: 10px;
+}
+
+.assertion-content .compact-table th,
+.assertion-content .compact-table td {
+    border: 1px solid #374151;
+    padding: 5px 8px;
+    text-align: left;
+}
+
+/* =================== BUSQUEDA POST ================= */
+#postSearchBox {
+    background: #1F2937;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+#postSearchBox input {
+    width: 200px;
+    padding: 6px 8px;
+    margin-right: 10px;
+}
+
+.post-box {
+    background: #1F2937;
+    padding: 15px;
+    border-left: 4px solid #0D9488;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.validation-box {
+    margin-top: 10px;
+    padding: 10px;
+    background: #1F2937;
+    border-radius: 6px;
+}
+
+/* Pequeños helpers */
+.loading { color: #FCD34D; }
+.error { color: #EF4444; font-weight: bold; }
+
+.result-ok { color: #10B981; font-weight: bold; }
+.result-ko { color: #EF4444; font-weight: bold; }
+
+/* =================== TABLA CONSISTENCIA COMPACTA =================== */
+#postConsistency {
+    table-layout: fixed;
+    width: 100%;
+    font-size: 0.75rem;
+}
+
+#postConsistency th,
+#postConsistency td {
+    padding: 4px 6px;
+    max-width: 250px;
+    overflow-wrap: anywhere;
+}
+
+#postConsistency pre {
+    font-size: 0.70rem;
+    padding: 8px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+/* Summary base */
+.assertion-summary {
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+/* Colores dinámicos */
+.summary-green { color: #22c55e; }
+.summary-red { color: #ef4444; }
+.summary-yellow { color: #F59E0B; }
+
+/* Sidebar */
+#sidebar {
+    width: 250px;
+    background-color: #1F2937;
+    padding: 10px;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.menu-group { margin-bottom: 10px; }
+
+.menu-title {
+    font-size: 1.1em;
+    cursor: pointer;
+    padding: 5px;
+    background-color: #374151;
+    color: orange;
+    margin: 0;
+}
+
+.submenu {
+    display: none;
+    margin-top: 5px;
+    padding-left: 10px;
+}
+
+.submenu button {
+    display: block;
+    width: 100%;
+    background: #4B5563;
+    color: #E5E7EB;
+    border: none;
+    padding: 5px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.submenu button:hover { background-color: #6B7280; }
+
+/* Main content */
+#main {
+    flex: 1;
+    padding: 20px;
+    overflow-x: auto;
+}
+
+/* Headers Titulo */
+.sidebar-header {
+    padding: 15px;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #0D9488;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+/* =================== STATUS BAR (BOTTOM) =================== */
+.status-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 12px;
+    text-align: center;
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: transform 0.25s ease-in-out, opacity 0.25s ease-in-out;
+    transform: translateY(100%);
+    opacity: 0;
+    z-index: 9999;
+}
+
+.status-bar.show {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.status-bar.info { background-color: #3B82F6; }
+.status-bar.primary { background-color: #0D9488; }
+.status-bar.error { background-color: #EF4444; }
+
+
+/*URL NEWS IMPORT*/
+.news-import-container {
+    display: flex;
+    gap: 10px;           /* espacio entre botón y input */
+    margin-bottom: 15px; /* margen inferior */
+    align-items: stretch; /* hace que los elementos hijos se estiren verticalmente */
+}
+
+.news-import-container input[type="text"] {
+    flex: 1;              /* ocupa todo el espacio disponible */
+    padding: 10px;
+    border: 1px solid #374151;
+    border-radius: 4px;
+    background-color: #1F2937;
+    color: #E5E7EB;
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+
+
+.news-import-container button {
+    /* mismo estilo que botones generales */
+    background-color: #10B981;
+    color: #111827;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background-color 0.2s;
+    height: 100%;           /* igual altura que el input */
+}
+
+.news-import-container button:hover {
+    background-color: #059669;
+}

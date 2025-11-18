@@ -3,9 +3,16 @@ pragma solidity ^0.8.0;
 
 contract TrustNews {
 
+
+    enum evaluation {
+        Unknown, // Valor por defecto (índice 0)
+        True,    // Índice 1
+        False    // Índice 2
+    }
+
     address public owner;
     uint256 public postCounter;
-    mapping(uint256 => Post) public postsById;
+    
 
     struct Category {
         uint256 id;
@@ -20,7 +27,7 @@ contract TrustNews {
 
     struct Validation {
         Validator validator;
-        bool veredict;  
+        evaluation veredict;  
         Multihash hash_description; 
     }
 
@@ -47,7 +54,7 @@ contract TrustNews {
         address validatorAddress;
         string domain;
         uint256 reputation;
-        bool veredict;
+        evaluation veredict;
         Multihash hash_description;
     }
 
@@ -62,6 +69,7 @@ contract TrustNews {
     mapping (address => Validator) public validators;
     mapping (uint256 => Validator[]) public validatorsByCategory;
     mapping (uint256 => string) public categories; 
+    mapping(uint256 => Post) public postsById;
 
     event RegisterNewResult(uint256  postId,Multihash hashNews,address[][] validatorAddressesByAsertion);
 
@@ -182,6 +190,19 @@ function registerNew(
     }
 
 
+    function getPostFlat(uint256 postId)
+        public
+        view
+        returns (
+            Multihash memory document,
+            address publisher,
+            Multihash memory hashNew
+        )
+    {
+        Post storage p = postsById[postId];
+        return (p.document, p.publisher, p.hashNew);
+    }
+
     // ======================================
     // VALIDADORES Y CATEGORÍAS
     // ======================================
@@ -225,7 +246,7 @@ function registerNew(
     function addValidation(
         uint256 postId,
         uint256 asertionIndex,
-        bool veredict,
+        evaluation veredict,
         Multihash memory hash_description
     ) public {
         // Asegurar que el validador está registrado

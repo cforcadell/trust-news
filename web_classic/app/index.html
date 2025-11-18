@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Trust News</title>
+<link rel="stylesheet" href="css/style.css"> 
+<link rel="icon" type="image/png" href="img/fake_news_v3.png">
+</head>
+<body>
+
+<div id="sidebar">
+  <!-- Título de la app -->
+<div id="sidebar-header" class="sidebar-header">
+    Trust News
+</div>
+
+
+
+  <!-- Espacio antes del menú -->
+  <div style="height: 15px;"></div>
+
+  <!-- Menú -->
+  <div class="menu-group">
+    <h2 class="menu-title">Verificación News</h2>
+    <div class="submenu">
+      <button onclick="showSection('news')">Nueva Verificación Automática</button>
+      <button onclick="showSection('orders')">Listado de Órdenes</button>
+      <button onclick="showSection('order')">Buscar Órdenes</button>
+      <button onclick="showSection('consistency')">Comprobar Consistencia</button>
+    </div>
+  </div>
+
+  <div class="menu-group">
+    <h2 class="menu-title">Ipfs</h2>
+    <div class="submenu">
+      <button onclick="showSection('ipfs')">Buscar Documento</button>
+    </div>
+  </div>
+
+  <div class="menu-group">
+    <h2 class="menu-title">Ethereum</h2>
+    <div class="submenu">
+      <button onclick="showSection('tx')">Buscar Transacciones</button>
+      <button onclick="showSection('blocks')">Buscar Bloques</button>
+    </div>
+  </div>
+
+  <div class="menu-group">
+    <h2 class="menu-title">SmartContract</h2>
+    <div class="submenu">
+      <button onclick="showSection('contract')">Buscar Post</button>
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <!-- Mantengo todos los sections con sus IDs -->
+  <section id="news">
+      <h2>Verificación y Búsqueda de Noticias</h2>
+
+      <div class="news-import-container">
+          <button id="btn-importarNew">Importar Noticia</button>
+          <input type="text" id="newsUrl" placeholder="Escribe la URL a importar">
+      </div>
+
+      <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar."></textarea><br>
+      <button id="btn-publishNew">Publicar Noticia</button>
+      <button id="btn-findPrevious">Buscar Verificación</button>
+
+      <h3>Resultados de búsqueda</h3>
+      <table id="findResults"></table>
+  </section>
+
+  <section id="orders">
+    <h2>Orders</h2>
+    <div id="ordersTopBar">
+        <button id="btn-listOrders">Refrescar</button>
+    </div>
+    <div id="listFixedDetailsContainer"></div> 
+    <div id="listOrderTabs" class="tabs"></div>
+    <div id="listTabContent"></div> 
+  </section>
+
+  <section id="order">
+    <h2>Orders</h2>
+    <div id="orderTopBar">
+        <input type="text" id="orderId" placeholder="order_id"/>
+        <button id="btn-findOrder">Buscar Order</button>
+    </div>
+    <div id="fixedDetailsContainer"></div> 
+    <div id="orderTabs" class="tabs"></div>
+    <div id="tabContent"></div> 
+  </section>
+
+  <section id="consistency">
+    <h2>Check de Integridad con Ethereum</h2>
+    <div style="margin-bottom:10px;">
+        <input type="text" id="orderIdCons" placeholder="Introduce order Id"/>
+        <button id="btn-checkConsistency">Buscar Post</button>
+    </div>
+    <table id="postConsistency"></table>
+  </section>
+
+  <section id="ipfs">
+    <h2>IPFS</h2>
+    <div style="margin-bottom:10px;">
+        <input type="text" id="ipfsHash" placeholder="Introduce IPFS hash"/>
+        <button id="btn-findIpfs">Buscar IPFS</button>
+    </div>
+    <table id="ipfsTable"></table>
+  </section>
+
+  <section id="tx">
+    <h2>Consulta de Transacciones</h2>
+    <div style="margin-bottom:10px;">
+        <input type="text" id="txHash" placeholder="Introduce transaction hash (ej: 0x55d2817a...)"/>
+        <button id="btn-findTx">Buscar Transacción</button>
+    </div>
+    <table id="txTable"></table>
+    <hr style="margin:25px 0;">
+  </section>
+
+  <section id="blocks">
+    <h2>Consulta de Bloques</h2>
+    <div style="margin-bottom:10px;">
+        <input type="text" id="blockId" placeholder="Introduce block number o hash"/>
+        <button id="btn-findBlock">Buscar Bloque</button>
+    </div>
+    <table id="blockTable"></table>
+  </section>
+
+  <section id="contract">
+    <h2>Smart Contract</h2>
+    <div style="margin-bottom:10px;">
+        <input type="text" id="postId" placeholder="Introduce post Id"/>
+        <button id="btn-findPost">Buscar Post</button>
+    </div>
+    <table id="postTable"></table>
+  </section>
+</div>
+<div id="statusBar" class="status-bar hidden"></div>
+//
+<!--  <script src="js/script.js"></script> -->
+<script src="js/app.js"></script>
+
+</body>
+</html>

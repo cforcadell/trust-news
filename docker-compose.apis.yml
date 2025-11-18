@@ -11,7 +11,9 @@ services:
   # IPFS FastAPI
   # -------------------------
   ipfs-fastapi:
-    build: ./api/ipfs
+    build: 
+      context: ./api  
+      dockerfile: ./ipfs/Dockerfile 
     container_name: ipfs-fastapi
     ports:
       - "8060:8060"
@@ -23,7 +25,9 @@ services:
   # Generate Asertions API
   # -------------------------
   generate-asertions:
-    build: ./api/generate-asertions
+    build: 
+      context: ./api  
+      dockerfile: ./generate-asertions/Dockerfile
     container_name: generate-asertions
     ports:
       - "8071:8071"
@@ -40,7 +44,9 @@ services:
   # Validate Asertions Workers
   # -------------------------
   validate-asertions-worker_1:
-    build: ./api/validate-asertions
+    build: 
+      context: ./api  
+      dockerfile: ./validate-asertions/Dockerfile 
     container_name: validate-asertions-worker_1
     ports:
       - "8070:8070"
@@ -51,14 +57,16 @@ services:
       ENABLE_KAFKA_CONSUMER: "true"
       ACCOUNT_ADDRESS: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 # Account #1
       PRIVATE_KEY: 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-      VALIDATOR_CATEGORIES: "[1,2,3,6,10]"
+      VALIDATOR_CATEGORIES: "[1,2,3,4,5,6,7,8,9,10]"
     depends_on:
       - ipfs-fastapi
     volumes:
       - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
   validate-asertions-worker_2:
-    build: ./api/validate-asertions
+    build: 
+      context: ./api  
+      dockerfile: ./validate-asertions/Dockerfile 
     container_name: validate-asertions-worker_2
     ports:
       - "8069:8070"
@@ -69,7 +77,7 @@ services:
       ENABLE_KAFKA_CONSUMER: "true"
       ACCOUNT_ADDRESS: 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC # Account #2
       PRIVATE_KEY: 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
-      VALIDATOR_CATEGORIES: "[1,4,5,6,10]"
+      VALIDATOR_CATEGORIES:  "[1,2,3,4,5,6,7,8,9,10]"
     depends_on:
       - ipfs-fastapi
     volumes:
@@ -97,7 +105,9 @@ services:
   # News Handler
   # -------------------------
   news-handler:
-    build: ./api/news-handler
+    build: 
+      context: ./api  
+      dockerfile: ./news-handler/Dockerfile 
     container_name: news-handler
     ports:
       - "8072:8072"
@@ -108,12 +118,15 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8072
     volumes:
       - ./api/news-handler:/app
+      - ./api/common:/app/common
 
   # -------------------------
   # News Chain
   # -------------------------
   news-chain:
-    build: ./api/news-chain
+    build:
+      context: ./api  
+      dockerfile: ./news-chain/Dockerfile
     container_name: news-chain
     ports:
       - "8073:8073"
@@ -124,7 +137,26 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8073
     volumes:
       - ./api/news-chain:/app
+      - ./api/common:/app/common
       - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
+
+    # -------------------------
+  # Frontend Web
+  # -------------------------
+  frontend-web_classic:
+    build: ./web_classic
+    container_name: trustnews-frontend_classic
+    ports:
+      - "8000:80"
+    depends_on:
+      - news-handler
+    environment:
+      - API_BASE_URL=http://news-handler:8072
+    volumes:
+      - ./web_classic/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  
+
 
 networks:
   default:

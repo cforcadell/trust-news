@@ -32,12 +32,10 @@ docker compose -f docker-compose.base.yml build
 docker compose -f docker-compose.base.yml up
 docker compose -f docker-compose.base.yml down
 
-#docker compose  -f docker-compose.blockchain.yml build
-#docker compose  -f docker-compose.blockchain.yml up
-#docker compose  -f docker-compose.blockchain.yml down
-
+docker compose  -f docker-compose.apis.yml down
 docker compose  -f docker-compose.apis.yml build
 docker compose  -f docker-compose.apis.yml up
+
 # si nomes volem aixecar un validador
 docker compose  -f docker-compose.apis.yml up 'ipfs-fastapi'  'generate-asertions'   'news-handler' 'news-chain'  'validate-asertions-worker_1' 'validate-asertions-worker_2'
 docker compose  -f docker-compose.apis.yml down
@@ -47,6 +45,15 @@ npx hardhat run scripts/registeredValidators.js   --network localhost # deberia 
 
 cd ~/blockchain/tfm/api/tests
 source venv/bin/activate
-pytest -v
+ pytest -v test_news-handler.py 
 
 
+swaggers:
+
+- fe: http://127.0.0.1:8000/
+- ipfs-fastapi: http://127.0.0.1:8060/docs
+- news-handler: http://127.0.0.1:8072/docs
+- generate-asertions : http://127.0.0.1:8071/docs
+- news-chain : http://127.0.0.1:8073/docs
+- validate-asertions-worker_1 : http://127.0.0.1:8070/docs
+- validate-asertions-worker_2 : http://127.0.0.1:8069/docs

@@ -407,6 +407,7 @@ pre, .event-payload-pre {
     cursor: pointer;
     padding: 5px;
     background-color: #374151;
+    color: orange;
     margin: 0;
 }
 

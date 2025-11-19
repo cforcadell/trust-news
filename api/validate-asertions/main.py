@@ -109,8 +109,8 @@ class MistralValidator(AIValidator):
 
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-        if contexto:
-            contenido += f"\nContexto adicional:\n{contexto}"
+        #if contexto:
+        #    contenido += f"\nContexto adicional:\n{contexto}"
 
         data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
         logger.info(f"Invocando Mistral para validar aserción (preview): {texto[:80]}...")

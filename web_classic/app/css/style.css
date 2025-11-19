@@ -421,7 +421,7 @@ pre, .event-payload-pre {
     cursor: pointer;
     padding: 5px;
     background-color: #374151;
-    color: orange;
+    color: rgba(255, 166, 0, 0.564);
     margin: 0;
 }
 

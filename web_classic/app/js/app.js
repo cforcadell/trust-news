@@ -106,9 +106,9 @@ function formatDate(ts) {
 
 function mapVeredict(v) {
     switch (v) {
-        case 0: return "<span class='false-news'>False</span>";
+        case 0: return "<span class='partial-news'>Unknown</span>";
         case 1: return "<span class='true-news'>True</span>";
-        case 2: return "<span class='partial-news'>Unknown</span>";
+        case 2: return "<span class='false-news'>False</span>";
         default: return "<span class='unknown'>?</span>";
     }
 }
@@ -894,6 +894,17 @@ function renderEventsTable(container, events) {
     const perPage = MAX_EVENTS_ROWS;
     const totalPages = Math.ceil(events.length / perPage);
 
+    // Map de iconos por acción
+    const actionIcons = {
+        "assertions_generated": "📝",
+        "upload_ipfs": "📤",
+        "ipfs_uploaded": "✅",
+        "register_blockchain": "⛓️",
+        "blockchain_registered": "🔗",
+        "request_validation": "🔍",
+        "validation_completed": "✔️"
+    };
+
     function renderPage(page) {
         const start = (page - 1) * perPage;
         const end = start + perPage;
@@ -902,9 +913,11 @@ function renderEventsTable(container, events) {
         const rows = pageData.map(e => {
             const payloadStr = JSON.stringify(e.payload, null, 2);
             const visibleSummary = payloadStr.substring(0, 80).trim() + (payloadStr.length > 80 ? '...' : '');
-            
+            const icon = actionIcons[e.action] || "❓";
+
             return `
                 <tr>
+                    <td class="col-icon text-center">${icon}</td>
                     <td class="col-action">${e.action}</td>
                     <td class="col-topic">${e.topic}</td>
                     <td class="col-date">${e.timestamp}</td>
@@ -914,7 +927,8 @@ function renderEventsTable(container, events) {
                             <pre class="event-payload-pre">${payloadStr}</pre>
                         </details>
                     </td>
-                </tr>`;
+                </tr>
+            `;
         }).join("");
 
         container.innerHTML = `
@@ -924,6 +938,7 @@ function renderEventsTable(container, events) {
             <table class="compact-table w-full">
                 <thead>
                     <tr>
+                        <th class="col-icon">Icono</th>
                         <th class="col-action">Acción</th>
                         <th class="col-topic">Topic</th>
                         <th class="col-date">Fecha</th>
@@ -950,6 +965,7 @@ function renderEventsTable(container, events) {
 
     renderPage(currentPage);
 }
+
 
 
 

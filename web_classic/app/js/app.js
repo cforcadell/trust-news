@@ -6,6 +6,7 @@
 const API = "/api";
 const TX_API = "/ethereum";
 const IPFS_API = "/ipfs";
+const GENERATE_API = "/generate";
 
 const MAX_EVENTS_ROWS = 15;
 const POLLING_DURATION = 0; // 20 segundos
@@ -170,6 +171,144 @@ async function pollOrder(orderId, startTime) {
     setTimeout(() => pollOrder(orderId, start), POLLING_INTERVAL);
 }
 
+// ========================================================
+// OPERACIONES DE ASSERTIONS
+// ========================================================
+
+async function generateAssertionsFromText(text) {
+    try {
+        const response = await fetch(`${GENERATE_API}/extraer`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify({ text })
+        });
+
+        if (!response.ok) throw new Error(`Error API: ${response.status}`);
+
+        const data = await response.json();
+        return data.payload.assertions || [];
+    } catch (err) {
+        console.error("Error al generar aserciones:", err);
+        alertMessage("Error al generar aserciones", "error");
+        return [];
+    }
+}
+
+function attachAssertionTableEvents(container) {
+
+    // ======================
+    // Borrar fila existente
+    // ======================
+    container.querySelectorAll(".btn-delete-row").forEach(btn => {
+        btn.addEventListener("click", e => {
+            e.target.closest("tr").remove();
+        });
+    });
+
+    // ======================
+    // Añadir fila nueva
+    // ======================
+    const addBtn = container.querySelector("#btn-add-row");
+    if (!addBtn) return;  // seguridad
+
+    addBtn.addEventListener("click", () => {
+
+        const tbody = container.querySelector("tbody");
+
+        // Calcular último ID numérico existente
+        let lastId = 0;
+        tbody.querySelectorAll("tr").forEach(row => {
+            const cell = row.children[0]?.textContent.trim();
+            if (cell && !isNaN(cell)) {
+                lastId = Math.max(lastId, parseInt(cell, 10));
+            }
+        });
+
+        const nextId = lastId + 1;
+
+        // Crear fila nueva
+        const row = document.createElement("tr");
+        row.setAttribute("data-id", nextId);
+
+        row.innerHTML = `
+            <td>${nextId}</td>
+            <td contenteditable="true" class="editable-text"></td>
+            <td>${renderCategorySelect(1)}</td>
+            <td><button class="btn-delete-row">✖</button></td>
+        `;
+
+        tbody.appendChild(row);
+
+        // Añadir evento borrar a la nueva fila
+        row.querySelector(".btn-delete-row").addEventListener("click", () => {
+            row.remove();
+        });
+    });
+}
+
+
+function renderEditableAssertionsTable(container, assertions) {
+    container.innerHTML = `
+        <table class="compact-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Aserción</th>
+                    <th>Categoría</th>
+                    <th style="width:60px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                ${assertions.map(a => `
+                    <tr data-id="${a.idAssertion}">
+                        <td>${a.idAssertion}</td>
+                        <td contenteditable="true" class="editable-text">${a.text}</td>
+                        <td>${renderCategorySelect(a.categoryId)}</td>
+                        <td><button class="btn-delete-row">✖</button></td>
+                    </tr>
+                `).join("")}
+            </tbody>
+        </table>
+
+        <button id="btn-add-row" class="btn btn-tertiary">+</button>
+        <button id="btn-publish-with-assertions" class="btn btn-tertiary">Publicar con Aserciones</button>
+    `;
+
+    // Conectar los eventos de edición y borrado
+    attachAssertionTableEvents(container);
+
+    // -----------------------------
+    // Listener para publicar con aserciones
+    // -----------------------------
+    const publishBtn = container.querySelector("#btn-publish-with-assertions");
+    if (publishBtn) {
+        publishBtn.addEventListener("click", async () => {
+            try {
+                await publishWithAssertions();
+            } catch (err) {
+                console.error("Error al publicar con aserciones:", err);
+            }
+        });
+    }
+}
+
+
+function renderCategorySelect(selected) {
+    return `
+        <select class="category-select">
+            ${Object.entries(CATEGORY_MAP)
+                .map(([id, name]) => `
+                    <option value="${id}" ${selected == id ? "selected" : ""}>${name}</option>`
+                ).join("")}
+        </select>
+    `;
+}
+
+
+
 // =========================================================
 // OPERACIONES DE NEWS
 // =========================================================
@@ -199,6 +338,70 @@ async function publishNew() {
     alertMessage(`Noticia publicada. Iniciando polling para Order ID: ${newOrderId}`, 'primary');
     pollOrder(newOrderId);
 }
+
+async function publishWithAssertions() {
+    const text = document.getElementById("newsText").value.trim();
+    if (!text) return alertMessage("Introduce un texto para verificar.", 'error');
+
+    const container = document.getElementById("news-assertions-container");
+    if (!container) return alertMessage("No se encontró el contenedor de aserciones.", 'error');
+
+    // Construir lista de aserciones desde la tabla
+    const assertions = [];
+    const rows = container.querySelectorAll("tbody tr");
+    rows.forEach(row => {
+        const idAssertion = row.dataset.id || crypto.randomUUID(); // Genera ID si no existe
+        const textCell = row.querySelector(".editable-text");
+        const categorySelect = row.querySelector(".category-select");
+
+        if (textCell && categorySelect) {
+            assertions.push({
+                idAssertion: idAssertion,
+                text: textCell.innerText.trim(),
+                categoryId: parseInt(categorySelect.value)
+            });
+        }
+    });
+
+    if (assertions.length === 0) {
+        return alertMessage("Debes tener al menos una aserción", 'error');
+    }
+
+    const payload = { text, assertions };
+
+    try {
+        const response = await fetch(`${API}/publishWithAssertions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorDetail = await response.text();
+            throw new Error(`Error ${response.status}: ${errorDetail}`);
+        }
+
+        const data = await response.json();
+        
+        showSection('order');  
+
+        const newOrderId = data.order_id;
+
+        document.getElementById("orderId").value = newOrderId;
+        alertMessage(`Noticia publicada. Iniciando polling para Order ID: ${newOrderId}`, 'primary');
+        pollOrder(newOrderId);
+        
+        return data;
+    } catch (error) {
+        console.error("Error al publicar con aserciones:", error);
+        alertMessage("Error al publicar la noticia con aserciones", 'error');
+        throw error;
+    }
+}
+
+
+
+
 
 async function findPrevious() {
     const text = document.getElementById("newsText").value.trim();
@@ -1394,7 +1597,26 @@ document.addEventListener('DOMContentLoaded',()=>{
     // News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
     document.getElementById('btn-publishNew').addEventListener('click',publishNew);
-    document.getElementById('btn-findPrevious').addEventListener('click',findPrevious);
+    //document.getElementById('btn-findPrevious').addEventListener('click',findPrevious);
+
+    document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
+        const text = document.getElementById("newsText").value.trim();
+
+        if (!text) {
+            alertMessage("Debes escribir o cargar una noticia", "warning");
+            return;
+        }
+
+        alertMessage("Generando aserciones...", "info");
+
+        const assertions = await generateAssertionsFromText(text);
+
+        const container = document.getElementById("news-assertions-container");
+        renderEditableAssertionsTable(container, assertions);
+
+        alertMessage("Aserciones generadas", "success");
+    });
+
     
     // Orders Listeners
     document.getElementById('btn-findOrder').addEventListener('click',findOrder);

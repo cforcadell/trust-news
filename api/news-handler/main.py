@@ -45,7 +45,9 @@ from common.async_models import (
     ConsistencyCheckResult,
     Multihash,
     ExtractedTextResponse,
-    ExtractTextRequest
+    ExtractTextRequest,
+    PreGeneratedAssertion,
+    PublishWithAssertionsRequest
 )
 
 # =========================================================
@@ -1246,6 +1248,63 @@ async def check_order_consistency(order_id: str):
 
     logger.info(f"checkOrderConsistency para OrderID: {order_id} finalizado. {len(all_results)} tests ejecutados.")
     return all_results
+
+
+@app.post("/publishWithAssertions", status_code=202)
+async def publish_with_assertions(req: PublishWithAssertionsRequest):
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty text")
+
+    if not req.assertions or len(req.assertions) == 0:
+        raise HTTPException(status_code=400, detail="No assertions provided")
+
+    order_id = str(uuid.uuid4())
+    order_doc = {
+        "order_id": order_id,
+        "status": "ASSERTIONS_REQUESTED",
+        "text": text,
+        "cid": None,
+        "postId": None,
+        "hash_text": None,
+        "tx_hash": None,
+        "validators_pending": None,
+        "assertions": [a.model_dump() for a in req.assertions],
+        "document": None,
+        "validators": None
+    }
+
+    # Guardar en MongoDB
+    await save_order_doc(order_doc)
+    logger.info(f"[{order_id}] Order saved in MongoDB with pre-generated assertions")
+
+    # Convertir a Assertion
+    from common.async_models import Assertion
+    assertions_for_payload = [
+        Assertion(idAssertion=a.idAssertion, text=a.text, categoryId=a.categoryId)
+        for a in req.assertions
+    ]
+
+    # Publicar mensaje
+    try:
+        msg = AssertionsGeneratedResponse(
+            action="assertions_generated",
+            order_id=order_id,
+            payload={
+                "text": text,
+                "publisher": "news-handler",
+                "assertions": assertions_for_payload
+            }
+        )
+        await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
+        logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
+        await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
+    except ValidationError as e:
+        logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
+        raise HTTPException(status_code=500, detail="Internal validation error")
+
+    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
+
 
 # =========================================================
 # Startup / Shutdown

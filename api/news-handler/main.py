@@ -1298,7 +1298,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest):
         )
         await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
-        await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
+        #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
     except ValidationError as e:
         logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")

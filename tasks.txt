@@ -1,6 +1,7 @@
 
 - Navegación Atrás --> Parcial
-
+- eventos de assertions-genetared duplicados
+- generate assertions en castellano
 - Cuando cambiemos de pestaña resetar valores de fields antiguos y limpiar pantalla. --> Casi
 - Cambiar x botón de Consistencia 
 - Centrar valores de true, False, etc...

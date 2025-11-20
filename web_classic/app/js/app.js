@@ -576,6 +576,50 @@ function renderTabContent(tabName, data, assertions=[]) {
 // =========================================================
 // RENDER DETALLES Y RESUMEN
 // =========================================================
+
+function renderProcessingFlow(currentStatus, validatorsPending = 0) {
+    const steps = [
+        "PENDING",
+        "ASSERTIONS_REQUESTED",
+        "DOCUMENT_CREATED",
+        "IPFS_PENDING",
+        "IPFS_UPLOADED",
+        "BLOCKCHAIN_PENDING",
+        "VALIDATION_PENDING",
+        "VALIDATED"
+    ];
+
+    const currentIndex = steps.indexOf(currentStatus);
+
+    const isValidated = currentStatus === "VALIDATED";
+
+    return `
+        <div class="process-flow">
+            ${steps.map((step, i) => {
+                let cls = "process-step";
+                let label = "";
+
+                // Si es el penúltimo → mostrar número
+                if (step === "VALIDATION_PENDING") {
+                    label = validatorsPending > 0 ? validatorsPending : "";
+                }
+
+                // Caso especial final → todo verde sin animación
+                if (isValidated) {
+                    cls += " done";
+                } else {
+                    if (i < currentIndex) cls += " done";
+                    else if (i === currentIndex) cls += " current";
+                }
+
+                return `<div class="${cls}" title="${step}">${label}</div>`;
+            }).join('')}
+        </div>
+    `;
+}
+
+
+
 function renderDetails(container, data) {
     container.innerHTML = '<h3 class="text-lg font-bold mb-4">Detalles de la Orden</h3>';
 
@@ -609,18 +653,22 @@ function renderDetails(container, data) {
     let overallTag = "Sin Validaciones", overallClass = "unknown";
     if (totalAssertions > 0) {
         if (trueAssertions > falseAssertions && trueAssertions > 0) { 
-            overallTag = "Parcialmente Cierta"; 
+            if (percentTrue === 100) 
+                overallTag = "Totalmente Cierta: 100% Aserciones Válidas"
+            else
+                overallTag = "Mayoritariamente Cierta: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; 
             overallClass = "true-news"; 
+            
         }
         else if (falseAssertions > trueAssertions && falseAssertions > 0) { 
-            overallTag = "Parcialmente Falsa"; 
+            overallTag = " Mayoritariamente Falsa: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; 
             overallClass = "false-news"; 
         }
         else if (trueAssertions === falseAssertions && knownAssertions > 0) {
-             overallTag = "Validación Mixta"; 
+             overallTag = " Validación Mixta: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; 
              overallClass = "partial-news";
         }
-        else { overallTag = "Pendiente / Indefinido"; overallClass = "unknown"; }
+        else { overallTag = "Pendiente / Indefinido: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; overallClass = "unknown"; }
     }
 
     // --- Contenido de las subpestañas
@@ -654,7 +702,13 @@ function renderDetails(container, data) {
     const summaryHtml = `<table class="compact-table">
         <tr><th>ID de Orden</th><td>${data.order_id || "N/A"}</td></tr>
         <tr><th>Estado General</th><td class="status-value ${overallClass}" data-status="${data.status || 'UNKNOWN'}"> ${overallTag}</td></tr>
-        <tr><th>Estado de Procesamiento</th><td>${data.status || "N/A"}</td></tr>
+        <tr>
+            <th>Estado de Procesamiento</th>
+            <td>
+                ${data.status || "N/A"}
+                ${renderProcessingFlow(data.status || "PENDING", data.validators_pending || 0)}
+            </td>
+        </tr>
         <tr><th>Noticia (Resumen)</th><td>${data.text || "N/A"}</td></tr>
         <tr><th>Validators Pendientes</th><td>${data.validators_pending ?? 0}</td></tr>
         <tr><th>Aserciones Ciertas</th><td class="true-news"> ${trueAssertions} (${percentTrue.toFixed(1)}%)</td></tr>

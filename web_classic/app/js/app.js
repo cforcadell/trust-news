@@ -639,16 +639,28 @@ function renderDetails(container, data) {
             const known = approved - rejected;
             if (known > 0)  trueAssertions++;
             else if (known < 0) falseAssertions++;
+            // Nota: En su data, ninguna aserción resulta en known === 0, 
+            // por eso trueAssertions es 2 y falseAssertions es 1.
         }
     }
 
     let percentTrue=0;
     let percentFalse=0;
-    const knownAssertions = totalAssertions - unknownCount;
+    
+    // **********************************
+    // ** CORRECCIÓN DE PORCENTAJES **
+    // **********************************
+    // FIX 1: La variable knownAssertions se redefine como el total de aserciones resueltas (2 + 1 = 3),
+    // para evitar que el cálculo se bloquee (anteriormente daba 0).
+    const knownAssertions = trueAssertions + falseAssertions; 
+    
     if (knownAssertions !== 0) {
-        percentTrue = (trueAssertions / totalAssertions) * 100;
-        percentFalse = (falseAssertions / totalAssertions) * 100;
+        // FIX 2: Se usa knownAssertions como denominador para el porcentaje de aserciones resueltas.
+        percentTrue = (trueAssertions / knownAssertions) * 100; 
+        percentFalse = (falseAssertions / knownAssertions) * 100;
     } 
+    // **********************************
+
 
     let overallTag = "Sin Validaciones", overallClass = "unknown";
     if (totalAssertions > 0) {
@@ -661,14 +673,15 @@ function renderDetails(container, data) {
             
         }
         else if (falseAssertions > trueAssertions && falseAssertions > 0) { 
-            overallTag = " Mayoritariamente Falsa: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; 
+            // FIX 3: Usar percentFalse para el mensaje de Mayoría Falsa.
+            overallTag = " Mayoritariamente Falsa: "+percentFalse.toFixed(1)+"% Aserciones Falsas"; 
             overallClass = "false-news"; 
         }
         else if (trueAssertions === falseAssertions && knownAssertions > 0) {
              overallTag = " Validación Mixta: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; 
              overallClass = "partial-news";
         }
-        else { overallTag = "Pendiente / Indefinido: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; overallClass = "unknown"; }
+        else { overallTag = "Pendiente / Indefinido: 0.0% Aserciones Válidas"; overallClass = "unknown"; }
     }
 
     // --- Contenido de las subpestañas
@@ -746,7 +759,6 @@ function renderDetails(container, data) {
         }
     }
 }
-
 
 
 

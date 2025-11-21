@@ -1,0 +1,450 @@
+/* =================== PALETA DE COLORES CÁLIDA =================== */
+/* Fondo General: #FDF7EC (Crema muy claro) */
+/* Sidebar/Contenedores: #FFFFFF (Blanco, pero usado con moderación o como acento) / #FFFCEE (Crema claro) */
+/* Texto Principal: #4A3C32 (Marrón oscuro) */
+/* Borde/Divisor: #EADDC2 (Crema-beige) */
+/* Primario/Acción: #E27B02 (Naranja vibrante) */
+/* Acento/Marca: #8B5E3C (Marrón medio cálido) */
+/* Secundario/Éxito: #6B8E23 (Verde oliva) */
+/* Advertencia: #F5A623 (Naranja-amarillo) */
+
+/* =================== ESTILOS GLOBALES =================== */
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    background-color: #FDF7EC; /* Fondo General Crema muy claro */
+    color: #4A3C32; /* Texto Marrón oscuro */
+}
+
+.section, section {
+    display: none;
+    padding-top: 2rem;
+    max-width: 1000px;
+    margin: 0 auto 20px auto;
+    background-color: #FFFCEE; /* Contenido en crema claro */
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1), 0 2px 5px rgba(0, 0, 0, 0.08); 
+    padding: 30px;
+}
+
+.section.active, section.active { display: block; }
+
+h2 {
+    color: #E27B02; /* Naranja vibrante para títulos de sección */
+    font-size: 1.8rem;
+    margin-bottom: 25px;
+    border-bottom: 3px solid #EADDC2;
+    padding-bottom: 8px;
+    font-weight: 700;
+}
+
+/* =================== CONTROLES Y ENTRADAS =================== */
+textarea, input[type="text"] {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 15px;
+    border: 1px solid #D1C2A5; /* Borde beige-marrón suave */
+    border-radius: 8px;
+    box-sizing: border-box;
+    font-size: 1rem;
+    background-color: #FFFFFF; /* Fondo de entrada blanco para contraste */
+    color: #4A3C32;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+textarea:focus, input[type="text"]:focus {
+    border-color: #E27B02; /* Naranja al enfocar */
+    box-shadow: 0 0 0 0.25rem rgba(226, 123, 2, 0.25);
+    outline: none;
+}
+
+textarea { resize: vertical; height: 300px; }
+
+button {
+    background-color: #E27B02; /* Naranja vibrante para botones principales */
+    color: #FFFFFF;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-right: 10px;
+    transition: background-color 0.2s, transform 0.1s;
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+button:hover { 
+    background-color: #C86B00; /* Naranja más oscuro */
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+/* =================== TABLAS =================== */
+table, .compact-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin-top: 25px;
+    background-color: #FFFFFF; /* Fondo de tabla blanco para contraste */
+    color: #4A3C32;
+    border: 1px solid #EADDC2;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+th, td {
+    border: 1px solid #F0E3D1; /* Bordes muy suaves */
+    padding: 12px 15px;
+    text-align: left;
+}
+
+th {
+    background-color: #F8F3EB; /* Fondo de encabezado crema suave */
+    font-weight: 700;
+    color: #5C4F44;
+}
+
+td a {
+    color: #E27B02; /* Naranja para enlaces */
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.2s;
+}
+
+td a:hover {
+    color: #C86B00;
+}
+
+/* =================== SIDEBAR =================== */
+#sidebar {
+    width: 280px;
+    min-width: 280px;
+    background-color: #FFFFFF; /* Sidebar blanco para limpiar */
+    padding: 15px;
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 1px solid #EADDC2;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+}
+
+.sidebar-header {
+    padding: 20px 15px;
+    text-align: center;
+    font-size: 2rem;
+    font-weight: 900;
+    color: #8B5E3C; /* Marrón medio cálido para la marca */
+    margin-bottom: 25px;
+    border-bottom: 3px solid #8B5E3C;
+}
+
+.menu-group { margin-bottom: 25px; }
+
+.menu-title {
+    font-size: 1em;
+    cursor: default;
+    padding: 12px 15px;
+    background-color: #FDF7EC; /* Fondo crema para destacar grupos */
+    color: #4A3C32;
+    margin: 0;
+    border-radius: 8px;
+    font-weight: 600;
+    border-left: 5px solid #F5A623; /* Borde Naranja-amarillo para destacar grupos */
+    margin-bottom: 8px;
+}
+
+.submenu {
+    display: block; 
+    margin-top: 5px;
+    padding-left: 0;
+}
+
+.submenu button {
+    display: block;
+    width: 100%;
+    background: #FFFFFF;
+    color: #5C4F44;
+    border: 1px solid #EADDC2;
+    padding: 10px 15px;
+    margin-bottom: 4px;
+    text-align: left;
+    border-radius: 6px;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+    font-weight: normal;
+    font-size: 0.95rem;
+}
+
+.submenu button:hover { 
+    background-color: #F8F3EB; 
+    color: #E27B02; /* Naranja al pasar el ratón */
+    border-color: #E27B02;
+}
+
+/* Main content */
+#main {
+    flex: 1;
+    padding: 30px;
+    overflow-x: auto;
+}
+
+/* =================== ORDERS / DETALLES =================== */
+
+#ordersTopBar, #orderTopBar {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    background-color: #FFFCEE; /* Fondo crema claro */
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-bottom: 25px;
+}
+
+#ordersTopBar input[type="text"], #orderTopBar input[type="text"] { flex: 1; margin-bottom: 0; }
+
+#ordersTopBar button, .sub-tabs button {
+    padding: 8px 15px;
+    font-size: 0.95rem;
+    border-radius: 8px;
+    background-color: #8B5E3C; /* Marrón para botones secundarios */
+    color: #FFFFFF;
+    font-weight: 500;
+}
+
+#ordersTopBar button:hover, .sub-tabs button:hover { background-color: #6F4A2F; }
+
+#fixedDetailsContainer {
+    background-color: #FDF7EC; /* Fondo crema muy claro */
+    padding: 20px;
+    border-left: 5px solid #E27B02; /* Borde naranja */
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+#orderTabs {
+    border-bottom: 2px solid #EADDC2;
+    margin-bottom: 20px;
+}
+
+#orderTabs button {
+    background: none;
+    color: #6F4A2F;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-right: 8px;
+    padding: 10px 18px;
+    font-size: 1rem;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    transition: color 0.2s, border-bottom-color 0.2s;
+}
+
+#orderTabs button:hover {
+    color: #E27B02;
+}
+
+#orderTabs button.activeTab {
+    color: #E27B02;
+    border-bottom: 3px solid #E27B02;
+    font-weight: 700;
+    background-color: #FDF7EC;
+}
+
+/* =================== STATUS / VERIFICACIÓN SOLO TEXTO =================== */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+.status-value {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: bold;
+    display: inline-block;
+    color: #FFFFFF; 
+    background-color: #8B5E3C; /* Marrón para estado por defecto */
+}
+
+.status-value.polling { color: #4A3C32; background-color: #F5A623; } /* Naranja-amarillo para Polling */
+.status-value.blinking { animation: blink 1s step-end infinite; }
+.status-value.validated { color: #FFFFFF; background-color: #6B8E23; animation: none; } /* Verde oliva para Validado */
+
+/* Colores de resultados más fuertes */
+.true-news { background: none; color: #6B8E23; font-weight: bold; padding: 0; } /* Verde oliva */
+.false-news { background: none; color: #DC3545; font-weight: bold; padding: 0; } /* Rojo (se mantiene fuerte por importancia) */
+.partial-news { background: none; color: #F5A623; font-weight: bold; padding: 0; } /* Naranja-amarillo */
+.unknown { background: none; color: #8B5E3C; font-weight: bold; padding: 0; } /* Marrón */
+
+/* =================== DETALLES / VALIDACIONES =================== */
+details {
+    margin-top: 20px;
+    border: 1px solid #EADDC2;
+    padding: 15px;
+    border-radius: 10px;
+    background-color: #FFFFFF;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+details summary {
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 5px 0;
+    font-weight: 600;
+    color: #E27B02;
+}
+
+/* =================== PRE / JSON =================== */
+pre, .event-payload-pre {
+    background-color: #F8F3EB; /* Fondo de código crema suave */
+    padding: 15px;
+    border-radius: 6px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border: 1px solid #D1C2A5;
+    color: #5C4F44;
+    font-size: 0.9rem;
+}
+
+/* =================== ASSERTIONS (CONTRACT & ORDERS) =================== */
+.assertion-box {
+    margin-bottom: 20px;
+    border: 1px solid #EADDC2;
+    border-radius: 10px;
+    background: #FFFFFF;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.assertion-header {
+    background: #F8F3EB;
+    color: #4A3C32;
+    cursor: pointer;
+    padding: 12px 15px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #EADDC2;
+}
+
+.assertion-content {
+    display: none;
+    padding: 15px;
+    background: #FFFFFF;
+}
+
+.assertion-content h4 {
+    color: #F5A623; /* Naranja-amarillo para subtítulos de aserciones */
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+/* Colores dinámicos */
+.summary-green { color: #6B8E23; }
+.summary-red { color: #DC3545; }
+.summary-yellow { color: #F5A623; }
+
+/* =================== STATUS BAR (BOTTOM) =================== */
+.status-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 15px;
+    text-align: center;
+    color: white;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: transform 0.25s ease-in-out, opacity 0.25s ease-in-out;
+    transform: translateY(100%);
+    opacity: 0;
+    z-index: 9999;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+}
+
+.status-bar.show {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.status-bar.info { background-color: #E27B02; } /* Naranja para info */
+.status-bar.primary { background-color: #8B5E3C; } /* Marrón para primary */
+.status-bar.error { background-color: #DC3545; } /* Rojo para error */
+
+
+/*URL NEWS IMPORT*/
+.news-import-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    align-items: stretch;
+}
+
+.news-import-container input[type="text"] {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+
+.news-import-container button {
+    background-color: #8B5E3C; /* Marrón para importar */
+    color: #FFFFFF;
+    border-radius: 8px;
+    padding: 10px 20px;
+    height: auto;
+    margin-right: 0;
+}
+
+.news-import-container button:hover {
+    background-color: #6F4A2F;
+}
+
+/* =================== PROGRESS ICONS =================== */
+
+.process-flow {
+    display: flex;
+    gap: 15px;
+    margin-top: 20px;
+    align-items: center;
+}
+
+.process-step {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background-color: #D1C2A5; /* Base beige */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    color: #FFFFFF;
+    opacity: 0.7;
+    transition: all 0.2s ease-in-out;
+    font-weight: 700;
+}
+
+/* Estados completados */
+.process-step.done {
+    background-color: #6B8E23; /* Verde oliva para completado */
+    color: #FFFFFF;
+    opacity: 1;
+}
+
+/* Estado actual */
+.process-step.current {
+    background-color: #F5A623; /* Naranja-amarillo para actual */
+    color: #4A3C32;
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(245, 166, 35, 0.7);
+    border: 3px solid #E27B02;
+    animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1);}
+    50% { transform: scale(1.1);}
+    100% { transform: scale(1);}
+}

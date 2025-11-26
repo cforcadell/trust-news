@@ -83,23 +83,25 @@ services:
     volumes:
       - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
-  #validate-asertions-worker_3:
-  #  build: ./api/validate-asertions
-  #  container_name: validate-asertions-worker_3
-  #  ports:
-  #    - "8068:8070"
-  #  env_file:
-  #    - ./api/validate-asertions/.env_openrouter
-  #  environment:
-  #    <<: *global-env
-  #    ENABLE_KAFKA_CONSUMER: "true"
-  #    ACCOUNT_ADDRESS: 0x90F79bf6EB2c4f870365E785982E1f101E93b906 # Account #3
-  #    PRIVATE_KEY: 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
-  #    VALIDATOR_CATEGORIES: "[1,7,8,9,10]"
-  #  depends_on:
-  #    - ipfs-fastapi
-  #  volumes:
-  #    - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
+  validate-asertions-worker_3:
+    build: 
+      context: ./api  
+      dockerfile: ./validate-asertions/Dockerfile 
+    container_name: validate-asertions-worker_3
+    ports:
+      - "8068:8070"
+    env_file:
+      - ./api/validate-asertions/.env_openrouter
+    environment:
+      <<: *global-env
+      ENABLE_KAFKA_CONSUMER: "true"
+      ACCOUNT_ADDRESS: 0x90F79bf6EB2c4f870365E785982E1f101E93b906 # Account #3
+      PRIVATE_KEY: 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
+      VALIDATOR_CATEGORIES:  "[1,2,3,4,5,6,7,8,9,10]"
+    depends_on:
+      - ipfs-fastapi
+    volumes:
+      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
   # -------------------------
   # News Handler

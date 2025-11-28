@@ -28,6 +28,8 @@ Informar AddressContract en
             CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3
    - y en registeredValidators.js
 
+
+
 docker compose -f docker-compose.base.yml build
 docker compose -f docker-compose.base.yml up
 docker compose -f docker-compose.base.yml down
@@ -59,4 +61,10 @@ swaggers:
 - validate-asertions-worker_2 : http://127.0.0.1:8069/docs
 
 
-Catalunya tiene una población de más de 7 millones de habitantesde los que  2 millones de niños en edad escolar y otro millón son inmigrantes.
+"Catalunya tiene una población de más de 7 millones de habitantesde los que  2 millones de niños en edad escolar y otro millón son inmigrantes."
+
+
+cd ~/blockchain/tfm/api/tests
+source venv/bin/activate
+
+python stats.py --text "Catalunya tiene una población de más de 7 millones de habitantesde los que  2 millones de niños en edad escolar y otro millón son inmigrantes." --num_runs 2 --timeout 200 --csv_file ./stats.out

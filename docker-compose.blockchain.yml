@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   geth-bootnode:
     container_name: geth-bootnode-container
@@ -9,10 +11,12 @@ services:
       - ./volumes/bootnode:/root/.ethereum
     command:
       - --nodekeyhex=b0ac22adcad37213c7c565810a50f1772291e7b0ce53fb73e7ec2a3c75bc13b5
-      - --nodiscover
-      - --ipcdisable
-      - --port=30304
+      - --nodiscover=false
       - --networkid=${NETWORK_ID}
+      - --http=false
+      - --ws=false
+      - --ipcdisable
+      - --mine=false  
     networks:
       default:
 
@@ -39,6 +43,9 @@ services:
       - --ws.port=8556
       - --ws.api=eth,web3,net,admin,personal
       - --networkid=${NETWORK_ID}
+      - --unlock=0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
+      - --password=/root/.ethereum/password.txt
+      - --allow-insecure-unlock
     ports:
       - "8555:8555"
       - "8556:8556"
@@ -60,8 +67,16 @@ services:
       - --mine
       - --miner.threads=1
       - --networkid=${NETWORK_ID}
-      - --miner.etherbase=0xd955e631028dcc4b1e3614217b7b719a6f7cd83f
-      - --port=30305
+      - --unlock=0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
+      - --password=/root/.ethereum/password.txt
+      - --miner.etherbase=0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8557
+      - --http.api=eth,web3,net,admin,personal
+      - --allow-insecure-unlock
+    ports:
+      - "30305:30305"
     networks:
       default:
 

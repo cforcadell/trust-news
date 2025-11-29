@@ -94,3 +94,127 @@ npx hardhat run scripts/deploy.js --network privateGeth
 docker exec -it geth-rpc-container geth attach http://localhost:8555
 eth.accounts
 
+
+
+
+INI network
+-----------
+
+cd /home/adminu/blockchain/tfm
+
+#Eliminar configuraciones previas
+docker compose -f docker-compose.blockchain.yml down -v
+
+
+sudo rm -rf ./volumes/bootnode ./volumes/rpc ./volumes/miner
+mkdir ./volumes/bootnode 
+mkdir ./volumes/rpc 
+mkdir ./volumes/miner
+
+
+
+#Crear la cuenta para Hardhat
+docker run --rm -v $(pwd)/volumes/rpc:/root/.ethereum -it ethereum/client-go:v1.10.1 account new --datadir /root/.ethereum
+
+Ex:
+(pwd)cforcadellm
+
+Public address of the key:   0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
+Path of the secret key file: /root/.ethereum/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff
+
+#Comprobamos
+sudo ls volumes/rpc/keystore/
+
+#Copiamos la cuenta al nodo minero
+sudo mkdir ./volumes/miner/keystore
+sudo cp ./volumes/rpc/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff ./volumes/miner/keystore/
+
+#Configuramos para desbloquear la cuenta al arrancar
+sudo echo "cforcadellm" > ./volumes/rpc/password.txt
+sudo echo "cforcadellm" > ./volumes/miner/password.txt
+
+#Informamos public addresss cuenta creada
+
+En geth-miner-container
+       - --unlock=0x01C6e67F460a85a953a5676371C01d2d37250D34
+       - --miner.etherbase=0x01C6e67F460a85a953a5676371C01d2d37250D34
+En geth-rpc-container
+       - --unlock=0x01C6e67F460a85a953a5676371C01d2d37250D34
+
+#Editamos extraData con la cuenta del validador en genesis.json
+ 
+ 
+
+#generamos genesis.json
+cd ./blockchain
+source ~/venv-geth/bin/activate
+python3 generate_genesis.py
+
+
+#Copiamos el fichero de genesis.json en cada volumen
+sudo cp /home/adminu/blockchain/tfm/blockchain/genesis.json /home/adminu/blockchain/tfm/volumes/bootnode
+sudo cp /home/adminu/blockchain/tfm/blockchain/genesis.json /home/adminu/blockchain/tfm/volumes/rpc
+sudo cp /home/adminu/blockchain/tfm/blockchain/genesis.json /home/adminu/blockchain/tfm/volumes/miner
+
+#Inicializamos cada nodo
+docker run --rm -v $(pwd)/volumes/rpc:/root/.ethereum ethereum/client-go:v1.10.1 init /root/.ethereum/genesis.json
+docker run --rm -v $(pwd)/volumes/miner:/root/.ethereum ethereum/client-go:v1.10.1 init /root/.ethereum/genesis.json
+docker run --rm -v $(pwd)/volumes/bootnode:/root/.ethereum ethereum/client-go:v1.10.1 init /root/.ethereum/genesis.json
+
+
+
+
+#Arrancamos red
+#docker compose -f docker-compose.blockchain.yml up geth-bootnode
+
+docker compose -f docker-compose.blockchain.yml up
+
+
+#get the address of our primary account created while the image is being built
+curl --location --request POST 'localhost:8555' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "eth_accounts",
+    "params": []
+}'
+
+# leer clave privada e la cuenta
+cd ./blockchain
+source ~/venv-geth/bin/activate
+
+sudo chmod -R 755 /home/adminu/blockchain/tfm/volumes/rpc/keystore
+ls /home/adminu/blockchain/tfm/volumes/rpc/keystore
+sudo chmod 644 /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff
+
+python get_private_key.py /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff cforcadellm
+
+#Informar en hardhat.config.js
+    privateGeth: {
+      url: "http://localhost:8555", // el port HTTP del node N1
+      accounts: [
+        //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
+        "0x???????????????????????????????????????????????????????"
+      ],
+      chainId: 1214
+    }
+  },
+
+
+
+#Revisar fondos
+docker exec -it geth-miner-container geth attach ipc:/root/.ethereum/geth.ipc
+
+// Mostrar balance en wei
+eth.getBalance("0xED47E71846D68f17Aa2156252ee00949a7a1FDFF")
+
+// Convertir a ether
+web3.fromWei(eth.getBalance("0xED47E71846D68f17Aa2156252ee00949a7a1FDFF"), "ether")
+
+# Desplegar contrato (Nuevo terminal)
+cd ~/blockchain/tfm/smart-contracts
+npx hardhat run scripts/deployGeth.js --network privateGeth
+
+
+

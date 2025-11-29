@@ -13,7 +13,12 @@ npx hardhat run scripts/testTrustNews.js
 
 Deploy
 -------
+#Para hardhat
 npx hardhat run scripts/deploy.js --network localhost 
+#Para privateGeth
+npx hardhat run scripts/deploy.js --network privateGeth 
+
+
 !ojo que si no indicamos network levanta un nodo temporal que desaparecerá dspues de ejecutarse!
 
 

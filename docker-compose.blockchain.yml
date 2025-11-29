@@ -3,13 +3,9 @@ version: '3.7'
 services:
   geth-bootnode:
     hostname: geth-bootnode
+    image: ethereum/client-go:v1.10.1
     env_file:
       - .env
-    image: geth-client
-    build:
-      context: .
-      args:
-        ACCOUNT_PASSWORD: ${ACCOUNT_PASSWORD}
     volumes:
       - ./volumes/bootnode:/root/.ethereum
     command:
@@ -23,11 +19,11 @@ services:
 
   geth-rpc-endpoint:
     hostname: geth-rpc-endpoint
-    env_file:
-      - .env
-    image: geth-client
+    image: ethereum/client-go:v1.10.1
     depends_on:
       - geth-bootnode
+    env_file:
+      - .env
     volumes:
       - ./volumes/rpc:/root/.ethereum
     command:
@@ -51,11 +47,11 @@ services:
 
   geth-miner:
     hostname: geth-miner
-    env_file:
-      - .env
-    image: geth-client
+    image: ethereum/client-go:v1.10.1
     depends_on:
       - geth-bootnode
+    env_file:
+      - .env
     volumes:
       - ./volumes/miner:/root/.ethereum
     command:

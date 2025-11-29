@@ -4,10 +4,14 @@ ARG ACCOUNT_PASSWORD
 
 COPY ./genesis.json /tmp
 
-RUN geth init /tmp/genesis.json \
+# Script de inicialización
+RUN mkdir -p /root/.ethereum \
+    && geth init /tmp/genesis.json \
     && rm -f ~/.ethereum/geth/nodekey \
-    && echo ${ACCOUNT_PASSWORD} > /tmp/password \
-    && geth account new --password /tmp/password \
-    && rm -f /tmp/password
+    && /bin/sh -c 'if [ ! -d /root/.ethereum/keystore ] || [ "$(ls -A /root/.ethereum/keystore 2>/dev/null)" = "" ]; then \
+         echo "$ACCOUNT_PASSWORD" > /tmp/pass && \
+         geth account new --password /tmp/pass && \
+         rm -f /tmp/pass; \
+       fi'
 
 ENTRYPOINT ["geth"]

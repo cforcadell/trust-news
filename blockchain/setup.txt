@@ -1,0 +1,78 @@
+docker build -t geth-client --build-arg ACCOUNT_PASSWORD=5uper53cr3t .
+
+
+docker images
+
+
+
+#Inicializar el genesis.json en tu volumen solo la primera vez:
+
+docker run --rm \
+  -v /home/adminu/blockchain/tfm/blockchain:/data \
+  -v /home/adminu/blockchain/tfm/volumes/geth:/root/.ethereum \
+  ethereum/client-go:v1.10.1 init /data/genesis.json
+
+#Crear la cuenta (si no existe)
+echo "5uper53cr3t" > /home/adminu/blockchain/tfm/volumes/geth/pass.txt
+docker run --rm -v /home/adminu/blockchain/tfm/volumes/geth:/root/.ethereum ethereum/client-go:v1.10.1 account new --password /root/.ethereum/pass.txt
+rm /home/adminu/blockchain/tfm/volumes/geth/pass.txt
+
+0xb5494F8D62aC68f56a7908950BC47dAc21e0d01C
+
+
+
+#check the connectivity of the nodes.
+
+curl --location --request POST 'localhost:8545' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "admin_peers",
+    "params": []
+}'
+
+#get the latest block number of the blockchain
+curl --location --request POST 'localhost:8545' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "eth_blockNumber",
+    "params": []
+}'
+
+#get the address of our primary account created while the image is being built
+curl --location --request POST 'localhost:8545' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "eth_accounts",
+    "params": []
+}'
+
+#get balances
+curl --location --request POST 'localhost:8545' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "eth_getBalance",
+    "params": [
+        "0x08d1f47128f5c04d7a4aee69e90642645059acd6",
+        "latest"
+    ]
+}'
+
+#create new account
+curl --location --request POST 'http://localhost:8545' \
+--header 'Content-type: application/json' \
+--data-raw '{
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "personal_newAccount",
+    "params": [
+        "5uper53cr3t"
+    ]
+}'

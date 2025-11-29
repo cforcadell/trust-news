@@ -6,9 +6,10 @@ async function main() {
 
   // Desplegar contrato
   const TrustNews = await ethers.getContractFactory("TrustNews");
-const trustNews = await TrustNews.deploy({
-  gasLimit: 3000000
-});
+//const trustNews = await TrustNews.deploy({
+//  gasLimit: 3000000
+//});
+  const trustNews = await TrustNews.deploy();
   await trustNews.waitForDeployment();
 
   const address = await trustNews.getAddress();

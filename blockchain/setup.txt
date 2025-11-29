@@ -1,7 +1,4 @@
-docker build -t geth-client --build-arg ACCOUNT_PASSWORD=5uper53cr3t .
 
-
-docker images
 
 
 
@@ -76,7 +73,7 @@ curl --location --request POST 'localhost:8555' \
     "id": 4,
     "method": "eth_getBalance",
     "params": [
-        "0x08d1f47128f5c04d7a4aee69e90642645059acd6",
+        "0xb5494F8D62aC68f56a7908950BC47dAc21e0d01C",
         "latest"
     ]
 }'
@@ -92,3 +89,8 @@ curl --location --request POST 'http://localhost:8555' \
         "5uper53cr3t"
     ]
 }'
+
+npx hardhat run scripts/deploy.js --network privateGeth 
+docker exec -it geth-rpc-container geth attach http://localhost:8555
+eth.accounts
+

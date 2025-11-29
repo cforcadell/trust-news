@@ -1,7 +1,6 @@
-version: '3.7'
-
 services:
   geth-bootnode:
+    container_name: geth-bootnode-container
     hostname: geth-bootnode
     image: ethereum/client-go:v1.10.1
     env_file:
@@ -12,12 +11,13 @@ services:
       - --nodekeyhex=b0ac22adcad37213c7c565810a50f1772291e7b0ce53fb73e7ec2a3c75bc13b5
       - --nodiscover
       - --ipcdisable
-      - --port=30304           # Puerto P2P del bootnode diferente del estándar
+      - --port=30304
       - --networkid=${NETWORK_ID}
     networks:
       default:
 
   geth-rpc-endpoint:
+    container_name: geth-rpc-container
     hostname: geth-rpc-endpoint
     image: ethereum/client-go:v1.10.1
     depends_on:
@@ -46,6 +46,7 @@ services:
       default:
 
   geth-miner:
+    container_name: geth-miner-container
     hostname: geth-miner
     image: ethereum/client-go:v1.10.1
     depends_on:
@@ -59,8 +60,8 @@ services:
       - --mine
       - --miner.threads=1
       - --networkid=${NETWORK_ID}
-      - --miner.etherbase=0xb5494F8D62aC68f56a7908950BC47dAc21e0d01C
-      - --port=30305            # Puerto P2P diferente para el miner
+      - --miner.etherbase=0xd955e631028dcc4b1e3614217b7b719a6f7cd83f
+      - --port=30305
     networks:
       default:
 

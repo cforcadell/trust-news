@@ -4,7 +4,8 @@ npx hardhat node --hostname 0.0.0.0
 
 comprobar  http://127.0.0.1:8545/
 
-
+#si hay interacciones
+lsof -i :8545
 
 script de test (en node tamporal)
 ------

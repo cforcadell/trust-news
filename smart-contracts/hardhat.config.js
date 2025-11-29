@@ -10,12 +10,12 @@ module.exports = {
     }
   },
     privateGeth: {
-      url: "http://192.168.56.108:8545", // el port HTTP del node N1
+      url: "http://localhost:8545", // el port HTTP del node N1
       accounts: [
         //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
-        "45a407904ebd8d0f6e9690ee36d7654c50a20e43dc2fa863c1eea9633f567667"
+        "d955e631028dcc4b1e3614217b7b719a6f7cd83f"
       ],
-      chainId: 12345
+      chainId: 1214
     }
   },
 };

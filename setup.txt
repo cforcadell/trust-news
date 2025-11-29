@@ -30,6 +30,10 @@ Informar AddressContract en
 
 
 
+docker compose -f docker-compose.blockchain.yml up
+docker compose -f docker-compose.blockchain.yml down
+
+
 docker compose -f docker-compose.base.yml build
 docker compose -f docker-compose.base.yml up
 docker compose -f docker-compose.base.yml down

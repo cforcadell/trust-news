@@ -31,3 +31,5 @@ api/tests/__pycache__/*
 api/generate-asertions/__pycache__/*
 api/mongo/mongo.txt
 blockchain/geth-client/setup.txt
+accounts/*
+

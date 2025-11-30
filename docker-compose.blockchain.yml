@@ -41,6 +41,7 @@ services:
       - --http.port=8555
       - --http.api=eth,web3,net,admin,personal
       - --http.corsdomain=*
+      - --http.vhosts=*          # <-- agregar esta línea
       - --ws
       - --ws.addr=0.0.0.0
       - --ws.port=8556
@@ -49,6 +50,8 @@ services:
       - --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
       - --password=/root/.ethereum/password.txt
       - --port=30303
+      - --miner.gaslimit=90000000
+      #- --mine
     ports:
       - "8555:8555"
       - "8556:8556"
@@ -80,6 +83,7 @@ services:
       - --http.api=eth,web3,net,admin,personal
       - --allow-insecure-unlock
       - --port=30305
+      - --miner.gaslimit=90000000
     ports:
       - "30305:30305"
       - "8557:8557"

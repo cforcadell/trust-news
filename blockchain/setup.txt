@@ -119,15 +119,15 @@ docker run --rm -v $(pwd)/volumes/rpc:/root/.ethereum -it ethereum/client-go:v1.
 Ex:
 (pwd)cforcadellm
 
-Public address of the key:   0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
-Path of the secret key file: /root/.ethereum/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff
+Public address of the key:   0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+Path of the secret key file: /root/.ethereum/keystore/UTC--2025-11-30T16-54-28.704244803Z--1747d8ab4dbdc6b2abe233d5688487a39bc555b5
 
 #Comprobamos
 sudo ls volumes/rpc/keystore/
 
 #Copiamos la cuenta al nodo minero
 sudo mkdir ./volumes/miner/keystore
-sudo cp ./volumes/rpc/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff ./volumes/miner/keystore/
+sudo cp ./volumes/rpc/keystore/UTC--2025-11-30T16-54-28.704244803Z--1747d8ab4dbdc6b2abe233d5688487a39bc555b5 ./volumes/miner/keystore/
 
 #Configuramos para desbloquear la cuenta al arrancar
 sudo echo "cforcadellm" > ./volumes/rpc/password.txt
@@ -162,7 +162,26 @@ docker run --rm -v $(pwd)/volumes/miner:/root/.ethereum ethereum/client-go:v1.10
 docker run --rm -v $(pwd)/volumes/bootnode:/root/.ethereum ethereum/client-go:v1.10.1 init /root/.ethereum/genesis.json
 
 
+# leer clave privada e la cuenta
+cd ./blockchain
+source ~/venv-geth/bin/activate
 
+sudo chmod -R 755 /home/adminu/blockchain/tfm/volumes/rpc/keystore
+ls /home/adminu/blockchain/tfm/volumes/rpc/keystore
+sudo chmod 644 /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-30T16-54-28.704244803Z--1747d8ab4dbdc6b2abe233d5688487a39bc555b5
+
+python get_private_key.py /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-30T16-54-28.704244803Z--1747d8ab4dbdc6b2abe233d5688487a39bc555b5 cforcadellm
+
+#Informar en hardhat.config.js
+    privateGeth: {
+      url: "http://localhost:8555", // el port HTTP del node N1
+      accounts: [
+        //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
+        "0x???????????????????????????????????????????????????????"
+      ],
+      chainId: 1214
+    }
+  },
 
 #Arrancamos red
 #docker compose -f docker-compose.blockchain.yml up geth-bootnode
@@ -180,26 +199,7 @@ curl --location --request POST 'localhost:8555' \
     "params": []
 }'
 
-# leer clave privada e la cuenta
-cd ./blockchain
-source ~/venv-geth/bin/activate
 
-sudo chmod -R 755 /home/adminu/blockchain/tfm/volumes/rpc/keystore
-ls /home/adminu/blockchain/tfm/volumes/rpc/keystore
-sudo chmod 644 /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff
-
-python get_private_key.py /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-29T20-25-29.866726315Z--ed47e71846d68f17aa2156252ee00949a7a1fdff cforcadellm
-
-#Informar en hardhat.config.js
-    privateGeth: {
-      url: "http://localhost:8555", // el port HTTP del node N1
-      accounts: [
-        //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
-        "0x???????????????????????????????????????????????????????"
-      ],
-      chainId: 1214
-    }
-  },
 
 
 
@@ -215,6 +215,12 @@ web3.fromWei(eth.getBalance("0xED47E71846D68f17Aa2156252ee00949a7a1FDFF"), "ethe
 # Desplegar contrato (Nuevo terminal)
 cd ~/blockchain/tfm/smart-contracts
 npx hardhat run scripts/deployGeth.js --network privateGeth
+
+# Si hay problemas de gastos
+#mira el gas masximo del bloque
+docker exec -it geth-rpc-container geth --exec "eth.getBlock('latest').gasLimit" attach /root/.ethereum/geth.ipc
+
+
 
 
 

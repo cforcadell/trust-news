@@ -6,9 +6,11 @@ async function main() {
 
   // Desplegar contrato
   const TrustNews = await ethers.getContractFactory("TrustNews");
-  const trustNews = await TrustNews.deploy(); // dejar que Hardhat estime gas
+  console.log("GetContractFactory.");
+  const trustNews = await TrustNews.deploy({ gasLimit: 25_000_000 });
+  console.log("Deploy Sent:");
   await trustNews.waitForDeployment();
-
+  console.log("✅ Deploy Mined");
   const address = await trustNews.getAddress();
   console.log("✅ Contrato desplegado en:", address);
 

@@ -4,12 +4,12 @@ import json
 chain_id = 1214
 period = 1
 epoch = 30000
-gas_limit = "0x8000000"
+gas_limit = "0xFFFFFFF"
 difficulty = "0x1"
 
 # Lista de validadores (pueden tener 0x y mayúsculas)
 validators = [
-    "0xED47E71846D68f17Aa2156252ee00949a7a1FDFF"
+    "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5"
 ]
 
 # Función para generar extraData

@@ -16,7 +16,10 @@ services:
       - --http=false
       - --ws=false
       - --ipcdisable
-      - --mine=false  
+      - --mine=false
+      - --port=30304
+    ports:
+      - "30304:30304"
     networks:
       default:
 
@@ -43,12 +46,13 @@ services:
       - --ws.port=8556
       - --ws.api=eth,web3,net,admin,personal
       - --networkid=${NETWORK_ID}
-      - --unlock=0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
+      - --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
       - --password=/root/.ethereum/password.txt
-      - --allow-insecure-unlock
+      - --port=30303
     ports:
       - "8555:8555"
       - "8556:8556"
+      - "30303:30303"
     networks:
       default:
 
@@ -67,16 +71,18 @@ services:
       - --mine
       - --miner.threads=1
       - --networkid=${NETWORK_ID}
-      - --unlock=0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
+      - --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
       - --password=/root/.ethereum/password.txt
-      - --miner.etherbase=0xED47E71846D68f17Aa2156252ee00949a7a1FDFF
+      - --miner.etherbase=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
       - --http
       - --http.addr=0.0.0.0
       - --http.port=8557
       - --http.api=eth,web3,net,admin,personal
       - --allow-insecure-unlock
+      - --port=30305
     ports:
       - "30305:30305"
+      - "8557:8557"
     networks:
       default:
 

@@ -4,19 +4,27 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("👤 Cuenta deployer:", deployer.address);
 
-  // Desplegar contrato
+  // -------------------------------
+  // Desplegar contrato TrustNews
+  // -------------------------------
   const TrustNews = await ethers.getContractFactory("TrustNews");
   console.log("GetContractFactory.");
-  const trustNews = await TrustNews.deploy({ gasLimit: 25_000_000 });
+
+  const trustNews = await TrustNews.deploy({
+    gasLimit: 25_000_000,    // suficiente para redes privadas
+    gasPrice: 1_000_000_000  // 1 Gwei
+  });
+  
   console.log("Deploy Sent:");
-  await trustNews.waitForDeployment();
+  await trustNews.waitForDeployment(); // esperar a que se mine
   console.log("✅ Deploy Mined");
+
   const address = await trustNews.getAddress();
   console.log("✅ Contrato desplegado en:", address);
 
-  // --------------------------------------------------
-  // Registrar categorías de noticias
-  // --------------------------------------------------
+  // -------------------------------
+  // Registrar categorías
+  // -------------------------------
   const categories = [
     { id: 1, name: "ECONOMÍA" },
     { id: 2, name: "DEPORTES" },
@@ -32,15 +40,25 @@ async function main() {
 
   console.log("\n⏳ Registrando categorías...");
 
-  // Enviar todas las transacciones sin await
-  const txs = categories.map(cat => trustNews.addCategory(cat.id, cat.name));
+  for (const cat of categories) {
+    try {
+      const tx = await trustNews.addCategory(cat.id, cat.name, {
+        gasLimit: 5_000_000,
+        gasPrice: 1_000_000_000
+      });
+      // Esperar a que se mine la transacción
+      if (tx.wait) {
+        await tx.wait();
+      }
+      console.log(`   ✅ Categoria [${cat.id}] ${cat.name} registrada`);
+    } catch (error) {
+      console.error(`   ❌ Error registrando categoría [${cat.id}] ${cat.name}:`, error.message);
+    }
+  }
 
-  // Esperar que todas las transacciones se minen
-  await Promise.all(txs.map(tx => tx.wait()));
-
-  console.log("✅ Todas las categorías registradas correctamente.");
-
+  // -------------------------------
   // Mostrar resumen
+  // -------------------------------
   console.log("\n📌 Categorías registradas:");
   for (let i = 1; i <= 10; i++) {
     try {

@@ -1,3 +1,5 @@
+Si usamos hardhat seguir los siguientes pasos:
+
 cd ~/blockchain/tfm/smart-contracts
 
 npx hardhat node --hostname 0.0.0.0 
@@ -41,9 +43,9 @@ Informar AddressContract en
    - y en registeredValidators.js
 
 
+Si es Geth private seguir setupt.txt de la carpeta blockchain
 
-docker compose -f docker-compose.blockchain.yml up
-docker compose -f docker-compose.blockchain.yml down
+
 
 
 docker compose -f docker-compose.base.yml build

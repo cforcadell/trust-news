@@ -5,9 +5,12 @@ INI network
 
 cd /home/adminu/blockchain/tfm
 
-#Backup de cuentas
+🟢Backup de cuentas
 
-#Eliminar configuraciones previas
+cp blockchain/volumes/miner/keystore accounts 
+cp blockchain/volumes/rpc/keystore accounts 
+
+🟢Eliminar configuraciones previas
 docker compose -f docker-compose.blockchain.yml down -v
 
 
@@ -18,7 +21,7 @@ mkdir ./volumes/miner
 
 
 
-#Crear la cuenta para Hardhat (no si restauramos cuentas)
+🟡Crear la cuenta para Hardhat (no si restauramos cuentas)
 docker run --rm -v $(pwd)/volumes/rpc:/root/.ethereum -it ethereum/client-go:v1.10.1 account new --datadir /root/.ethereum
 
 Ex:
@@ -27,22 +30,22 @@ Ex:
 Public address of the key:   0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
 Path of the secret key file: /root/.ethereum/keystore/UTC--2025-11-30T16-54-28.704244803Z--1747d8ab4dbdc6b2abe233d5688487a39bc555b5
 
-#Comprobamos (no si restauramos cuentas)
+🟡Comprobamos (no si restauramos cuentas)
 sudo ls volumes/rpc/keystore/
 
-#Copiamos la cuenta al nodo minero (no si restauramos cuentas)
+🟡Copiamos la cuenta al nodo minero (no si restauramos cuentas)
 sudo mkdir ./volumes/miner/keystore
 sudo cp ./volumes/rpc/keystore/UTC--2025-11-30T16-54-28.704244803Z--1747d8ab4dbdc6b2abe233d5688487a39bc555b5 ./volumes/miner/keystore/
 
-#Restauramos cuentas de miner y rpc
+🟢Restauramos cuentas de miner y rpc
 sudo cp -r ./accounts/miner/keystore ./volumes/miner
 sudo cp -r ./accounts/rpc/keystore ./volumes/rpc
 
-#Configuramos para desbloquear la cuenta al arrancar
+🟢Configuramos para desbloquear la cuenta al arrancar
 sudo echo "cforcadellm" > ./volumes/rpc/password.txt
 sudo echo "cforcadellm" > ./volumes/miner/password.txt
 
-#Informamos public addresss cuenta creada (no si restauramos cuentas)
+🟡Informamos public addresss cuenta creada (no si restauramos cuentas)
 
 En geth-miner-container
        - --unlock=0x01C6e67F460a85a953a5676371C01d2d37250D34
@@ -53,24 +56,24 @@ En geth-rpc-container
 
  
 
-#generamos genesis.json con extradata dedicado (no si restauramos cuentas)
+🟡generamos genesis.json con extradata dedicado (no si restauramos cuentas)
 cd ./blockchain
 source ~/venv-geth/bin/activate
 python3 generate_genesis.py
 
 
-#Copiamos el fichero de genesis.json en cada volumen
+🟢Copiamos el fichero de genesis.json en cada volumen
 sudo cp /home/adminu/blockchain/tfm/blockchain/genesis.json /home/adminu/blockchain/tfm/volumes/bootnode
 sudo cp /home/adminu/blockchain/tfm/blockchain/genesis.json /home/adminu/blockchain/tfm/volumes/rpc
 sudo cp /home/adminu/blockchain/tfm/blockchain/genesis.json /home/adminu/blockchain/tfm/volumes/miner
 
-#Inicializamos cada nodo
+🟢Inicializamos cada nodo
 docker run --rm -v $(pwd)/volumes/rpc:/root/.ethereum ethereum/client-go:v1.10.1 init /root/.ethereum/genesis.json
 docker run --rm -v $(pwd)/volumes/miner:/root/.ethereum ethereum/client-go:v1.10.1 init /root/.ethereum/genesis.json
 docker run --rm -v $(pwd)/volumes/bootnode:/root/.ethereum ethereum/client-go:v1.10.1 init /root/.ethereum/genesis.json
 
 
-# leer clave privada e la cuenta (no si restauramos cuentas)
+🟡 leer clave privada e la cuenta (no si restauramos cuentas)
 cd ./blockchain
 source ~/venv-geth/bin/activate
 
@@ -80,7 +83,7 @@ sudo chmod 644 /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-30T
 
 python get_private_key.py /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--2025-11-30T16-54-28.704244803Z--1747d8ab4dbdc6b2abe233d5688487a39bc555b5 cforcadellm
 
-#Informar en hardhat.config.js (no si restauramos cuentas)
+🟡Informar en hardhat.config.js (no si restauramos cuentas)
     privateGeth: {
       url: "http://localhost:8555", // el port HTTP del node N1
       accounts: [
@@ -91,13 +94,17 @@ python get_private_key.py /home/adminu/blockchain/tfm/volumes/rpc/keystore/UTC--
     }
   },
 
-#Arrancamos red
 
+
+🟢Arrancamos red
+
+docker compose -f docker-compose.blockchain.yml down
 
 docker compose -f docker-compose.blockchain.yml up
 
 
-#get the address of our primary account created while the image is being built
+
+🟢get the address of our primary account created while the image is being built
 curl --location --request POST 'localhost:8555' \
 --header 'Content-Type: application/json' \
 --data-raw '{
@@ -111,7 +118,7 @@ curl --location --request POST 'localhost:8555' \
 
 
 
-#Revisar fondos
+🟢Revisar fondos
 docker exec -it geth-miner-container geth attach ipc:/root/.ethereum/geth.ipc
 
 // Mostrar balance en wei
@@ -120,18 +127,18 @@ eth.getBalance("0xED47E71846D68f17Aa2156252ee00949a7a1FDFF")
 // Convertir a ether
 web3.fromWei(eth.getBalance("0xED47E71846D68f17Aa2156252ee00949a7a1FDFF"), "ether")
 
-# Desplegar contrato (Nuevo terminal)
+🟢 Desplegar contrato (Nuevo terminal)
 cd ~/blockchain/tfm/smart-contracts
 npx hardhat run scripts/deployGeth.js --network privateGeth
 
-✅ Contrato desplegado en: 0x9eA62eb7944349C407B307025644E47bF22F8bCc
+Contrato desplegado en: 0x9eA62eb7944349C407B307025644E47bF22F8bCc
 
-# Informar Contrato
+🟢 Informar Contrato
 Modificar .env de news-chain
 Modificar docker-compose.apis.yml
 
 
-#Crear resto de cuentas (no si restauramos cuentas. En ese caso solo pasar al paso siguiente) 
+🟡Crear resto de cuentas (no si restauramos cuentas. En ese caso solo pasar al paso siguiente) 
 
 docker exec -it geth-rpc-container geth account new --datadir /root/.ethereum
 
@@ -262,7 +269,7 @@ console.log(balanceEth + " ETH");
 
 
 
-#transfer + unlock all accounts
+🟢transfer + unlock all accounts (si no se ha hecho en el paso anterior)
 docker exec -it geth-rpc-container geth attach /root/.ethereum/geth.ipc
 
 eth.sendTransaction({from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5", to: "0xa28885A13A7b4D3561a7af64eA1bA0F82eD9f06B", value: web3.toWei(10, "ether")})
@@ -280,7 +287,7 @@ personal.unlockAccount("0xBe794abf86d173ddCfE937c6d8d739BDc4e94165", "validador3
 
 
 
-# UTILS
+🔧 UTILS
 
  #test ping
 docker exec -it validate-asertions-worker_3 /bin/bash

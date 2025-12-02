@@ -133,6 +133,9 @@ npx hardhat run scripts/deployGeth.js --network privateGeth
 
 Contrato desplegado en: 0x9eA62eb7944349C407B307025644E47bF22F8bCc
 
+eth.getCode("0x9eA62eb7944349C407B307025644E47bF22F8bCc")
+
+
 🟢 Informar Contrato
 Modificar .env de news-chain
 Modificar docker-compose.apis.yml

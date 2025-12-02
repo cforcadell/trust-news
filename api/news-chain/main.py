@@ -50,6 +50,7 @@ try:
         artifact = json.load(f)
     abi = artifact["abi"]
     contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
+    logger.info(f"Conectado a blockchain: {w3.is_connected()} - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
 except Exception as e:
     logger.error(f"Error cargando ABI o inicializando contrato: {e}")
     # Usar un contrato placeholder si la carga falla para permitir que el worker continúe
@@ -127,6 +128,11 @@ def send_tx_async(function_call, gas_estimate=3_000_000):
         raise ConnectionError("Web3 no está conectado al RPC.")
     if not PRIVATE_KEY or not ACCOUNT_ADDRESS:
         raise ValueError("Variables PRIVATE_KEY o ACCOUNT_ADDRESS no definidas.")
+    
+    sender = Web3.to_checksum_address(ACCOUNT_ADDRESS)
+    
+    balance = w3.eth.get_balance(sender)
+    logger.info(f"Balance de la cuenta {sender}: {w3.from_wei(balance, 'ether')} ETH")
         
     nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
     tx = function_call.build_transaction({

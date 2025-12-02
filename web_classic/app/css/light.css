@@ -1,0 +1,601 @@
+/* =================== PALETA DE COLORES CLARA =================== */
+/* Base: #FFFFFF (Blanco puro) */
+/* Fondo General: #F3F4F6 (Gris muy claro) */
+/* Sidebar/Contenedores: #FFFFFF (Blanco) */
+/* Texto Principal: #1F2937 (Gris Oscuro) */
+/* Borde/Divisor: #D1D5DB (Gris claro) */
+/* Primario/Éxito: #10B981 (Verde) */
+/* Acento/Marca: #0D9488 (Cian) */
+
+/* =================== ESTILOS GLOBALES =================== */
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    background-color: #F3F4F6; /* Fondo General Claro */
+    color: #1F2937; /* Texto Oscuro */
+}
+
+/* Header (Eliminado/No utilizado en el HTML proporcionado) */
+header {
+    display: none; /* Mantener oculto si el HTML no lo usa */
+}
+
+.section, section {
+    display: none;
+    padding-top: 2rem;
+    max-width: 1000px;
+    margin: 0 auto 20px auto; /* Ajuste de margen para mejor visualización */
+    background-color: #F3F4F6; /* Fondo de sección claro */
+    border-radius: 8px;
+    /* Reducir sombra en modo claro */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06); 
+}
+
+.section.active, section.active { display: block; }
+
+h2 {
+    color: #0D9488; /* Color de acento para títulos de sección */
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #E5E7EB;
+    padding-bottom: 5px;
+}
+
+/* =================== CONTROLES Y ENTRADAS =================== */
+textarea, input[type="text"] {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 15px;
+    border: 1px solid #D1D5DB; /* Borde suave */
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-size: 1rem;
+    background-color: #FFFFFF; /* Fondo de entrada blanco */
+    color: #1F2937; /* Texto oscuro */
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+}
+
+textarea { resize: vertical; height: 300px; }
+
+button {
+    background-color: #0D9488; /* Botón de acción principal (Cian) */
+    color: #FFFFFF;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-right: 10px;
+    transition: background-color 0.2s, transform 0.1s;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+button:hover { 
+    background-color: #0F766E; /* Cian más oscuro al pasar el ratón */
+    transform: translateY(-1px);
+}
+
+/* =================== TABLAS =================== */
+table, .compact-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    margin-top: 20px;
+    background-color: #FFFFFF; /* Fondo de tabla blanco */
+    color: #374151;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    overflow: hidden; /* Para que los bordes redondeados se apliquen bien */
+}
+
+th, td {
+    border: 1px solid #E5E7EB; /* Bordes de tabla más claros */
+    padding: 12px 15px;
+    text-align: left;
+}
+
+th {
+    background-color: #F9FAFB; /* Fondo de encabezado muy claro */
+    font-weight: 700;
+    color: #4B5563;
+}
+
+td a {
+    color: #0D9488;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 0.9rem;
+}
+
+/* =================== SIDEBAR =================== */
+#sidebar {
+    width: 260px;
+    min-width: 260px;
+    background-color: #FFFFFF; /* Sidebar blanco */
+    padding: 15px;
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 1px solid #E5E7EB;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+}
+
+.sidebar-header {
+    padding: 15px;
+    text-align: center;
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #0D9488;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #E5E7EB;
+}
+
+.menu-group { margin-bottom: 20px; }
+
+.menu-title {
+    font-size: 1em;
+    cursor: default;
+    padding: 10px 15px;
+    background-color: #F9FAFB;
+    color: #374151;
+    margin: 0;
+    border-radius: 6px;
+    font-weight: 600;
+    border-left: 4px solid #0D9488;
+}
+
+.submenu {
+    /* Mantener display:none; para JS */
+    display: block; 
+    margin-top: 8px;
+    padding-left: 0;
+}
+
+.submenu button {
+    display: block;
+    width: 100%;
+    background: #FFFFFF; /* Botón de menú blanco */
+    color: #4B5563; /* Texto de menú gris */
+    border: 1px solid #E5E7EB;
+    padding: 8px 15px;
+    margin-bottom: 4px;
+    cursor: pointer;
+    text-align: left;
+    border-radius: 6px;
+    transition: background-color 0.15s, color 0.15s;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.03);
+    font-weight: normal;
+}
+
+.submenu button:hover { 
+    background-color: #E5E7EB; /* Gris claro al pasar el ratón */
+    color: #0D9488; 
+    border-color: #0D9488;
+}
+
+/* Main content */
+#main {
+    flex: 1;
+    padding: 30px;
+    overflow-x: auto;
+}
+
+/* =================== ORDERS / DETALLES =================== */
+
+#ordersTopBar, #orderTopBar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 15px;
+    background-color: #FFFFFF;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+#ordersTopBar input[type="text"], #orderTopBar input[type="text"] { flex: 1; margin-bottom: 0; }
+
+#ordersTopBar button, .sub-tabs button {
+    padding: 8px 15px;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    background-color: #D1D5DB; /* Botones secundarios grises */
+    color: #374151;
+    font-weight: 500;
+}
+
+#ordersTopBar button:hover, .sub-tabs button:hover { background-color: #9CA3AF; color: #1F2937; }
+
+#fixedDetailsContainer {
+    background-color: #FFFFFF;
+    padding: 15px;
+    border-left: 4px solid #0D9488;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+#orderTabs {
+    border-bottom: 2px solid #D1D5DB;
+    margin-bottom: 15px;
+}
+
+#orderTabs button {
+    background: none;
+    color: #6B7280;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-right: 5px;
+    padding: 10px 18px;
+    font-size: 1rem;
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    transition: color 0.2s, border-bottom-color 0.2s;
+}
+
+#orderTabs button.activeTab {
+    color: #0D9488;
+    border-bottom: 3px solid #0D9488;
+    font-weight: 700;
+    background-color: #F9FAFB;
+}
+
+/* =================== STATUS / VERIFICACIÓN SOLO TEXTO =================== */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+.status-value {
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-weight: bold;
+    display: inline-block;
+    color: #1F2937; /* Color de texto oscuro para el estado */
+    background-color: #E5E7EB;
+}
+
+.status-value.polling { color: #F59E0B; background-color: #FEF3C7; }
+.status-value.blinking { animation: blink 1s step-end infinite; }
+.status-value.validated { color: #10B981; background-color: #D1FAE5; animation: none; }
+
+/* Mantener colores fuertes para resultados */
+.true-news { background: none; color: #10B981; font-weight: bold; padding: 0; }
+.false-news { background: none; color: #EF4444; font-weight: bold; padding: 0; }
+.partial-news { background: none; color: #F59E0B; font-weight: bold; padding: 0; }
+.unknown { background: none; color: #6B7280; font-weight: bold; padding: 0; }
+
+/* =================== DETALLES / VALIDACIONES =================== */
+details {
+    margin-top: 15px;
+    border: 1px solid #E5E7EB;
+    padding: 15px;
+    border-radius: 8px;
+    background-color: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+details summary {
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 5px 0;
+    font-weight: 600;
+    color: #374151;
+}
+
+details .compact-table { margin-top: 15px; }
+
+details .compact-table th { text-align: left; width: auto; }
+
+/* =================== PRE / JSON =================== */
+pre, .event-payload-pre {
+    background-color: #F9FAFB; /* Fondo de código muy claro */
+    padding: 15px;
+    border-radius: 6px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border: 1px solid #E5E7EB;
+    color: #374151; /* Color de texto de código */
+    font-size: 0.9rem;
+}
+
+/* =================== EVENT PAYLOAD SUMMARY =================== */
+.event-payload-details summary {
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 6px;
+    color: #6B7280;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+
+/* =================== FIX: Overflow en tablas largas =================== */
+#txTable, #blockTable {
+    table-layout: fixed;
+    width: 100%;
+    word-break: break-all;
+}
+
+#txTable th, #txTable td,
+#blockTable th, #blockTable td {
+    border: 1px solid #E5E7EB;
+    padding: 10px 15px;
+    vertical-align: top;
+    white-space: normal;
+    word-break: break-all;
+    max-width: 600px;
+    overflow-wrap: anywhere;
+}
+
+/* =================== RESPONSIVE =================== */
+@media (max-width: 768px) {
+    body { flex-direction: column; }
+    #sidebar {
+        width: 100%;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid #E5E7EB;
+    }
+    .submenu { display: block; /* Mostrar submenú por defecto en móvil */ }
+    #main { padding: 15px; }
+    #ordersTopBar, #orderTopBar, .news-import-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    #ordersTopBar input[type="text"], #ordersTopBar button,
+    #orderTopBar input[type="text"], #orderTopBar button,
+    .news-import-container input[type="text"], .news-import-container button {
+        width: 100%;
+        margin: 5px 0;
+    }
+    .news-import-container button { height: auto; padding: 10px 18px; }
+}
+
+/* =================== ASSERTIONS (CONTRACT & ORDERS) =================== */
+.assertion-box {
+    margin-bottom: 15px;
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    background: #FFFFFF;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.assertion-header {
+    background: #F9FAFB;
+    color: #1F2937;
+    cursor: pointer;
+    padding: 10px 15px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.assertion-header .arrow {
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 0.3s ease;
+}
+
+.assertion-header .arrow::after { content: '>'; }
+
+.assertion-header.open .arrow { transform: rotate(90deg); }
+
+.assertion-content {
+    display: none;
+    padding: 15px;
+    background: #FFFFFF;
+}
+
+.assertion-content h4 {
+    color: #0D9488;
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1rem;
+}
+
+.assertion-content .compact-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    margin-bottom: 15px;
+}
+
+.assertion-content .compact-table th,
+.assertion-content .compact-table td {
+    border: 1px solid #E5E7EB;
+    padding: 8px 10px;
+    text-align: left;
+}
+
+/* =================== BUSQUEDA POST ================= */
+#postSearchBox {
+    background: #FFFFFF;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+#postSearchBox input {
+    width: 200px;
+    padding: 8px 10px;
+    margin-right: 10px;
+    margin-bottom: 0;
+}
+
+.post-box {
+    background: #FFFFFF;
+    padding: 20px;
+    border-left: 4px solid #0D9488;
+    border-radius: 8px;
+    margin-top: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.validation-box {
+    margin-top: 15px;
+    padding: 15px;
+    background: #F9FAFB;
+    border-radius: 6px;
+    border: 1px solid #E5E7EB;
+}
+
+/* Pequeños helpers */
+.loading { color: #F59E0B; }
+.error { color: #EF4444; font-weight: bold; }
+
+.result-ok { color: #10B981; font-weight: bold; }
+.result-ko { color: #EF4444; font-weight: bold; }
+
+/* =================== TABLA CONSISTENCIA COMPACTA =================== */
+#postConsistency {
+    table-layout: fixed;
+    width: 100%;
+    font-size: 0.8rem;
+}
+
+#postConsistency th,
+#postConsistency td {
+    padding: 6px 8px;
+    max-width: 250px;
+    overflow-wrap: anywhere;
+}
+
+#postConsistency pre {
+    font-size: 0.75rem;
+    padding: 10px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+/* Summary base */
+.assertion-summary {
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+/* Colores dinámicos */
+.summary-green { color: #10B981; }
+.summary-red { color: #EF4444; }
+.summary-yellow { color: #F59E0B; }
+
+/* =================== STATUS BAR (BOTTOM) =================== */
+.status-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 15px;
+    text-align: center;
+    color: white;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: transform 0.25s ease-in-out, opacity 0.25s ease-in-out;
+    transform: translateY(100%);
+    opacity: 0;
+    z-index: 9999;
+}
+
+.status-bar.show {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.status-bar.info { background-color: #3B82F6; }
+.status-bar.primary { background-color: #0D9488; }
+.status-bar.error { background-color: #EF4444; }
+
+
+/*URL NEWS IMPORT*/
+.news-import-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    align-items: stretch;
+}
+
+.news-import-container input[type="text"] {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    background-color: #FFFFFF;
+    color: #1F2937;
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+
+
+.news-import-container button {
+    background-color: #10B981; /* Verde más clásico para Importar */
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 18px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background-color 0.2s;
+    height: auto;
+    margin-right: 0;
+}
+
+.news-import-container button:hover {
+    background-color: #059669;
+}
+
+/* =================== PROGRESS ICONS =================== */
+
+.process-flow {
+    display: flex;
+    gap: 12px;
+    margin-top: 15px;
+    align-items: center;
+}
+
+.process-step {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    background-color: #E5E7EB;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    color: #6B7280;
+    opacity: 0.6;
+    transition: all 0.2s ease-in-out;
+    font-weight: 700;
+}
+
+/* Estados completados */
+.process-step.done {
+    background-color: #10B981;
+    color: #FFFFFF;
+    opacity: 1;
+}
+
+/* Estado actual */
+.process-step.current {
+    background-color: #FBBF24;
+    color: #1F2937;
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+    border: 2px solid #FCD34D;
+    animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1);}
+    50% { transform: scale(1.1);}
+    100% { transform: scale(1);}
+}

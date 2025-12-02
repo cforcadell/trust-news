@@ -1,82 +1,95 @@
-version: "3.8"
+version: "3.9"
 
 services:
-  # -------------------------
-  # Ethereum Node 1 (minero principal)
-  # -------------------------
-  geth-node1:
-    image: ethereum/client-go:stable
-    container_name: geth-node1
-    entrypoint: >
-      sh -c "
-        if [ ! -d /root/.ethereum/geth ]; then
-          echo 'Inicializando nodo 1...';
-          geth --datadir /root/.ethereum init /ethereum/genesis.json;
-        fi;
-        exec geth
-          --networkid 2025
-          --datadir /root/.ethereum
-          --http
-          --http.addr 0.0.0.0
-          --http.port 8545
-          --http.api personal,eth,net,web3,miner,clique
-          --http.corsdomain='*'
-          --allow-insecure-unlock
-          --mine
-          --miner.threads=1
-          --unlock 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-          --password /ethereum/passwords.txt
-          --verbosity 3
-          --nodiscover
-      "
-    ports:
-      - "8545:8545"
-      - "30303:30303"
+  geth-bootnode:
+    container_name: geth-bootnode-container
+    hostname: geth-bootnode
+    image: ethereum/client-go:v1.10.1
+    env_file:
+      - .env
     volumes:
-      - ./ethereum:/ethereum
-      - ./volumes/geth/node1:/root/.ethereum
+      - ./volumes/bootnode:/root/.ethereum
+    command:
+      - --nodekeyhex=b0ac22adcad37213c7c565810a50f1772291e7b0ce53fb73e7ec2a3c75bc13b5
+      - --nodiscover=false
+      - --networkid=${NETWORK_ID}
+      - --http=false
+      - --ws=false
+      - --ipcdisable
+      - --mine=false
+      - --port=30304
+    ports:
+      - "30304:30304"
     networks:
-      - tfm_network
+      default:
 
-  # -------------------------
-  # Ethereum Node 2 (seguidor)
-  # -------------------------
-  geth-node2:
-    image: ethereum/client-go:stable
-    container_name: geth-node2
-    entrypoint: >
-      sh -c "
-        if [ ! -d /root/.ethereum/geth ]; then
-          echo 'Inicializando nodo 2...';
-          geth --datadir /root/.ethereum init /ethereum/genesis.json;
-        fi;
-        # Esperar a que el nodo 1 esté disponible
-        sleep 5;
-        exec geth
-          --networkid 2025
-          --datadir /root/.ethereum
-          --http
-          --http.addr 0.0.0.0
-          --http.port 8546
-          --http.api personal,eth,net,web3,clique
-          --allow-insecure-unlock
-          --unlock 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
-          --password /ethereum/passwords.txt
-          --verbosity 3
-          --bootnodes enode://$(cat /ethereum/node1_enode.txt)
-          --nodiscover
-      "
-    ports:
-      - "8546:8546"
-      - "30304:30303"
+  geth-rpc-endpoint:
+    container_name: geth-rpc-container
+    hostname: geth-rpc-endpoint
+    image: ethereum/client-go:v1.10.1
     depends_on:
-      - geth-node1
+      - geth-bootnode
+    env_file:
+      - .env
     volumes:
-      - ./ethereum:/ethereum
-      - ./volumes/geth/node2:/root/.ethereum
+      - ./volumes/rpc:/root/.ethereum
+    command:
+      - --bootnodes=enode://af22c29c316ad069cf48a09a4ad5cf04a251b411e45098888d114c6dd7f489a13786620d5953738762afa13711d4ffb3b19aa5de772d8af72f851f7e9c5b164a@geth-bootnode:30304
+      - --allow-insecure-unlock
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8555
+      - --http.api=eth,web3,net,admin,personal
+      - --http.corsdomain=*
+      - --http.vhosts=*          # <-- agregar esta línea
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8556
+      - --ws.api=eth,web3,net,admin,personal
+      - --networkid=${NETWORK_ID}
+      - --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+      - --password=/root/.ethereum/password.txt
+      - --port=30303
+      - --miner.gaslimit=90000000
+      #- --mine
+    ports:
+      - "8555:8555"
+      - "8556:8556"
+      - "30303:30303"
     networks:
-      - tfm_network
+      default:
+
+  geth-miner:
+    container_name: geth-miner-container
+    hostname: geth-miner
+    image: ethereum/client-go:v1.10.1
+    depends_on:
+      - geth-bootnode
+    env_file:
+      - .env
+    volumes:
+      - ./volumes/miner:/root/.ethereum
+    command:
+      - --bootnodes=enode://af22c29c316ad069cf48a09a4ad5cf04a251b411e45098888d114c6dd7f489a13786620d5953738762afa13711d4ffb3b19aa5de772d8af72f851f7e9c5b164a@geth-bootnode:30304
+      - --mine
+      - --miner.threads=1
+      - --networkid=${NETWORK_ID}
+      - --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+      - --password=/root/.ethereum/password.txt
+      - --miner.etherbase=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8557
+      - --http.api=eth,web3,net,admin,personal
+      - --allow-insecure-unlock
+      - --port=30305
+      - --miner.gaslimit=90000000
+    ports:
+      - "30305:30305"
+      - "8557:8557"
+    networks:
+      default:
 
 networks:
-  app-network:
-    external: true
+  default:
+    name: tfm_network

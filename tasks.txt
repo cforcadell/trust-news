@@ -1,12 +1,10 @@
+Script multiinews
+Stats: time,ai generate,ai,  validator, veredict, unknown
+Doc project GitHub 
 
-- Navegación Atrás --> Parcial
+Check secrets GitHub 
+Public Github
+Video 
+Presentació
 
-- Cuando cambiemos de pestaña resetar valores de fields antiguos y limpiar pantalla. --> Casi
-- Cambiar x botón de Consistencia 
-- Centrar valores de true, False, etc...
-- Valores de resumen de ordenes con un espacio delante 
-- Mostrar resultado global de comprobación de consistencia
-- Estado de órdenes en lista ordenada con iconos y resaltado o estado final y entre parentesis lista de estados en verde los finalizados, Negro pendiente y negrita el ultimo
-- Desplegar en Geth [Opcional]
-
-- Categoria de Validaciones muy errática
+[New install]

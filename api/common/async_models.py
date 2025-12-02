@@ -245,3 +245,15 @@ class ExtractedTextResponse(BaseModel):
     url: str
     title: str
     text: str
+# ============================================================
+# 🔹 ASERCIONES YA GENERADAS
+# ============================================================   
+    
+class PreGeneratedAssertion(BaseModel):
+    idAssertion: str
+    text: str
+    categoryId: int
+
+class PublishWithAssertionsRequest(BaseModel):
+    text: str
+    assertions: List[PreGeneratedAssertion]

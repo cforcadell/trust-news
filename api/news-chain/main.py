@@ -15,6 +15,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from common.async_models import Multihash, Assertion, RegisterBlockchainRequest, BlockchainRegisteredResponse, RegisterBlockchainPayload 
 from fastapi import Query
 import base58
+from web3.middleware import geth_poa_middleware
 
 # =========================================================
 # Config
@@ -40,6 +41,8 @@ logger = logging.getLogger("TrustNewsAPI")
 # =========================================================
 # Inicialización de Web3
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
+
+w3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
 # Carga del ABI del contrato
 try:

@@ -3,19 +3,20 @@ require("@nomicfoundation/hardhat-toolbox");
 module.exports = {
   solidity: "0.8.28",
   networks: {
-  hardhat: {
-    chainId: 31337,
-    mining: {
-      auto: true
-    }
-  },
+    hardhat: {
+      chainId: 31337,
+      mining: {
+        auto: true
+      }
+    },
     privateGeth: {
-      url: "http://192.168.56.108:8545", // el port HTTP del node N1
+      url: "http://localhost:8555", // el port HTTP del node N1
       accounts: [
         //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
-        "45a407904ebd8d0f6e9690ee36d7654c50a20e43dc2fa863c1eea9633f567667"
+        "0xd65e41d84cf076f7624184243ef298b5de143a9495db66c6425724e35b441c68"
       ],
-      chainId: 12345
+      gas: 25_000_000,
+      chainId: 1214
     }
   },
 };

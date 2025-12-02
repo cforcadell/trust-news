@@ -46,22 +46,17 @@ MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-large-latest")
 # Nuevo prompt: Pide explícitamente el array de objetos con las 3 claves necesarias (idAssertion, text, categoryId)
-MISTRAL_PROMPT = os.getenv(
-    "MISTRAL_PROMPT",
-    "Extrae solo las aserciones verificables que contengan cifras objetivables y eliminen cualquier valoración subjetiva. "
-    "Responde **EXCLUSIVAMENTE** con un array JSON de objetos que contengan las claves 'idAssertion' (string, debe ser un índice único y consecutivo empezando en '1'), 'text' (string) y 'categoryId' (integer, usa 1 para 'verificable'). NO incluyas ninguna otra clave o texto."
-)
+PROMPT = os.getenv(
+    "PROMPT",
+    "Pendiente de Configurar "
+ )
 
 # Gemini config
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-preview-09-2025")
 # Nuevo prompt: Menciona la estructura y el esquema para reforzar
-GEMINI_PROMPT = os.getenv(
-    "GEMINI_PROMPT",
-    "Extrae solo las aserciones verificables que contengan cifras objetivables y eliminen cualquier valoración subjetiva. "
-    "Devuelve un array JSON de objetos que cumplan con el esquema proporcionado. Asegúrate de generar valores para 'idAssertion', 'text' y 'categoryId'."
-)
+
 
 # Timeouts / retries
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
@@ -96,7 +91,7 @@ async def call_mistral(text: str) -> List[Assertion]:
     if not (MISTRAL_API_URL and MISTRAL_API_KEY):
         raise HTTPException(status_code=500, detail="Mistral no está configurado en variables de entorno.")
 
-    full_prompt = f"{MISTRAL_PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
     headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MISTRAL_MODEL,
@@ -166,7 +161,7 @@ async def call_gemini(text: str) -> List[Assertion]:
     if not (GEMINI_API_URL and GEMINI_API_KEY):
         raise HTTPException(status_code=500, detail="Gemini no está configurado en variables de entorno.")
 
-    full_prompt = f"{GEMINI_PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
 
     api_endpoint = f"{GEMINI_API_URL}/models/{GEMINI_MODEL}:generateContent"
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}

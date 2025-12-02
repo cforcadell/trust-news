@@ -6,6 +6,7 @@ async function main() {
 
   // Desplegar contrato
   const TrustNews = await ethers.getContractFactory("TrustNews");
+
   const trustNews = await TrustNews.deploy();
   await trustNews.waitForDeployment();
 

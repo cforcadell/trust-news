@@ -4,18 +4,17 @@ import uuid
 import hashlib
 import logging
 import asyncio
-from typing import List, Optional, Tuple, Any, Dict
-
 import requests
+
+from common.blockchain import send_signed_tx, wait_for_receipt_blocking
+from common.hash_utils import safe_multihash_to_tuple, multihash_to_base58, hash_text_to_multihash,uuid_to_uint256
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from web3 import Web3
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from abc import ABC, abstractmethod
-
-# ✅ IMPORTAR MODELOS UNIFICADOS
-# Se asume que estos son los modelos que definiste en el primer mensaje
+from typing import List, Optional, Tuple, Any, Dict
 from common.veredicto import Veredicto, Validacion
 from common.async_models import (
     VerifyInputModel,
@@ -60,7 +59,7 @@ RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses")
 ENABLE_KAFKA_CONSUMER = os.getenv("ENABLE_KAFKA_CONSUMER", "false").lower() == "true"
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 
-EMULATE_BLOCKCHAIN_REQUESTS = os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "false").lower() # True or False
+
 
 # =========================================================
 # Logging
@@ -229,25 +228,22 @@ logger.info(f"AI Validator inicializado con proveedor: {AI_PROVIDER.upper()}")
 # =========================================================
 # Web3 + contract (cargar ABI desde JSON)
 # =========================================================
-if EMULATE_BLOCKCHAIN_REQUESTS == "false":
-    if not RPC_URL or not CONTRACT_ADDRESS or not CONTRACT_ABI_PATH or not PRIVATE_KEY or not ACCOUNT_ADDRESS:
-        logger.error("Faltan variables de entorno blockchain (RPC_URL, CONTRACT_ADDRESS, CONTRACT_ABI_PATH, PRIVATE_KEY, ACCOUNT_ADDRESS).")
-        raise RuntimeError("Missing blockchain environment variables")
 
-    w3 = Web3(Web3.HTTPProvider(RPC_URL))
-    try:
-        with open(CONTRACT_ABI_PATH, "r", encoding="utf-8") as fh:
-            artifact = json.load(fh)
-        abi = artifact.get("abi", artifact)
-        contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=abi)
-        logger.info(f"Conectado a blockchain: {w3.is_connected()} - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
-    except Exception as e:
-        logger.exception(f"Error cargando ABI/contrato: {e}")
-        raise
-else:
-    logger.warning("⚠️ Blockchain en modo EMULADO. No se realizarán transacciones reales.")
-    w3 = None
-    contract = None
+if not RPC_URL or not CONTRACT_ADDRESS or not CONTRACT_ABI_PATH or not PRIVATE_KEY or not ACCOUNT_ADDRESS:
+    logger.error("Faltan variables de entorno blockchain (RPC_URL, CONTRACT_ADDRESS, CONTRACT_ABI_PATH, PRIVATE_KEY, ACCOUNT_ADDRESS).")
+    raise RuntimeError("Missing blockchain environment variables")
+
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
+try:
+    with open(CONTRACT_ABI_PATH, "r", encoding="utf-8") as fh:
+        artifact = json.load(fh)
+    abi = artifact.get("abi", artifact)
+    contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=abi)
+    logger.info(f"Conectado a blockchain: {w3.is_connected()} - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
+except Exception as e:
+    logger.exception(f"Error cargando ABI/contrato: {e}")
+    raise
+
 
 
 # =========================================================
@@ -256,7 +252,6 @@ else:
 app = FastAPI(title="Validate Asertions API")
 
 
-    
     
 # =========================================================
 # hashing, tx send/wait
@@ -267,77 +262,6 @@ def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
 
 
 
-def send_signed_tx(function_call, gas_estimate=3_000_000) -> str:
-    """Construye, firma y envía tx; devuelve tx_hash (hex) — no espera minado."""
-    if EMULATE_BLOCKCHAIN_REQUESTS == "true":
-        fake_hash = f"0x{uuid.uuid4().hex[:64]}"
-        logger.info(f"[EMULADO] send_signed_tx -> {fake_hash}")
-        return fake_hash
-
-
-    sender = Web3.to_checksum_address(ACCOUNT_ADDRESS)
-    
-    balance = w3.eth.get_balance(sender)
-    logger.info(f"Balance de la cuenta {sender}: {w3.from_wei(balance, 'ether')} ETH")
-
-    nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS, "pending")
-    
-    tx = function_call.build_transaction({
-        "from": ACCOUNT_ADDRESS,
-        "nonce": nonce,
-        "gas": gas_estimate,
-        "gasPrice": w3.eth.gas_price
-    })
-    signed = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
-    tx_hash_hex = tx_hash.hex()
-    logger.info(f"Transacción enviada: {tx_hash_hex}")
-    return tx_hash_hex
-
-def wait_for_receipt_blocking(tx_hash: str, timeout: Optional[int] = None) -> Optional[Dict[str, Any]]:
-    """Bloqueante: espera al minado y devuelve diccionario receipt (o None si falla)."""
-    if EMULATE_BLOCKCHAIN_REQUESTS == "true":
-        fake_receipt = {"transactionHash": tx_hash, "blockNumber": 0, "status": 1}
-        logger.info(f"[EMULADO] wait_for_receipt -> {fake_receipt}")
-        return fake_receipt
-
-    try:
-        # w3.eth.wait_for_transaction_receipt aceptará timeout si se especifica
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
-        # convertir atributos del receipt a dict simple
-        receipt_dict = {
-            "transactionHash": receipt.transactionHash.hex() if hasattr(receipt, "transactionHash") else tx_hash,
-            "blockNumber": getattr(receipt, "blockNumber", None),
-            "status": getattr(receipt, "status", None),
-            # logs no serializables completamente; kept minimal
-            "logs": [dict(l) for l in getattr(receipt, "logs", []) if hasattr(receipt, "logs")] 
-        }
-        logger.info(f"Receipt obtenido: tx={receipt_dict['transactionHash']}, block={receipt_dict['blockNumber']}, status={receipt_dict['status']}")
-        return receipt_dict
-    except Exception as e:
-        logger.error(f"Error esperando receipt de {tx_hash}: {e}")
-        return None
-
-def uuid_to_uint256(u: str) -> int:
-    """
-    Convierte un UUID (en formato string) a un entero uint256 compatible con Solidity.
-    Si el UUID no es válido, usa el hash como fallback.
-    """
-    try:
-        return uuid.UUID(u).int
-    except Exception:
-        # Si no es UUID válido (ej: "3" o "abc"), convertir hash como fallback
-        # Reducción modular para asegurar que cabe en un uint256 (aunque el UUID original ya cabe)
-        return int(hashlib.sha256(u.encode()).hexdigest(), 16) % (2**256)
-
-
-
-def hash_text_to_multihash(text: str) -> Multihash:
-    """Calcula el SHA256 y lo envuelve en el modelo Multihash."""
-    logger.info(f"Calculando multihash para texto (preview): {text[:80]}...")
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    # 0x12 es SHA256, 0x20 es 32 bytes (256 bits)
-    return Multihash(hash_function="0x12", hash_size="0x20", digest="0x" + h)
 
 # =========================================================
 # Funciones internas reutilizables
@@ -360,11 +284,6 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, veredicto: Ver
         postId_int = int(postId) if str(postId).isdigit() else uuid_to_uint256(str(postId))
         assertion_id_int = int(assertion_id)
 
-        if EMULATE_BLOCKCHAIN_REQUESTS == "true":
-            tx_hash = f"0x{uuid.uuid4().hex[:64]}"
-            receipt = {"transactionHash": tx_hash, "blockNumber": 0, "status": 1}
-            logger.info(f"[EMULADO] Validación simulada: {tx_hash}")
-            return tx_hash, receipt
 
         func_call = contract.functions.addValidation(
             postId_int,             # ✅ Ahora postId se pasa como int (Web3/Solidity)
@@ -376,8 +295,8 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, veredicto: Ver
                 "digest": multihash.digest
             }
         )
-        tx_hash = send_signed_tx(func_call)
-        receipt = wait_for_receipt_blocking(tx_hash)
+        tx_hash = send_signed_tx(w3,func_call, ACCOUNT_ADDRESS, PRIVATE_KEY)
+        receipt = wait_for_receipt_blocking(w3,tx_hash)
         return tx_hash, receipt
     except HTTPException:
         # propaga errores de IA al caller (para logging/response)
@@ -388,8 +307,7 @@ def registrar_validacion_internal(postId: Any, assertion_id: Any, veredicto: Ver
 
 def consultar_tx_status_internal(tx_hash: str) -> Dict[str, Any]:
     """Consulta receipt y devuelve un dict con status y detalles (no bloqueante)."""
-    if EMULATE_BLOCKCHAIN_REQUESTS == "true":
-        return {"status": "mined", "result": True, "tx_hash": tx_hash, "receipt": {"transactionHash": tx_hash, "status": 1, "blockNumber": 0}}
+
 
     try:
         receipt = w3.eth.get_transaction_receipt(tx_hash)
@@ -418,21 +336,17 @@ def registrar_validador_blockchain(name: str, categories: List[int]) -> Tuple[Op
     try:
         logger.info(f"Inicio registrar_validador_blockchain -> name: {name}, categories: {categories}")
 
-        if EMULATE_BLOCKCHAIN_REQUESTS == "true":
-            tx_hash = f"0x{uuid.uuid4().hex[:64]}"
-            fake_receipt = {"transactionHash": tx_hash, "blockNumber": 0, "status": 1}
-            logger.info(f"[EMULATE] Transacción simulada: {tx_hash}, receipt: {fake_receipt}")
-            return tx_hash, fake_receipt
+
 
         # Preparar llamada al contrato
         fn = contract.functions.registerValidator(name, categories)
 
         # Enviar transacción
-        tx_hash = send_signed_tx(fn)
+        tx_hash = send_signed_tx(w3,fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
         logger.info(f"Transacción enviada: {tx_hash}")
 
         # Esperar a que se mine
-        receipt = wait_for_receipt_blocking(tx_hash)
+        receipt = wait_for_receipt_blocking(w3,tx_hash)
         logger.info(f"Receipt recibido: {receipt}")
 
         return tx_hash, receipt
@@ -626,30 +540,28 @@ async def startup_event():
         logger.info("Kafka consumer iniciado en background")
         
     # registrar validador en startup (si no está registrado)
-    if EMULATE_BLOCKCHAIN_REQUESTS == "false":
-        try:
-            # Comprobar registro existente (si la llamada falla, procedemos a registrar)
-            try:
-                val_info = contract.functions.validators(ACCOUNT_ADDRESS).call()
-                already = val_info[0] if isinstance(val_info, (list, tuple)) and len(val_info) > 0 else None
-                if already and str(already) != "0x0000000000000000000000000000000000000000":
-                    logger.info("Validador ya registrado en blockchain.")
-                    return
-            except Exception as e:
-                logger.warning(f"No se pudo comprobar validador (se intentará registrar): {e}")
 
-            # Registrar usando VALIDATOR_CATEGORIES
-            logger.info(
-                f"Validador no encontrado -> registrando en startup. "
-                f"Cuenta: {ACCOUNT_ADDRESS}, Categorías: {VALIDATOR_CATEGORIES or []} (esperando minado)..."
-            )
-            # Usar 'default-' como nombre si es el registro automático
-            tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, f"default-{ACCOUNT_ADDRESS}", VALIDATOR_CATEGORIES or [])
-            if tx_hash:
-                logger.info(f"Validador registrado en startup: {tx_hash}")
-            else:
-                logger.error("Registro de validador en startup falló.")
+    try:
+        # Comprobar registro existente (si la llamada falla, procedemos a registrar)
+        try:
+            val_info = contract.functions.validators(ACCOUNT_ADDRESS).call()
+            already = val_info[0] if isinstance(val_info, (list, tuple)) and len(val_info) > 0 else None
+            if already and str(already) != "0x0000000000000000000000000000000000000000":
+                logger.info("Validador ya registrado en blockchain.")
+                return
         except Exception as e:
-            logger.exception(f"Error en startup registrar validador: {e}")
-    else:
-        logger.info("[EMULADO] Saltando registro real de validador en startup.")
+            logger.warning(f"No se pudo comprobar validador (se intentará registrar): {e}")
+
+        # Registrar usando VALIDATOR_CATEGORIES
+        logger.info(
+            f"Validador no encontrado -> registrando en startup. "
+            f"Cuenta: {ACCOUNT_ADDRESS}, Categorías: {VALIDATOR_CATEGORIES or []} (esperando minado)..."
+        )
+        # Usar 'default-' como nombre si es el registro automático
+        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, f"default-{ACCOUNT_ADDRESS}", VALIDATOR_CATEGORIES or [])
+        if tx_hash:
+            logger.info(f"Validador registrado en startup: {tx_hash}")
+        else:
+            logger.error("Registro de validador en startup falló.")
+    except Exception as e:
+        logger.exception(f"Error en startup registrar validador: {e}")

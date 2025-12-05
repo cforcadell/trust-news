@@ -6,7 +6,6 @@ x-global-environment: &global-env
   #CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3 #Hardhat
   RPC_URL: http://geth-rpc-endpoint:8555 # Geth Private Network
   CONTRACT_ADDRESS: 0x9eA62eb7944349C407B307025644E47bF22F8bCc  # Geth Private Network
-  EMULATE_BLOCKCHAIN_REQUESTS: "false"  # true o false
   CONTRACT_ABI_PATH: deployments/TrustNews.json
 
 services:

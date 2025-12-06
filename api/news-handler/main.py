@@ -7,9 +7,12 @@ import logging
 import hashlib
 import requests
 import httpx
+import time # Añadir import de time
+import lxml.html
+
 from bs4 import BeautifulSoup
 from typing import Any, Dict, List, Optional, Tuple
-
+from common.hash_utils import hash_text_to_multihash,hash_text_to_hash
 from fastapi import FastAPI, HTTPException, Query,APIRouter
 from pydantic import BaseModel, ValidationError,HttpUrl
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
@@ -17,17 +20,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
-import time # Añadir import de time
-
-import lxml.html
 from readability import Document
-
 from loguru import logger
-
-
 from common.veredicto import Validacion
-
-# Importa modelos pydantic centralizados
 from common.async_models import (
     GenerateAssertionsRequest,
     AssertionsGeneratedResponse,
@@ -79,7 +74,7 @@ MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "orders")
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 
-EMULATE_BLOCKCHAIN_REQUESTS = os.getenv("EMULATE_BLOCKCHAIN_REQUESTS", "true").lower() == "true"
+
 
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
 NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain:8073")
@@ -147,19 +142,7 @@ async def get_order_doc(order_id: str) -> Optional[dict]:
 # ===========================
 # Helpers para hashes
 # ===========================
-def hash_text_to_multihash(text: str) -> dict:
-    """Genera un hash SHA-256 tipo multihash para enviar al smart contract."""
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return {
-        "hash_function": "0x12",  # sha2-256
-        "hash_size": "0x20",      # 32 bytes
-        "digest": "0x" + h
-    }
-    
-def hash_text_to_hash(text: str) -> str:
-    """Genera un hash SHA-256 tipo multihash para enviar al smart contract."""
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return h
+
 
 async def get_order_lock(order_id: str):
     if order_id not in order_locks:
@@ -211,66 +194,38 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
     logger.info(f"[{order_id}] 🟢 Validación registrada en MongoDB (Assertion={id_assertion}, Validator={id_validator}).")
 
 # ===========================
-# Emulación / manejo blockchain
+# manejo blockchain
 # ===========================
 async def handle_blockchain_request(order_id: str, text: str, cid: str, assertions: list):
     global producer
-    if EMULATE_BLOCKCHAIN_REQUESTS:
-        # Construir payload emulado conforme BlockchainRegisteredResponse
-        hash_text = hash_text_to_multihash(text)
-        asertions_hashed = []
-        validator_addresses_matrix = []
 
-        for a in assertions:
-            mh = hash_text_to_multihash(a.get("text", ""))
-            id_assertion = a.get("idAssertion") or str(uuid.uuid4().hex[:8])
-            # Construimos un AssertionExtended-like dict
-            asertions_hashed.append({
-                "hash_asertion": mh,
-                "idAssertion": id_assertion,
-                "text": a.get("text", ""),
-                "categoryId": int(a.get("categoryId", 0)),
-                # Emulamos validatorAddresses como lista de objetos {"address": "..."}
-                "validatorAddresses": [{"address": v} for v in ["VAL1", "VAL2"]]
-            })
-            validator_addresses_matrix.append([{"address": v} for v in ["VAL1", "VAL2"]])
+    try:
+        # Construir la request blockchain REAL
+        req = RegisterBlockchainRequest(
+            action="register_blockchain",
+            order_id=order_id,
+            payload={
+                "text": text,
+                "cid": cid,
+                "assertions": assertions,
+                "publisher": "news-handler"
+            }
+        )
 
-        # Validar con el modelo de respuesta para asegurar conformidad
-        try:
-            resp_model = BlockchainRegisteredResponse(
-                action="blockchain_registered",
-                order_id=order_id,
-                payload={
-                    "postId": str(1),
-                    "hash_text": hash_text,
-                    "assertions": asertions_hashed,
-                    "tx_hash": "0xSIMULATEDTXHASH1234567890abcdef"
-                }
-            )
-            # Serializamos y publicamos
-            await producer.send_and_wait(TOPIC_RESPONSES, resp_model.model_dump_json().encode("utf-8"))
-            logger.info(f"[{order_id}] Mensaje 'blockchain_registered' EMULADO publicado")
-            await log_event(order_id, resp_model.action, TOPIC_RESPONSES, resp_model.payload.model_dump())
-        except ValidationError as e:
-            logger.exception(f"Error validando blockchain_registered emulado: {e}")
-    else:
-        # Mensaje real al topic de blockchain usando RegisterBlockchainRequest
-        try:
-            req = RegisterBlockchainRequest(
-                action="register_blockchain",
-                order_id=order_id,
-                payload={
-                    "text": text,
-                    "cid": cid,
-                    "assertions": assertions,
-                    "publisher": "news-handler"
-                }
-            )
-            await producer.send_and_wait(TOPIC_REQUESTS_BLOCKCHAIN, req.model_dump_json().encode("utf-8"))
-            logger.info(f"[{order_id}] Mensaje enviado al topic {TOPIC_REQUESTS_BLOCKCHAIN}")
-            await log_event(order_id, req.action, TOPIC_REQUESTS_BLOCKCHAIN, req.payload.model_dump())
-        except ValidationError as e:
-            logger.exception(f"Error validando register_blockchain request: {e}")
+        # Enviar al topic real
+        await producer.send_and_wait(
+            TOPIC_REQUESTS_BLOCKCHAIN,
+            req.model_dump_json().encode("utf-8")
+        )
+
+        logger.info(f"[{order_id}] Mensaje enviado al topic {TOPIC_REQUESTS_BLOCKCHAIN}")
+
+        # Registrar evento
+        await log_event(order_id, req.action, TOPIC_REQUESTS_BLOCKCHAIN, req.payload.model_dump())
+
+    except ValidationError as e:
+        logger.exception(f"Error validando register_blockchain request: {e}")
+
 
 # =========================================================
 # Procesador genérico de mensajes Kafka (reutilizable)
@@ -1122,7 +1077,7 @@ async def find_order_by_text(request: PublishRequest):
             raise HTTPException(status_code=400, detail="El campo 'text' no puede estar vacío.")
 
         mh = hash_text_to_multihash(request.text)
-        digest_hex = mh["digest"]
+        digest_hex = mh.digest
 
         logger.info(f"🧮 Buscando órdenes con hash_text={digest_hex}")
 

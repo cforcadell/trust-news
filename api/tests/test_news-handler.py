@@ -14,7 +14,7 @@ def test_publish_new():
     Verifica que el endpoint /publishNew funcione correctamente y devuelva order_id.
     """
     payload = {
-        "text": "Catalunya tiene una población de más de 7 millones de habitantesde los que  2 millones de niños en edad escolar y otro millón son inmigrantes.",
+        "text": "Catalunya tiene una población de más de 7 millones de habitantesde los que  2 millones de niños en edad escolar y otro millón son italianos.",
         #"text": "Donald Trump puede presentarse a un tercer mandato como presidente de los Estados Unidos según la Constitución y seria el primer presidente en las proximas elecciones con mas de 90 años",
         
         }

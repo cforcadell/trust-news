@@ -10,7 +10,7 @@ services:
     volumes:
       - ./volumes/bootnode:/root/.ethereum
     command:
-      - --nodekeyhex=b0ac22adcad37213c7c565810a50f1772291e7b0ce53fb73e7ec2a3c75bc13b5
+      - --nodekeyhex=${NODE_KEY_HEX}
       - --nodiscover=false
       - --networkid=${NETWORK_ID}
       - --http=false
@@ -34,23 +34,23 @@ services:
     volumes:
       - ./volumes/rpc:/root/.ethereum
     command:
-      - --bootnodes=enode://af22c29c316ad069cf48a09a4ad5cf04a251b411e45098888d114c6dd7f489a13786620d5953738762afa13711d4ffb3b19aa5de772d8af72f851f7e9c5b164a@geth-bootnode:30304
+      - --bootnodes=${BOOT_NODES}
       - --allow-insecure-unlock
       - --http
       - --http.addr=0.0.0.0
       - --http.port=8555
       - --http.api=eth,web3,net,admin,personal
       - --http.corsdomain=*
-      - --http.vhosts=*          # <-- agregar esta línea
+      - --http.vhosts=*          
       - --ws
       - --ws.addr=0.0.0.0
       - --ws.port=8556
       - --ws.api=eth,web3,net,admin,personal
       - --networkid=${NETWORK_ID}
-      - --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+      - --unlock=${MASTER_PUBLIC_KEY}
       - --password=/root/.ethereum/password.txt
       - --port=30303
-      - --miner.gaslimit=90000000
+      - --miner.gaslimit=${GAS_LIMIT}
       #- --mine
     ports:
       - "8555:8555"
@@ -70,20 +70,20 @@ services:
     volumes:
       - ./volumes/miner:/root/.ethereum
     command:
-      - --bootnodes=enode://af22c29c316ad069cf48a09a4ad5cf04a251b411e45098888d114c6dd7f489a13786620d5953738762afa13711d4ffb3b19aa5de772d8af72f851f7e9c5b164a@geth-bootnode:30304
+      - --bootnodes=${BOOT_NODES}
       - --mine
       - --miner.threads=1
       - --networkid=${NETWORK_ID}
-      - --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+      - --unlock=${MASTER_PUBLIC_KEY}
       - --password=/root/.ethereum/password.txt
-      - --miner.etherbase=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+      - --miner.etherbase=${MASTER_PUBLIC_KEY}
       - --http
       - --http.addr=0.0.0.0
       - --http.port=8557
       - --http.api=eth,web3,net,admin,personal
       - --allow-insecure-unlock
       - --port=30305
-      - --miner.gaslimit=90000000
+      - --miner.gaslimit=${GAS_LIMIT}
     ports:
       - "30305:30305"
       - "8557:8557"

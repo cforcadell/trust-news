@@ -4,17 +4,17 @@ import uuid
 import hashlib
 import logging
 import asyncio
+import base58
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ValidationError # BaseModel necesario si no se importa en common.async_models
 from dotenv import load_dotenv
 from web3 import Web3
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-
-# Importar modelos comunes
+from common.blockchain import send_signed_tx, wait_for_receipt_blocking
+from common.hash_utils import safe_multihash_to_tuple, multihash_to_base58, hash_text_to_multihash,safe_hex
 from common.async_models import Multihash, Assertion, RegisterBlockchainRequest, BlockchainRegisteredResponse, RegisterBlockchainPayload 
 from fastapi import Query
-import base58
 from web3.middleware import geth_poa_middleware
 
 # =========================================================
@@ -50,6 +50,7 @@ try:
         artifact = json.load(f)
     abi = artifact["abi"]
     contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
+    logger.info(f"Conectado a blockchain: {w3.is_connected()} - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
 except Exception as e:
     logger.error(f"Error cargando ABI o inicializando contrato: {e}")
     # Usar un contrato placeholder si la carga falla para permitir que el worker continúe
@@ -68,87 +69,16 @@ except Exception as e:
 
 
 
-
-
-def safe_multihash_to_tuple(mh: Multihash) -> tuple:
-    """
-    Convierte Multihash (Pydantic) a la tupla (bytes1, bytes1, bytes32)
-    requerida por Solidity. Soporta digest en 0x... o Base58 (CID IPFS).
-    """
-    try:
-        digest = mh.digest
-        # Si digest es base58 (CID tipo Qm...), lo decodificamos completo
-        if isinstance(digest, str) and digest.startswith("Qm"):
-            decoded = base58.b58decode(digest)
-            hf = decoded[0:1]
-            hs = decoded[1:2]
-            dg = decoded[2:34]  # digest real
-        else:
-            # Si digest ya es hex (0x...), usar hash_function y hash_size explícitos
-            hf = bytes.fromhex(mh.hash_function.removeprefix("0x"))
-            hs = bytes.fromhex(mh.hash_size.removeprefix("0x"))
-            dg = bytes.fromhex(digest.removeprefix("0x"))
-
-        # Validación de longitud
-        if len(dg) != 32:
-            raise ValueError(f"Digest debe tener 32 bytes, tiene {len(dg)}")
-
-        return (hf, hs, dg)
-
-    except Exception as e:
-        logger.warning(f"Error en safe_multihash_to_tuple({mh}): {e}")
-        return (b'\x00', b'\x00', b'\x00' * 32)
-
-def multihash_to_base58(multihash_tuple: tuple) -> str:
-    """
-    Convierte un Multihash (bytes1, bytes1, bytes32) en un CID base58 (IPFS-style).
-
-    """
-    try:
-        hf, hs, dg = multihash_tuple
-        # Concatenar bytes: [hash_function][hash_size][digest]
-        multihash_bytes = hf + hs + dg
-        return base58.b58encode(multihash_bytes).decode("utf-8")
-    except Exception as e:
-        logger.warning(f"Error en multihash_to_base58: {e}")
-        return None
-
-def hash_text_to_multihash(text: str) -> Multihash:
-    """Calcula el SHA256 y lo envuelve en el modelo Multihash."""
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    # 0x12 es SHA256, 0x20 es 32 bytes (256 bits)
-    return Multihash(hash_function="0x12", hash_size="0x20", digest="0x" + h)
-
-
-
-def send_tx_async(function_call, gas_estimate=3_000_000):
-    """Firma y envía la transacción a la red."""
-    if not w3.is_connected():
-        raise ConnectionError("Web3 no está conectado al RPC.")
-    if not PRIVATE_KEY or not ACCOUNT_ADDRESS:
-        raise ValueError("Variables PRIVATE_KEY o ACCOUNT_ADDRESS no definidas.")
-        
-    nonce = w3.eth.get_transaction_count(ACCOUNT_ADDRESS)
-    tx = function_call.build_transaction({
-        "from": ACCOUNT_ADDRESS,
-        "nonce": nonce,
-        "gas": gas_estimate,
-        "gasPrice": w3.eth.gas_price,
-    })
-    signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    logger.info(f"TX enviada (no minada aún): {tx_hash.hex()}")
-    return tx_hash.hex()
-
-def wait_for_receipt(tx_hash: str):
-    """Espera a que la transacción sea minada."""
-    logger.info(f"Esperando minado de {tx_hash}...")
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-    logger.info(f"TX minada en bloque {receipt.blockNumber}")
-    return receipt
-
 def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
     """Extrae datos relevantes del evento RegisterNewResult de la transacción minada."""
+    # Compatibilidad: si receipt es dict de Web3, convertir a atributos dinámicos
+    class AttrDict(dict):
+        def __getattr__(self, item):
+            return self[item]
+
+    if isinstance(receipt, dict):
+        receipt = AttrDict(receipt)
+
     events = contract.events.RegisterNewResult().process_receipt(receipt)
     if not events:
         logger.warning("No se encontró evento RegisterNewResult; devolviendo info mínima.")
@@ -156,7 +86,7 @@ def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
             "postId": None,
             "hash_text": "",
             "assertions": [],
-            "tx_hash": receipt.transactionHash.hex()
+            "tx_hash": getattr(receipt, "transactionHash", "0x")  # fallback
         }
 
     event = events[0]
@@ -166,17 +96,10 @@ def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
     # reconstrucción hashes
     asertions_output = []
     for i, a in enumerate(data.assertions):
-        # Se genera el hash de la aserción original para la respuesta
         mh = hash_text_to_multihash(a.text)
         digest_hex = mh.digest[2:]
-        
-        # Obtener las direcciones de los validadores para esta aserción
         addrs_raw = validator_addresses_by_asertion[i] if i < len(validator_addresses_by_asertion) else []
-        logger.info(f"Aserción {i} tiene {len(addrs_raw)} validadores registrados. {addrs_raw}")
         addrs = [{"address": str(x)} for x in addrs_raw]
-        logger.info(f"Direcciones de validadores para aserción {i}: {addrs}")
-        
-        # El modelo Assertion ya garantiza que a.categoryId es un int
         asertions_output.append({
             "hash_asertion": "0x" + digest_hex,
             "idAssertion": a.idAssertion or str(uuid.uuid4().hex[:8]),
@@ -191,20 +114,9 @@ def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
         "postId": str(postId),
         "hash_text": hash_new.digest,
         "assertions": asertions_output,
-        "tx_hash": receipt.transactionHash.hex()
+        "tx_hash": getattr(receipt, "transactionHash", "0x")
     }
-    
-def safe_hex(value):
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        h = value.hex()
-        if not h.startswith("0x"):
-            h = "0x" + h
-        return h
-    if isinstance(value, str) and value.startswith("0x0x"):
-        return "0x" + value[4:]
-    return value
+
 
 
 
@@ -247,7 +159,7 @@ def register_new(data: RegisterBlockchainRequest):
             tuple(categoryIds)
         )
 
-        tx_hash = send_tx_async(func_call)
+        tx_hash = send_signed_tx(w3,func_call, ACCOUNT_ADDRESS, PRIVATE_KEY)
         return {"tx_hash": tx_hash, "result": False}
 
     except Exception as e:
@@ -524,7 +436,7 @@ async def consume_register_blockchain():
                 logger.info(f"[{order_id}] TX enviada: {tx_hash}")
 
                 # Paso 2: esperar hasta que se mine (sincrónico, en otro thread)
-                receipt = await asyncio.to_thread(wait_for_receipt, tx_hash)
+                receipt = await asyncio.to_thread(wait_for_receipt_blocking,w3, tx_hash)
                 
                 # Paso 3: parsear el resultado (sincrónico)
                 result = await asyncio.to_thread(parse_registernew_event, receipt, publish_input)

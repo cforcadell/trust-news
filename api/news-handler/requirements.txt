@@ -23,6 +23,7 @@ kafka-python==2.1.2
 pydantic==2.7.1
 python-dotenv==1.0.1
 loguru==0.7.2
+base58==2.1.1
 
 # Web3 / Blockchain
 web3==6.20.4

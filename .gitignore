@@ -10,7 +10,6 @@ api/ipfs/__pycache__/main.cpython-312.pyc
 api/validateAsertions/venv/*
 api/generate-asertions/venv/*
 api/validate-asertions/venv/*
-chainlink/secrets.toml
 api/generate-asertions/.env
 api/validate-asertions/.env
 .env
@@ -33,3 +32,5 @@ api/mongo/mongo.txt
 blockchain/geth-client/setup.txt
 accounts/*
 
+news.txt
+blockchain/setup.txt

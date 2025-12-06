@@ -10,8 +10,8 @@ def test_verificar_asercion():
     """Test de integración para el endpoint /verificar"""
     url = f"{BASE_URL}/verificar"
     payload = {
-        "texto": "El sol sale por el este",
-        "contexto": "Fenómeno astronómico diario"
+        "text": "El sol sale por el este",
+        "context": "Fenómeno astronómico diario"
     }
 
     response = requests.post(url, json=payload)
@@ -30,8 +30,8 @@ def test_registrar_validador():
     """Test de integración para /registrar_validador"""
     url = f"{BASE_URL}/registrar_validador"
     payload = {
-        "nombre": "validator_test_domain",
-        "categorias": [1, 2]
+        "name": "validator_test_domain",
+        "categories": [1, 2]
     }
 
     response = requests.post(url, json=payload)

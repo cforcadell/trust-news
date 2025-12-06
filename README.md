@@ -186,7 +186,4 @@ Developed as a **Master Thesis – Proof of Concept**.
 
 ---
 
-## 🇪🇸 Español
 
-👉 La versión en español se mantiene para referencia académica.
-Consulta commits anteriores si necesitas el README completo en castellano.

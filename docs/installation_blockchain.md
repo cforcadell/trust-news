@@ -222,7 +222,7 @@ eth.getCode("<CONTRACT_ADDRESS>")
 
 ---
 
-## 1️⃣8️⃣ Create Validator & Service Accounts
+## 1️⃣8️⃣ Create Validator & Service Accounts (Skip if Restoring Accounts)
 
 Create additional accounts:
 

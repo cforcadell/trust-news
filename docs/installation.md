@@ -48,10 +48,19 @@ Copy the deployed **contract address** into:
 If using the private Ethereum network based on Geth:
 
 👉 Follow the instructions located at:
+
+For network setup and initialization:
 ```
 docs/installation_blockchain.md
 
 ```
+
+For just starting and deploying and testing the contract:
+```
+docs/scripts_blockchain.md
+
+```
+
 
 (This option is more realistic but slower and heavier.)
 

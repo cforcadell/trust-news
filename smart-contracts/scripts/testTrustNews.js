@@ -135,6 +135,9 @@ async function main() {
   }
 
   console.log("\n✅ Test completado correctamente.");
+
+  await (await trustNews.connect(validator1).unregisterValidator("factcheck.org")).wait();
+  await (await trustNews.connect(validator2).unregisterValidator("truth.net")).wait();
 }
 
 main().catch((error) => {

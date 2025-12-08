@@ -28,6 +28,7 @@ def wait_until_validated(order_id, timeout):
     order = get_order(order_id)
 
     while order["status"] != "VALIDATED":
+        print(f"Order Status: {order['status']}. Validators Pending: {order['validators_pending']}")
         if time.time() - start > timeout:
             return None
         time.sleep(1)

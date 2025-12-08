@@ -26,6 +26,7 @@ def main(text, num_runs, timeout, csv_file):
     positive_approvals_per_validator = defaultdict(list)
     zero_approval_per_validator = defaultdict(list)
     validator_completion_times = defaultdict(list)
+    validator_completion_per_assertion = defaultdict(list)
     approval1_gt2_per_validator = defaultdict(list)
 
     percent_valid_assertions_per_order = []
@@ -72,20 +73,19 @@ def main(text, num_runs, timeout, csv_file):
         valid_assertions_count = 0
 
         for assertion_id, val_dict in validations.items():
-            all_validators_approval1_gt2 = True
+            temp_assertion = 0
             for validator, vdata in val_dict.items():
                 approval = vdata["approval"]
 
                 if approval == 1:
                     positive_approvals_per_validator[validator].append(1)
+                    temp_assertion += 1
                 elif approval == 0:
                     zero_approval_per_validator[validator].append(1)
                 else:
                     positive_approvals_per_validator[validator].append(0)
+                    temp_assertion -= 1
 
-                # Validación approval1 > approval2 (ignorar 0)
-                if approval == 2:
-                    all_validators_approval1_gt2 = False
 
                 # CSV
                 csv_rows.append({
@@ -97,7 +97,7 @@ def main(text, num_runs, timeout, csv_file):
                     "approval_2": 1 if approval==2 else 0
                 })
 
-            if all_validators_approval1_gt2:
+            if temp_assertion>0:
                 valid_assertions_count += 1
 
         percent_valid_assertions_per_order.append(
@@ -108,6 +108,7 @@ def main(text, num_runs, timeout, csv_file):
         for validator, times_dict in validator_times.items():
             max_time = max(times_dict.values())
             validator_completion_times[validator].append(max_time)
+            validator_completion_per_assertion[validator].append(max_time/len(times_dict))
 
     # Estadísticas finales
     print("\n=== Estadísticas finales ===")
@@ -120,17 +121,19 @@ def main(text, num_runs, timeout, csv_file):
     print(f"Número medio de aserciones: {statistics.mean(num_assertions_list):.2f}")
     print(f"Varianza del número de aserciones: {statistics.variance(num_assertions_list) if len(num_assertions_list)>1 else 0:.2f}")
     print(f"Media % de aserciones válidas por orden: {statistics.mean(percent_valid_assertions_per_order):.2f}%")
-
+    print(f"Varianza Media % de aserciones válidas por orden: {statistics.variance(percent_valid_assertions_per_order) if len(percent_valid_assertions_per_order)>1 else 0:.2f}")
+    
     # Estadísticas por validador
     print("\nEstadísticas por validador:")
     for validator in validator_completion_times.keys():
         times = validator_completion_times[validator]
         avg_response_time = statistics.mean(times)
+        avg_completion_per_assertion = statistics.mean(validator_completion_per_assertion[validator]) if validator_completion_per_assertion[validator] else 0
         approvals1 = positive_approvals_per_validator.get(validator, [])
         avg_positive = statistics.mean(approvals1) if approvals1 else 0
         zero_var = statistics.variance(zero_approval_per_validator[validator]) if len(zero_approval_per_validator[validator])>1 else 0
 
-        print(f"  {validator} - tiempo medio respuesta: {avg_response_time:.2f}s, media approvals=1: {avg_positive:.2f}, varianza approvals=0: {zero_var:.2f}")
+        print(f"  {validator} - tiempo medio respuesta total assertions: {avg_response_time:.2f}s, tiempo medio completado por aserción: {avg_completion_per_assertion:.2f}s, media assertions aprobadas=1: {avg_positive:.2f}, varianza assertions aprobadas=0: {zero_var:.2f}")
 
     # Exportar CSV
     with open(csv_file, "w", newline="") as f:

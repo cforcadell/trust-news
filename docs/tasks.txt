@@ -1,8 +1,17 @@
-Script multiinews
-Stats: time,ai generate,ai,  validator, veredict, unknown
-Doc project GitHub 
 
-Check secrets GitHub 
+Stats: time,ai generate,ai,  validator, veredict, unknown
+
+que el descomponedor sea unopenrouter
+introduccion
+Sacar Planificacion de introduccion OK
+Revisar estructura del documento formato OK
+lenguaje tecnico
+Despues de  objectivos --> metodologia y plan de trabajo OK
+Mostrar cofigo relevante (smart contract?)
+citar a figuras y que toda figura tenfa una referencia en en texto
+Bibliografia OK
+Format UOC OK
+
 Public Github
 Video 
 Presentació

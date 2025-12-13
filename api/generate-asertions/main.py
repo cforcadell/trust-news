@@ -4,6 +4,7 @@ import os
 import json
 import asyncio
 import logging
+import re
 import uuid
 from typing import List, Optional
 
@@ -44,19 +45,26 @@ OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TO
 # Mistral config
 MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
-MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-large-latest")
+MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "")
 # Nuevo prompt: Pide explícitamente el array de objetos con las 3 claves necesarias (idAssertion, text, categoryId)
-PROMPT = os.getenv(
-    "PROMPT",
-    "Pendiente de Configurar "
- )
+
 
 # Gemini config
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-preview-09-2025")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
 # Nuevo prompt: Menciona la estructura y el esquema para reforzar
 
+# OpenRouter config
+OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "")
+# Nuevo prompt: Menciona la estructura y el esquema para reforzar
+
+PROMPT = os.getenv(
+    "PROMPT",
+    "Pendiente de Configurar "
+ )
 
 # Timeouts / retries
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
@@ -223,6 +231,127 @@ async def call_gemini(text: str) -> List[Assertion]:
                 await asyncio.sleep(RETRY_DELAY)
     return []
 
+
+
+# ============================================================
+# Llamada asíncrona a OpenRouter (aiohttp)
+# ============================================================
+# ============================================================
+# Llamada asíncrona a OpenRouter (aiohttp) robusta
+# ============================================================
+# ============================================================
+# Llamada asíncrona a OpenRouter (aiohttp) con logging y retries
+# ============================================================
+async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Assertion]:
+    """
+    Llama a OpenRouter y devuelve la respuesta validada como List[Assertion].
+    Limpia automáticamente bloques de código Markdown (```json ... ```) antes de parsear.
+    """
+    if not (OPENROUTER_API_URL and OPENROUTER_API_KEY):
+        raise HTTPException(
+            status_code=500, 
+            detail="OpenRouter no está configurado en variables de entorno."
+        )
+
+    # Construir prompt
+    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
+    if contexto:
+        full_prompt += f"\nContexto adicional:\n{contexto}"
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://trust-news",
+        "X-Title": "AIValidator-OpenRouter"
+    }
+
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [{"role": "user", "content": full_prompt}],
+        "temperature": 0.3
+    }
+
+    logger.info(f"Llamando a OpenRouter con prompt: {full_prompt[:200]}...")
+
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                async with session.post(
+                    OPENROUTER_API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=HTTP_TIMEOUT
+                ) as resp:
+
+                    text_resp = await resp.text()
+                    logger.debug(f"OpenRouter status: {resp.status}, body: {text_resp[:500]}")
+
+                    if resp.status != 200:
+                        # Si es un error de cuota o temporal, el except Exception lo capturará para reintentar
+                        if resp.status in [429, 500, 502, 503, 504]:
+                             raise Exception(f"Error temporal del servidor: {resp.status}")
+                        raise HTTPException(status_code=resp.status, detail=f"Error OpenRouter: {text_resp}")
+
+                    data = await resp.json()
+                    
+                    try:
+                        content = data["choices"][0]["message"]["content"]
+                    except (KeyError, TypeError):
+                        logger.error(f"Estructura de respuesta inesperada: {data}")
+                        raise ValueError("Estructura de respuesta OpenRouter inesperada.")
+
+                    if not content:
+                        raise ValueError("OpenRouter devolvió contenido vacío.")
+
+                    # --- Lógica de Procesamiento de Contenido ---
+                    parsed_list = []
+
+                    if isinstance(content, list):
+                        parsed_list = content
+                    elif isinstance(content, str):
+                        # 1. Limpieza de Markdown y espacios
+                        # Eliminamos ```json, ``` y cualquier espacio en blanco al inicio/final
+                        clean_content = re.sub(r"```json|```", "", content).strip()
+                        
+                        try:
+                            parsed_list = json.loads(clean_content)
+                            logger.debug(f"JSON parseado correctamente tras limpieza")
+                        except json.JSONDecodeError as je:
+                            logger.error(f"Error al decodificar JSON. Contenido original: {content}")
+                            raise ValueError(f"La respuesta no pudo ser parseada como JSON: {str(je)}")
+                    else:
+                        raise ValueError(f"Tipo de contenido inesperado: {type(content)}")
+
+                    # Validar esquema Assertion y asignar idAssertion
+                    if not isinstance(parsed_list, list):
+                        raise ValueError("El resultado final no es una lista de aserciones.")
+
+                    assertions = []
+                    for idx, item in enumerate(parsed_list, start=1):
+                        # Aseguramos que el idAssertion sea un string consecutivo
+                        item["idAssertion"] = str(idx)
+                        # Asumimos que Assertion es un modelo Pydantic
+                        assertions.append(Assertion(**item))
+
+                    logger.info(f"OpenRouter devolvió {len(assertions)} aserciones válidas")
+                    return assertions
+
+            except HTTPException as he:
+                # No reintentamos si es un error de cliente (4xx) definido explícitamente
+                raise he
+            except Exception as e:
+                logger.warning(f"Intento {attempt}/{MAX_RETRIES} fallido OpenRouter: {str(e)}")
+                if attempt == MAX_RETRIES:
+                    logger.exception("Fallo definitivo tras reintentos llamando a OpenRouter")
+                    raise HTTPException(status_code=503, detail=f"Servicio no disponible: {str(e)}")
+                
+                await asyncio.sleep(RETRY_DELAY)
+
+    return []
+
+
+
+
 # ============================================================
 # Dispatch a proveedor elegido
 # ============================================================
@@ -232,6 +361,8 @@ async def extract_assertions_from_text(text: str) -> List[Assertion]:
         return await call_mistral(text)
     elif AI_PROVIDER == "gemini":
         return await call_gemini(text)
+    elif AI_PROVIDER == "openrouter":
+        return await call_openrouter(text)
     else:
         # Aquí puedes dejar un logger.warning para indicar que no hay proveedor
         return []

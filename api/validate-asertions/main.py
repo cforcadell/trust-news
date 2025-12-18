@@ -480,7 +480,8 @@ async def consume_and_process():
                 result_text = None
                 try:
                     # Ejecutar la verificación de IA en un thread
-                    result_text = await asyncio.to_thread(verificar_asercion, assertion_text, context)
+                    #result_text = await asyncio.to_thread(verificar_asercion, assertion_text, context)
+                    result_text = await asyncio.to_thread(verificar_asercion, assertion_text)
                     logger.info(f"Verificación completada (preview): {result_text}")
                     result_text_parsed = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
                     logger.info(f"Resultado verificación: {result_text_parsed}")

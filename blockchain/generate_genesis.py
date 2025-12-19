@@ -2,7 +2,7 @@ import json
 
 # CONFIGURACIÓN
 chain_id = 1214
-period = 1
+period = 5
 epoch = 30000
 gas_limit = "0xFFFFFFF"
 difficulty = "0x1"

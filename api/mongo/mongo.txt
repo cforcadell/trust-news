@@ -20,3 +20,4 @@ db.news.countDocuments()
 
 #borrar todos los postIds
 db.news.deleteMany({})
+db.events.deleteMany({})

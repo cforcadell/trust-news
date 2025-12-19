@@ -39,3 +39,6 @@ api/stats/__pycache__/statistics.cpython-312.pyc
 api/validate-asertions/.env_openrouter2
 api/stats/venv/bin/tabulate
 .gitignore
+docs/password_unlock.txt
+api/validate-asertions/.env_openrouter1
+api/validate-asertions/.env_openrouter3

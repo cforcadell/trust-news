@@ -42,3 +42,6 @@ api/stats/venv/bin/tabulate
 docs/password_unlock.txt
 api/validate-asertions/.env_openrouter1
 api/validate-asertions/.env_openrouter3
+api/stats/saved_tests/*
+api/mongo/mongo.txt
+api/mongo/mongo.txt

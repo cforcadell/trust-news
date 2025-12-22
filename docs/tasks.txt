@@ -1,19 +1,22 @@
 
+Memoria
+-------
+Alterar MongoDB y pantalla de validación OK
 Stats: time,ai generate,ai,  validator, veredict, unknown
+Analisis de coste. 20 validaciones de 7 aserciones
+Conclusiones
 
-que el descomponedor sea unopenrouter
-introduccion
-Sacar Planificacion de introduccion OK
-Revisar estructura del documento formato OK
 lenguaje tecnico
-Despues de  objectivos --> metodologia y plan de trabajo OK
 Mostrar cofigo relevante (smart contract?)
-citar a figuras y que toda figura tenfa una referencia en en texto
-Bibliografia OK
-Format UOC OK
+Anexos
+    - Github    
+    - Prompts Utilizados
+    - Módulo de Estadísticas.
+Relectura TFM
+Eliminar comentarios
+Publicar Github
 
-Public Github
+Presentació de Video
 Video 
-Presentació
+Presentació Defensa
 
-[New install]

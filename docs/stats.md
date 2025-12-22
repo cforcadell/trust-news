@@ -17,7 +17,7 @@ This module generates json data for further analysis. We will only get data file
 python collector.py \
   --text "Text to validate" \
   --num_runs 2 \
-  --timeout 200 \
+  --timeout 200 
 
 ```
 ## 2️⃣ BIS  Generate json data from existing orders

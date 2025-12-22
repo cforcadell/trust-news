@@ -46,20 +46,20 @@ OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TO
 MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "")
-# Nuevo prompt: Pide explícitamente el array de objetos con las 3 claves necesarias (idAssertion, text, categoryId)
+Id)
 
 
 # Gemini config
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
-# Nuevo prompt: Menciona la estructura y el esquema para reforzar
+
 
 # OpenRouter config
 OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "")
-# Nuevo prompt: Menciona la estructura y el esquema para reforzar
+
 
 PROMPT = os.getenv(
     "PROMPT",
@@ -82,7 +82,6 @@ app = FastAPI(title="Generate Assertions Worker (Typed)")
 
 def get_assertions_schema() -> dict:
     """Genera el JSON Schema para List[Assertion] que los LLM deben seguir."""
-    # El esquema generado por Pydantic es suficiente para los LLM
     assertion_schema = Assertion.model_json_schema(by_alias=True)
     
     # Creamos el esquema para un array de esos objetos
@@ -233,14 +232,9 @@ async def call_gemini(text: str) -> List[Assertion]:
 
 
 
+
 # ============================================================
-# Llamada asíncrona a OpenRouter (aiohttp)
-# ============================================================
-# ============================================================
-# Llamada asíncrona a OpenRouter (aiohttp) robusta
-# ============================================================
-# ============================================================
-# Llamada asíncrona a OpenRouter (aiohttp) con logging y retries
+# Llamada asíncrona a OpenRouter (aiohttp) 
 # ============================================================
 async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Assertion]:
     """
@@ -364,7 +358,6 @@ async def extract_assertions_from_text(text: str) -> List[Assertion]:
     elif AI_PROVIDER == "openrouter":
         return await call_openrouter(text)
     else:
-        # Aquí puedes dejar un logger.warning para indicar que no hay proveedor
         return []
 
 # ============================================================
@@ -401,8 +394,6 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
         logger.info(f"[{req.order_id}] No se extrajeron aserciones.")
         return
 
-    # NOTA: Ya no hay necesidad de 'structured_assertions' ni de iterar para crear Assertion(**a)
-    # Los objetos ya están en assertion_objs
 
     # Construir respuesta tipada (AssertionsGeneratedResponse)
     try:
@@ -462,7 +453,7 @@ async def consume_and_process():
         logger.info("Kafka consumer y producer detenidos")
 
 # ============================================================
-# Endpoint HTTP (sin Kafka) para probar /extraer
+# Endpoint HTTP 
 # ============================================================
 class TextoEntrada(BaseModel):
     text: str
@@ -477,7 +468,7 @@ async def extraer_endpoint(body: TextoEntrada):
     logger.info(f"[{order_id}] Endpoint /extraer (provider={AI_PROVIDER})")
     
     try:
-        # Ahora devuelve directamente List[Assertion]
+
         assertion_objs = await extract_assertions_from_text(text)
     except HTTPException as he:
         raise he
@@ -485,7 +476,7 @@ async def extraer_endpoint(body: TextoEntrada):
         logger.exception("Error generando aserciones")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Ya no hace falta estructurar/validar, usamos assertion_objs directamente
+
     try:
         payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, publisher=AI_PROVIDER)
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=order_id, payload=payload)
@@ -505,7 +496,6 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    # nada explícito: aiokafka será detenido en consume_and_process finally
     logger.info("Shutdown requested")
 
 # ============================================================

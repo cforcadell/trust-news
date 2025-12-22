@@ -21,3 +21,22 @@ db.news.countDocuments()
 #borrar todos los postIds
 db.news.deleteMany({})
 db.events.deleteMany({})
+
+
+Modifica una noticia
+db.news.findOne({ order_id: "33c690ab-8994-4df8-905e-0d949d5a677e" })
+
+db.news.updateOne(
+  { order_id: "33c690ab-8994-4df8-905e-0d949d5a677e" },
+  {
+    $set: {
+      "assertions.$[a].text": 'España se sitúa en el puesto 2 de 23 en términos de bienestar, solo por delante de Grecia, según el análisis internacional.'
+    }
+  },
+  {
+    arrayFilters: [
+      { "a.idAssertion": "2" }
+    ]
+  }
+)
+

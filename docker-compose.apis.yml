@@ -53,7 +53,7 @@ services:
     ports:
       - "8070:8070"
     env_file:
-      - ./api/validate-asertions/.env_mistral
+      - ./api/validate-asertions/.env_openrouter1
     environment:
       <<: *global-env
 
@@ -70,7 +70,7 @@ services:
     ports:
       - "8069:8070"
     env_file:
-      - ./api/validate-asertions/.env_gemini
+      - ./api/validate-asertions/.env_openrouter2
     environment:
       <<: *global-env
 
@@ -87,7 +87,7 @@ services:
     ports:
       - "8068:8070"
     env_file:
-      - ./api/validate-asertions/.env_openrouter
+      - ./api/validate-asertions/.env_openrouter3
     environment:
       <<: *global-env
 

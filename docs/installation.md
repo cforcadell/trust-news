@@ -48,10 +48,19 @@ Copy the deployed **contract address** into:
 If using the private Ethereum network based on Geth:
 
 👉 Follow the instructions located at:
+
+For network setup and initialization:
 ```
 docs/installation_blockchain.md
 
 ```
+
+For just starting and deploying and testing the contract:
+```
+docs/scripts_blockchain.md
+
+```
+
 
 (This option is more realistic but slower and heavier.)
 
@@ -109,27 +118,32 @@ npx hardhat run scripts/registeredValidators.js --network localhost
 
 ```bash
 cd api/tests
+(python3 -m venv venv )
 source venv/bin/activate
-pytest -v test_news-handler.py
+(install required packages)
+pytest -v 
 ```
 
 ---
 
-## 6️⃣ Run Statistics & Load Tests
+## 6️⃣ Run Stats Tests
 
 ```bash
-cd api/tests
+cd api/stats
+(python3 -m venv venv )
 source venv/bin/activate
+(install required packages)
 ```
 
 Example:
 
 ```bash
-python stats.py \
+python collector.py \
   --text "Text to validate" \
   --num_runs 2 \
   --timeout 200 \
-  --csv_file ./stats.out
+  
+python stats_report.py
 ```
 
 ---

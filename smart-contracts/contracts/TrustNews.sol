@@ -70,6 +70,8 @@ contract TrustNews {
     mapping (uint256 => Validator[]) public validatorsByCategory;
     mapping (uint256 => string) public categories; 
     mapping(uint256 => Post) public postsById;
+    mapping(address => uint256[]) public validatorCategories;
+
 
     event RegisterNewResult(uint256  postId,Multihash hashNews,address[][] validatorAddressesByAsertion);
 
@@ -216,6 +218,7 @@ function registerNew(
     function registerValidator(string memory name, uint256[] memory categoryIds) public {
         require(bytes(name).length != 0, "Invalid name");
         require(categoryIds.length != 0, "Invalid categories");
+        require(validators[msg.sender].validatorAddress == address(0), "Validator already registered");
 
         for (uint i = 0; i < categoryIds.length; i++) {
             uint256 catId = categoryIds[i];
@@ -223,12 +226,38 @@ function registerNew(
         }
 
         validators[msg.sender] = Validator(msg.sender, name, 0);
+        validatorCategories[msg.sender] = categoryIds;
 
         for (uint i = 0; i < categoryIds.length; i++) {
             uint256 catId = categoryIds[i];
             validatorsByCategory[catId].push(validators[msg.sender]);
         }
     }
+
+    function unregisterValidator() public {
+        require(validators[msg.sender].validatorAddress != address(0), "Validator not registered");
+
+        uint256[] storage cats = validatorCategories[msg.sender];
+
+        for (uint256 i = 0; i < cats.length; i++) {
+            uint256 catId = cats[i];
+            Validator[] storage catValidators = validatorsByCategory[catId];
+
+            for (uint256 j = 0; j < catValidators.length; j++) {
+                if (catValidators[j].validatorAddress == msg.sender) {
+                    // swap & pop
+                    catValidators[j] = catValidators[catValidators.length - 1];
+                    catValidators.pop();
+                    break;
+                }
+            }
+        }
+
+        // Limpieza final
+        delete validatorCategories[msg.sender];
+        delete validators[msg.sender];
+    }
+
 
 
     function getValidatorsByCategory(uint256 categoryId) public view returns (address[] memory) {

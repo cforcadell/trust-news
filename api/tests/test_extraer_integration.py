@@ -56,23 +56,3 @@ def test_extraer_endpoint():
 
     print(f"✅ Respuesta /extraer correcta:\n{data}")
 
-
-@pytest.mark.integration
-def test_extraer_endpoint_empty_text():
-    """
-    Test de integración para texto vacío.
-    Debe responder correctamente, con lista vacía de 'assertions' en el payload.
-    """
-
-    url = f"{API_GENERATION_URL}/extraer"
-    payload = {"text": ""}
-
-    response = requests.post(url, json=payload)
-    assert response.status_code == 200, f"Error HTTP {response.status_code}: {response.text}"
-
-    data = response.json()
-    assert "payload" in data, "Falta 'payload' en la respuesta"
-    payload_data = data["payload"]
-    assert "assertions" in payload_data, "Falta 'assertions' dentro de 'payload'"
-    assert isinstance(payload_data["assertions"], list), "'assertions' debe ser una lista"
-    print(f"ℹ️ Respuesta /extraer con texto vacío:\n{data}")

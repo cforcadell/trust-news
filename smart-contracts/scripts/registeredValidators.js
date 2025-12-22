@@ -4,7 +4,7 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("👤 Cuenta deployer:", deployer.address);
 
-  const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  const contractAddress = "0xcd01d6977F0d2B2aeF57F7c75924C9eC7eB60dFC";
   const TrustNews = await ethers.getContractFactory("TrustNews");
   const trustNews = await TrustNews.attach(contractAddress);
 

@@ -1,0 +1,19 @@
+{
+"text": "Catalunya tiene una población de más de 7 millones de habitantesde los que  2 millones de niños en edad escolar y otro millón son europeos",
+    "assertions": [
+      {
+        "idAssertion": "1",
+        "text": "Catalunya tiene una población de más de 7 millones de habitantes.",
+        "categoryId": 10
+      },
+      {
+        "idAssertion": "2",
+        "text": "2 millones de habitantes de Catalunya son niños en edad escolar.",
+        "categoryId": 10
+      },
+      {
+        "idAssertion": "3",
+        "text": "Un millón de habitantes de Catalunya son europeos.",
+        "categoryId": 10
+      }
+}

@@ -1,0 +1,7 @@
+source ./venv/bin/activate
+python collector.py \
+  --text "	Catalunya tiene una población de más de 7 millones de habitantesde los que 2 millones de niños en edad escolar y más de 50000 italianos." \
+  --num_runs 2 \
+  --timeout 200 
+  
+  python 

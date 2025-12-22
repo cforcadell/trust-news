@@ -63,6 +63,8 @@ class ValidatorRegistrationInput(BaseModel):
     name: str
     categories: Optional[List[int]] = None
     
+
+    
 class AsyncMessage(BaseModel):
     action: str
     order_id: str

@@ -5,22 +5,51 @@ async function main() {
   console.log("👤 Cuenta deployer:", deployer.address);
 
   // -------------------------------
-  // Desplegar contrato TrustNews
+  // Preparar despliegue de contrato
   // -------------------------------
   const TrustNews = await ethers.getContractFactory("TrustNews");
-  console.log("GetContractFactory.");
+  console.log("GetContractFactory listo.");
 
-  const trustNews = await TrustNews.deploy({
-    gasLimit: 25_000_000,    // suficiente para redes privadas
-    gasPrice: 1_000_000_000  // 1 Gwei
+  // -------------------------------
+  // Obtener límite de gas del bloque actual
+  // -------------------------------
+  const block = await ethers.provider.getBlock("latest");
+  console.log("⛓️ Block Gas Limit actual:", block.gasLimit.toString());
+
+  // -------------------------------
+  // Crear transacción de deploy
+  // -------------------------------
+  const deployTx = TrustNews.getDeployTransaction({
+    gasPrice: ethers.parseUnits("1", "gwei")
   });
-  
-  console.log("Deploy Sent:");
-  await trustNews.waitForDeployment(); // esperar a que se mine
-  console.log("✅ Deploy Mined");
 
-  const address = await trustNews.getAddress();
-  console.log("✅ Contrato desplegado en:", address);
+  // -------------------------------
+  // Estimar gas necesario para deploy
+  // -------------------------------
+  let gasEstimate = await ethers.provider.estimateGas(deployTx); // bigint
+  console.log("⛽ Gas estimado para desplegar contrato:", gasEstimate.toString());
+
+  // Añadir margen de seguridad (+20%)
+  gasEstimate = BigInt(Math.floor(Number(gasEstimate) * 1.2));
+  console.log("⚡ Gas con margen de seguridad (+20%):", gasEstimate.toString());
+
+  if (gasEstimate > BigInt(block.gasLimit)) {
+    console.error("❌ El contrato necesita más gas que el límite del bloque. Ajusta el contrato o la red.");
+    process.exit(1);
+  }
+
+  // -------------------------------
+  // Desplegar contrato
+  // -------------------------------
+  const trustNews = await TrustNews.deploy({
+    gasLimit: 5_000_000,             // Holgado para redes privadas
+    gasPrice: ethers.parseUnits("10", "gwei") // Suficiente para Geth
+  });
+
+
+  console.log("Deploy enviado, esperando confirmación...");
+  await trustNews.waitForDeployment();
+  console.log("✅ Contrato desplegado en:", await trustNews.getAddress());
 
   // -------------------------------
   // Registrar categorías
@@ -39,17 +68,13 @@ async function main() {
   ];
 
   console.log("\n⏳ Registrando categorías...");
-
   for (const cat of categories) {
     try {
       const tx = await trustNews.addCategory(cat.id, cat.name, {
         gasLimit: 5_000_000,
-        gasPrice: 1_000_000_000
+        gasPrice: ethers.parseUnits("1", "gwei")
       });
-      // Esperar a que se mine la transacción
-      if (tx.wait) {
-        await tx.wait();
-      }
+      if (tx.wait) await tx.wait();
       console.log(`   ✅ Categoria [${cat.id}] ${cat.name} registrada`);
     } catch (error) {
       console.error(`   ❌ Error registrando categoría [${cat.id}] ${cat.name}:`, error.message);
@@ -57,7 +82,7 @@ async function main() {
   }
 
   // -------------------------------
-  // Mostrar resumen
+  // Mostrar resumen de categorías
   // -------------------------------
   console.log("\n📌 Categorías registradas:");
   for (let i = 1; i <= 10; i++) {
@@ -71,6 +96,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("❌ Error al desplegar:", error);
+  console.error("❌ Error en script:", error);
   process.exitCode = 1;
 });

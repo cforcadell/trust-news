@@ -357,6 +357,36 @@ def registrar_validador_blockchain(name: str, categories: List[int]) -> Tuple[Op
 
 
 # =========================================================
+# Registrar validador (espera confirmación)
+# =========================================================
+def desregistrar_validador_blockchain() -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Registra validador y espera minado.
+    Devuelve (tx_hash, receipt_dict) o (None, None) en error.
+    Bloqueante: usar asyncio.to_thread en el event loop.
+    """
+    try:
+        logger.info(f"Inicio desregistrar_validador_blockchain ")
+
+        # Preparar llamada al contrato
+        fn = contract.functions.unregisterValidator()
+
+        # Enviar transacción
+        tx_hash = send_signed_tx(w3,fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
+        logger.info(f"Transacción enviada: {tx_hash}")
+
+        # Esperar a que se mine
+        receipt = wait_for_receipt_blocking(w3,tx_hash)
+        logger.info(f"Receipt recibido: {receipt}")
+
+        return tx_hash, receipt
+
+    except Exception as e:
+        logger.exception(f"Error al registrar validador en blockchain: {e}")
+        return None, None
+
+
+# =========================================================
 # Endpoints HTTP (sincronicos desde la perspectiva del caller)
 # =========================================================
 @app.post("/verificar")
@@ -385,6 +415,19 @@ async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
         return {"status": "ok", "tx_hash": tx_hash, "receipt": receipt}
     except Exception as e:
         logger.exception(f"endpoint_registrar_validador error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/desregistrar_validador")
+# ✅ Usando ValidatorRegistrationInput
+async def endpoint_desregistrar_validador():
+    """Desregistra validador. Espera minado."""
+    try:
+        tx_hash, receipt = await asyncio.to_thread(desregistrar_validador_blockchain)
+        if tx_hash is None:
+            raise HTTPException(status_code=500, detail="Error desregistrando validador.")
+        return {"status": "ok", "tx_hash": tx_hash, "receipt": receipt}
+    except Exception as e:
+        logger.exception(f"endpoint_desregistrar_validador error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =========================================================
@@ -437,7 +480,8 @@ async def consume_and_process():
                 result_text = None
                 try:
                     # Ejecutar la verificación de IA en un thread
-                    result_text = await asyncio.to_thread(verificar_asercion, assertion_text, context)
+                    #result_text = await asyncio.to_thread(verificar_asercion, assertion_text, context)
+                    result_text = await asyncio.to_thread(verificar_asercion, assertion_text)
                     logger.info(f"Verificación completada (preview): {result_text}")
                     result_text_parsed = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
                     logger.info(f"Resultado verificación: {result_text_parsed}")
@@ -512,7 +556,7 @@ async def consume_and_process():
                         approval=veredict.estado, # El enum Validacion
                         text=result_text_parsed.descripcion,
                         tx_hash=tx_hash,
-                        validator_alias=AI_PROVIDER.upper(),
+                        validator_alias=AI_PROVIDER.upper() + "_" +  os.getenv("MODEL", "unknown"),
                         # Receipt no está en el Payload original, lo omitimos para consistencia con common.async_models
                     )
                 )

@@ -1,10 +1,22 @@
-Script multiinews
+
+Memoria
+-------
+Alterar MongoDB y pantalla de validación OK
 Stats: time,ai generate,ai,  validator, veredict, unknown
-Doc project GitHub 
+Analisis de coste. 20 validaciones de 7 aserciones
+Conclusiones
 
-Check secrets GitHub 
-Public Github
+lenguaje tecnico
+Mostrar cofigo relevante (smart contract?)
+Anexos
+    - Github    
+    - Prompts Utilizados
+    - Módulo de Estadísticas.
+Relectura TFM
+Eliminar comentarios
+Publicar Github
+
+Presentació de Video
 Video 
-Presentació
+Presentació Defensa
 
-[New install]

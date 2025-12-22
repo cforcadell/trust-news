@@ -87,7 +87,7 @@ news-handler (Orchestrator)
 | `news-chain`          | Blockchain access layer        |
 | `ipfs-fastapi`        | Document storage abstraction   |
 | `TrustNews.sol`       | Immutable system state         |
-| `frontend`            | User interaction & monitoring  |
+| `web_classic`         | User interaction & monitoring  |
 
 ---
 
@@ -107,26 +107,46 @@ cd trustnews
 docker compose up --build
 ```
 
+For further info see docs folder.
+
+* installation.md helps you to setup and run the project.
+* installation_blockchain.md guides you to set up a configure private geth POA network.
+* scripts_blockchain.md to deploy and test TrustNews contract.
+
 After startup, services will be available locally (frontend, APIs, blockchain, IPFS).
 
 > ⏳ First startup may take a few minutes (Ethereum + Kafka initialization)
 
 ---
 
-## 📂 Project Structure
+## 📂 Project Structure (main folders) & files
 
 ```text
 .
+├── api  
+     ├── news-handler/                    (API and Orchestator validation end to end)
+     ├── news-chain/                      (API Smart Contract Abstraction)
+     ├── generate-assertions/             (API for generate assertions) 
+     ├── validate-assertions/             (API for validate assertions)
+     ├── common/                          (Common modules)
+     ├── mongo/                           (mongo DB Configuration)
+     ├── ipfs/                            (API for validate assertions)
+     ├── kafka/                           (Kafka Configuration)
+     ├── test/                            (Test Units)
+├── blockchain/                           (Configuration files for Geth POA private Network)
+├── docs/                                 (Doc files)
+├── scripts/                              (scripts for build and start/stop containers)
 ├── smart-contracts/
-├── news-handler/
-├── news-chain/
-├── generate-assertions/
-├── validate-assertions/
-├── ipfs-fastapi/
-├── frontend/
-├── docker-compose.yml
-├── .env.example
-└── README.md
+     ├── contracts/                       (smart contract folder)
+     ├── scripts/                         (scripts for deploy and test smart contract)
+     ├── hardhat.config.js                (hardhat config)
+├── volumes/                              (persistent data folder accross contaniners)
+├── web_classic/                          (frontend folder)
+├── .env.example                          (.env configutation golab example)
+├── docker-compose.apis.yml               (yaml to build apis )
+├── docker-compose.base.yml               (yaml to build core containers )
+├── docker-compose.blockchain.yml         (yaml to build blockchain Geth POA private Network containers )
+└── README.md                             (this file)
 ```
 
 ---
@@ -185,5 +205,3 @@ Academic / research use only.
 Developed as a **Master Thesis – Proof of Concept**.
 
 ---
-
-

@@ -60,7 +60,7 @@ TrustNews explores a different approach:
 Frontend
    │
    ▼
-news-handler (Orchestrator) ─▶ MongoDB
+news-handler (Orchestrator)
    │
    ├─ Kafka ─▶ generate-assertions (AI)
    ├─ Kafka ─▶ ipfs-fastapi (IPFS)

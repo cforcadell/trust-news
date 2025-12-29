@@ -46,7 +46,7 @@ OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TO
 MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "")
-Id)
+
 
 
 # Gemini config

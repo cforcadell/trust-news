@@ -42,7 +42,7 @@ BROKER_URL = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", "kafka:9092"
 INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", os.getenv("ASSERTIONS_REQUEST_TOPIC", "fake_news_requests_generate"))
 OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TOPIC", "fake_news_responses"))
 
-# Mistral config.
+# Mistral config
 MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "")

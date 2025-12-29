@@ -2,16 +2,18 @@
 Memoria
 -------
 Alterar MongoDB y pantalla de validación OK
-Stats: time,ai generate,ai,  validator, veredict, unknown
-Analisis de coste. 20 validaciones de 7 aserciones
-Conclusiones
+Stats: time,ai generate,ai,  validator, veredict, unknown OK
+Analisis de coste. 20 validaciones de 7 aserciones OK
+Conclusiones OK
 
 lenguaje tecnico
-Mostrar cofigo relevante (smart contract?)
+asociar  palabras al glosario
+Mostrar cofigo relevante (smart contract?) OK
 Anexos
-    - Github    
-    - Prompts Utilizados
-    - Módulo de Estadísticas.
+    - Github    OK
+    - Prompts Utilizados OK
+    - Módulo de Estadísticas. OK
+
 Relectura TFM
 Eliminar comentarios
 Publicar Github

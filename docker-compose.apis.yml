@@ -135,20 +135,19 @@ services:
       - ./api/common:/app/common
       - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
 
-    # -------------------------
-  # Frontend Web
-  # -------------------------
   frontend-web_classic:
     build: ./web_classic
     container_name: trustnews-frontend_classic
     ports:
       - "8000:80"
+      - "8443:443"
     depends_on:
       - news-handler
     environment:
-      - API_BASE_URL=http://news-handler:8072
+      - API_BASE_URL=https://localhost:8443/api
     volumes:
       - ./web_classic/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web_classic/certs:/etc/nginx/certs:ro
 
   
 networks:

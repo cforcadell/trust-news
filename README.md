@@ -174,11 +174,10 @@ Ensuring the system is **auditable and tamper-resistant**.
 ---
 
 ## 🛣️ Roadmap
-
+* [ ] Secure and authenticate plattform
+* [ ] Support to Hyperledger Besu
+* [ ] Integrate UI with IDP and custom chains for user
 * [ ] Validator reputation system
-* [ ] External validator registration
-* [ ] Public Ethereum deployment
-* [ ] Advanced AI ensemble validation
 * [ ] Performance and cost analysis
 
 ---

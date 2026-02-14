@@ -79,6 +79,7 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
 NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain:8073")
 
+
 # =========================================================
 # App & globals
 # =========================================================
@@ -139,10 +140,17 @@ async def get_order_doc(order_id: str) -> Optional[dict]:
     doc = await orders_collection.find_one({"order_id": order_id})
     return doc
 
+async def get_order_id_by_post_id(post_id: str) -> Optional[str]:
+    doc = await orders_collection.find_one({"post_id": post_id})
+    return doc["order_id"] if doc else None
 # ===========================
 # Helpers para hashes
 # ===========================
-
+def ipfs_get_text(cid: str) -> str:
+    url = f"{IPFS_FASTAPI_URL}/{cid}"
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+    return r.text
 
 async def get_order_lock(order_id: str):
     if order_id not in order_locks:
@@ -245,9 +253,40 @@ async def process_kafka_message(data: dict):
     try:
         action = data.get("action")
         order_id = data.get("order_id")
-        if not action or not order_id:
-            logger.warning("⚠️ Mensaje Kafka sin 'action' o 'order_id', ignorado.")
+        if not action :
+            logger.warning("⚠️ Mensaje Kafka sin 'action' ")
             return
+
+        # ============================================================
+        # 🔁 Resolver order_id a partir de postId si no viene informado
+        # ============================================================
+        if not order_id or order_id == "":
+            post_id = (
+                data.get("payload", {}).get("postId")
+                if isinstance(data.get("payload"), dict)
+                else None
+            )
+
+            if not post_id:
+                logger.warning(
+                    "⚠️ Mensaje Kafka sin 'order_id' ni 'postId', ignorado."
+                )
+                return
+
+            order_id = await get_order_id_by_post_id(str(post_id))
+
+            if not order_id:
+                logger.warning(
+                    f"⚠️ No se pudo resolver order_id para postId={post_id}, ignorando evento."
+                )
+                return
+
+            logger.info(
+                f"🔁 order_id resuelto por postId | postId={post_id} → order_id={order_id}"
+            )
+
+        # 🔒 A partir de aquí order_id EXISTE siempre
+
 
         # Si existe un modelo de respuesta para esa acción, validamos
         model_cls = ACTION_TO_MODEL_RESPONSE.get(action)
@@ -416,34 +455,97 @@ async def process_kafka_message(data: dict):
 
             logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones).")
 
-            # Enviar requests de validación tipados
-            for val in validators_info:
-                id_assert = val["idAssertion"]
-                text_assert = val["text"]
-                for validator_addr in val["validatorAddresses"]:
-                    try:
-                        req_val = RequestValidationRequest(
-                            action="request_validation",
-                            order_id=order_id,
-                            payload={
-                                "postId": str(postId),
-                                "idValidator": validator_addr,
-                                "idAssertion": id_assert,
-                                "text": text_assert,
-                                "context": doc.get("text", "")
-                            }
-                        )
-                        await producer.send_and_wait(TOPIC_REQUESTS_VALIDATE, req_val.model_dump_json().encode("utf-8"))
-                        logger.info(f"[{order_id}] 📤 Enviada validación a {validator_addr} para aserción {id_assert} y postId {postId}.")
-                        await log_event(order_id, req_val.action, TOPIC_REQUESTS_VALIDATE, req_val.payload.model_dump())
-                    except ValidationError as e:
-                        logger.exception(f"[{order_id}] Error validando request_validation para {validator_addr}: {e}")
+        # ================================================================
+        # 4 request_validation  
+        # ================================================================
+        elif action == "request_validation":
+            payload = parsed.payload.model_dump()
 
-            total_validators = sum(len(v['validatorAddresses']) for v in validators_info)
-            logger.info(f"[{order_id}] 🎯 Envío de validaciones completado ({total_validators} totales).")
+            postId = str(payload.get("postId"))
+            id_val = payload.get("idValidator")
+            id_assert = str(payload.get("idAssertion"))
+            text_assert = payload.get("text", "")
+            context = payload.get("context")
+
+            logger.info(
+                f"[{order_id}] 📥 RequestValidation recibida -> "
+                f"postId={postId}, assertion={id_assert}, validator={id_val}"
+            )
+
+            if not id_val or not id_assert:
+                logger.warning(f"[{order_id}] ⚠️ request_validation sin idValidator o idAssertion.")
+                return
+
+            lock = await get_order_lock(order_id)
+            async with lock:
+                doc = await get_order_doc(order_id)
+                if not doc:
+                    logger.warning(f"[{order_id}] ❌ Documento no encontrado para request_validation.")
+                    return
+
+                validators_cfg = doc.get("validators", [])
+                assertion_cfg = None
+
+                for v in validators_cfg:
+                    if str(v.get("idAssertion")) == id_assert:
+                        assertion_cfg = v
+                        break
+
+                if not assertion_cfg:
+                    logger.warning(
+                        f"[{order_id}] ⚠️ request_validation para aserción desconocida: {id_assert}"
+                    )
+                    return
+
+                validator_addresses = set(assertion_cfg.get("validatorAddresses", []))
+                if id_val not in validator_addresses:
+                    logger.warning(
+                        f"[{order_id}] ⚠️ Validator {id_val} no esperado para aserción {id_assert}"
+                    )
+                    return
+
+                # Registrar request recibida (auditoría / trazabilidad)
+                await log_event(
+                    order_id,
+                    "request_validation_received",
+                    TOPIC_RESPONSES,
+                    payload
+                )
+
+                # Inicializar estructura de validaciones si no existe
+                validations = doc.get("validations", {})
+                if id_assert not in validations:
+                    validations[id_assert] = {}
+
+                # Si ya hay validación hecha, ignoramos
+                if id_val in validations[id_assert]:
+                    logger.info(
+                        f"[{order_id}] ⚠️ request_validation duplicada ignorada "
+                        f"(Assertion={id_assert}, Validator={id_val})"
+                    )
+                    return
+
+                # Guardar request como pendiente (opcional pero útil)
+                pending_requests = doc.get("validation_requests", {})
+                pending_requests.setdefault(id_assert, set())
+                pending_requests[id_assert].add(id_val)
+
+                # Persistir
+                await update_order(order_id, {
+                    "$set": {
+                        "validation_requests": {
+                            k: list(v) for k, v in pending_requests.items()
+                        }
+                    }
+                })
+
+                logger.info(
+                    f"[{order_id}] 🧾 RequestValidation registrada "
+                    f"(Assertion={id_assert}, Validator={id_val})"
+                )
 
         # ================================================================
-        # 4️⃣ validation_completed
+        # 5 validation_completed
         # ================================================================
         elif action == "validation_completed":
             payload = parsed.payload.model_dump()
@@ -789,7 +891,7 @@ async def _check_blockchain_consistency(client: httpx.AsyncClient, order_data: D
     results.append(ConsistencyCheckResult(
         test='Comparando hash de "text" de Order con hash de blockchain',
         toCompare="Orden:"+order_hash_text,
-        compared="Ethereum:"+post_data.get("hash_new"),
+        compared="Ethereum:"+ipfs_get_text(post_data.get("hash_new")),
         result="OK" if hash_text_ok else "KO"
     ))
     logger.info(f"--- Prueba 8 (Hash Text): {'OK' if hash_text_ok else 'KO'}")
@@ -839,13 +941,13 @@ def _check_assertion_details_consistency(order_data: Dict[str, Any], post_data: 
         # --- Prueba 10: Comparar hash de text de assertion con hash de post ---
         calculated_digest = hash_text_to_hash(order_text).lower().removeprefix("0x")
         
-        post_digest = a_post.get("hash_asertion", {}).get("digest", "").lower().removeprefix("0x")
+        post_digest = a_post.get("cid", {}).get("digest", "").lower().removeprefix("0x")
         hash_ok = calculated_digest == post_digest
         
         results.append(ConsistencyCheckResult(
             test=f'Comparando hash de "assertions"."text" (Orden vs Ethereum) para idAssertion {assertion_id}',
             toCompare="Orden:"+"0x" + calculated_digest,
-            compared="Ethereum:"+"0x" + post_digest,
+            compared="Ethereum:"+"0x" + ipfs_get_text(post_digest),
             result="OK" if hash_ok else "KO",
             details=None if hash_ok else "El hash calculado del texto de la aserción no coincide con el digest en Blockchain."
         ))
@@ -949,7 +1051,7 @@ def _check_validation_details_consistency(order_data: Dict[str, Any], post_data:
             order_validation_text = v_order.get("text", "")
             logger.info(f"--- Calculando digest de validación para idAssertion {assertion_id}, validador {validator_address}: {order_validation_text}")
             calculated_hash_digest = hash_text_to_hash(order_validation_text).lower().removeprefix("0x")
-            post_hash_digest = v_post.get("hash_description", {}).get("digest", "").lower().removeprefix("0x")
+            post_hash_digest = ipfs_get_text(v_post.get("cid"))
             hash_veredict_ok = calculated_hash_digest == post_hash_digest
             
             results.append(ConsistencyCheckResult(

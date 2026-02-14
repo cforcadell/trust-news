@@ -1418,8 +1418,7 @@ function renderPost(post) {
     const rows = [
         ["postId", post.postId],
         ["publisher", post.publisher],
-        ["document", post.document],
-        ["hash_new", post.hash_new]
+        ["document", post.document]
     ];
 
     postTable.innerHTML = `
@@ -1481,7 +1480,7 @@ function renderPost(post) {
                         <tr><th>Dominio</th><td>${v.domain}</td></tr>
                         <tr><th>Reputación</th><td>${v.reputation}</td></tr>
                         <tr><th>Veredicto</th><td>${mapVeredict(v.veredict)}</td></tr>
-                        <tr><th>Digest Descripción</th><td>${v.hash_description?.digest ?? ""}</td></tr>
+                        <tr><th>cid</th><td>${v.cid}</td></tr>
                     `;
                     content.appendChild(validationTable);
                 });

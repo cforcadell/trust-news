@@ -171,14 +171,6 @@ class RequestValidationRequest(BaseModel):
     payload: RequestValidationPayload
 
 
-class ValidationWorkerTask(BaseModel):
-    """Model for an incoming validation request, often for an internal worker/queue."""
-    order_id: str
-    postId: str # Changed from int to str for consistency
-    idAssertion: str # Changed from int to str for consistency
-    text: str
-    context: Optional[str] = None
-    idValidator: str
 
 
 # ============================================================
@@ -202,21 +194,6 @@ class ValidationCompletedResponse(BaseModel):
     payload: ValidationCompletedPayload
 
 
-class ValidationFailedPayload(BaseModel):
-    """Model for a failed validation response."""
-    order_id: str
-    error_message: str
-    error_type: str = "ProcessingError"
-    # Re-adding validator/assertion IDs for full context
-    postId: Optional[str] = None
-    idValidator: Optional[str] = None
-    idAssertion: Optional[str] = None
-
-
-class ValidationFailedResponse(BaseModel):
-    action: str = "validation_failed"
-    order_id: str
-    payload: ValidationFailedPayload
     
 class ValidatorAPIResponse(BaseModel):
     resultado: str

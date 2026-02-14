@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from common.blockchain import send_signed_tx, wait_for_receipt_blocking
 from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256
 from common.veredicto import Veredicto, Validacion
-from common.async_models import VerifyInputModel, ValidatorAPIResponse
+from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput
 
 
 # =========================================================
@@ -331,6 +331,34 @@ async def endpoint_tx_status(tx_hash: str):
     if receipt is None:
         return {"status": "pending", "result": False, "tx_hash": tx_hash}
     return {"status": "mined" if receipt.status == 1 else "failed", "tx_hash": tx_hash, "blockNumber": receipt.blockNumber}
+
+@app.post("/registrar_validador")
+# ✅ Usando ValidatorRegistrationInput
+async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
+    """Registra validador (usa VALIDATOR_CATEGORIES si no se pasan). Espera minado."""
+    categorias = input.categories if input.categories is not None else VALIDATOR_CATEGORIES
+    try:
+        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, input.name, categorias or [])
+        if tx_hash is None:
+            raise HTTPException(status_code=500, detail="Error registrando validador.")
+        return {"status": "ok", "tx_hash": tx_hash, "receipt": receipt}
+    except Exception as e:
+        logger.exception(f"endpoint_registrar_validador error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/desregistrar_validador")
+# ✅ Usando ValidatorRegistrationInput
+async def endpoint_desregistrar_validador():
+    """Desregistra validador. Espera minado."""
+    try:
+        tx_hash, receipt = await asyncio.to_thread(desregistrar_validador_blockchain)
+        if tx_hash is None:
+            raise HTTPException(status_code=500, detail="Error desregistrando validador.")
+        return {"status": "ok", "tx_hash": tx_hash, "receipt": receipt}
+    except Exception as e:
+        logger.exception(f"endpoint_desregistrar_validador error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # =========================================================
 # Blockchain Event Agent

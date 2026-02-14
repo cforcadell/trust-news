@@ -9,6 +9,10 @@ show collections
 # Consultar todos los documentos de una colección
 db.news.find().pretty()
 
+@Consulta l'ultim
+db.news.find().sort({ _id: -1 }).limit(1)
+
+
 # Consultar un documento específico por order_id
 db.news.findOne({ order_id: "68dc982f-28a3-4fb1-92ab-dfc210bcd461" })
 

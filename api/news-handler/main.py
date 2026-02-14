@@ -141,7 +141,7 @@ async def get_order_doc(order_id: str) -> Optional[dict]:
     return doc
 
 async def get_order_id_by_post_id(post_id: str) -> Optional[str]:
-    doc = await orders_collection.find_one({"post_id": post_id})
+    doc = await orders_collection.find_one({"postId": post_id})
     return doc["order_id"] if doc else None
 # ===========================
 # Helpers para hashes
@@ -243,6 +243,7 @@ ACTION_TO_MODEL_RESPONSE = {
     "ipfs_uploaded": IpfsUploadedResponse,
     "blockchain_registered": BlockchainRegisteredResponse,
     "validation_completed": ValidationCompletedResponse,
+    "request_validation": RequestValidationRequest
 }
 
 async def process_kafka_message(data: dict):
@@ -505,12 +506,12 @@ async def process_kafka_message(data: dict):
                     return
 
                 # Registrar request recibida (auditoría / trazabilidad)
-                await log_event(
-                    order_id,
-                    "request_validation_received",
-                    TOPIC_RESPONSES,
-                    payload
-                )
+                # await log_event(
+                #     order_id,
+                #     "request_validation_received",
+                #     TOPIC_RESPONSES,
+                #     payload
+                # )
 
                 # Inicializar estructura de validaciones si no existe
                 validations = doc.get("validations", {})

@@ -61,39 +61,39 @@ services:
     volumes:
       - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
 
-  validate-asertions-worker_2:
-    build: 
-      context: ./api  
-      dockerfile: ./validate-asertions/Dockerfile 
-    container_name: validate-asertions-worker_2
-    ports:
-      - "8069:8070"
-    env_file:
-      - ./api/validate-asertions/.env_openrouter2
-    environment:
-      <<: *global-env
+  # validate-asertions-worker_2:
+  #   build: 
+  #     context: ./api  
+  #     dockerfile: ./validate-asertions/Dockerfile 
+  #   container_name: validate-asertions-worker_2
+  #   ports:
+  #     - "8069:8070"
+  #   env_file:
+  #     - ./api/validate-asertions/.env_openrouter2
+  #   environment:
+  #     <<: *global-env
 
-    depends_on:
-      - ipfs-fastapi
-    volumes:
-      - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
+  #   depends_on:
+  #     - ipfs-fastapi
+  #   volumes:
+  #     - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
 
-  validate-asertions-worker_3:
-    build: 
-      context: ./api  
-      dockerfile: ./validate-asertions/Dockerfile 
-    container_name: validate-asertions-worker_3
-    ports:
-      - "8068:8070"
-    env_file:
-      - ./api/validate-asertions/.env_openrouter3
-    environment:
-      <<: *global-env
+  # validate-asertions-worker_3:
+  #   build: 
+  #     context: ./api  
+  #     dockerfile: ./validate-asertions/Dockerfile 
+  #   container_name: validate-asertions-worker_3
+  #   ports:
+  #     - "8068:8070"
+  #   env_file:
+  #     - ./api/validate-asertions/.env_openrouter3
+  #   environment:
+  #     <<: *global-env
 
-    depends_on:
-      - ipfs-fastapi
-    volumes:
-      - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
+  #   depends_on:
+  #     - ipfs-fastapi
+  #   volumes:
+  #     - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
 
   # -------------------------
   # News Handler

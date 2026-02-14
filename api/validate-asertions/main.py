@@ -3,8 +3,9 @@ import json
 import uuid
 import logging
 import asyncio
-
+import base58
 from typing import List, Tuple, Optional, Dict, Any
+from hexbytes import HexBytes
 
 
 import httpx
@@ -14,9 +15,9 @@ from web3 import Web3
 from abc import ABC, abstractmethod
 
 from common.blockchain import send_signed_tx, wait_for_receipt_blocking
-from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256
+from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple
 from common.veredicto import Veredicto, Validacion
-from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput
+from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash
 
 
 # =========================================================
@@ -152,9 +153,10 @@ def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
     return ai_validator.verificar_asercion(texto, contexto)
 
 async def upload_validation_to_ipfs(validation_doc_bytes: bytes) -> str:
+    ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
-            "http://ipfs-api:8000/ipfs/upload",
+            f"{ipfs_api_url}/ipfs/upload",
             data={
                 "filename": f"validation-{uuid.uuid4()}.json",
                 "content_bytes": validation_doc_bytes
@@ -174,12 +176,13 @@ async def registrar_validacion_internal(
     y registra en blockchain el CID (multihash base58).
     """
     try:
+        logger.info(f"Inicio registrar_validacion_internal -> postId: {postId}, assertion_id: {assertion_id}, veredicto: {veredicto}")  
         # -----------------------------------------
         # 1. Documento de validación
         # -----------------------------------------
         validation_doc = {
             "postId": str(postId),
-            "assertionIndex": assertion_id,
+            "assertionIndex": assertion_id+1,
             "validator": ACCOUNT_ADDRESS,
             "estado": int(veredicto.estado),
             "descripcion": veredicto.texto
@@ -193,35 +196,53 @@ async def registrar_validacion_internal(
         # 2. Subir a IPFS → CID (base58)
         # -----------------------------------------
         validation_cid = await upload_validation_to_ipfs(
-            validation_doc_bytes,
-            f"validation-{uuid.uuid4()}.json"
+            validation_doc_bytes
         )
 
         logger.info(f"📦 Validación subida a IPFS: {validation_cid}")
 
-        # -----------------------------------------
-        # 3. CID base58 → multihash
-        # -----------------------------------------
-        hash_function, hash_size, digest = safe_multihash_to_tuple(validation_cid)
+       # ------------------------------------------------
+        # Decodificar CIDv0 → Multihash
+        # ------------------------------------------------
+        decoded = base58.b58decode(validation_cid)
 
-        # -----------------------------------------
-        # 4. Normalizar IDs
-        # -----------------------------------------
-        postId_int = int(postId) if str(postId).isdigit() else uuid_to_uint256(str(postId))
-        assertion_id_int = int(assertion_id)
+        logger.info(f"CID decoded length: {len(decoded)} bytes")
 
-        # -----------------------------------------
-        # 5. Registrar en blockchain
-        # -----------------------------------------
+        if len(decoded) != 34:
+            raise ValueError(
+                f"CID inválido. Longitud inesperada: {len(decoded)} (esperado 34)"
+            )
+
+        hash_function = decoded[0:1]  # bytes1
+        hash_size = decoded[1:2]      # bytes1
+        digest = decoded[2:]          # bytes32
+
+        logger.info(f"hash_function: {hash_function.hex()}")
+        logger.info(f"hash_size: {hash_size.hex()}")
+        logger.info(f"digest length: {len(digest)}")
+
+        # ------------------------------------------------
+        # Validaciones estrictas (protección arquitectura)
+        # ------------------------------------------------
+        if hash_function != b"\x12":
+            raise ValueError("Solo se soporta SHA-256 (0x12)")
+
+        if hash_size != b"\x20":
+            raise ValueError("Solo se soporta digest de 32 bytes (0x20)")
+
+        if len(digest) != 32:
+            raise ValueError("Digest no es 32 bytes")
+
+        # ------------------------------------------------
+        # Construir llamada al contrato
+        # ------------------------------------------------
+
+
         func_call = contract.functions.addValidation(
-            postId_int,
-            assertion_id_int - 1,
+            postId,
+            assertion_id ,
             int(veredicto.estado),
-            {
-                "hash_function": hash_function,
-                "hash_size": hash_size,
-                "digest": digest
-            }
+            (hash_function, hash_size, digest)   
         )
 
         tx_hash = send_signed_tx(w3, func_call, ACCOUNT_ADDRESS, PRIVATE_KEY)
@@ -398,9 +419,48 @@ class BlockchainEventAgent:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{self.ipfs_api}/ipfs/{cid}")
             resp.raise_for_status()
-            document = resp.json()["content"]
+            post_json = json.loads(resp.text)
+            logger.info("🧩 JSON parseado correctamente desde IPFS")
+            
+            content_obj = json.loads(post_json.get("content", "{}"))
+
+            # ------------------------------------------------
+            # Buscar assertion correspondiente
+            # ------------------------------------------------
+            assertions = content_obj.get("assertions", [])
+            logger.info(f"🔍 Total assertions encontradas en documento: {len(assertions)}")
+
+            if assertion_index < 0 or assertion_index >= len(assertions):
+                logger.warning(
+                    f"⚠️ Assertion index fuera de rango | "
+                    f"post={post_id} assertion={assertion_index}"
+                )
+                return
+
+            assertion = assertions[assertion_index]
+
+            logger.info(f"✅ Assertion localizada correctamente | assertion={assertion_index}")
+
+            text = assertion.get("text", "")
+            if not text:
+                logger.warning(
+                    f"⚠️ Assertion sin texto | "
+                    f"post={post_id} assertion={assertion_index}"
+                )
+                return
+
+
+            logger.info(
+                f"📝 Texto assertion obtenido ({len(text)} chars) | "
+                f"assertion={assertion_index}"
+            )
+            
 
         try:
+            document = {
+                "text": text,
+                "metadata": content_obj.get("metadata", {})
+            }
             result_text = await asyncio.to_thread(verificar_asercion, document)
             parsed_result = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
             if parsed_result.resultado == "TRUE":

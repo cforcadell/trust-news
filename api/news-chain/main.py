@@ -497,7 +497,7 @@ async def blockchain_event_listener():
 
                                 post_id = str(ev["args"]["postId"])
                                 validator = str(ev["args"]["validator"])
-                                assertion_index = int(ev["args"]["asertionIndex"])
+                                assertion_index = int(ev["args"]["asertionIndex"])+1
 
                                 logger.info(
                                     f"📨 ValidationRequested | "
@@ -574,7 +574,7 @@ async def blockchain_event_listener():
                                     payload=RequestValidationPayload(
                                         postId=post_id,
                                         idValidator=validator,
-                                        idAssertion=str(assertion_index+1),
+                                        idAssertion=str(assertion_index),
                                         text=text,
                                     ),
                                 )
@@ -582,7 +582,7 @@ async def blockchain_event_listener():
                                 logger.info(
                                     f"📦 Mensaje Kafka construido | "
                                     f"topic={KAFKA_RESPONSE_TOPIC} "
-                                    f"post={post_id} assertion={assertion_index+1}"
+                                    f"post={post_id} assertion={assertion_index}"
                                 )
                                 await producer.send_and_wait(
                                     KAFKA_RESPONSE_TOPIC,
@@ -610,7 +610,7 @@ async def blockchain_event_listener():
 
                                 post_id = str(ev["args"]["postId"])
                                 validator = str(ev["args"]["validator"])
-                                assertion_index = int(ev["args"]["asertionIndex"])
+                                assertion_index = int(ev["args"]["asertionIndex"])+1
 
                                 logger.info(
                                     f"📨 ValidationSubmitted | "
@@ -645,7 +645,7 @@ async def blockchain_event_listener():
                                     payload=ValidationCompletedPayload(
                                         postId=post_id,
                                         idValidator=validator,
-                                        idAssertion=str(assertion_index+1),
+                                        idAssertion=str(assertion_index),
                                         approval=validation_json.get("estado"),
                                         text=validation_json.get("descripcion", ""),
                                         tx_hash=tx_hash,

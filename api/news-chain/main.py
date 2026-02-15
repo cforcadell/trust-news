@@ -574,7 +574,7 @@ async def blockchain_event_listener():
                                     payload=RequestValidationPayload(
                                         postId=post_id,
                                         idValidator=validator,
-                                        idAssertion=str(assertion_index),
+                                        idAssertion=str(assertion_index+1),
                                         text=text,
                                     ),
                                 )
@@ -582,7 +582,7 @@ async def blockchain_event_listener():
                                 logger.info(
                                     f"📦 Mensaje Kafka construido | "
                                     f"topic={KAFKA_RESPONSE_TOPIC} "
-                                    f"post={post_id} assertion={assertion_index}"
+                                    f"post={post_id} assertion={assertion_index+1}"
                                 )
                                 await producer.send_and_wait(
                                     KAFKA_RESPONSE_TOPIC,
@@ -594,6 +594,7 @@ async def blockchain_event_listener():
                                     f"topic={KAFKA_RESPONSE_TOPIC} "
                                     f"post={post_id} assertion={assertion_index}"
                                 )
+                                continue  # Si se procesó como ValidationRequested, no intentamos ValidationSubmitted
 
                             except Exception as e:
                                 if "event signature did not match" in str(e):
@@ -644,7 +645,7 @@ async def blockchain_event_listener():
                                     payload=ValidationCompletedPayload(
                                         postId=post_id,
                                         idValidator=validator,
-                                        idAssertion=str(assertion_index),
+                                        idAssertion=str(assertion_index+1),
                                         approval=validation_json.get("estado"),
                                         text=validation_json.get("descripcion", ""),
                                         tx_hash=tx_hash,

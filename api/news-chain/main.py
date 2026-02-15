@@ -6,6 +6,7 @@ import logging
 import asyncio
 import base58
 import requests
+import ast
 
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query
@@ -595,7 +596,10 @@ async def blockchain_event_listener():
                                 )
 
                             except Exception as e:
-                                logger.error(f"❌ Error procesando ValidationRequested: {str(e)}")
+                                if "event signature did not match" in str(e):
+                                    pass  # No es este evento, continuar
+                                else:
+                                    logger.error(f"❌ Error procesando ValidationRequested: {str(e)}")
 
                             # =================================================
                             # ValidationSubmitted
@@ -615,17 +619,25 @@ async def blockchain_event_listener():
                                     f"tx={tx_hash}"
                                 )
 
-                                cid_post = multihash_to_base58_dict(
-                                    ev["args"]["postDocument"]
-                                )
+                                #cid_post = multihash_to_base58_dict(
+                                #    ev["args"]["postDocument"]
+                                #)
                                 cid_validation = multihash_to_base58_dict(
                                     ev["args"]["validationDocument"]
                                 )
 
-                                post_json = json.loads(ipfs_get_text(cid_post))
-                                validation_json = json.loads(
-                                    ipfs_get_text(cid_validation)
-                                )
+                                #post_json = json.loads(ipfs_get_text(cid_post))
+                                raw_validation = json.loads(ipfs_get_text(cid_validation))
+
+                                content_str = raw_validation.get("content", "")
+
+                                # Si viene como b'...'
+                                if content_str.startswith("b'") or content_str.startswith('b"'):
+                                    # Convertir string representando bytes → bytes reales
+                                    content_bytes = ast.literal_eval(content_str)
+                                    content_str = content_bytes.decode("utf-8")
+
+                                validation_json = json.loads(content_str)
 
                                 msg = ValidationCompletedResponse(
                                     order_id="",
@@ -633,8 +645,8 @@ async def blockchain_event_listener():
                                         postId=post_id,
                                         idValidator=validator,
                                         idAssertion=str(assertion_index),
-                                        approval=validation_json.get("approval"),
-                                        text=validation_json.get("text", ""),
+                                        approval=validation_json.get("estado"),
+                                        text=validation_json.get("descripcion", ""),
                                         tx_hash=tx_hash,
                                         validator_alias=validation_json.get(
                                             "validator_alias", ""
@@ -648,7 +660,7 @@ async def blockchain_event_listener():
                                 )
 
                             except Exception as e:
-                                logger.error(f"❌ Error procesando ValidationRequested: {str(e)}")
+                                logger.error(f"❌ Error procesando ValidationSubmitted: {str(e)}")
                                 pass
 
                 last_block = latest

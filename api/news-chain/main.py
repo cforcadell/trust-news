@@ -358,21 +358,23 @@ def get_info_by_postid(post_id: int):
         # =====================================================
         # 1️⃣ Recuperar los campos planos del Post
         # =====================================================
-        document, publisher, hash_new = contract.functions.getPostFlat(post_id).call()
+        document, publisher = contract.functions.getPostFlat(post_id).call()
 
         logger.info(f"Recuperados datos planos para postId {post_id}: "
-                    f"publisher={publisher}, document={document}, hash_new={hash_new}")
+                    f"publisher={publisher}, document={document}")
 
         post_info = {
             "postId": post_id,
             "publisher": publisher,
             "cid": multihash_to_base58(document)
         }
+        logger.info(f"Post plano construido para postId {post_id}: {post_info}")
 
         # =====================================================
         # 2️⃣ Recuperar aserciones y validaciones
         # =====================================================
         asertions_raw = contract.functions.getAsertionsWithValidations(post_id).call()
+        logger.info(f"RAW asertionsWithValidations: {asertions_raw}")
         logger.info(f"Recuperadas {len(asertions_raw)} aserciones para postId {post_id}.")
         asertions = []
 
@@ -381,8 +383,8 @@ def get_info_by_postid(post_id: int):
                 logger.info(f"Procesando aserción #{idx_a}: {a}")
 
                 # a = (Multihash, ValidationView[], categoryId)
-                category_id = a[1] if len(a) > 2 else a[0]
-                raw_validations = a[0] if isinstance(a[0], (list, tuple)) else []
+                category_id = a[0]
+                raw_validations = a[1]
 
 
                 logger.info(f"Aserción #{idx_a} tiene {len(raw_validations)} validaciones.")

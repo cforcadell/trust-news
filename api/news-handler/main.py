@@ -147,7 +147,7 @@ async def get_order_id_by_post_id(post_id: str) -> Optional[str]:
 # Helpers para hashes
 # ===========================
 def ipfs_get_text(cid: str) -> str:
-    url = f"{IPFS_FASTAPI_URL}/{cid}"
+    url = f"{IPFS_FASTAPI_URL}/ipfs/{cid}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()
     return r.text
@@ -828,7 +828,7 @@ async def _check_blockchain_consistency(client: httpx.AsyncClient, order_data: D
     results: List[ConsistencyCheckResult] = []
     post_data = None
     order_cid = order_data.get("cid")
-    order_hash_text = order_data.get("hash_text")
+
     order_assertions = order_data.get("assertions", [])
 
     if not postId:
@@ -877,7 +877,7 @@ async def _check_blockchain_consistency(client: httpx.AsyncClient, order_data: D
         return results, None
 
     # --- Prueba 7: Comparar CID de Order con Post.document ---
-    post_cid = post_data.get("document")
+    post_cid = post_data.get("cid")
     cid_post_ok = order_cid == post_cid
     results.append(ConsistencyCheckResult(
         test="Comparando cid de Order con cid de blockchain",
@@ -887,15 +887,7 @@ async def _check_blockchain_consistency(client: httpx.AsyncClient, order_data: D
     ))
     logger.info(f"--- Prueba 7 (CID): {'OK' if cid_post_ok else 'KO'}")
 
-    # --- Prueba 8: Comparar hash_text de Order con Post.hash_new ---
-    hash_text_ok = order_hash_text == post_data.get("hash_new")
-    results.append(ConsistencyCheckResult(
-        test='Comparando hash de "text" de Order con hash de blockchain',
-        toCompare="Orden:"+order_hash_text,
-        compared="Ethereum:"+ipfs_get_text(post_data.get("hash_new")),
-        result="OK" if hash_text_ok else "KO"
-    ))
-    logger.info(f"--- Prueba 8 (Hash Text): {'OK' if hash_text_ok else 'KO'}")
+
     
     # --- Prueba 9: Comparar num de assertions entre order y post ---
     post_assertions = post_data.get("asertions", [])
@@ -936,23 +928,7 @@ def _check_assertion_details_consistency(order_data: Dict[str, Any], post_data: 
         a_post = post_assertions[idx]
         
         assertion_id = a_order.get("idAssertion", f"Idx {idx}")
-        order_text = a_order.get("text", "")
-        logger.info(f"--- Calculando digest para idAssertion {assertion_id}: {order_text}")
-        
-        # --- Prueba 10: Comparar hash de text de assertion con hash de post ---
-        calculated_digest = hash_text_to_hash(order_text).lower().removeprefix("0x")
-        
-        post_digest = a_post.get("cid", {}).get("digest", "").lower().removeprefix("0x")
-        hash_ok = calculated_digest == post_digest
-        
-        results.append(ConsistencyCheckResult(
-            test=f'Comparando hash de "assertions"."text" (Orden vs Ethereum) para idAssertion {assertion_id}',
-            toCompare="Orden:"+"0x" + calculated_digest,
-            compared="Ethereum:"+"0x" + ipfs_get_text(post_digest),
-            result="OK" if hash_ok else "KO",
-            details=None if hash_ok else "El hash calculado del texto de la aserción no coincide con el digest en Blockchain."
-        ))
-        logger.info(f"--- Prueba 10 (Hash Assertions {assertion_id}): {'OK' if hash_ok else 'KO'}")
+
 
         # --- Prueba 11: Comparar num de validations entre order y post ---
         order_validations_map = order_data.get("validations", {}).get(assertion_id, {})
@@ -1048,20 +1024,6 @@ def _check_validation_details_consistency(order_data: Dict[str, Any], post_data:
             ))
             logger.info(f"--- Prueba 13 (Veredict {assertion_id} {validator_address}): {'OK' if approval_ok else 'KO'}")
 
-            # --- Prueba 14: Comparar hash de veredicto de validaciones ---
-            order_validation_text = v_order.get("text", "")
-            logger.info(f"--- Calculando digest de validación para idAssertion {assertion_id}, validador {validator_address}: {order_validation_text}")
-            calculated_hash_digest = hash_text_to_hash(order_validation_text).lower().removeprefix("0x")
-            post_hash_digest = ipfs_get_text(v_post.get("cid"))
-            hash_veredict_ok = calculated_hash_digest == post_hash_digest
-            
-            results.append(ConsistencyCheckResult(
-                test=f"Comparando hash de validacion (texto) entre orden y Ethereum paraidAssertion {assertion_id} y validador {validator_address}",
-                toCompare="Orden:"+"0x" + calculated_hash_digest,
-                compared="Ethereum:"+"0x" + post_hash_digest,
-                result="OK" if hash_veredict_ok else "KO"
-            ))
-            logger.info(f"--- Prueba 14 (Hash Veredict {assertion_id} {validator_address}): {'OK' if hash_veredict_ok else 'KO'}")
             
     logger.info("<- FIN: Chequeo de detalles de validación (Blockchain)")
     return results

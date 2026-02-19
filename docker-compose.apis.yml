@@ -5,9 +5,8 @@ x-global-environment: &global-env
   #RPC_URL: http://172.17.0.1:8545 #Hardhat
   #CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3 #Hardhat
   RPC_URL: http://geth-rpc-endpoint:8555 # Geth Private Network
-  CONTRACT_ADDRESS: 0x9eA62eb7944349C407B307025644E47bF22F8bCc  # Geth Private Network
-  CONTRACT_ABI_PATH: deployments/TrustNews.json
-
+  CONTRACT_ADDRESS: 0x41E9DeEBde30642209218533CEACa485CcDC3782  # Geth Private Network
+  CONTRACT_ABI_PATH: /app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
 services:
   # -------------------------
   # IPFS FastAPI
@@ -60,41 +59,41 @@ services:
     depends_on:
       - ipfs-fastapi
     volumes:
-      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
+      - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
 
-  validate-asertions-worker_2:
-    build: 
-      context: ./api  
-      dockerfile: ./validate-asertions/Dockerfile 
-    container_name: validate-asertions-worker_2
-    ports:
-      - "8069:8070"
-    env_file:
-      - ./api/validate-asertions/.env_openrouter2
-    environment:
-      <<: *global-env
+  # validate-asertions-worker_2:
+  #   build: 
+  #     context: ./api  
+  #     dockerfile: ./validate-asertions/Dockerfile 
+  #   container_name: validate-asertions-worker_2
+  #   ports:
+  #     - "8069:8070"
+  #   env_file:
+  #     - ./api/validate-asertions/.env_openrouter2
+  #   environment:
+  #     <<: *global-env
 
-    depends_on:
-      - ipfs-fastapi
-    volumes:
-      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
+  #   depends_on:
+  #     - ipfs-fastapi
+  #   volumes:
+  #     - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
 
-  validate-asertions-worker_3:
-    build: 
-      context: ./api  
-      dockerfile: ./validate-asertions/Dockerfile 
-    container_name: validate-asertions-worker_3
-    ports:
-      - "8068:8070"
-    env_file:
-      - ./api/validate-asertions/.env_openrouter3
-    environment:
-      <<: *global-env
+  # validate-asertions-worker_3:
+  #   build: 
+  #     context: ./api  
+  #     dockerfile: ./validate-asertions/Dockerfile 
+  #   container_name: validate-asertions-worker_3
+  #   ports:
+  #     - "8068:8070"
+  #   env_file:
+  #     - ./api/validate-asertions/.env_openrouter3
+  #   environment:
+  #     <<: *global-env
 
-    depends_on:
-      - ipfs-fastapi
-    volumes:
-      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
+  #   depends_on:
+  #     - ipfs-fastapi
+  #   volumes:
+  #     - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
 
   # -------------------------
   # News Handler
@@ -133,22 +132,21 @@ services:
     volumes:
       - ./api/news-chain:/app
       - ./api/common:/app/common
-      - ./smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json:/app/deployments/TrustNews.json
+      - ./smart-contracts/artifacts:/app/smart-contracts/artifacts
 
-    # -------------------------
-  # Frontend Web
-  # -------------------------
   frontend-web_classic:
     build: ./web_classic
     container_name: trustnews-frontend_classic
     ports:
       - "8000:80"
+      - "8443:443"
     depends_on:
       - news-handler
     environment:
-      - API_BASE_URL=http://news-handler:8072
+      - API_BASE_URL=https://localhost:8443/api
     volumes:
       - ./web_classic/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web_classic/certs:/etc/nginx/certs:ro
 
   
 networks:

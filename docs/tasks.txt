@@ -1,24 +1,53 @@
 
-Memoria
--------
-Alterar MongoDB y pantalla de validación OK
-Stats: time,ai generate,ai,  validator, veredict, unknown OK
-Analisis de coste. 20 validaciones de 7 aserciones OK
-Conclusiones OK
 
-lenguaje tecnico
-asociar  palabras al glosario
-Mostrar cofigo relevante (smart contract?) OK
-Anexos
-    - Github    OK
-    - Prompts Utilizados OK
-    - Módulo de Estadísticas. OK
+VALIDACIONES COMO CIF Y SMART CONTRACT EFICIENTE + MOVER MESSAGES DE VALIDACION DE KAFKA A eventos
 
-Relectura TFM
-Eliminar comentarios
-Publicar Github
+Al recibir una validacion
 
-Presentació de Video
-Video 
-Presentació Defensa
+- La validacion de asercion en modo blockchain debe subir docuemnto con la validacion a ipfs
+- En lugar de registrar el hash de la validacion registramos cidValidacion
+- Eliminamos hash de texto y aserciones
+
+
+news-handler: OK
+
+   _check_order_retrieval: Adaptarse a nuevo modelo
+   - Los eventos ahora han de seguir teniendo hash de text y de assertions 
+   - la order en mongodb si que deben tener la info (no en los eventos). Si hace falta completarla con ipfs. 
+
+   - Al recibir eventos de blockchain_registered no enviar peticiones de validacion OK
+   process_kafka_message:
+            elif action == "blockchain_registered":
+
+            Transformar segun el evento descrito en el punto siguiente.
+
+            for val in validators_info:...
+            
+    - Ahora los eventos de peticiones de validacion se reciben, en lugar de enviar. Codigo anterior transformar en evento de recepcion OK
+     
+
+validate-assertions: OK
+   Al recibir un evento de validacion, vamos a ipfs a recuperar el documento para saber que validar. OK
+    
+   Al registrar la validacion registramos el cid, en lugar del hash
+    - Guardamos el cid en ipfs OK
+    - En lugar de escuchar en kafka solicitudes de validacion lee de los eventos de la blockchain. OK
+    - Validar como hasta ahora de la blockchain sin enviar mensaje de resuesta a kafka.  OK
+
+news-chain OK
+    Adaptarse a nuevo escenario
+        Nuevas funciones que leen los eventos de la blockchain y recuperen la info necesario (get ipfs, etc...) para simular los eventos actuales
+    Levantar agente que lea de los eventos de la blockchain para dar servicio a cadenas fuera de la blockchain:
+    - Si hay evento de solicitud de validacion envia evento (nuevo) de solicitud de verificación realizada y se envia a topic  de responses
+    - Si hay evento de validacion realizada enviar a topic de responses como los realizada hasta ahora el validador directamente
+
+FE 
+    adaptar pantallas a 
+    - validadores ahora tienen cid 
+    - no guardamos ni hash de noticia ni texto
+    - el comprobador cambia casi por completo.
+
+SmartContract: OK
+    - emitir eventos al registrar nuevo postId para solicitar validacion a los validadores. Al enviar evento de validacion, enviamos postId, cid y numAsercion. OK
+    - emitir evento cuando se ha producido una nueva validacion. OK
 

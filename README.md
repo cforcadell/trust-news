@@ -56,17 +56,8 @@ TrustNews explores a different approach:
 
 ## 🏗️ Architecture (High Level)
 
-```text
-Frontend
-   │
-   ▼
-news-handler (Orchestrator)
-   │
-   ├─ Kafka ─▶ generate-assertions (AI)
-   ├─ Kafka ─▶ ipfs-fastapi (IPFS)
-   ├─ Kafka ─▶ news-chain (Ethereum)
-   └─ Kafka ─▶ validate-assertions (AI Validators)
-```
+
+<img src="./docs/img/Architecture.png" width="70%"/>
 
 **Key traits**:
 
@@ -174,8 +165,9 @@ Ensuring the system is **auditable and tamper-resistant**.
 ---
 
 ## 🛣️ Roadmap
-* [ ] Secure and authenticate plattform
-* [ ] Support to Hyperledger Besu
+* [X] Secure and authenticate plattform
+* [ ] Migrate requests and responses to Validation from Kafka to Blockchain Events
+* [ ] Support to Hyperledger Besu or Fabric
 * [ ] Integrate UI with IDP and custom chains for user
 * [ ] Validator reputation system
 * [ ] Performance and cost analysis

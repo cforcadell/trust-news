@@ -3,38 +3,31 @@ pragma solidity ^0.8.0;
 
 contract TrustNews {
 
+    // ======================================
+    // ENUMS & STATE
+    // ======================================
 
     enum evaluation {
-        Unknown, // Valor por defecto (índice 0)
-        True,    // Índice 1
-        False    // Índice 2
+        Unknown,
+        True,
+        False
     }
 
     address public owner;
     uint256 public postCounter;
-    
 
-    struct Category {
-        uint256 id;
-        string description;
+    constructor() {
+        owner = msg.sender;
     }
+
+    // ======================================
+    // STRUCTS
+    // ======================================
 
     struct Validator {
-        address validatorAddress;
         string domain;
         uint256 reputation;
-    }
-
-    struct Validation {
-        Validator validator;
-        evaluation veredict;  
-        Multihash hash_description; 
-    }
-
-    struct Asertion {
-        Multihash hash_asertion;
-        Validation[] validations;
-        uint256 categoryId;
+        bool exists;
     }
 
     struct Multihash {
@@ -43,110 +36,152 @@ contract TrustNews {
         bytes32 digest;
     }
 
+    struct Validation {
+        address validator;
+        evaluation veredict;
+        Multihash document;
+    }
+
+    struct Asertion {
+        uint256 categoryId;
+        Validation[] validations;
+        mapping(address => uint256) validationIndex; // index + 1
+    }
+
     struct Post {
         Asertion[] asertions;
-        Multihash document; 
+        Multihash document;
         address publisher;
-        Multihash hashNew; 
     }
+
+    // ===== Views =====
 
     struct ValidationView {
         address validatorAddress;
         string domain;
         uint256 reputation;
         evaluation veredict;
-        Multihash hash_description;
+        Multihash document;
     }
 
     struct AsertionView {
-        Multihash hash_asertion;
+        uint256 categoryId;
         ValidationView[] validations;
-        uint256 categoryId;   
     }
 
-    mapping (bytes32 => uint256) public postsHash;
-    mapping (bytes32 => uint256) public postsCid;
-    mapping (address => Validator) public validators;
-    mapping (uint256 => Validator[]) public validatorsByCategory;
-    mapping (uint256 => string) public categories; 
-    mapping(uint256 => Post) public postsById;
+    // ======================================
+    // STORAGE
+    // ======================================
+
+    mapping(address => Validator) public validators;
     mapping(address => uint256[]) public validatorCategories;
+    mapping(uint256 => address[]) public validatorsByCategory;
+
+    mapping(uint256 => string) public categories;
+
+    mapping(uint256 => Post) public postsById;
+    mapping(bytes32 => uint256) public postsCid;
+
+    // ======================================
+    // EVENTS
+    // ======================================
 
 
-    event RegisterNewResult(uint256  postId,Multihash hashNews,address[][] validatorAddressesByAsertion);
 
+    // Se emite por CADA validador asignado a una aserción
+    event ValidationRequested(
+        uint256 postId,
+        Multihash postDocument,
+        uint256 asertionIndex,
+        address indexed validator
+    );
 
-    constructor() {
-        owner = msg.sender;
-    } 
+    // Se emite cuando un validador registra o actualiza una validación
+    event ValidationSubmitted(
+        uint256 postId,
+        Multihash postDocument,
+        uint256 asertionIndex,
+        address validator,
+        Multihash validationDocument
+    );
+
+    event RegisterNewResult(
+        uint256  postId,
+        Multihash hash_ipfs,
+        address[][] validatorAddressesByAsertion
+    );
+
 
     // ======================================
     // PUBLICACIONES
     // ======================================
 
-function registerNew(
-    Multihash memory hash_new,
-    Multihash memory hash_ipfs,
-    Asertion[] memory asertions,
-    uint256[] memory categoryIds
-)
-    public
-    returns (
-        uint256 postId,
-        address[][] memory validatorAddressesByAsertion
+    function registerNew(
+        Multihash memory hash_ipfs,
+        uint256[] memory categoryIds
     )
-{
-    require(asertions.length == categoryIds.length, "Cada asercion debe tener su categoria");
+        public
+        returns (
+            uint256 postId,
+            address[][] memory validatorAddressesByAsertion
+        )
+    {
+        require(categoryIds.length > 0, "No categories");
 
-    postCounter++;
-    postId = postCounter;
-    Post storage newPost = postsById[postCounter];
-    newPost.document = hash_ipfs;
-    newPost.hashNew = hash_new;
-    newPost.publisher = msg.sender;
+        postId = ++postCounter;
 
-    uint256 numAsertions = asertions.length;
-    validatorAddressesByAsertion = new address[][](numAsertions);
+        Post storage p = postsById[postId];
+        p.document = hash_ipfs;
+        p.publisher = msg.sender;
 
-    for (uint256 i = 0; i < numAsertions; i++) {
-        uint256 categoryId = categoryIds[i];
-        Validator[] storage catValidators = validatorsByCategory[categoryId];
-        uint256 numValidators = catValidators.length;
+        uint256 n = categoryIds.length;
+        validatorAddressesByAsertion = new address[][](n);
 
-        // Añadimos la aserción con categoryId
-        Asertion storage a = newPost.asertions.push();
-        a.hash_asertion = asertions[i].hash_asertion;
-        a.categoryId = categoryId;  // ← nueva línea
+        for (uint256 i = 0; i < n; i++) {
+            uint256 catId = categoryIds[i];
+            require(bytes(categories[catId]).length != 0, "Category not exists");
 
-        // Creamos el array de direcciones para esta aserción
-        validatorAddressesByAsertion[i] = new address[](numValidators);
+            p.asertions.push();
+            p.asertions[i].categoryId = catId;
 
-        for (uint256 j = 0; j < numValidators; j++) {
-            validatorAddressesByAsertion[i][j] = catValidators[j].validatorAddress;
+            address[] storage v = validatorsByCategory[catId];
+            validatorAddressesByAsertion[i] = v;
+
+            // 🔔 Evento POR CADA VALIDADOR
+            for (uint256 j = 0; j < v.length; j++) {
+                emit ValidationRequested(
+                    postId,
+                    p.document,
+                    i,
+                    v[j]
+                );
+            }
         }
+        emit RegisterNewResult(postId, hash_ipfs, validatorAddressesByAsertion);
+        postsCid[hash_ipfs.digest] = postId;
+
+
     }
-
-    postsHash[hash_new.digest] = postCounter;
-    postsCid[hash_ipfs.digest] = postCounter;
-
-
-    emit RegisterNewResult(postId, hash_new, validatorAddressesByAsertion);
-    return (postId, validatorAddressesByAsertion);
-}
-
 
     // ======================================
     // CONSULTAS
     // ======================================
 
-    function getNewByHash(Multihash memory hash_new) public view returns (Multihash memory hash_cid, uint256 PostId) {
-        PostId = postsHash[hash_new.digest];
-        hash_cid = postsById[PostId].document;
+    function getNewByCid(Multihash memory hash_cid)
+        public
+        view
+        returns (uint256)
+    {
+        return postsCid[hash_cid.digest];
     }
 
-    function getNewByCid(Multihash memory hash_cid) public view returns (Multihash memory hash_new, uint256 PostId) {
-        PostId = postsCid[hash_cid.digest];
-        hash_new = postsById[PostId].hashNew;
+    function getPostFlat(uint256 postId)
+        public
+        view
+        returns (Multihash memory document, address publisher)
+    {
+        Post storage p = postsById[postId];
+        return (p.document, p.publisher);
     }
 
     function getAsertionsWithValidations(uint256 postId)
@@ -155,54 +190,36 @@ function registerNew(
         returns (AsertionView[] memory)
     {
         Post storage p = postsById[postId];
-        uint256 numAsertions = p.asertions.length;
+        uint256 n = p.asertions.length;
 
-        // Array de salida
-        AsertionView[] memory asertionViews = new AsertionView[](numAsertions);
+        AsertionView[] memory result = new AsertionView[](n);
 
-        // Iterar sobre todas las aserciones
-        for (uint256 i = 0; i < numAsertions; i++) {
+        for (uint256 i = 0; i < n; i++) {
             Asertion storage a = p.asertions[i];
-            uint256 numValidations = a.validations.length;
+            uint256 m = a.validations.length;
 
-            // Copiar hash_asertion
-            asertionViews[i].hash_asertion = a.hash_asertion;
-            asertionViews[i].categoryId = a.categoryId;
+            ValidationView[] memory validations = new ValidationView[](m);
 
-            // Crear array temporal de validaciones
-            ValidationView[] memory validationViews = new ValidationView[](numValidations);
-
-            // Copiar las validaciones y los datos del validador
-            for (uint256 j = 0; j < numValidations; j++) {
+            for (uint256 j = 0; j < m; j++) {
                 Validation storage v = a.validations[j];
-                validationViews[j] = ValidationView({
-                    validatorAddress: v.validator.validatorAddress,
-                    domain: v.validator.domain,
-                    reputation: v.validator.reputation,
+                Validator storage val = validators[v.validator];
+
+                validations[j] = ValidationView({
+                    validatorAddress: v.validator,
+                    domain: val.domain,
+                    reputation: val.reputation,
                     veredict: v.veredict,
-                    hash_description: v.hash_description
+                    document: v.document
                 });
             }
 
-            // Asignar al resultado
-            asertionViews[i].validations = validationViews;
+            result[i] = AsertionView({
+                categoryId: a.categoryId,
+                validations: validations
+            });
         }
 
-        return asertionViews;
-    }
-
-
-    function getPostFlat(uint256 postId)
-        public
-        view
-        returns (
-            Multihash memory document,
-            address publisher,
-            Multihash memory hashNew
-        )
-    {
-        Post storage p = postsById[postId];
-        return (p.document, p.publisher, p.hashNew);
+        return result;
     }
 
     // ======================================
@@ -210,107 +227,104 @@ function registerNew(
     // ======================================
 
     function addCategory(uint256 id, string memory description) public {
-        require(msg.sender == owner, "Only owner can add categories");
-        require(bytes(categories[id]).length == 0, "Category already exists");
+        require(msg.sender == owner, "Only owner");
+        require(bytes(categories[id]).length == 0, "Category exists");
         categories[id] = description;
     }
 
-    function registerValidator(string memory name, uint256[] memory categoryIds) public {
-        require(bytes(name).length != 0, "Invalid name");
-        require(categoryIds.length != 0, "Invalid categories");
-        require(validators[msg.sender].validatorAddress == address(0), "Validator already registered");
+    function registerValidator(
+        string memory domain,
+        uint256[] memory categoryIds
+    ) public {
+        require(!validators[msg.sender].exists, "Already validator");
+        require(bytes(domain).length != 0, "Invalid domain");
+        require(categoryIds.length > 0, "No categories");
 
-        for (uint i = 0; i < categoryIds.length; i++) {
-            uint256 catId = categoryIds[i];
-            require(bytes(categories[catId]).length != 0, "Category not registered");
-        }
+        validators[msg.sender] = Validator({
+            domain: domain,
+            reputation: 0,
+            exists: true
+        });
 
-        validators[msg.sender] = Validator(msg.sender, name, 0);
         validatorCategories[msg.sender] = categoryIds;
 
-        for (uint i = 0; i < categoryIds.length; i++) {
+        for (uint256 i = 0; i < categoryIds.length; i++) {
             uint256 catId = categoryIds[i];
-            validatorsByCategory[catId].push(validators[msg.sender]);
+            require(bytes(categories[catId]).length != 0, "Category not exists");
+            validatorsByCategory[catId].push(msg.sender);
         }
     }
 
     function unregisterValidator() public {
-        require(validators[msg.sender].validatorAddress != address(0), "Validator not registered");
+        require(validators[msg.sender].exists, "Not validator");
 
         uint256[] storage cats = validatorCategories[msg.sender];
 
         for (uint256 i = 0; i < cats.length; i++) {
             uint256 catId = cats[i];
-            Validator[] storage catValidators = validatorsByCategory[catId];
+            address[] storage list = validatorsByCategory[catId];
 
-            for (uint256 j = 0; j < catValidators.length; j++) {
-                if (catValidators[j].validatorAddress == msg.sender) {
-                    // swap & pop
-                    catValidators[j] = catValidators[catValidators.length - 1];
-                    catValidators.pop();
+            for (uint256 j = 0; j < list.length; j++) {
+                if (list[j] == msg.sender) {
+                    list[j] = list[list.length - 1];
+                    list.pop();
                     break;
                 }
             }
         }
 
-        // Limpieza final
         delete validatorCategories[msg.sender];
         delete validators[msg.sender];
     }
 
-
-
-    function getValidatorsByCategory(uint256 categoryId) public view returns (address[] memory) {
-        Validator[] storage catValidators = validatorsByCategory[categoryId];
-        uint256 numValidators = catValidators.length;
-        address[] memory validatorAddresses = new address[](numValidators);
-
-        for (uint256 i = 0; i < numValidators; i++) {
-            validatorAddresses[i] = catValidators[i].validatorAddress;
-        }
-
-        return validatorAddresses;
+    function getValidatorsByCategory(uint256 categoryId)
+        public
+        view
+        returns (address[] memory)
+    {
+        return validatorsByCategory[categoryId];
     }
+
+    // ======================================
+    // VALIDACIONES
+    // ======================================
 
     function addValidation(
         uint256 postId,
         uint256 asertionIndex,
         evaluation veredict,
-        Multihash memory hash_description
+        Multihash memory document
     ) public {
-        // Asegurar que el validador está registrado
-        require(
-            validators[msg.sender].validatorAddress != address(0),
-            "Validator not registered"
-        );
+        require(validators[msg.sender].exists, "Not validator");
 
-        // Recuperar el post y verificar índices válidos
         Post storage p = postsById[postId];
-        require(asertionIndex < p.asertions.length, "Invalid asertion index");
+        require(asertionIndex < p.asertions.length, "Invalid asertion");
 
-        // Buscar si el validador ya emitió una validación
-        Validation[] storage validations = p.asertions[asertionIndex].validations;
-        bool updated = false;
+        Asertion storage a = p.asertions[asertionIndex];
+        uint256 idx = a.validationIndex[msg.sender];
 
-        for (uint256 i = 0; i < validations.length; i++) {
-            if (validations[i].validator.validatorAddress == msg.sender) {
-                //Actualizar validación existente
-                validations[i].veredict = veredict;
-                validations[i].hash_description = hash_description;
-                updated = true;
-                break;
-            }
+        if (idx == 0) {
+            a.validations.push(
+                Validation({
+                    validator: msg.sender,
+                    veredict: veredict,
+                    document: document
+                })
+            );
+            a.validationIndex[msg.sender] = a.validations.length;
+        } else {
+            Validation storage v = a.validations[idx - 1];
+            v.veredict = veredict;
+            v.document = document;
         }
 
-        // Si no existe, añadir nueva validación
-        if (!updated) {
-            Validation memory v = Validation({
-                validator: validators[msg.sender],
-                veredict: veredict,
-                hash_description: hash_description
-            });
-            validations.push(v);
-        }
+        // 🔔 Evento de validación registrada (nueva o actualizada)
+        emit ValidationSubmitted(
+            postId,
+            p.document,
+            asertionIndex,
+            msg.sender,
+            document
+        );
     }
-
 }

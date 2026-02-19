@@ -1418,19 +1418,30 @@ function renderPost(post) {
     const rows = [
         ["postId", post.postId],
         ["publisher", post.publisher],
-        ["document", post.document],
-        ["hash_new", post.hash_new]
+        ["document", post.cid]
     ];
 
     postTable.innerHTML = `
         <tr><th>Campo</th><th>Valor</th></tr>
-        ${rows.map(([k, v]) => `
-            <tr>
-                <th>${k}</th>
-                <td>${v ?? ""}</td>
-            </tr>
-        `).join("")}
+        ${rows.map(([k, v]) => {
+
+            // Si es CID, lo convertimos en enlace
+            if (k === "document" && v) {
+                v = `<a href="#" 
+                        onclick="event.preventDefault(); navigateToIpfs('${v}'); return false;">
+                        ${v}
+                    </a>`;
+            }
+
+            return `
+                <tr>
+                    <th>${k}</th>
+                    <td>${v ?? ""}</td>
+                </tr>
+            `;
+        }).join("")}
     `;
+
     container.appendChild(postTable);
 
     // ===== Árbol de Aserciones =====
@@ -1481,8 +1492,18 @@ function renderPost(post) {
                         <tr><th>Dominio</th><td>${v.domain}</td></tr>
                         <tr><th>Reputación</th><td>${v.reputation}</td></tr>
                         <tr><th>Veredicto</th><td>${mapVeredict(v.veredict)}</td></tr>
-                        <tr><th>Digest Descripción</th><td>${v.hash_description?.digest ?? ""}</td></tr>
+                        <tr><th>cid</th>
+                            <td>
+                                ${v.cid 
+                                    ? `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${v.cid}'); return false;">
+                                            ${v.cid}
+                                    </a>`
+                                    : ""
+                                }
+                            </td>
+                        </tr>
                     `;
+
                     content.appendChild(validationTable);
                 });
             }

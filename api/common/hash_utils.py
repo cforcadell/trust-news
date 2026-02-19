@@ -52,7 +52,14 @@ def multihash_to_base58(multihash_tuple: tuple) -> str:
         logger.warning(f"Error en multihash_to_base58: {e}")
         return None
 
+def multihash_to_base58_dict(multihash_obj):
+    hash_function = multihash_obj["hash_function"]
+    hash_size = multihash_obj["hash_size"]
+    digest = multihash_obj["digest"]
 
+    full_multihash = hash_function + hash_size + digest
+
+    return base58.b58encode(full_multihash).decode()
 
 
 def hash_text_to_hash(text: str) -> str:

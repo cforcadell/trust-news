@@ -288,3 +288,9 @@ eth.getBlock("latest").gasLimit
 ```
 
 ---
+
+### UnregisterValidator
+  export VALIDATOR_PK=0xPRIVATE_KEY  
+  export CONTRACT_ADDRESS=0xCONTRACT_ADDRESS;
+
+  npx hardhat run scripts/unregisterValidator.js --network privateGeth 

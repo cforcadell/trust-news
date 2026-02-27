@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: news-handler
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: news-handler
+  template:
+    metadata:
+      labels:
+        app: news-handler
+    spec:
+      containers:
+      - name: news-handler
+        image: tfm-news-handler:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8072
+        envFrom:
+        - configMapRef:
+            name: news-handler-config
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: news-handler-secrets
+              key: MONGO_URI

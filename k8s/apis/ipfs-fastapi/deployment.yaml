@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ipfs-fastapi
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ipfs-fastapi
+  template:
+    metadata:
+      labels:
+        app: ipfs-fastapi
+    spec:
+      containers:
+      - name: ipfs-fastapi
+        image: tfm-ipfs-fastapi:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8060
+        envFrom:
+        - configMapRef:
+            name: ipfs-fastapi-config
+        env:
+        # Apuntamos al servicio interno de IPFS en el namespace infra
+        - name: IPFS_HOST
+          value: "ipfs.infra.svc.cluster.local"
+        - name: IPFS_PORT
+          value: "5001"

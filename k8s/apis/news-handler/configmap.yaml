@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: news-handler-config
+  namespace: apis
+data:
+  # --- Kafka ---
+  KAFKA_BROKER: "kafka.infra.svc.cluster.local:9092"
+  KAFKA_SECURITY_PROTOCOL: "PLAINTEXT"
+  KAFKA_MECHANISM: "PLAIN"
+  
+  # --- Tópicos ---
+  TOPIC_REQUESTS_GENERATE: "fake_news_requests_generate"
+  TOPIC_REQUESTS_IPFS: "fake_news_requests_ipfs"
+  TOPIC_REQUESTS_BLOCKCHAIN: "fake_news_requests_blockchain"
+  TOPIC_REQUESTS_VALIDATE: "fake_news_requests_validate"
+  TOPIC_RESPONSES: "fake_news_responses"
+  
+  # --- MongoDB ---
+  MONGO_DBNAME: "newsdb"
+  MONGO_COLLECTION: "news"
+  
+  # --- App Config ---
+  MAX_WORKERS: "3"
+  EMULATE_BLOCKCHAIN_REQUESTS: "false"
+  
+  # --- URLs Internas ---
+  IPFS_FASTAPI_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"
+  NEWS_CHAIN_URL: "http://news-chain.apis.svc.cluster.local:8073"

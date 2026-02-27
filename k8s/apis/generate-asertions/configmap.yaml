@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: generate-asertions-config
+  namespace: apis
+data:
+  OPENROUTER_MODEL: "arcee-ai/trinity-large-preview:free"
+  OPENROUTER_API_URL: "https://openrouter.ai/api/v1/chat/completions"
+  AI_PROVIDER: "openrouter"
+  KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
+  KAFKA_REQUEST_TOPIC: "fake_news_requests_generate"
+  KAFKA_RESPONSE_TOPIC: "fake_news_responses"
+  LOG_LEVEL: "INFO"
+  HTTP_TIMEOUT: "60"
+  PROMPT: |
+    Extrae únicamente aserciones verificables con datos cuantificables
+    (cifras, porcentajes, cantidades, fechas o magnitudes) o verificables de forma factual.
+    Excluye opiniones, valoraciones, predicciones o lenguaje subjetivo.
+    Cada aserción debe ser una frase completa, autocontenida y con el contexto mínimo necesario.
+    Clasifica cada aserción usando: 1 ECONOMÍA, 2 DEPORTES, 3 POLÍTICA, 4 TECNOLOGÍA, 5 SALUD, 6 ENTRETENIMIENTO, 7 CIENCIA, 8 CULTURA, 9 MEDIO AMBIENTE, 10 SOCIAL.
+    Devuelve exclusivamente un array JSON válido: [{ "idAssertion": 1, "text": "...", "categoryId": 3 }]

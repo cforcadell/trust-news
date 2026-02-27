@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ipfs-fastapi-config
+  namespace: apis
+data:
+  # Cambiamos 'ipfs' por el nombre DNS completo en el namespace infra
+  IPFS_API_ADD: "http://ipfs.infra.svc.cluster.local:5001/api/v0/add"
+  IPFS_API_CAT: "http://ipfs.infra.svc.cluster.local:5001/api/v0/cat"
+  
+  # Cambiamos 'kafka' por su DNS completo
+  KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
+  
+  KAFKA_REQUEST_TOPIC: "fake_news_requests_ipfs"
+  KAFKA_RESPONSE_TOPIC: "fake_news_responses"
+  LOG_LEVEL: "INFO" # Lo subo a INFO para que veas si conecta en los logs
+  LOG_FORMAT: "%(asctime)s [%(levelname)s] %(name)s - %(message)s"

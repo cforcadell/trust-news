@@ -1,0 +1,14 @@
+# k8s/apis/generate-asertions/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: generate-asertions
+  namespace: apis
+spec:
+  selector:
+    app: generate-asertions
+  ports:
+  - protocol: TCP
+    port: 8071        # Puerto expuesto del servicio
+    targetPort: 8071  # Puerto al que apunta en el contenedor
+  type: ClusterIP     # Solo visible dentro del clúster

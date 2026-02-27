@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: geth-miner
+  namespace: blockchain
+spec:
+  serviceName: geth-miner
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geth-miner
+  template:
+    metadata:
+      labels:
+        app: geth-miner
+    spec:
+      initContainers:
+        - name: init-blockchain
+          image: ethereum/client-go:v1.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -d "/root/.ethereum/geth/chaindata" ]; then
+                echo "Inicializando la blockchain Miner y restaurando cuentas..."
+                geth init /etc/geth/genesis.json
+                
+                # Creamos el directorio de keystores
+                mkdir -p /root/.ethereum/keystore
+                
+                # Copiamos TODAS las cuentas del Secret montado
+                cp /etc/keystores/* /root/.ethereum/keystore/ 2>/dev/null || true
+                
+                echo "Cuentas del minero restauradas con éxito."
+              else
+                echo "La blockchain ya está inicializada. Omitiendo..."
+              fi
+          volumeMounts:
+            # Aquí usamos 'miner-data' para que coincida con el volumeClaimTemplate
+            - name: miner-data
+              mountPath: /root/.ethereum
+            - name: config-volume
+              mountPath: /etc/geth/genesis.json
+              subPath: genesis.json
+            - name: keystores-volume
+              mountPath: /etc/keystores
+      containers:
+        - name: geth-miner
+          image: ethereum/client-go:v1.10.1
+          # Usamos sh -c y exec para que evalúe correctamente las variables del envFrom
+          command:
+            - /bin/sh
+            - -c
+            - |
+              exec geth \
+                --bootnodes=$BOOT_NODES \
+                --mine \
+                --miner.threads=1 \
+                --networkid=$NETWORK_ID \
+                --unlock=$MASTER_PUBLIC_KEY \
+                --password=/root/.ethereum/password.txt \
+                --miner.etherbase=$MASTER_PUBLIC_KEY \
+                --http \
+                --http.addr=0.0.0.0 \
+                --http.port=8557 \
+                --http.api=eth,web3,net,admin,personal \
+                --allow-insecure-unlock \
+                --port=30305 \
+                --miner.gaslimit=$GAS_LIMIT
+          envFrom:
+            - configMapRef:
+                name: ethereum-config
+          ports:
+            - containerPort: 30305
+              name: p2p
+            - containerPort: 8557
+              name: http
+          volumeMounts:
+            - name: miner-data
+              mountPath: /root/.ethereum
+            - name: secret-volume
+              mountPath: /root/.ethereum/password.txt
+              subPath: ACCOUNT_PASSWORD
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ethereum-config
+        - name: secret-volume
+          secret:
+            secretName: ethereum-secrets
+        - name: keystores-volume
+          secret:
+            secretName: ethereum-keystores
+  volumeClaimTemplates:
+    - metadata:
+        name: miner-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

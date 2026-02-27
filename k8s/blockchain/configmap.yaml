@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ethereum-config
+  namespace: blockchain
+data:
+  # 1. Tus variables de entorno originales
+  NETWORK_ID: "1214"
+  BOOT_NODES: "enode://af22c29c316ad069cf48a09a4ad5cf04a251b411e45098888d114c6dd7f489a13786620d5953738762afa13711d4ffb3b19aa5de772d8af72f851f7e9c5b164a@geth-bootnode:30304"
+  MASTER_PUBLIC_KEY: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5"
+  GAS_LIMIT: "90000000"
+  NODE_KEY_HEX: "b0ac22adcad37213c7c565810a50f1772291e7b0ce53fb73e7ec2a3c75bc13b5"
+  
+  # 2. Tu archivo genesis.json
+  genesis.json: |
+    {
+      "config": {
+        "chainId": 1214,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "clique": {
+          "period": 5,
+          "epoch": 30000
+        }
+      },
+      "nonce": "0x0",
+      "timestamp": "0x0",
+      "extraData": "0x00000000000000000000000000000000000000000000000000000000000000001747d8ab4dbdc6b2abe233d5688487a39bc555b50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "gasLimit": "0xFFFFFFF",
+      "difficulty": "0x1",
+      "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "coinbase": "0x0000000000000000000000000000000000000000",
+      "alloc": {
+        "1747d8ab4dbdc6b2abe233d5688487a39bc555b5": {
+          "balance": "0x3635C9ADC5DEA00000"
+        }
+      },
+      "number": "0x0",
+      "gasUsed": "0x0",
+      "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "baseFeePerGas": null
+    }

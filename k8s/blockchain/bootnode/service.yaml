@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: geth-bootnode
+  namespace: blockchain
+spec:
+  # Usamos ClusterIP porque el bootnode solo necesita ser accesible dentro del clúster
+  type: ClusterIP
+  selector:
+    app: geth-bootnode
+  ports:
+    # Geth necesita TCP para la conexión y UDP para el descubrimiento
+    - name: p2p-tcp
+      port: 30304
+      targetPort: 30304
+      protocol: TCP
+    - name: p2p-udp
+      port: 30304
+      targetPort: 30304
+      protocol: UDP

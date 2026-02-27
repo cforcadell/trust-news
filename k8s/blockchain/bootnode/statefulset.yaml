@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: geth-bootnode
+  namespace: blockchain
+spec:
+  serviceName: geth-bootnode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geth-bootnode
+  template:
+    metadata:
+      labels:
+        app: geth-bootnode
+    spec:
+      # 1. Añadimos el initContainer para que cargue tu genesis.json
+      initContainers:
+        - name: init-blockchain
+          image: ethereum/client-go:v1.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -d "/root/.ethereum/geth/chaindata" ]; then
+                echo "Inicializando la blockchain del Bootnode..."
+                geth init /etc/geth/genesis.json
+              else
+                echo "Bootnode ya inicializado. Omitiendo..."
+              fi
+          volumeMounts:
+            - name: bootnode-data
+              mountPath: /root/.ethereum
+            - name: config-volume
+              mountPath: /etc/geth/genesis.json
+              subPath: genesis.json
+      containers:
+        - name: geth-bootnode
+          image: ethereum/client-go:v1.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # 2. Quitamos el --nodiscover y forzamos el puerto de descubrimiento
+              exec geth \
+                --nodekeyhex=$NODE_KEY_HEX \
+                --networkid=$NETWORK_ID \
+                --http=false \
+                --ws=false \
+                --ipcdisable \
+                --mine=false \
+                --port=30304 \
+                --nodiscover \
+                --nat=none \
+                --bootnodes=""
+          envFrom:
+            - configMapRef:
+                name: ethereum-config
+          ports:
+            - containerPort: 30304
+              name: p2p
+          volumeMounts:
+            - name: bootnode-data
+              mountPath: /root/.ethereum
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ethereum-config
+  volumeClaimTemplates:
+    - metadata:
+        name: bootnode-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

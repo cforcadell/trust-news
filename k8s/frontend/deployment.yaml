@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-web
+  namespace: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend-web
+  template:
+    metadata:
+      labels:
+        app: frontend-web
+    spec:
+      containers:
+      - name: frontend
+        image: tfm-frontend-web_classic:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        - containerPort: 443
+        env:
+        - name: API_BASE_URL
+          # Para que el JS del frontend sepa a qué ruta interna de Nginx llamar
+          value: "/api" 
+        volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+          readOnly: true
+        - name: certs
+          mountPath: /etc/nginx/certs
+          readOnly: true
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-config
+      - name: certs
+        secret:
+          secretName: frontend-tls

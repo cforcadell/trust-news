@@ -123,6 +123,47 @@ kubectl port-forward service/geth-rpc-endpoint 8545:8555 -n blockchain
 #current term (review before hardhat.config.js)
 cd smart-contracts
 npx hardhat run scripts/deployGeth.js --network privateGeth
+
+#fund accounts
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
+
+#fund accounts
+
+
+eth.sendTransaction({
+  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
+  to: "a28885a13a7b4d3561a7af64ea1ba0f82ed9f06b",
+  value: web3.toWei(10, "ether")
+})
+
+
+eth.sendTransaction({
+  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
+  to: "4504a1d4047583164919ae40c37c4f4c5b854bbb",
+  value: web3.toWei(10, "ether")
+})
+
+
+eth.sendTransaction({
+  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
+  to: "edbef53fc17dde65bf303b3d4983afb7028eb6eb",
+  value: web3.toWei(10, "ether")
+})
+
+
+eth.sendTransaction({
+  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
+  to: "be794abf86d173ddcfe937c6d8d739bdc4e94165",
+  value: web3.toWei(10, "ether")
+})
+
+
+eth.sendTransaction({
+  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
+  to: "42d488d0393fd1d6b72bb424db28dd7eb5e06737",
+  value: web3.toWei(10, "ether")
+})
+
 ```
 
 **apis**
@@ -195,7 +236,7 @@ kubectl describe pod news-chain-5d7b789cf9-r59sb -n apis
 
 #validators
 
-kind load docker-image tfm-validate-asertions:latest --name trust-news
+kind load docker-image tfm-validate-asertions-worker_1:latest --name trust-news
 
 #Para cada validador
 # Para el validador 1
@@ -263,4 +304,19 @@ kubectl port-forward service/frontend-service 30443:443 -n frontend --address 0.
 
 #local
 https://192.168.56.108:30443/
+```
+
+En caso de querer reconstruir una imagen
+
+```bash
+#rebuil de la imagen
+
+kind load docker-image tfm-news-chain:latest --name trust-news
+
+kubectl rollout restart deployment news-chain -n apis
+
+kubectl get pods -n apis
+
+kubectl logs -f news-chain-7f5dbdd667-zzv7p -n apis
+
 ```

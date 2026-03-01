@@ -674,9 +674,10 @@ async def blockchain_event_listener():
 
 
 
-
 async def consume_register_kafka():
     """Consume mensajes de Kafka para registrarlos en la Blockchain."""
+    logger.info(f"Iniciando consumidor Kafka en {KAFKA_BOOTSTRAP}...")
+    
     consumer = AIOKafkaConsumer(
         KAFKA_REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
@@ -688,54 +689,77 @@ async def consume_register_kafka():
     try:
         await consumer.start()
         await producer.start()
-        logger.info("Kafka consumer y producer iniciados")
+        logger.info(f"✅ Conectado a Kafka. Escuchando: {KAFKA_REQUEST_TOPIC}")
 
         async for msg in consumer:
             payload_msg = {}
+            start_time = asyncio.get_event_loop().time()
+            
             try:
+                # 1. Parsear el mensaje JSON
                 payload_msg = json.loads(msg.value.decode())
                 order_id = payload_msg.get("order_id", str(uuid.uuid4()))
-                logger.info(f"[{order_id}] Mensaje recibido de Kafka.")
                 
-                # Validar el payload usando el nuevo modelo común
-                # Asumo que el payload del mensaje Kafka es de tipo RegisterBlockchainPayload
-                publish_input = RegisterBlockchainPayload(**payload_msg.get("payload", {}))
+                logger.info(f"--- [START {order_id}] Mensaje recibido de Kafka ---")
 
-                # Paso 1: enviar transacción (sincrónico, pero ejecutado por to_thread)
+                # 2. Validar el payload con el modelo Pydantic
+                # Extraemos el contenido de 'payload' del mensaje Kafka
+                inner_data = payload_msg.get("payload", {})
+                publish_input = RegisterBlockchainPayload(**inner_data)
+                
+                # TRACE CORREGIDA: Usamos .text (que sí existe) en lugar de .title
+                preview = publish_input.text[:40].replace('\n', ' ')
+                logger.info(f"[{order_id}] Payload validado. Contenido: '{preview}...'")
+
+                # 3. Paso 1: Enviar transacción a la Blockchain (Geth)
+                logger.info(f"[{order_id}] ⛓️ Enviando transacción a la red Ethereum...")
+                # Ejecutamos en un thread aparte porque web3.py suele ser bloqueante
                 tx_info = await asyncio.to_thread(register_new, publish_input)
                 tx_hash = tx_info["tx_hash"]
-                logger.info(f"[{order_id}] TX enviada: {tx_hash}")
+                logger.info(f"[{order_id}] 🚀 TX enviada con éxito. Hash: {tx_hash}")
 
-                # Paso 2: esperar hasta que se mine (sincrónico, en otro thread)
-                receipt = await asyncio.to_thread(wait_for_receipt_blocking,w3, tx_hash)
+                # 4. Paso 2: Esperar confirmación (Mining)
+                logger.info(f"[{order_id}] ⏳ Esperando a que el minero confirme el bloque...")
+                receipt = await asyncio.to_thread(wait_for_receipt_blocking, w3, tx_hash)
                 
-                # Paso 3: parsear el resultado (sincrónico)
+                if receipt.get('status') == 0:
+                    logger.error(f"[{order_id}] ❌ ERROR: La transacción fue revertida (Status 0)")
+                    continue
+
+                logger.info(f"[{order_id}] ✅ TX minada en el bloque {receipt['blockNumber']}")
+
+                # 5. Paso 3: Parsear eventos de la transacción
                 result = await asyncio.to_thread(parse_registernew_event, receipt, publish_input)
                 
-                # Crear la respuesta Kafka (asumo BlockchainRegisteredResponse para el tipo de respuesta)
+                # 6. Crear el modelo de respuesta
                 response_model = BlockchainRegisteredResponse(
                     action="blockchain_registered",
                     order_id=order_id,
                     payload=result
                 )
 
-                # Paso 4: Publicar el resultado
+                # 7. Paso 4: Publicar resultado en el tópico de respuesta
+                logger.info(f"[{order_id}] 📤 Publicando resultado en {KAFKA_RESPONSE_TOPIC}...")
                 await producer.send_and_wait(
                     KAFKA_RESPONSE_TOPIC, 
                     response_model.model_dump_json(exclude_none=True).encode("utf-8")
                 )
-                logger.info(f"[{order_id}] Respuesta publicada en {KAFKA_RESPONSE_TOPIC}")
+                
+                duration = round(asyncio.get_event_loop().time() - start_time, 2)
+                logger.info(f"--- [END {order_id}] Ciclo completado en {duration}s ---")
 
             except ValidationError as ve:
-                logger.error(f"[{payload_msg.get('order_id', 'N/A')}] Error de validación del payload de Kafka: {ve}")
+                logger.error(f"[{payload_msg.get('order_id', 'N/A')}] ❌ Error de validación: {ve}")
             except Exception as e:
-                logger.exception(f"Error procesando mensaje Kafka: {e}")
+                # logger.exception nos dará el traceback completo en Stern
+                logger.exception(f"[{payload_msg.get('order_id', 'N/A')}] 💥 Error inesperado: {e}")
 
+    except Exception as e:
+        logger.error(f"Fallo crítico en el loop del consumidor: {e}")
     finally:
         await consumer.stop()
         await producer.stop()
-        logger.info("Kafka detenido")
-        
+        logger.info("🔌 Conexiones de Kafka cerradas")
         
 # =========================================================
 # Startup

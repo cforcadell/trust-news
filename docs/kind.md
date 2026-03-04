@@ -320,3 +320,28 @@ kubectl get pods -n apis
 kubectl logs -f news-chain-7f5dbdd667-zzv7p -n apis
 
 ```
+
+**fluent-bit**
+```bash
+kubectl apply -f k8s/infra/fluent-bit/ -n infra
+
+kubectl get pods -n infra -l app=fluent-bit
+
+kubectl logs -n infra <nombre-del-pod-fluent-bit> -f
+
+#para reinicios
+kubectl rollout restart daemonset fluent-bit -n infra
+
+```
+
+**loki + grafana**
+```bash
+
+kubectl apply -f k8s/infra/frontend-logs/ -n infra
+# new terminal
+kubectl port-forward --address 0.0.0.0 svc/grafana 3000:80 -n infra
+
+http://192.168.56.108:3000/
+
+admin/admin and changepassword
+```

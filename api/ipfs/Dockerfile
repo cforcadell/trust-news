@@ -1,5 +1,5 @@
 # Imagen base oficial de Python 3.11 slim
-FROM python-base:1.0
+FROM python:3.11-slim
 
 # Setea el directorio de trabajo
 WORKDIR /app

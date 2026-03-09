@@ -10,15 +10,6 @@ build:
     useBuildkit: true
 
   artifacts:
-  - image: python-base
-    context: api
-    docker:
-      dockerfile: base-python/Dockerfile
-  
-  - image: nginx-base
-    context: api
-    docker:
-      dockerfile: base-nginx/Dockerfile
 
   - image: generate-asertions
     context: api
@@ -64,11 +55,7 @@ build:
     context: web_classic
     docker:
       dockerfile: Dockerfile
-      buildArgs:
-        BASE_IMAGE: nginx-base
-    requires:
-      - image: nginx-base
-        alias: nginx_base
+
 
 manifests:
   kustomize:

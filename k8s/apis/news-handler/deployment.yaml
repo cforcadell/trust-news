@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
       - name: news-handler
-        image: tfm-news-handler:latest
+        #image: tfm-news-handler:latest
+        image: news-handler
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8072

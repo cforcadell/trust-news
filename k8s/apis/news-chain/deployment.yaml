@@ -17,7 +17,8 @@ spec:
     spec:
       containers:
       - name: news-chain
-        image: tfm-news-chain:latest
+        #image: tfm-news-chain:latest
+        image: news-chain
         imagePullPolicy: IfNotPresent
         envFrom:
         - configMapRef:

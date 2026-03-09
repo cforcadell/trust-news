@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: tfm-frontend-web_classic:latest
+        #image: tfm-frontend-web_classic:latest
+        image: web-classic
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 80

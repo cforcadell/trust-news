@@ -1,0 +1,151 @@
+apiVersion: skaffold/v4beta6
+kind: Config
+
+metadata:
+  name: blockchain-tfm
+
+build:
+  local:
+    push: false
+    useBuildkit: true
+
+  artifacts:
+  - image: python-base
+    context: api
+    docker:
+      dockerfile: base-python/Dockerfile
+  
+  - image: nginx-base
+    context: api
+    docker:
+      dockerfile: base-nginx/Dockerfile
+
+  - image: generate-asertions
+    context: api
+    docker:
+      dockerfile: generate-asertions/Dockerfile
+    sync:
+      infer:
+        - "**/*.py"
+
+  - image: validate-asertions
+    context: api
+    docker:
+      dockerfile: validate-asertions/Dockerfile
+    sync:
+      infer:
+        - "**/*.py"
+
+  - image: news-handler
+    context: api
+    docker:
+      dockerfile: news-handler/Dockerfile
+    sync:
+      infer:
+        - "**/*.py"
+
+  - image: news-chain
+    context: api
+    docker:
+      dockerfile: news-chain/Dockerfile
+    sync:
+      infer:
+        - "**/*.py"
+
+  - image: ipfs-api
+    context: api
+    docker:
+      dockerfile: ipfs/Dockerfile
+    sync:
+      infer:
+        - "**/*.py"
+
+  - image: web-classic
+    context: web_classic
+    docker:
+      dockerfile: Dockerfile
+      buildArgs:
+        BASE_IMAGE: nginx-base
+    requires:
+      - image: nginx-base
+        alias: nginx_base
+
+manifests:
+  kustomize:
+    buildArgs:
+      - --load-restrictor=LoadRestrictionsNone  
+    paths:
+      -  k8s/apis/generate-asertions
+      -  k8s/apis/validate-asertions
+      -  k8s/apis/news-handler
+      -  k8s/apis/news-chain
+      -  k8s/frontend
+      -  k8s/infra/mongodb
+# manifests:
+  rawYaml:
+      - k8s/namespaces.yaml
+
+#     # Infraestructura
+      - k8s/infra/zookeeper/*.yaml
+      - k8s/infra/kafka/*.yaml
+#     - k8s/infra/mongodb/*.yaml
+      - k8s/infra/ipfs/*.yaml
+
+#     # Observabilidad
+      - k8s/infra/fluent-bit/*.yaml
+      - k8s/infra/frontend-logs/*.yaml
+
+#     # Blockchain
+      - k8s/blockchain/*.yaml
+      - k8s/blockchain/bootnode/*.yaml
+      - k8s/blockchain/validator/*.yaml
+      - k8s/blockchain/rpc/*.yaml
+
+#     # APIs
+#     - k8s/apis/**/*.yaml
+      - k8s/apis/ipfs-fastapi/*.yaml
+
+
+#     # Frontend
+      #- k8s/frontend/*.yaml
+
+
+deploy:
+  kubectl: {}
+
+portForward:
+
+  - resourceType: service
+    resourceName: news-handler
+    port: 8072
+    localPort: 8072
+
+  - resourceType: service
+    resourceName: generate-asertions
+    port: 8071
+    localPort: 8071
+
+  - resourceType: service
+    resourceName: validate-asertions
+    port: 8070
+    localPort: 8070
+
+  - resourceType: service
+    resourceName: news-chain
+    port: 8073
+    localPort: 8073
+
+  - resourceType: service
+    resourceName: ipfs-api
+    port: 8060
+    localPort: 8060
+
+  - resourceType: service
+    resourceName: web-classic
+    port: 8060
+    localPort: 8060
+
+  - resourceType: service
+    resourceName: grafana
+    port: 30443
+    localPort: 443

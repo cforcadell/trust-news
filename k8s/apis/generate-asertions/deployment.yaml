@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
       - name: generate-asertions
-        image: tfm-generate-asertions:latest
+        #image: tfm-generate-asertions:latest
+        image: generate-asertions
         imagePullPolicy: IfNotPresent  # Importante para usar la imagen local
         ports:
         - containerPort: 8071

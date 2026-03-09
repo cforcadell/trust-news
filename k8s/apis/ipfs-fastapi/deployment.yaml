@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
       - name: ipfs-fastapi
-        image: tfm-ipfs-fastapi:latest
+        #image: tfm-ipfs-fastapi:latest
+        image: ipfs-api
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8060

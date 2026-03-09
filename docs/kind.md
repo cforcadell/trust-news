@@ -15,6 +15,10 @@ Creating cluster "trust-news" ...
  ✓ Joining worker nodes 🚜 
 
 ```bash
+#imagen base python
+docker build -t python-base:1.0 ./api/base-python
+docker build -t nginx-base:1.0 ./api/base-nginx
+
 kubectl get nodes
 ```
 
@@ -344,4 +348,13 @@ kubectl port-forward --address 0.0.0.0 svc/grafana 3000:80 -n infra
 http://192.168.56.108:3000/
 
 admin/admin and changepassword
+```
+
+*Skaffold*
+```bash
+./skaffold dev --cleanup=false
+
+#Si falla
+docker tag nginx-base:v1.0-tfm-12-g4ed9411-dirty nginx-base:latest
+docker tag python-base:v1.0-tfm-xxxxxx-dirty python-base:latest
 ```

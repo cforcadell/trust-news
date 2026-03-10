@@ -104,35 +104,42 @@ portForward:
 
   - resourceType: service
     resourceName: news-handler
+    namespace: apis
     port: 8072
     localPort: 8072
 
   - resourceType: service
     resourceName: generate-asertions
+    namespace: apis
     port: 8071
     localPort: 8071
 
   - resourceType: service
     resourceName: validate-asertions
+    namespace: apis
     port: 8070
     localPort: 8070
 
   - resourceType: service
     resourceName: news-chain
+    namespace: apis
     port: 8073
     localPort: 8073
 
   - resourceType: service
     resourceName: ipfs-api
+    namespace: apis
     port: 8060
     localPort: 8060
 
   - resourceType: service
     resourceName: web-classic
-    port: 8060
-    localPort: 8060
+    namespace: frontend
+    port: 8080
+    localPort: 80
 
   - resourceType: service
     resourceName: grafana
+    namespace: infra
     port: 30443
     localPort: 443

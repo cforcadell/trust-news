@@ -13,6 +13,17 @@ spec:
       labels:
         app: ipfs-fastapi
     spec:
+      initContainers: # SECCIÓN A AÑADIR (Corre antes de todo)
+        - name: wait-for-kafka
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until nc -z kafka.infra.svc.cluster.local 9092; do
+                echo "Esperando a Kafka..."
+                sleep 2
+              done
       containers:
       - name: ipfs-fastapi
         #image: tfm-ipfs-fastapi:latest

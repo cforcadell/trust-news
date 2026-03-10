@@ -16,7 +16,7 @@ data:
   CONTRACT_ADDRESS: "0xbF5919A8E0422C715a71DdEc6E0864fAbD8F6651"
   # Esta ruta debe coincidir con el mountPath del Deployment
   CONTRACT_ABI_PATH: "/app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json"
-  ACCOUNT_ADDRESS: "0xa28885A13A7b4D3561a7af64eA1bA0F82eD9f06B"
+  ACCOUNT_ADDRESS: "0x4504A1d4047583164919AE40C37c4f4c5B854BBb"
   
   # --- Configuración de Aplicación y Logs ---
   LOG_LEVEL: "INFO"

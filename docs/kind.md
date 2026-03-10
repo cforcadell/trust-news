@@ -352,7 +352,9 @@ admin/admin and changepassword
 
 *Skaffold*
 ```bash
-./skaffold dev --cleanup=false
+#./skaffold dev --cleanup=false
+export SKAFFOLD_PORT_FORWARD_ADDRESS=0.0.0.0
+./skaffold dev
 
 #Si falla
 docker tag nginx-base:v1.0-tfm-12-g4ed9411-dirty nginx-base:latest

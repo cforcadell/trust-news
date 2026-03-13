@@ -54,6 +54,7 @@ spec:
             - |
               exec geth \
                 --bootnodes=$BOOT_NODES \
+                --nat=none \
                 --allow-insecure-unlock \
                 --http \
                 --http.addr=0.0.0.0 \
@@ -68,7 +69,7 @@ spec:
                 --networkid=$NETWORK_ID \
                 --unlock=$MASTER_PUBLIC_KEY \
                 --password=/root/.ethereum/password.txt \
-                --port=30303 \
+                --port=30304 \
                 --miner.gaslimit=$GAS_LIMIT
           envFrom:
             - configMapRef:

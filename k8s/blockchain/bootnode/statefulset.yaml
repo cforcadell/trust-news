@@ -41,18 +41,15 @@ spec:
             - /bin/sh
             - -c
             - |
-              # 2. Quitamos el --nodiscover y forzamos el puerto de descubrimiento
               exec geth \
                 --nodekeyhex=$NODE_KEY_HEX \
                 --networkid=$NETWORK_ID \
                 --http=false \
                 --ws=false \
-                --ipcdisable \
                 --mine=false \
-                --port=30304 \
-                --nodiscover \
-                --nat=none \
-                --bootnodes=""
+                --port 30304 \
+                --nat=extip:$(hostname -i) \
+                --ipcpath /root/.ethereum/geth.ipc
           envFrom:
             - configMapRef:
                 name: ethereum-config

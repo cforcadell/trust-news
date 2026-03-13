@@ -136,7 +136,7 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localho
 
 eth.sendTransaction({
   from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
-  to: "a28885a13a7b4d3561a7af64ea1ba0f82ed9f06b",
+  to: "0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b",
   value: web3.toWei(10, "ether")
 })
 
@@ -167,6 +167,10 @@ eth.sendTransaction({
   to: "42d488d0393fd1d6b72bb424db28dd7eb5e06737",
   value: web3.toWei(10, "ether")
 })
+
+eth.pendingTransactions
+
+eth.getBalance("0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b")
 
 ```
 
@@ -348,15 +352,4 @@ kubectl port-forward --address 0.0.0.0 svc/grafana 3000:80 -n infra
 http://192.168.56.108:3000/
 
 admin/admin and changepassword
-```
-
-*Skaffold*
-```bash
-#./skaffold dev --cleanup=false
-export SKAFFOLD_PORT_FORWARD_ADDRESS=0.0.0.0
-./skaffold dev
-
-#Si falla
-docker tag nginx-base:v1.0-tfm-12-g4ed9411-dirty nginx-base:latest
-docker tag python-base:v1.0-tfm-xxxxxx-dirty python-base:latest
 ```

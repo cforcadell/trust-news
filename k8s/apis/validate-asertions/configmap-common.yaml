@@ -38,7 +38,7 @@ data:
   KAFKA_RESPONSE_TOPIC: "fake_news_responses"
   # Blockchain (Namespace blockchain)
   RPC_URL: "http://geth-rpc-endpoint.blockchain.svc.cluster.local:8555"
-  CONTRACT_ADDRESS: "0xbF5919A8E0422C715a71DdEc6E0864fAbD8F6651"
+  CONTRACT_ADDRESS: "0x9eA62eb7944349C407B307025644E47bF22F8bCc"
   CONTRACT_ABI_PATH: "/app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json"
   # IPFS (Namespace apis)
   IPFS_API_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"

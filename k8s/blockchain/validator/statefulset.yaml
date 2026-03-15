@@ -21,20 +21,19 @@ spec:
             - /bin/sh
             - -c
             - |
-              if [ ! -d "/root/.ethereum/geth/chaindata" ]; then
-                echo "Inicializando la blockchain Miner y restaurando cuentas..."
-                geth init /etc/geth/genesis.json
-                
-                # Creamos el directorio de keystores
-                mkdir -p /root/.ethereum/keystore
-                
-                # Copiamos TODAS las cuentas del Secret montado
-                cp /etc/keystores/* /root/.ethereum/keystore/ 2>/dev/null || true
-                
-                echo "Cuentas del minero restauradas con éxito."
+              # 1. Inicializar solo si NO existe la base de datos (Note el !)
+              if [ ! -f "/root/.ethereum/geth/chaindata/CURRENT" ]; then
+                echo "Inicializando la blockchain Miner por primera vez..."
+                geth --datadir /root/.ethereum init /etc/geth/genesis.json
               else
-                echo "La blockchain ya está inicializada. Omitiendo..."
+                echo "Blockchain ya detectada en el volumen. Omitiendo init."
               fi
+              
+              # 2. Restaurar llaves SIEMPRE (Fuera del if)
+              echo "Asegurando disponibilidad de llaves en el keystore..."
+              mkdir -p /root/.ethereum/keystore
+              cp /etc/keystores/* /root/.ethereum/keystore/ 2>/dev/null || true
+              echo "Cuentas del minero preparadas."
           volumeMounts:
             # Aquí usamos 'miner-data' para que coincida con el volumeClaimTemplate
             - name: miner-data
@@ -48,10 +47,22 @@ spec:
         - name: geth-miner
           image: ethereum/client-go:v1.10.1
           # Usamos sh -c y exec para que evalúe correctamente las variables del envFrom
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           command:
             - /bin/sh
             - -c
             - |
+              # 1. Esperamos a que el DNS del bootnode esté registrado en Kubernetes
+              echo "Esperando a que el bootnode esté disponible en la red..."
+              while ! nslookup geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local > /dev/null 2>&1; do
+                echo "DNS del bootnode no encontrado aún. Reintentando en 3 segundos..."
+                sleep 3
+              done
+              echo "¡Bootnode encontrado en la red! Arrancando nodo..."
               exec geth \
                 --bootnodes=$BOOT_NODES \
                 --mine \
@@ -66,7 +77,8 @@ spec:
                 --http.api=eth,web3,net,admin,personal \
                 --allow-insecure-unlock \
                 --port=30305 \
-                --miner.gaslimit=$GAS_LIMIT
+                --nat=extip:$POD_IP \
+                --miner.gaslimit=${GAS_LIMIT}
           envFrom:
             - configMapRef:
                 name: ethereum-config
@@ -94,6 +106,7 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: miner-data
+        namespace: blockchain
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:

@@ -14,7 +14,6 @@ spec:
       labels:
         app: geth-bootnode
     spec:
-      # 1. Añadimos el initContainer para que cargue tu genesis.json
       initContainers:
         - name: init-blockchain
           image: ethereum/client-go:v1.10.1
@@ -22,9 +21,9 @@ spec:
             - /bin/sh
             - -c
             - |
-              if [ ! -d "/root/.ethereum/geth/chaindata" ]; then
+              if [ ! -f "/root/.ethereum/geth/chaindata/CURRENT" ]; then
                 echo "Inicializando la blockchain del Bootnode..."
-                geth init /etc/geth/genesis.json
+                geth --datadir /root/.ethereum init /etc/geth/genesis.json
               else
                 echo "Bootnode ya inicializado. Omitiendo..."
               fi
@@ -37,19 +36,28 @@ spec:
       containers:
         - name: geth-bootnode
           image: ethereum/client-go:v1.10.1
+          env:
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
           command:
             - /bin/sh
             - -c
             - |
+              # Obtenemos la IP real del Pod
+              POD_IP=$(hostname -i | awk '{print $1}')
               exec geth \
                 --nodekeyhex=$NODE_KEY_HEX \
-                --networkid=$NETWORK_ID \
+                --networkid=${NETWORK_ID} \
                 --http=false \
                 --ws=false \
+                --ipcpath /root/.ethereum/geth.ipc \
                 --mine=false \
-                --port 30304 \
-                --nat=extip:$(hostname -i) \
-                --ipcpath /root/.ethereum/geth.ipc
+                --port=30304 \
+                --nodiscover \
+                --nat=extip:$POD_IP \
+                --datadir /root/.ethereum                 
           envFrom:
             - configMapRef:
                 name: ethereum-config
@@ -66,6 +74,7 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: bootnode-data
+        namespace: blockchain
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:

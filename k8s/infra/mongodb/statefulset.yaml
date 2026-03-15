@@ -36,6 +36,7 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: mongodb-storage
+        namespace: infra
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:

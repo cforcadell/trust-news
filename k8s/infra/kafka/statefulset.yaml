@@ -43,6 +43,7 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: kafka-data
+        namespace: infra
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:

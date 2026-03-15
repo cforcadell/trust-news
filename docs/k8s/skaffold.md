@@ -1,10 +1,14 @@
 
 **Skaffold**
 
+```bash blockchain
+./skaffold dev -p setup 
+```
 
 ```bash blockchain
 
-./skaffold dev -p blockchain
+./skaffold dev -p blockchain --namespace blockchain 
+# ./skaffold dev -p blockchain --namespace blockchain --cleanup=false
 
 
 kubectl get pods -n blockchain
@@ -14,12 +18,23 @@ kubectl logs -n blockchain -f geth-bootnode-0
 kubectl logs -n blockchain -f geth-rpc-endpoint-0
 kubectl logs -n blockchain -f geth-miner-0
 
+#analyze if node have been initialized or not
+
+ kubectl describe pod geth-bootnode-0 -n blockchain
+ kubectl describe pod geth-rpc-endpoint-0 -n blockchain
+ kubectl describe pod geth-miner-0 -n blockchain
+
 #connect rpc node 
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
 
 > admin.peers
 > net.peerCount
 > eth.blockNumber
+
+#alernativa
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "admin.peers"
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "eth.blockNumber"
 
 #connect boot node 
 kubectl exec -it geth-bootnode-0 -n blockchain -- ps aux
@@ -32,7 +47,16 @@ kubectl exec -it geth-miner-0 -n blockchain -- geth attach
 > net.peerCount
 > eth.blockNumber
 
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "net.peerCount"
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "admin.peers"
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "eth.blockNumber"
+
 # check that net.peerCount ==1 in rpc & miner node and check that eth.blockNumber in both nodes are equal
+#connect manually two nodes
+
+>kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.addPeer("enode://af28ee328bbab1085d8f3e6eef110001a4075da8513871091bb25c7111f57e4261270b26791b5d71d6fd9707c1efd4ca17db2010b73fcd7ff1c7cd3a6877531c@10.244.2.13:30304")'4")'
+
+>kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
 
 
 #restart blockchain keepong stateful and volumes
@@ -45,6 +69,7 @@ kubectl scale statefulset --all --replicas=1 -n blockchain
 
 kubectl get pods -n blockchain
 
+kubectl get pv  -n blockchain
 
 ```
 
@@ -98,6 +123,8 @@ eth.sendTransaction({
 eth.pendingTransactions
 
 eth.getBalance("0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b")
+
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.getCode("0x9eA62eb7944349C407B307025644E47bF22F8bCc")'
 
 ```
 

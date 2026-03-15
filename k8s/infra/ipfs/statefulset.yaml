@@ -27,6 +27,7 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: ipfs-storage
+        namespace: infra
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:

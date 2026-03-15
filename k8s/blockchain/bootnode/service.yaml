@@ -4,8 +4,8 @@ metadata:
   name: geth-bootnode
   namespace: blockchain
 spec:
-  # Usamos ClusterIP porque el bootnode solo necesita ser accesible dentro del clúster
-  type: ClusterIP
+  # clusterIP: None lo convierte en Headless, ideal para StatefulSets y P2P
+  clusterIP: None 
   selector:
     app: geth-bootnode
   ports:

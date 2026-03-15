@@ -28,6 +28,7 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: zk-storage
+        namespace: infra
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:

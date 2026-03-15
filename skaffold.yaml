@@ -33,44 +33,34 @@ build:
       docker: {dockerfile: ipfs/Dockerfile}
       sync:
         infer: ["**/*.py"]
-    - image: web-classic
-      context: web_classic
-      docker: {dockerfile: Dockerfile}
+    #- image: web-classic
+    #  context: web_classic
+    #  docker: {dockerfile: Dockerfile}
 
-# Por defecto: No levanta nada o todo. Aquí lo dejamos vacío/mínimo para forzar el uso de perfiles.
+# --- MANIFESTS GLOBALES ---
+# Dejamos la raíz mínima para evitar borrados accidentales de namespaces
 manifests:
   kustomize:
     buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
     paths: []
-  rawYaml:
-    - k8s/namespaces.yaml
+  rawYaml: [] 
 
 deploy:
   kubectl: {}
 
-portForward: [] # Se define dentro de cada perfil para evitar avisos de servicios no encontrados
+portForward: [] 
 
 profiles:
   # ---------------------------------------------------------
-  # PERFIL: APIS + FRONTEND
+  # PERFIL: SETUP
   # ---------------------------------------------------------
-  - name: apis-frontend
+  - name: setup
     patches:
       - op: add
-        path: /manifests/kustomize/paths
-        value:
-          - k8s/apis/generate-asertions
-          - k8s/apis/validate-asertions
-          - k8s/apis/news-handler
-          - k8s/apis/news-chain
-          - k8s/frontend
-      - op: add
-        path: /portForward
-        value:
-          - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
-          - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
-          - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
-          - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: 0.0.0.0}
+        path: /manifests/rawYaml
+        value: 
+          - k8s/namespaces.yaml
+          - k8s/blockchain/blockchain-pvcs.yaml
 
   # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN
@@ -78,20 +68,17 @@ profiles:
   - name: blockchain
     patches:
       - op: add
-        path: /manifests/rawYaml/-
-        value: k8s/blockchain/*.yaml
-      - op: add
-        path: /manifests/rawYaml/-
-        value: k8s/blockchain/bootnode/*.yaml
-      - op: add
-        path: /manifests/rawYaml/-
-        value: k8s/blockchain/validator/*.yaml
-      - op: add
-        path: /manifests/rawYaml/-
-        value: k8s/blockchain/rpc/*.yaml
+        path: /manifests/rawYaml
+        value:
+          - k8s/blockchain/configmap.yaml
+          - k8s/blockchain/ethereum-keystores.yaml
+          - k8s/blockchain/secret-template.yaml
+          - k8s/blockchain/bootnode/*.yaml
+          - k8s/blockchain/validator/*.yaml
+          - k8s/blockchain/rpc/*.yaml
 
   # ---------------------------------------------------------
-  # PERFIL: INFRA (Kafka, Zookeeper, IPFS, Logs)
+  # PERFIL: INFRA
   # ---------------------------------------------------------
   - name: infra
     patches:
@@ -101,7 +88,6 @@ profiles:
       - op: add
         path: /manifests/rawYaml
         value:
-          - k8s/namespaces.yaml
           - k8s/infra/zookeeper/*.yaml
           - k8s/infra/kafka/*.yaml
           - k8s/infra/ipfs/*.yaml

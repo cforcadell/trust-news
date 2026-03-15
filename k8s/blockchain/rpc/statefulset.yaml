@@ -56,13 +56,14 @@ spec:
             - /bin/sh
             - -c
             - |
-              echo "Esperando al DNS del bootnode..."
+              # 1. Esperamos a que el DNS del bootnode esté registrado en Kubernetes
+              echo "Esperando a que el bootnode esté disponible en la red..."
               while ! nslookup geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local > /dev/null 2>&1; do
+                echo "DNS del bootnode no encontrado aún. Reintentando en 3 segundos..."
                 sleep 3
               done
-              
-              echo "DNS resuelto. Arrancando nodo..." 
               echo "¡Bootnode encontrado en la red! Arrancando nodo..."
+
               exec geth \
                 --bootnodes=$BOOT_NODES \
                 --allow-insecure-unlock \
@@ -91,7 +92,7 @@ spec:
               name: http
             - containerPort: 8556
               name: ws
-            - containerPort: 30303
+            - containerPort: 30304
               name: p2p
           volumeMounts:
             - name: rpc-data
@@ -99,6 +100,10 @@ spec:
             - name: secret-volume
               mountPath: /root/.ethereum/password.txt
               subPath: ACCOUNT_PASSWORD
+            - name: config-volume
+              mountPath: /root/.ethereum/geth/static-nodes.json
+              subPath: static-nodes.json
+              readOnly: true
       volumes:
         - name: config-volume
           configMap:

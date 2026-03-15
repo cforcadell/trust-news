@@ -54,15 +54,15 @@ spec:
                 --ws=false \
                 --ipcpath /root/.ethereum/geth.ipc \
                 --mine=false \
-                --port=30304 \
-                --nodiscover \
+                --port=30303 \
+                --nodiscover=false \
                 --nat=extip:$POD_IP \
                 --datadir /root/.ethereum                 
           envFrom:
             - configMapRef:
                 name: ethereum-config
           ports:
-            - containerPort: 30304
+            - containerPort: 30303
               name: p2p
           volumeMounts:
             - name: bootnode-data

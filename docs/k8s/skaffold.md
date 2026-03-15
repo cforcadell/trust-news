@@ -18,6 +18,12 @@ kubectl logs -n blockchain -f geth-bootnode-0
 kubectl logs -n blockchain -f geth-rpc-endpoint-0
 kubectl logs -n blockchain -f geth-miner-0
 
+#see geth processes
+
+kubectl exec geth-bootnode-0 -n blockchain -- ps aux | grep geth
+kubectl exec geth-rpc-endpoint-0 -n blockchain -- ps aux | grep geth
+kubectl exec geth-miner-0 -n blockchain -- ps aux | grep geth
+
 #analyze if node have been initialized or not
 
  kubectl describe pod geth-bootnode-0 -n blockchain

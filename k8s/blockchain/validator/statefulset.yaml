@@ -63,6 +63,7 @@ spec:
                 sleep 3
               done
               echo "¡Bootnode encontrado en la red! Arrancando nodo..."
+
               exec geth \
                 --bootnodes=$BOOT_NODES \
                 --mine \
@@ -93,6 +94,10 @@ spec:
             - name: secret-volume
               mountPath: /root/.ethereum/password.txt
               subPath: ACCOUNT_PASSWORD
+            - name: config-volume
+              mountPath: /root/.ethereum/geth/static-nodes.json
+              subPath: static-nodes.json
+              readOnly: true
       volumes:
         - name: config-volume
           configMap:

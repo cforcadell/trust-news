@@ -5,12 +5,15 @@ metadata:
   namespace: blockchain
 data:
   NETWORK_ID: "1214"
-  # Usamos el FQDN completo del servicio en K8s: <servicio>.<namespace>.svc.cluster.local
-  BOOT_NODES: "enode://af22c29c316ad069cf48a09a4ad5cf04a251b411e45098888d114c6dd7f489a13786620d5953738762afa13711d4ffb3b19aa5de772d8af72f851f7e9c5b164a@geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local:30304"
+  # BOOT_NODES ya no es necesario al usar static-nodes.json
+  BOOT_NODES: "enode://36ca2def84346e1c715ac65c481785a3d6ab217f420fb216c3014f947ae70b9459763fb4e093bab1c88231261e9ad33c0ef70f780c53c0605f02dac4148845cb@geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local:30303"
   MASTER_PUBLIC_KEY: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5"
   GAS_LIMIT: "90000000"
   NODE_KEY_HEX: "92c076e4d03d9e78b70729f0039b651f6c7c13a410cc329c77693b46cbd1f8ed"
   
+  static-nodes.json: |
+    []
+
   genesis.json: |
     {
       "config": {

@@ -17,10 +17,10 @@ spec:
       targetPort: 8556
       protocol: TCP
     - name: p2p-tcp
-      port: 30303
-      targetPort: 30303
+      port: 30304
+      targetPort: 30304
       protocol: TCP
     - name: p2p-udp
-      port: 30303
-      targetPort: 30303
+      port: 30304
+      targetPort: 30304
       protocol: UDP

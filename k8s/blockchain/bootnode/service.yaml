@@ -11,10 +11,10 @@ spec:
   ports:
     # Geth necesita TCP para la conexión y UDP para el descubrimiento
     - name: p2p-tcp
-      port: 30304
-      targetPort: 30304
+      port: 30303
+      targetPort: 30303
       protocol: TCP
     - name: p2p-udp
-      port: 30304
-      targetPort: 30304
+      port: 30303
+      targetPort: 30303
       protocol: UDP

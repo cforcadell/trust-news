@@ -148,7 +148,7 @@ kubectl logs -n infra -f kafka-0
 
 ```
 
-```bash infra
+```bash apis + frontend
 
 ./skaffold dev -p apis-frontend
 

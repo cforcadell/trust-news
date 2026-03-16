@@ -33,9 +33,9 @@ build:
       docker: {dockerfile: ipfs/Dockerfile}
       sync:
         infer: ["**/*.py"]
-    # - image: web-classic
-    #   context: web_classic
-    #   docker: {dockerfile: Dockerfile}
+    - image: web-classic
+      context: web_classic
+      docker: {dockerfile: Dockerfile}
 
 # --- MANIFESTS GLOBALES ---
 # Dejamos la raíz mínima para evitar borrados accidentales de namespaces
@@ -96,8 +96,8 @@ profiles:
       - op: add
         path: /portForward
         value:
-          - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
-          - {resourceType: service, resourceName: grafana, namespace: infra, port: 80, localPort: 3000, address: "0.0.0.0"}
+
+          - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND (Recuperado)
@@ -111,7 +111,6 @@ profiles:
           - k8s/apis/validate-asertions
           - k8s/apis/news-handler
           - k8s/apis/news-chain
-          - k8s/apis/ipfs-fastapi/*.yaml
           - k8s/frontend
       - op: add
         path: /portForward
@@ -120,5 +119,6 @@ profiles:
           - {resourceType: service, resourceName: validate-asertions, namespace: apis, port: 8070, localPort: 8070}
           - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
           - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
-          # - {resourceType: service, resourceName: web-classic, namespace: frontend, port: 8080, localPort: 80}
+          - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
+          - {resourceType: service, resourceName: web-classic, namespace: frontend, port: 8080, localPort: 80}
           - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}

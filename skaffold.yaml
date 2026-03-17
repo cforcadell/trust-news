@@ -11,34 +11,29 @@ build:
     - image: generate-asertions
       context: api
       docker: {dockerfile: generate-asertions/Dockerfile}
-      sync:
-        infer: ["**/*.py"]
+      sync: {infer: ["**/*.py"]}
     - image: validate-asertions
       context: api
       docker: {dockerfile: validate-asertions/Dockerfile}
-      sync:
-        infer: ["**/*.py"]
+      sync: {infer: ["**/*.py"]}
     - image: news-handler
       context: api
       docker: {dockerfile: news-handler/Dockerfile}
-      sync:
-        infer: ["**/*.py"]
+      sync: {infer: ["**/*.py"]}
     - image: news-chain
       context: api
       docker: {dockerfile: news-chain/Dockerfile}
-      sync:
-        infer: ["**/*.py"]
+      sync: {infer: ["**/*.py"]}
     - image: ipfs-api
       context: api
       docker: {dockerfile: ipfs/Dockerfile}
-      sync:
-        infer: ["**/*.py"]
+      sync: {infer: ["**/*.py"]}
     - image: web-classic
       context: web_classic
       docker: {dockerfile: Dockerfile}
 
 # --- MANIFESTS GLOBALES ---
-# Dejamos la raíz mínima para evitar borrados accidentales de namespaces
+# Lo dejamos vacío en la raíz para que cada perfil inyecte solo lo que necesita
 manifests:
   kustomize:
     buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
@@ -63,7 +58,7 @@ profiles:
           - k8s/blockchain/blockchain-pvcs.yaml
 
   # ---------------------------------------------------------
-  # PERFIL: BLOCKCHAIN
+  # PERFIL: BLOCKCHAIN (Todo es rawYaml según tu find)
   # ---------------------------------------------------------
   - name: blockchain
     patches:
@@ -78,13 +73,15 @@ profiles:
           - k8s/blockchain/rpc/*.yaml
 
   # ---------------------------------------------------------
-  # PERFIL: INFRA
+  # PERFIL: INFRA (Híbrido)
   # ---------------------------------------------------------
   - name: infra
     patches:
+      # Mongo sí tiene Kustomize
       - op: add
         path: /manifests/kustomize/paths
         value: ["k8s/infra/mongodb"]
+      # El resto son puros YAMLs
       - op: add
         path: /manifests/rawYaml
         value:
@@ -96,14 +93,14 @@ profiles:
       - op: add
         path: /portForward
         value:
-
           - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
-  # PERFIL: APIS + FRONTEND (Recuperado)
+  # PERFIL: APIS + FRONTEND (Híbrido)
   # ---------------------------------------------------------
   - name: apis-frontend
     patches:
+      # Estos sí tienen Kustomize
       - op: add
         path: /manifests/kustomize/paths
         value:
@@ -112,6 +109,11 @@ profiles:
           - k8s/apis/news-handler
           - k8s/apis/news-chain
           - k8s/frontend
+      # ipfs-fastapi NO tiene Kustomize, lo inyectamos como rawYaml
+      - op: add
+        path: /manifests/rawYaml
+        value:
+          - k8s/apis/ipfs-fastapi/*.yaml
       - op: add
         path: /portForward
         value:
@@ -120,5 +122,6 @@ profiles:
           - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
           - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
           - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
-          - {resourceType: service, resourceName: web-classic, namespace: frontend, port: 8080, localPort: 80}
+          # Nota: asumo que web-classic se levanta dentro del Kustomize de k8s/frontend
+          #- {resourceType: service, resourceName: web-classic, namespace: frontend, port: 8080, localPort: 80}
           - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}

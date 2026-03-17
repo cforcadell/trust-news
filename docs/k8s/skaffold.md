@@ -145,6 +145,14 @@ kubectl scale statefulset --all --replicas=1 -n infra
 kubectl get pods -n infra
 
 kubectl logs -n infra -f kafka-0
+kubectl logs -n infra -f zookeeper-0
+
+#si al parar los pods a replicas=0 o eliminar los statefuls quedan pvcs
+kubectl get pvc -n infra
+kubectl delete pvc ipfs-storage-ipfs-0 -n infra
+kubectl delete pvc kafka-data-kafka-0 -n infra
+kubectl delete pvc mongodb-storage-mongodb-0 -n infra
+kubectl delete pvc zk-storage-zookeeper-0 -n infra
 
 ```
 

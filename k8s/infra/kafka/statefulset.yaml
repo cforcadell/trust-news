@@ -15,6 +15,13 @@ spec:
       labels:
         app: kafka
     spec:
+      initContainers:
+        - name: wait-for-zookeeper
+          image: confluentinc/cp-kafka:7.6.1
+          command:
+            - sh
+            - -c
+            - "cub zk-ready zookeeper:2181 120"
       containers:
         - name: kafka
           image: confluentinc/cp-kafka:7.6.1

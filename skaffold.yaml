@@ -55,7 +55,7 @@ profiles:
         path: /manifests/rawYaml
         value: 
           - k8s/namespaces.yaml
-          - k8s/blockchain/blockchain-pvcs.yaml
+
 
   # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN (Todo es rawYaml según tu find)

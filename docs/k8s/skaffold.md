@@ -155,6 +155,13 @@ kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
 kubectl delete pvc zk-storage-zookeeper-0 -n infra
 
+
+# En caso de problemas con los pvs por charsloops y diferentes ids de cluster
+#parar los pods del perfil 
+kubectl get pvc -n infra
+kubectl delete pvc kafka-data-kafka-0 -n infra
+#y rearrancar skkafold con el perfil infra
+
 ```
 
 ```bash apis + frontend
@@ -163,6 +170,7 @@ kubectl delete pvc zk-storage-zookeeper-0 -n infra
 
 
 kubectl get pods -n apis
+kubectl get pods -n frontend
 
 kubectl logs -n apis -f 
 

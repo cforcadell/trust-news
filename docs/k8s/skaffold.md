@@ -174,7 +174,16 @@ kubectl get pods -n frontend
 
 kubectl logs -n apis -f 
 
-
+Frontend:
 https://192.168.56.108:8443/
+
+grafana:
+http://localhost:3000/
+
+get svc -n infra
+
+#Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
+
+Explore + Run query
 
 ```

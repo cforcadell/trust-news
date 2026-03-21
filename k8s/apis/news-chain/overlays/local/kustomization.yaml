@@ -1,0 +1,19 @@
+# ./k8s/apis/news-chain/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+
+# Reemplaza el comando manual: kubectl create configmap news-chain-contract --from-file=...
+configMapGenerator:
+- name: news-chain-contract
+  files:
+    - TrustNews.json=../../../../../smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
+
+# Reemplaza el comando manual: kubectl create secret generic news-chain-secrets ... Account 0
+secretGenerator:
+- name: news-chain-secrets
+  namespace: apis
+  envs:
+    - news-chain.env
+namespace: apis

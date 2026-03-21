@@ -6,12 +6,10 @@ resources:
 
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
 secretGenerator:
-
-
 - name: news-handler-secrets
   namespace: apis
   envs:
     - prod-news-handler.env
-namespace: apis
 patches:
   - path: patch-resources.yaml
+namespace: apis

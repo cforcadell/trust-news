@@ -80,11 +80,13 @@ profiles:
       # Mongo sí tiene Kustomize
       - op: add
         path: /manifests/kustomize/paths
-        value: ["k8s/infra/mongodb"]
+        value: 
+          - k8s/infra/mongodb/overlays/local
       # El resto son puros YAMLs
       - op: add
         path: /manifests/rawYaml
         value:
+          - k8s/infra/mongodb/*.yaml
           - k8s/infra/zookeeper/*.yaml
           - k8s/infra/kafka/*.yaml
           - k8s/infra/ipfs/*.yaml

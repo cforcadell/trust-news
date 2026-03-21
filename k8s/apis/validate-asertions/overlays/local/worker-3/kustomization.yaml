@@ -28,3 +28,4 @@ patches:
       - op: replace
         path: /spec/selector/matchLabels/instance
         value: "3"
+  - path: patch-config-ai.yaml

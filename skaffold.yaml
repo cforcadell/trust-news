@@ -109,11 +109,12 @@ profiles:
           - k8s/apis/validate-asertions/base/configmap-common.yaml
           - k8s/apis/news-handler/*.yaml
           - k8s/apis/news-chain/*.yaml
+          - k8s/apis/generate-asertions/*.yaml
       # Estos sí tienen Kustomize
       - op: add
         path: /manifests/kustomize/paths
         value:
-          - k8s/apis/generate-asertions
+          - k8s/apis/generate-asertions/overlays/local
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
           - k8s/apis/validate-asertions/overlays/local/worker-3

@@ -107,6 +107,7 @@ profiles:
         value:
           - k8s/apis/ipfs-fastapi/*.yaml
           - k8s/apis/validate-asertions/base/configmap-common.yaml
+          - k8s/apis/news-handler/*.yaml
       # Estos sí tienen Kustomize
       - op: add
         path: /manifests/kustomize/paths
@@ -115,7 +116,7 @@ profiles:
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
           - k8s/apis/validate-asertions/overlays/local/worker-3
-          - k8s/apis/news-handler
+          - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain
           - k8s/frontend
       - op: add

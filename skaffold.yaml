@@ -100,28 +100,31 @@ profiles:
   # ---------------------------------------------------------
   - name: apis-frontend
     patches:
-      # Estos sí tienen Kustomize
-      - op: add
-        path: /manifests/kustomize/paths
-        value:
-          - k8s/apis/generate-asertions
-          - k8s/apis/validate-asertions
-          - k8s/apis/news-handler
-          - k8s/apis/news-chain
-          - k8s/frontend
+      
       # ipfs-fastapi NO tiene Kustomize, lo inyectamos como rawYaml
       - op: add
         path: /manifests/rawYaml
         value:
           - k8s/apis/ipfs-fastapi/*.yaml
+          - k8s/apis/validate-asertions/configmap-common.yaml
+      # Estos sí tienen Kustomize
+      - op: add
+        path: /manifests/kustomize/paths
+        value:
+          - k8s/apis/generate-asertions
+          - k8s/apis/validate-asertions/overlays/worker-1
+          - k8s/apis/validate-asertions/overlays/worker-2
+          - k8s/apis/validate-asertions/overlays/worker-3  
+          - k8s/apis/news-handler
+          - k8s/apis/news-chain
+          - k8s/frontend
       - op: add
         path: /portForward
         value:
           - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
-          - {resourceType: service, resourceName: validate-asertions, namespace: apis, port: 8070, localPort: 8070}
+          # No service for validators
+          #- {resourceType: service, resourceName: validate-asertions, namespace: apis, port: 8070, localPort: 8070}
           - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
           - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
           - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
-          # Nota: asumo que web-classic se levanta dentro del Kustomize de k8s/frontend
-          #- {resourceType: service, resourceName: web-classic, namespace: frontend, port: 8080, localPort: 80}
           - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}

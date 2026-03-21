@@ -55,3 +55,6 @@ k8s/apis/validate-asertions/kustomization.yaml
 k8s/infra/mongodb/kustomization.yaml
 docs/fake_news/password_unlock.txt
 docs/github/github.txt
+k8s/apis/validate-asertions/overlays/worker-1/worker-1.env
+k8s/apis/validate-asertions/overlays/worker-2/worker-2.env
+k8s/apis/validate-asertions/overlays/worker-3/worker-3.env

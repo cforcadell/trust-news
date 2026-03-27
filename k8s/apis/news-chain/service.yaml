@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: news-chain
+  namespace: apis
+spec:
+  selector:
+    app: news-chain
+  ports:
+    - protocol: TCP
+      port: 8073  # O el puerto que use tu FastAPI en news-chain
+      targetPort: 8073
+  type: ClusterIP

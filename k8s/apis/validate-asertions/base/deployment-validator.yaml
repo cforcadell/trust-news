@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: validate-worker
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: validate-worker
+  template:
+    metadata:
+      labels:
+        app: validate-worker
+    spec:
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - "until nc -z kafka.infra.svc.cluster.local 9092; do echo Waiting for Kafka; sleep 2; done"
+      containers:
+      - name: worker
+        image: validate-asertions
+        envFrom:
+        - configMapRef:
+            name: validate-common-config
+        env:
+        - name: PRIVATE_KEY
+          valueFrom: { secretKeyRef: { name: validator-secret, key: PRIVATE_KEY } }
+        - name: ACCOUNT_ADDRESS
+          valueFrom: { secretKeyRef: { name: validator-secret, key: ACCOUNT_ADDRESS } }
+        - name: API_KEY
+          valueFrom: { secretKeyRef: { name: validator-secret, key: API_KEY } }
+        - name: VALIDATOR_CATEGORIES
+          value: "[1,2,3,4,5,6,7,8,9,10]"
+        volumeMounts:
+        - name: abi-volume
+          mountPath: /app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
+          subPath: TrustNews.json
+
+      volumes:
+      - name: abi-volume
+        configMap:
+          name: news-chain-contract
+          items: [{ key: "TrustNews.json", path: "TrustNews.json" }]

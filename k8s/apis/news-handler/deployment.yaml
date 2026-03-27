@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: news-handler
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: news-handler
+  template:
+    metadata:
+      labels:
+        app: news-handler
+    spec:
+      initContainers: # SECCIÓN A AÑADIR (Corre antes de todo)
+        - name: wait-for-kafka
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until nc -z kafka.infra.svc.cluster.local 9092; do
+                echo "Esperando a Kafka..."
+                sleep 2
+              done
+      containers:
+      - name: news-handler
+        #image: tfm-news-handler:latest
+        image: news-handler
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8072
+        envFrom:
+        - configMapRef:
+            name: news-handler-config
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: news-handler-secrets
+              key: MONGO_URI

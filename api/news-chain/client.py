@@ -11,7 +11,7 @@ import os
 # ========================================
 API_URL = "http://localhost:8000"  # URL del API Trust Manager
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Clave privada del usuario
-ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")  # Dirección de la wallet
+ACCOUNT_ADDRESS = Web3.to_checksum_address(os.getenv("ACCOUNT_ADDRESS"))  # Dirección de la wallet
 RPC_URL = os.getenv("RPC_URL")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 

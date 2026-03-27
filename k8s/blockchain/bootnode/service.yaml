@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: geth-bootnode
+  namespace: blockchain
+spec:
+  # clusterIP: None lo convierte en Headless, ideal para StatefulSets y P2P
+  clusterIP: None 
+  selector:
+    app: geth-bootnode
+  ports:
+    # Geth necesita TCP para la conexión y UDP para el descubrimiento
+    - name: p2p-tcp
+      port: 30303
+      targetPort: 30303
+      protocol: TCP
+    - name: p2p-udp
+      port: 30303
+      targetPort: 30303
+      protocol: UDP

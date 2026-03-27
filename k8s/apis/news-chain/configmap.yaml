@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: news-chain-config
+  namespace: apis
+data:
+  # --- Comunicación interna entre Microservicios ---
+  KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
+  KAFKA_REQUEST_TOPIC: "fake_news_requests_blockchain"
+  KAFKA_RESPONSE_TOPIC: "fake_news_responses"
+  IPFS_FASTAPI_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"
+  
+  # --- Configuración de Blockchain (Geth) ---
+  # RPC_URL apunta al servicio en el namespace 'blockchain'
+  RPC_URL: "http://geth-rpc-endpoint.blockchain.svc.cluster.local:8555"
+  CONTRACT_ADDRESS: "0x9eA62eb7944349C407B307025644E47bF22F8bCc"
+  # Esta ruta debe coincidir con el mountPath del Deployment
+  CONTRACT_ABI_PATH: "/app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json"
+  ACCOUNT_ADDRESS: "0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b"
+  
+  # --- Configuración de Aplicación y Logs ---
+  LOG_LEVEL: "INFO"
+  ENABLE_KAFKA_CONSUMER: "true"

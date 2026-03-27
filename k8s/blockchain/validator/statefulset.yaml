@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: geth-miner
+  namespace: blockchain
+spec:
+  serviceName: geth-miner
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geth-miner
+  template:
+    metadata:
+      labels:
+        app: geth-miner
+    spec:
+      initContainers:
+        - name: init-blockchain
+          image: ethereum/client-go:v1.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # 1. Inicializar solo si NO existe la base de datos (Note el !)
+              if [ ! -f "/root/.ethereum/geth/chaindata/CURRENT" ]; then
+                echo "Inicializando la blockchain Miner por primera vez..."
+                geth --datadir /root/.ethereum init /etc/geth/genesis.json
+              else
+                echo "Blockchain ya detectada en el volumen. Omitiendo init."
+              fi
+              
+              # 2. Restaurar llaves SIEMPRE (Fuera del if)
+              echo "Asegurando disponibilidad de llaves en el keystore..."
+              mkdir -p /root/.ethereum/keystore
+              cp /etc/keystores/* /root/.ethereum/keystore/ 2>/dev/null || true
+              echo "Cuentas del minero preparadas."
+          volumeMounts:
+            # Aquí usamos 'miner-data' para que coincida con el volumeClaimTemplate
+            - name: miner-data
+              mountPath: /root/.ethereum
+            - name: config-volume
+              mountPath: /etc/geth/genesis.json
+              subPath: genesis.json
+            - name: keystores-volume
+              mountPath: /etc/keystores
+      containers:
+        - name: geth-miner
+          image: ethereum/client-go:v1.10.1
+          # Usamos sh -c y exec para que evalúe correctamente las variables del envFrom
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # 1. Esperamos a que el DNS del bootnode esté registrado en Kubernetes
+              echo "Esperando a que el bootnode esté disponible en la red..."
+              while ! nslookup geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local > /dev/null 2>&1; do
+                echo "DNS del bootnode no encontrado aún. Reintentando en 3 segundos..."
+                sleep 3
+              done
+              echo "¡Bootnode encontrado en la red! Arrancando nodo..."
+
+              exec geth \
+                --bootnodes=$BOOT_NODES \
+                --mine \
+                --miner.threads=1 \
+                --networkid=$NETWORK_ID \
+                --unlock=$MASTER_PUBLIC_KEY \
+                --password=/root/.ethereum/password.txt \
+                --miner.etherbase=$MASTER_PUBLIC_KEY \
+                --http \
+                --http.addr=0.0.0.0 \
+                --http.port=8557 \
+                --http.api=eth,web3,net,admin,personal \
+                --allow-insecure-unlock \
+                --port=30305 \
+                --nat=extip:$POD_IP \
+                --miner.gaslimit=${GAS_LIMIT}
+          envFrom:
+            - configMapRef:
+                name: ethereum-config
+          ports:
+            - containerPort: 30305
+              name: p2p
+            - containerPort: 8557
+              name: http
+          volumeMounts:
+            - name: miner-data
+              mountPath: /root/.ethereum
+            - name: secret-volume
+              mountPath: /root/.ethereum/password.txt
+              subPath: ACCOUNT_PASSWORD
+            - name: config-volume
+              mountPath: /root/.ethereum/geth/static-nodes.json
+              subPath: static-nodes.json
+              readOnly: true
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ethereum-config
+        - name: secret-volume
+          secret:
+            secretName: ethereum-secrets
+        - name: keystores-volume
+          secret:
+            secretName: ethereum-keystores
+  volumeClaimTemplates:
+    - metadata:
+        name: miner-data
+        namespace: blockchain
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

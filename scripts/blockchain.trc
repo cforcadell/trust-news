@@ -1,0 +1,151 @@
+
+# >>> COMANDO: kubectl exec geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
+Defaulted container "geth-rpc" out of: geth-rpc, init-blockchain (init)
+1
+
+# >>> COMANDO: kubectl exec geth-miner-0 -n blockchain -- geth attach --exec "net.peerCount"
+Defaulted container "geth-miner" out of: geth-miner, init-blockchain (init)
+1
+
+# >>> COMANDO: kubectl logs -n blockchain geth-bootnode-0
+Defaulted container "geth-bootnode" out of: geth-bootnode, init-blockchain (init)
+INFO [03-15|18:36:29.251] Maximum peer count                       ETH=50 LES=0 total=50
+INFO [03-15|18:36:29.251] Smartcard socket not found, disabling    err="stat /run/pcscd/pcscd.comm: no such file or directory"
+INFO [03-15|18:36:29.253] Set global gas cap                       cap=25000000
+INFO [03-15|18:36:29.254] Allocated trie memory caches             clean=154.00MiB dirty=256.00MiB
+INFO [03-15|18:36:29.255] Allocated cache and file handles         database=/root/.ethereum/geth/chaindata cache=512.00MiB handles=524288
+INFO [03-15|18:36:29.346] Opened ancient database                  database=/root/.ethereum/geth/chaindata/ancient
+INFO [03-15|18:36:29.349] Initialised chain configuration          config="{ChainID: 1214 Homestead: 0 DAO: <nil> DAOSupport: false EIP150: 0 EIP155: 0 EIP158: 0 Byzantium: 0 Constantinople: 0 Petersburg: 0 Istanbul: 0, Muir Glacier: <nil>, Berlin: <nil>, YOLO v3: <nil>, Engine: clique}"
+INFO [03-15|18:36:29.355] Initialising Ethereum protocol           network=1214 dbversion=<nil>
+WARN [03-15|18:36:29.355] Upgrade blockchain database version      from=<nil> to=8
+INFO [03-15|18:36:29.359] Loaded most recent local header          number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+INFO [03-15|18:36:29.359] Loaded most recent local full block      number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+INFO [03-15|18:36:29.359] Loaded most recent local fast block      number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+WARN [03-15|18:36:29.360] Failed to load snapshot, regenerating    err="missing or corrupted snapshot"
+INFO [03-15|18:36:29.360] Rebuilding state snapshot 
+INFO [03-15|18:36:29.360] Deleted state snapshot leftovers         kind=accounts wiped=0 elapsed="123.735µs"
+INFO [03-15|18:36:29.360] Deleted state snapshot leftovers         kind=storage  wiped=0 elapsed="21.723µs"
+INFO [03-15|18:36:29.360] Compacting snapshot account area  
+INFO [03-15|18:36:29.362] Wiper running, state snapshotting paused accounts=0 slots=0 storage=0.00B elapsed=2.464ms
+INFO [03-15|18:36:29.365] Regenerated local transaction journal    transactions=0 accounts=0
+INFO [03-15|18:36:29.370] Compacting snapshot storage area  
+INFO [03-15|18:36:29.370] Compacted snapshot area in database      elapsed=9.714ms
+INFO [03-15|18:36:29.370] Resuming state snapshot generation       root="e3a854…8b9ead" accounts=0 slots=0 storage=0.00B elapsed="13.505µs"
+INFO [03-15|18:36:29.370] Generated state snapshot                 accounts=1 slots=0 storage=47.00B elapsed="248.957µs"
+INFO [03-15|18:36:29.415] Allocated fast sync bloom                size=512.00MiB
+WARN [03-15|18:36:29.418] Error reading unclean shutdown markers   error="leveldb: not found"
+INFO [03-15|18:36:29.421] Starting peer-to-peer node               instance=Geth/v1.10.1-stable-c2d2f4ed/linux-amd64/go1.16
+INFO [03-15|18:36:29.424] Stored checkpoint snapshot to disk       number=0 hash="baf5f9…48566d"
+INFO [03-15|18:36:29.423] Initialized state bloom                  items=1 errorrate=0.000 elapsed=7.873ms
+INFO [03-15|18:36:29.439] Mapped network port                      proto=tcp extport=30303 intport=30303 interface=ExtIP(10.244.2.68)
+INFO [03-15|18:36:29.444] IPC endpoint opened                      url=/root/.ethereum/geth.ipc
+INFO [03-15|18:36:29.445] New local node record                    seq=1 id=5868f37ad03d142f ip=10.244.2.68 udp=0 tcp=30303
+INFO [03-15|18:36:29.446] Started P2P networking                   self="enode://36ca2def84346e1c715ac65c481785a3d6ab217f420fb216c3014f947ae70b9459763fb4e093bab1c88231261e9ad33c0ef70f780c53c0605f02dac4148845cb@10.244.2.68:30303?discport=0"
+WARN [03-15|18:36:39.246] Fast syncing, discarded propagated block number=1 hash="f70164…1fcf73"
+INFO [03-15|18:36:44.046] Block synchronisation started 
+INFO [03-15|18:36:44.158] Imported new block headers               count=2 elapsed=16.102ms    number=2 hash="04015b…0be6ca"
+INFO [03-15|18:36:44.159] Downloader queue stats                   receiptTasks=0 blockTasks=0 itemSize=121.79B throttle=8192
+INFO [03-15|18:36:44.202] Imported new chain segment               blocks=2 txs=0 mgas=0.000 elapsed=24.235ms    mgasps=0.000 number=2 hash="04015b…0be6ca" dirty=0.00B
+INFO [03-15|18:36:44.214] Fast sync complete, auto disabling 
+
+# >>> COMANDO: kubectl logs -n blockchain geth-rpc-endpoint-0
+Defaulted container "geth-rpc" out of: geth-rpc, init-blockchain (init)
+Esperando a que el bootnode esté disponible en la red...
+¡Bootnode encontrado en la red! Arrancando nodo...
+INFO [03-15|18:36:31.878] Maximum peer count                       ETH=50 LES=0 total=50
+INFO [03-15|18:36:31.878] Smartcard socket not found, disabling    err="stat /run/pcscd/pcscd.comm: no such file or directory"
+WARN [03-15|18:36:31.884] Found deprecated node list file /root/.ethereum/geth/static-nodes.json, please use the TOML config file instead. 
+INFO [03-15|18:36:31.884] Set global gas cap                       cap=25000000
+INFO [03-15|18:36:31.884] Allocated trie memory caches             clean=154.00MiB dirty=256.00MiB
+INFO [03-15|18:36:31.884] Allocated cache and file handles         database=/root/.ethereum/geth/chaindata cache=512.00MiB handles=524288
+INFO [03-15|18:36:31.997] Opened ancient database                  database=/root/.ethereum/geth/chaindata/ancient
+INFO [03-15|18:36:32.011] Initialised chain configuration          config="{ChainID: 1214 Homestead: 0 DAO: <nil> DAOSupport: false EIP150: 0 EIP155: 0 EIP158: 0 Byzantium: 0 Constantinople: 0 Petersburg: 0 Istanbul: 0, Muir Glacier: <nil>, Berlin: <nil>, YOLO v3: <nil>, Engine: clique}"
+INFO [03-15|18:36:32.019] Initialising Ethereum protocol           network=1214 dbversion=<nil>
+WARN [03-15|18:36:32.019] Upgrade blockchain database version      from=<nil> to=8
+INFO [03-15|18:36:32.023] Loaded most recent local header          number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+INFO [03-15|18:36:32.023] Loaded most recent local full block      number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+INFO [03-15|18:36:32.023] Loaded most recent local fast block      number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+WARN [03-15|18:36:32.023] Failed to load snapshot, regenerating    err="missing or corrupted snapshot"
+INFO [03-15|18:36:32.027] Rebuilding state snapshot 
+INFO [03-15|18:36:32.028] Regenerated local transaction journal    transactions=0 accounts=0
+INFO [03-15|18:36:32.033] Wiper running, state snapshotting paused accounts=0 slots=0 storage=0.00B elapsed=5.689ms
+INFO [03-15|18:36:32.121] Deleted state snapshot leftovers         kind=accounts wiped=0 elapsed=90.017ms
+INFO [03-15|18:36:32.121] Deleted state snapshot leftovers         kind=storage  wiped=0 elapsed="26.272µs"
+INFO [03-15|18:36:32.121] Compacting snapshot account area  
+INFO [03-15|18:36:32.123] Allocated fast sync bloom                size=512.00MiB
+WARN [03-15|18:36:32.125] Error reading unclean shutdown markers   error="leveldb: not found"
+INFO [03-15|18:36:32.125] Starting peer-to-peer node               instance=Geth/v1.10.1-stable-c2d2f4ed/linux-amd64/go1.16
+INFO [03-15|18:36:32.138] Initialized state bloom                  items=1 errorrate=0.000 elapsed=6.997ms
+INFO [03-15|18:36:32.140] Stored checkpoint snapshot to disk       number=0 hash="baf5f9…48566d"
+INFO [03-15|18:36:32.147] Compacting snapshot storage area  
+INFO [03-15|18:36:32.170] Mapped network port                      proto=tcp extport=30304 intport=30304 interface=ExtIP(10.244.1.68)
+INFO [03-15|18:36:32.176] Mapped network port                      proto=udp extport=30304 intport=30304 interface=ExtIP(10.244.1.68)
+INFO [03-15|18:36:32.177] New local node record                    seq=1 id=75d1e28102a77299 ip=10.244.1.68 udp=30304 tcp=30304
+INFO [03-15|18:36:32.194] Started P2P networking                   self=enode://24529dd499869cf9073eb74b6461da9e97b0239539398722a5f00220354e9d336ff652ea45e778988f70b2295d56d1ff7d4f09f758f8710fcb997acbebcfde01@10.244.1.68:30304
+INFO [03-15|18:36:32.202] IPC endpoint opened                      url=/root/.ethereum/geth.ipc
+INFO [03-15|18:36:32.205] HTTP server started                      endpoint=[::]:8555 prefix= cors=* vhosts=*
+INFO [03-15|18:36:32.206] WebSocket enabled                        url=ws://[::]:8556
+INFO [03-15|18:36:32.337] Compacted snapshot area in database      elapsed=215.940ms
+INFO [03-15|18:36:32.338] Resuming state snapshot generation       root="e3a854…8b9ead" accounts=0 slots=0 storage=0.00B elapsed="15.926µs"
+INFO [03-15|18:36:32.348] Generated state snapshot                 accounts=1 slots=0 storage=47.00B elapsed=10.400ms
+INFO [03-15|18:36:39.090] Unlocked account                         address=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+WARN [03-15|18:36:39.260] Fast syncing, discarded propagated block number=1 hash="f70164…1fcf73"
+
+# >>> COMANDO: kubectl logs -n blockchain geth-miner-0
+Defaulted container "geth-miner" out of: geth-miner, init-blockchain (init)
+Esperando a que el bootnode esté disponible en la red...
+¡Bootnode encontrado en la red! Arrancando nodo...
+INFO [03-15|18:36:31.815] Maximum peer count                       ETH=50 LES=0 total=50
+INFO [03-15|18:36:31.816] Smartcard socket not found, disabling    err="stat /run/pcscd/pcscd.comm: no such file or directory"
+WARN [03-15|18:36:31.820] Found deprecated node list file /root/.ethereum/geth/static-nodes.json, please use the TOML config file instead. 
+INFO [03-15|18:36:31.821] Set global gas cap                       cap=25000000
+INFO [03-15|18:36:31.822] Allocated trie memory caches             clean=154.00MiB dirty=256.00MiB
+INFO [03-15|18:36:31.822] Allocated cache and file handles         database=/root/.ethereum/geth/chaindata cache=512.00MiB handles=524288
+INFO [03-15|18:36:31.886] Opened ancient database                  database=/root/.ethereum/geth/chaindata/ancient
+INFO [03-15|18:36:31.889] Initialised chain configuration          config="{ChainID: 1214 Homestead: 0 DAO: <nil> DAOSupport: false EIP150: 0 EIP155: 0 EIP158: 0 Byzantium: 0 Constantinople: 0 Petersburg: 0 Istanbul: 0, Muir Glacier: <nil>, Berlin: <nil>, YOLO v3: <nil>, Engine: clique}"
+INFO [03-15|18:36:31.890] Initialising Ethereum protocol           network=1214 dbversion=<nil>
+WARN [03-15|18:36:31.890] Upgrade blockchain database version      from=<nil> to=8
+INFO [03-15|18:36:31.895] Loaded most recent local header          number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+INFO [03-15|18:36:31.895] Loaded most recent local full block      number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+INFO [03-15|18:36:31.895] Loaded most recent local fast block      number=0 hash="baf5f9…48566d" td=1 age=57y1w18h
+WARN [03-15|18:36:31.896] Failed to load snapshot, regenerating    err="missing or corrupted snapshot"
+INFO [03-15|18:36:31.896] Rebuilding state snapshot 
+INFO [03-15|18:36:31.896] Deleted state snapshot leftovers         kind=accounts wiped=0 elapsed="60.586µs"
+INFO [03-15|18:36:31.897] Deleted state snapshot leftovers         kind=storage  wiped=0 elapsed="34.212µs"
+INFO [03-15|18:36:31.899] Compacting snapshot account area  
+INFO [03-15|18:36:31.897] Wiper running, state snapshotting paused accounts=0 slots=0 storage=0.00B elapsed="771.383µs"
+INFO [03-15|18:36:31.897] Regenerated local transaction journal    transactions=0 accounts=0
+INFO [03-15|18:36:31.945] Allocated fast sync bloom                size=512.00MiB
+WARN [03-15|18:36:31.952] Error reading unclean shutdown markers   error="leveldb: not found"
+INFO [03-15|18:36:31.952] Starting peer-to-peer node               instance=Geth/v1.10.1-stable-c2d2f4ed/linux-amd64/go1.16
+INFO [03-15|18:36:31.958] Stored checkpoint snapshot to disk       number=0 hash="baf5f9…48566d"
+INFO [03-15|18:36:31.967] Initialized state bloom                  items=1 errorrate=0.000 elapsed=19.882ms
+INFO [03-15|18:36:31.968] Compacting snapshot storage area  
+INFO [03-15|18:36:31.990] Mapped network port                      proto=tcp extport=30305 intport=30305 interface=ExtIP(10.244.1.69)
+INFO [03-15|18:36:31.995] Mapped network port                      proto=udp extport=30305 intport=30305 interface=ExtIP(10.244.1.69)
+INFO [03-15|18:36:32.000] New local node record                    seq=1 id=a6d1c52d1cd3b47a ip=10.244.1.69 udp=30305 tcp=30305
+INFO [03-15|18:36:32.021] Started P2P networking                   self=enode://2c76ff8ccf6b125571a802e1f3569d06037b8959fd531491cf39546778aed5a756befbbe40bf5efbe505281e7123b9f82e985218daf768bcdb90930e7acc374c@10.244.1.69:30305
+INFO [03-15|18:36:32.048] IPC endpoint opened                      url=/root/.ethereum/geth.ipc
+INFO [03-15|18:36:32.055] HTTP server started                      endpoint=[::]:8557 prefix= cors= vhosts=localhost
+INFO [03-15|18:36:32.375] Compacted snapshot area in database      elapsed=476.268ms
+INFO [03-15|18:36:32.375] Resuming state snapshot generation       root="e3a854…8b9ead" accounts=0 slots=0 storage=0.00B elapsed="59.955µs"
+INFO [03-15|18:36:32.375] Generated state snapshot                 accounts=1 slots=0 storage=47.00B elapsed="341.098µs"
+INFO [03-15|18:36:39.243] Unlocked account                         address=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5
+INFO [03-15|18:36:39.243] Transaction pool price threshold updated price=1000000000
+INFO [03-15|18:36:39.243] Transaction pool price threshold updated price=1000000000
+INFO [03-15|18:36:39.245] Successfully sealed new block            number=1 sealhash="1c8bb0…4cfcce" hash="f70164…1fcf73" elapsed="654.927µs"
+INFO [03-15|18:36:39.245] 🔨 mined potential block                  number=1 hash="f70164…1fcf73"
+INFO [03-15|18:36:39.246] Commit new mining work                   number=1 sealhash="1c8bb0…4cfcce" uncles=0 txs=0 gas=0 fees=0 elapsed=1.928ms
+INFO [03-15|18:36:39.246] Commit new mining work                   number=2 sealhash="f7ac3f…a0e8f9" uncles=0 txs=0 gas=0 fees=0 elapsed="488.557µs"
+INFO [03-15|18:36:44.004] Successfully sealed new block            number=2 sealhash="f7ac3f…a0e8f9" hash="04015b…0be6ca" elapsed=4.757s
+INFO [03-15|18:36:44.027] 🔨 mined potential block                  number=2 hash="04015b…0be6ca"
+INFO [03-15|18:36:44.015] Commit new mining work                   number=3 sealhash="364621…2554dd" uncles=0 txs=0 gas=0 fees=0 elapsed=10.304ms
+
+# >>> COMANDO: kubectl exec geth-bootnode-0 -n blockchain -- ps aux | grep geth
+    1 root      0:00 geth --nodekeyhex=92c076e4d03d9e78b70729f0039b651f6c7c13a410cc329c77693b46cbd1f8ed --networkid=1214 --http=false --ws=false --ipcpath /root/.ethereum/geth.ipc --mine=false --port=30303 --nodiscover=false --nat=extip:10.244.2.68 --datadir /root/.ethereum
+
+# >>> COMANDO: kubectl exec geth-rpc-endpoint-0 -n blockchain -- ps aux | grep geth
+    1 root      0:04 geth --bootnodes=enode://36ca2def84346e1c715ac65c481785a3d6ab217f420fb216c3014f947ae70b9459763fb4e093bab1c88231261e9ad33c0ef70f780c53c0605f02dac4148845cb@geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local:30303 --allow-insecure-unlock --http --http.addr=0.0.0.0 --http.port=8555 --http.api=eth,web3,net,admin,personal --http.corsdomain=* --http.vhosts=* --ws --ws.addr=0.0.0.0 --ws.port=8556 --ws.api=eth,web3,net,admin,personal --networkid=1214 --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5 --password=/root/.ethereum/password.txt --port=30304 --datadir /root/.ethereum --nat=extip:10.244.1.68 --miner.gaslimit=90000000
+
+# >>> COMANDO: kubectl exec geth-miner-0 -n blockchain -- ps aux | grep geth
+    1 root      0:05 geth --bootnodes=enode://36ca2def84346e1c715ac65c481785a3d6ab217f420fb216c3014f947ae70b9459763fb4e093bab1c88231261e9ad33c0ef70f780c53c0605f02dac4148845cb@geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local:30303 --mine --miner.threads=1 --networkid=1214 --unlock=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5 --password=/root/.ethereum/password.txt --miner.etherbase=0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5 --http --http.addr=0.0.0.0 --http.port=8557 --http.api=eth,web3,net,admin,personal --allow-insecure-unlock --port=30305 --nat=extip:10.244.1.69 --miner.gaslimit=90000000

@@ -33,7 +33,7 @@ logger = logging.getLogger("validate-asertions")
 # =========================================================
 RPC_URL = os.getenv("RPC_URL")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
-ACCOUNT_ADDRESS = os.getenv("ACCOUNT_ADDRESS")
+ACCOUNT_ADDRESS = Web3.to_checksum_address(os.getenv("ACCOUNT_ADDRESS"))
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustNews.json")
 

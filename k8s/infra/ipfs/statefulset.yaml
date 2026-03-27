@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ipfs
+  namespace: infra
+spec:
+  serviceName: ipfs
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ipfs
+  template:
+    metadata:
+      labels:
+        app: ipfs
+    spec:
+      containers:
+        - name: ipfs
+          image: ipfs/kubo:latest
+          ports:
+            - containerPort: 5001   # API
+            - containerPort: 8080   # Gateway
+            - containerPort: 4001   # Swarm
+          volumeMounts:
+            - name: ipfs-storage
+              mountPath: /data/ipfs
+  volumeClaimTemplates:
+    - metadata:
+        name: ipfs-storage
+        namespace: infra
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

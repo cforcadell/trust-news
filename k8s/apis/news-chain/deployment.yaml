@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: news-chain
+  namespace: apis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: news-chain
+  template:
+    metadata:
+      labels:
+        app: news-chain
+    spec:
+      initContainers: # SECCIÓN A AÑADIR (Corre antes de todo)
+        - name: wait-for-kafka
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until nc -z kafka.infra.svc.cluster.local 9092; do
+                echo "Esperando a Kafka..."
+                sleep 2
+              done
+      containers:
+      - name: news-chain
+        #image: tfm-news-chain:latest
+        image: news-chain
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: news-chain-config
+        env:
+        - name: PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: news-chain-secrets
+              key: PRIVATE_KEY
+        volumeMounts:
+        # Montamos el volumen en la carpeta para que el archivo JSON aparezca dentro
+        - name: abi-volume
+          mountPath: /app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
+          subPath: TrustNews.json
+      volumes:
+      - name: abi-volume
+        configMap:
+          name: news-chain-contract
+          items:
+          - key: "TrustNews.json"
+            path: "TrustNews.json"

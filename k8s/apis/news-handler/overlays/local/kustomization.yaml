@@ -1,0 +1,15 @@
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+
+
+# Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
+secretGenerator:
+
+- name: news-handler-secrets
+  namespace: apis
+  envs:
+    - news-handler.env
+namespace: apis

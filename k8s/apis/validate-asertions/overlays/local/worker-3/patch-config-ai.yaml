@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: validate-worker # Tiene que llamarse igual que en la base
+  namespace: apis
+spec:
+  template:
+    spec:
+      containers:
+      - name: worker
+        # Kustomize inyectará estas variables automáticamente en la lista de 'env' de tu base
+        env:
+        - name: AI_PROVIDER
+          value: "openrouter"
+        - name: MODEL
+          value: "arcee-ai/trinity-large-preview:free"
+        - name: API_URL
+          value: "https://openrouter.ai/api/v1/chat/completions"

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: geth-rpc-endpoint
+  namespace: blockchain
+spec:
+  type: ClusterIP
+  selector:
+    app: geth-rpc-endpoint
+  ports:
+    - name: http
+      port: 8555
+      targetPort: 8555
+      protocol: TCP
+    - name: ws
+      port: 8556
+      targetPort: 8556
+      protocol: TCP
+    - name: p2p-tcp
+      port: 30304
+      targetPort: 30304
+      protocol: TCP
+    - name: p2p-udp
+      port: 30304
+      targetPort: 30304
+      protocol: UDP

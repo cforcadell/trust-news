@@ -1,0 +1,135 @@
+apiVersion: skaffold/v4beta6
+kind: Config
+metadata:
+  name: blockchain-tfm
+
+build:
+  local:
+    push: false
+    useBuildkit: true
+  artifacts:
+    - image: generate-asertions
+      context: api
+      docker: {dockerfile: generate-asertions/Dockerfile}
+      sync: {infer: ["**/*.py"]}
+    - image: validate-asertions
+      context: api
+      docker: {dockerfile: validate-asertions/Dockerfile}
+      sync: {infer: ["**/*.py"]}
+    - image: news-handler
+      context: api
+      docker: {dockerfile: news-handler/Dockerfile}
+      sync: {infer: ["**/*.py"]}
+    - image: news-chain
+      context: api
+      docker: {dockerfile: news-chain/Dockerfile}
+      sync: {infer: ["**/*.py"]}
+    - image: ipfs-api
+      context: api
+      docker: {dockerfile: ipfs/Dockerfile}
+      sync: {infer: ["**/*.py"]}
+    - image: web-classic
+      context: web_classic
+      docker: {dockerfile: Dockerfile}
+
+# --- MANIFESTS GLOBALES ---
+# Lo dejamos vacío en la raíz para que cada perfil inyecte solo lo que necesita
+manifests:
+  kustomize:
+    buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+    paths: []
+  rawYaml: [] 
+
+deploy:
+  kubectl: {}
+
+portForward: [] 
+
+profiles:
+  # ---------------------------------------------------------
+  # PERFIL: SETUP
+  # ---------------------------------------------------------
+  - name: setup
+    patches:
+      - op: add
+        path: /manifests/rawYaml
+        value: 
+          - k8s/namespaces.yaml
+
+
+  # ---------------------------------------------------------
+  # PERFIL: BLOCKCHAIN (Todo es rawYaml según tu find)
+  # ---------------------------------------------------------
+  - name: blockchain
+    patches:
+      - op: add
+        path: /manifests/rawYaml
+        value:
+          - k8s/blockchain/configmap.yaml
+          - k8s/blockchain/ethereum-keystores.yaml
+          - k8s/blockchain/secret-template.yaml
+          - k8s/blockchain/bootnode/*.yaml
+          - k8s/blockchain/validator/*.yaml
+          - k8s/blockchain/rpc/*.yaml
+
+  # ---------------------------------------------------------
+  # PERFIL: INFRA (Híbrido)
+  # ---------------------------------------------------------
+  - name: infra
+    patches:
+      # Mongo sí tiene Kustomize
+      - op: add
+        path: /manifests/kustomize/paths
+        value: 
+          - k8s/infra/mongodb/overlays/local
+      # El resto son puros YAMLs
+      - op: add
+        path: /manifests/rawYaml
+        value:
+          - k8s/infra/mongodb/*.yaml
+          - k8s/infra/zookeeper/*.yaml
+          - k8s/infra/kafka/*.yaml
+          - k8s/infra/ipfs/*.yaml
+          - k8s/infra/fluent-bit/*.yaml
+          - k8s/infra/frontend-logs/*.yaml
+      - op: add
+        path: /portForward
+        value:
+          - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
+
+  # ---------------------------------------------------------
+  # PERFIL: APIS + FRONTEND (Híbrido)
+  # ---------------------------------------------------------
+  - name: apis-frontend
+    patches:
+      
+      # ipfs-fastapi NO tiene Kustomize, lo inyectamos como rawYaml
+      - op: add
+        path: /manifests/rawYaml
+        value:
+          - k8s/apis/ipfs-fastapi/*.yaml
+          - k8s/apis/validate-asertions/base/configmap-common.yaml
+          - k8s/apis/news-handler/*.yaml
+          - k8s/apis/news-chain/*.yaml
+          - k8s/apis/generate-asertions/*.yaml
+      # Estos sí tienen Kustomize
+      - op: add
+        path: /manifests/kustomize/paths
+        value:
+          - k8s/apis/generate-asertions/overlays/local
+          - k8s/apis/validate-asertions/overlays/local/worker-1
+          - k8s/apis/validate-asertions/overlays/local/worker-2
+          - k8s/apis/validate-asertions/overlays/local/worker-3
+          - k8s/apis/news-handler/overlays/local
+          - k8s/apis/news-chain/overlays/local
+          - k8s/frontend
+      - op: add
+        path: /portForward
+        value:
+          - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
+          # No service for validators
+          #- {resourceType: service, resourceName: validate-asertions, namespace: apis, port: 8070, localPort: 8070}
+          - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
+          - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
+          - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
+          - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}

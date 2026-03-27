@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: geth-rpc-endpoint
+  namespace: blockchain
+spec:
+  serviceName: geth-rpc-endpoint
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geth-rpc-endpoint
+  template:
+    metadata:
+      labels:
+        app: geth-rpc-endpoint
+    spec:
+      initContainers:
+        - name: init-blockchain
+          image: ethereum/client-go:v1.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # 1. Inicializar solo si NO existe el archivo CURRENT
+              if [ ! -f "/root/.ethereum/geth/chaindata/CURRENT" ]; then
+                echo "Blockchain no detectada. Inicializando con genesis.json..."
+                geth --datadir /root/.ethereum init /etc/geth/genesis.json
+              else
+                echo "Blockchain ya inicializada. Omitiendo geth init."
+              fi
+
+              # 2. Restaurar cuentas (SIEMPRE se debe hacer para asegurar que estén ahí)
+              echo "Restaurando archivos de cuentas en el keystore..."
+              mkdir -p /root/.ethereum/keystore
+              cp /etc/keystores/* /root/.ethereum/keystore/ 2>/dev/null || true
+              echo "Cuentas sincronizadas con éxito."
+          volumeMounts:
+            # CORRECCIÓN 1: El nombre debe coincidir con el volumeClaimTemplate
+            - name: rpc-data 
+              mountPath: /root/.ethereum
+            - name: config-volume
+              mountPath: /etc/geth/genesis.json
+              subPath: genesis.json
+            - name: keystores-volume
+              mountPath: /etc/keystores
+      containers:
+        - name: geth-rpc
+          image: ethereum/client-go:v1.10.1
+          # CORRECCIÓN 2: Usar sh -c para que evalúe correctamente las variables del envFrom
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # 1. Esperamos a que el DNS del bootnode esté registrado en Kubernetes
+              echo "Esperando a que el bootnode esté disponible en la red..."
+              while ! nslookup geth-bootnode-0.geth-bootnode.blockchain.svc.cluster.local > /dev/null 2>&1; do
+                echo "DNS del bootnode no encontrado aún. Reintentando en 3 segundos..."
+                sleep 3
+              done
+              echo "¡Bootnode encontrado en la red! Arrancando nodo..."
+
+              exec geth \
+                --bootnodes=$BOOT_NODES \
+                --allow-insecure-unlock \
+                --http \
+                --http.addr=0.0.0.0 \
+                --http.port=8555 \
+                --http.api=eth,web3,net,admin,personal \
+                --http.corsdomain="*" \
+                --http.vhosts="*" \
+                --ws \
+                --ws.addr=0.0.0.0 \
+                --ws.port=8556 \
+                --ws.api=eth,web3,net,admin,personal \
+                --networkid=$NETWORK_ID \
+                --unlock=$MASTER_PUBLIC_KEY \
+                --password=/root/.ethereum/password.txt \
+                --port=30304 \
+                --datadir /root/.ethereum \
+                --nat=extip:$POD_IP \
+                --miner.gaslimit=$GAS_LIMIT
+          envFrom:
+            - configMapRef:
+                name: ethereum-config
+          ports:
+            - containerPort: 8555
+              name: http
+            - containerPort: 8556
+              name: ws
+            - containerPort: 30304
+              name: p2p
+          volumeMounts:
+            - name: rpc-data
+              mountPath: /root/.ethereum
+            - name: secret-volume
+              mountPath: /root/.ethereum/password.txt
+              subPath: ACCOUNT_PASSWORD
+            - name: config-volume
+              mountPath: /root/.ethereum/geth/static-nodes.json
+              subPath: static-nodes.json
+              readOnly: true
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ethereum-config
+        - name: secret-volume
+          secret:
+            secretName: ethereum-secrets 
+        - name: keystores-volume
+          secret:
+            secretName: ethereum-keystores
+  volumeClaimTemplates:
+    - metadata:
+        name: rpc-data
+        namespace: blockchain
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

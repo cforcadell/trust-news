@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: geth-bootnode
+  namespace: blockchain
+spec:
+  serviceName: geth-bootnode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geth-bootnode
+  template:
+    metadata:
+      labels:
+        app: geth-bootnode
+    spec:
+      initContainers:
+        - name: init-blockchain
+          image: ethereum/client-go:v1.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -f "/root/.ethereum/geth/chaindata/CURRENT" ]; then
+                echo "Inicializando la blockchain del Bootnode..."
+                geth --datadir /root/.ethereum init /etc/geth/genesis.json
+              else
+                echo "Bootnode ya inicializado. Omitiendo..."
+              fi
+          volumeMounts:
+            - name: bootnode-data
+              mountPath: /root/.ethereum
+            - name: config-volume
+              mountPath: /etc/geth/genesis.json
+              subPath: genesis.json
+      containers:
+        - name: geth-bootnode
+          image: ethereum/client-go:v1.10.1
+          env:
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Obtenemos la IP real del Pod
+              POD_IP=$(hostname -i | awk '{print $1}')
+              exec geth \
+                --nodekeyhex=$NODE_KEY_HEX \
+                --networkid=${NETWORK_ID} \
+                --http=false \
+                --ws=false \
+                --ipcpath /root/.ethereum/geth.ipc \
+                --mine=false \
+                --port=30303 \
+                --nodiscover=false \
+                --nat=extip:$POD_IP \
+                --datadir /root/.ethereum                 
+          envFrom:
+            - configMapRef:
+                name: ethereum-config
+          ports:
+            - containerPort: 30303
+              name: p2p
+          volumeMounts:
+            - name: bootnode-data
+              mountPath: /root/.ethereum
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ethereum-config
+  volumeClaimTemplates:
+    - metadata:
+        name: bootnode-data
+        namespace: blockchain
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

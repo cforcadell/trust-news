@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base/deployment-validator.yaml
+
+nameSuffix: "-3" # Esto cambia el nombre a validate-worker-1 y validator-secret-1
+
+# Leemos tu archivo .env local para generar el secreto
+secretGenerator:
+  - name: validator-secret
+    namespace: apis
+    envs:
+      - prod-worker-3.env
+
+# Desactivamos el hash aleatorio al final del nombre del secreto
+generatorOptions:
+  disableNameSuffixHash: true
+
+patches:
+  - target:
+      kind: Deployment
+      name: validate-worker
+    patch: |-
+      - op: replace
+        path: /spec/template/metadata/labels/instance
+        value: "3"
+      - op: replace
+        path: /spec/selector/matchLabels/instance
+        value: "3"
+  - path: patch-resources.yaml

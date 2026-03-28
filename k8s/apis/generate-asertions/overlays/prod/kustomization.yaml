@@ -5,11 +5,11 @@ kind: Kustomization
 resources:
 
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
-secretGenerator:
-- name: api-keys
-  namespace: apis
-  envs:
-    - generate-asertions.env
+# secretGenerator:
+# - name: api-keys
+#   namespace: apis
+#   envs:
+#     - generate-asertions.env
 patches:
   - path: patch-resources.yaml
 namespace: apis

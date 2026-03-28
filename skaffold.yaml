@@ -133,3 +133,45 @@ profiles:
           - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
           - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
           - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}
+          # ---------------------------------------------------------
+  # PERFIL: INFRA PROD
+  # ---------------------------------------------------------
+  - name: infra-prod
+    patches:
+      - op: add
+        path: /manifests/kustomize/paths
+        value: 
+          - k8s/infra/mongodb/overlays/prod 
+      - op: add
+        path: /manifests/rawYaml
+        value:
+          - k8s/infra/mongodb/*.yaml
+          - k8s/infra/zookeeper/*.yaml
+          - k8s/infra/kafka/*.yaml
+          - k8s/infra/ipfs/*.yaml
+          - k8s/infra/fluent-bit/*.yaml
+          - k8s/infra/frontend-logs/*.yaml
+
+  # ---------------------------------------------------------
+  # PERFIL: APIS + FRONTEND PROD
+  # ---------------------------------------------------------
+  - name: apis-frontend-prod
+    patches:
+      - op: add
+        path: /manifests/rawYaml
+        value:
+          - k8s/apis/ipfs-fastapi/*.yaml
+          - k8s/apis/validate-asertions/base/configmap-common.yaml
+          - k8s/apis/news-handler/*.yaml
+          - k8s/apis/news-chain/*.yaml
+          - k8s/apis/generate-asertions/*.yaml
+      - op: add
+        path: /manifests/kustomize/paths
+        value:
+          - k8s/apis/generate-asertions/overlays/prod 
+          - k8s/apis/validate-asertions/overlays/prod/worker-1 #
+          - k8s/apis/validate-asertions/overlays/prod/worker-2
+          - k8s/apis/validate-asertions/overlays/prod/worker-3
+          - k8s/apis/news-handler/overlays/prod
+          - k8s/apis/news-chain/overlays/prod
+          - k8s/frontend 

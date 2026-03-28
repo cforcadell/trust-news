@@ -1,0 +1,80 @@
+name: CD - Deploy to Hetzner (Prod)
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Perfil de Skaffold a desplegar'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - setup
+          - blockchain
+          - infra-prod
+          - apis-frontend-prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod 
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Descargar build.json (Artifact)
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: build-and-release.yml
+          name: skaffold-build-artifact
+          path: .
+
+      - name: Instalar Skaffold y Kubectl
+        run: |
+          curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+          sudo install skaffold /usr/local/bin/
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install kubectl /usr/local/bin/
+
+      - name: Configurar Túnel SSH y Kubeconfig
+        env:
+          SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+          SSH_USER: ${{ secrets.HETZNER_USER }}
+          SERVER_IP: ${{ secrets.HETZNER_IP }}
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p 2222 -H $SERVER_IP >> ~/.ssh/known_hosts
+          
+          # Abrir túnel SSH
+          ssh -i ~/.ssh/id_rsa -p 2222 -f -N -L 6443:127.0.0.1:6443 $SSH_USER@$SERVER_IP
+
+          sleep 5
+          kubectl cluster-info # Prueba rápida para ver si hay conexión
+          
+          # Setup Kubeconfig
+          mkdir -p ~/.kube
+          echo "$KUBECONFIG_DATA" | base64 --decode > ~/.kube/config
+          kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+
+      # --- DESPLIEGUES CONDICIONALES ---
+
+      - name: Deploy Setup (Manual Only)
+        if: ${{ github.event.inputs.profile == 'setup' }}
+        run: skaffold deploy --build-artifacts=build.json --profile=setup --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm
+
+      - name: Deploy Blockchain
+        if: ${{ github.event.inputs.profile == 'all' || github.event.inputs.profile == 'blockchain' }}
+        run: skaffold deploy --build-artifacts=build.json --profile=blockchain --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm
+
+      - name: Deploy Infraestructura Prod
+        if: ${{ github.event.inputs.profile == 'all' || github.event.inputs.profile == 'infra-prod' }}
+        run: skaffold deploy --build-artifacts=build.json --profile=infra-prod --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm
+
+      - name: Deploy APIs y Frontend Prod
+        if: ${{ github.event.inputs.profile == 'all' || github.event.inputs.profile == 'apis-frontend-prod' }}
+        run: skaffold deploy --build-artifacts=build.json --profile=apis-frontend-prod --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm

@@ -11,11 +11,11 @@ configMapGenerator:
     - TrustNews.json=../../../../../smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
 
 # Reemplaza el comando manual: kubectl create secret generic news-chain-secrets ... Account 0
-secretGenerator:
-- name: news-chain-secrets
-  namespace: apis
-  envs:
-    - prod-news-chain.env
+# secretGenerator:
+# - name: news-chain-secrets
+#   namespace: apis
+#   envs:
+#     - prod-news-chain.env
 patches:
   - path: patch-resources.yaml    
 namespace: apis

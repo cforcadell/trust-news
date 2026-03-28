@@ -11,7 +11,7 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: backend
+  name: apis
 ---
 apiVersion: v1
 kind: Namespace

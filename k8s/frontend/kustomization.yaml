@@ -1,0 +1,21 @@
+# ./k8s/frontend/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - service.yaml
+  - deployment.yaml
+
+secretGenerator:
+- name: frontend-tls
+  type: kubernetes.io/tls
+  files:
+    - tls.crt=../../web_classic/certs/fullchain.pem
+    - tls.key=../../web_classic/certs/privkey.pem
+
+configMapGenerator:
+- name: nginx-config
+  files:
+    - default.conf=../../web_classic/nginx_k8s.conf
+
+namespace: frontend

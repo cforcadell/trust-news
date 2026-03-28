@@ -7,11 +7,11 @@ resources:
 nameSuffix: "-2" # Esto cambia el nombre a validate-worker-1 y validator-secret-1
 
 # Leemos tu archivo .env local para generar el secreto
-secretGenerator:
-  - name: validator-secret
-    namespace: apis
-    envs:
-      - prod-worker-2.env
+# secretGenerator:
+#   - name: validator-secret
+#     namespace: apis
+#     envs:
+#       - prod-worker-2.env
 
 # Desactivamos el hash aleatorio al final del nombre del secreto
 generatorOptions:

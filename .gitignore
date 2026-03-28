@@ -47,12 +47,6 @@ api/mongo/mongo.txt
 api/mongo/mongo.txt
 k8s/blockchain/secret-template.yaml
 skaffold
-k8s/apis/generate-asertions/kustomization.yaml
-k8s/apis/news-chain/kustomization.yaml
-k8s/apis/news-handler/kustomization.yaml
-k8s/frontend/kustomization.yaml
-k8s/apis/validate-asertions/kustomization.yaml
-k8s/infra/mongodb/kustomization.yaml
 docs/fake_news/password_unlock.txt
 docs/github/github.txt
 *.env

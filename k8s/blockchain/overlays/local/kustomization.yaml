@@ -7,10 +7,10 @@ resources:
 
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
 secretGenerator:
-- name: mongodb-secret
-  namespace: infra
+- name: ethereum-secrets
+  namespace: blockchain
   envs:
-    - mongodb.env
+    - ethereum.env
 
 generatorOptions:
   disableNameSuffixHash: true

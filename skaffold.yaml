@@ -63,11 +63,14 @@ profiles:
   - name: blockchain
     patches:
       - op: add
+        path: /manifests/kustomize/paths
+        value: 
+          - k8s/blockchain/overlays/local
+      - op: add
         path: /manifests/rawYaml
         value:
           - k8s/blockchain/configmap.yaml
           - k8s/blockchain/ethereum-keystores.yaml
-          - k8s/blockchain/secret-template.yaml
           - k8s/blockchain/bootnode/*.yaml
           - k8s/blockchain/validator/*.yaml
           - k8s/blockchain/rpc/*.yaml
@@ -133,7 +136,25 @@ profiles:
           - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
           - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
           - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}
-          # ---------------------------------------------------------
+  
+  # ---------------------------------------------------------
+  # PERFIL: BLOCKCHAIN PROD
+  # ---------------------------------------------------------
+  - name: blockchain-prod
+    patches:
+      - op: add
+        path: /manifests/kustomize/paths
+        value: 
+          - k8s/blockchain/overlays/prod
+      - op: add
+        path: /manifests/rawYaml
+        value:
+          - k8s/blockchain/configmap.yaml
+          - k8s/blockchain/ethereum-keystores.yaml
+          - k8s/blockchain/bootnode/*.yaml
+          - k8s/blockchain/validator/*.yaml
+          - k8s/blockchain/rpc/*.yaml
+  # ---------------------------------------------------------
   # PERFIL: INFRA PROD
   # ---------------------------------------------------------
   - name: infra-prod

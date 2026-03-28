@@ -6,11 +6,11 @@ resources:
 
 
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
-secretGenerator:
-- name: mongodb-secret
-  namespace: infra
-  envs:
-    - prod-mongodb.env
+# secretGenerator:
+# - name: mongodb-secret
+#   namespace: infra
+#   envs:
+#     - prod-mongodb.env
 patches:
   - path: patch-resources.yaml 
 generatorOptions:

@@ -78,7 +78,7 @@ jobs:
 
       - name: Deploy Blockchain
         if: ${{ github.event.inputs.profile == 'all' || github.event.inputs.profile == 'blockchain-prod' }}
-        run: skaffold deploy --build-artifacts=build.json --profile=blockchain --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm
+        run: skaffold deploy --build-artifacts=build.json --profile=blockchain-prod --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm
 
       - name: Deploy Infraestructura Prod
         if: ${{ github.event.inputs.profile == 'all' || github.event.inputs.profile == 'infra-prod' }}

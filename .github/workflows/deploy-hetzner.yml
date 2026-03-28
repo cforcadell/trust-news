@@ -59,7 +59,13 @@ jobs:
           # Setup Kubeconfig
           mkdir -p ~/.kube
           echo "$KUBECONFIG_DATA" | base64 --decode > ~/.kube/config
+          # Verificar que el archivo no está vacío (para debug)
+          ls -l ~/.kube/config
+          
+          # Configurar el contexto para que use el túnel
           kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+          kubectl config set-context default --cluster=default
+          kubectl config use-context default
 
       # --- DESPLIEGUES CONDICIONALES ---
 

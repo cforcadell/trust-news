@@ -50,7 +50,7 @@ npx hardhat run scripts/deployGeth.js --network cloudGeth
 #get contract address and configure apis
 ```
 
-```bash infra inside server
+```bash blockchain inside server
 
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
 
@@ -87,5 +87,37 @@ eth.sendTransaction({
   to: "42d488d0393fd1d6b72bb424db28dd7eb5e06737",
   value: web3.toWei(10, "ether")
 })
+
+```
+
+
+```bash infra
+
+#use actions deploy workflow
+
+
+kubectl get pods -n infra
+
+kubectl logs -n infra -f zookeeper-0
+kubectl logs -n infra -f kafka-0
+
+
+#si al parar los pods a replicas=0 o eliminar los statefuls quedan pvcs
+kubectl get pvc -n infra
+kubectl delete pvc ipfs-storage-ipfs-0 -n infra
+kubectl delete pvc kafka-data-kafka-0 -n infra
+kubectl delete pvc mongodb-storage-mongodb-0 -n infra
+kubectl delete pvc zk-storage-zookeeper-0 -n infra
+
+
+# En caso de problemas con los pvs por charsloops y diferentes ids de cluster
+#parar los pods del perfil 
+kubectl get pvc -n infra
+kubectl delete pvc kafka-data-kafka-0 -n infra
+
+#if we want to stop or start pods
+kubectl scale statefulset --all --replicas=0 -n infra
+kubectl scale statefulset --all --replicas=1 -n infra
+
 
 ```

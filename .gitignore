@@ -50,3 +50,4 @@ skaffold
 docs/fake_news/password_unlock.txt
 docs/github/github.txt
 *.env
+smart-contracts/hardhat.config.js

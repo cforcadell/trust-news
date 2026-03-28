@@ -40,32 +40,35 @@ jobs:
 
       - name: Configurar Túnel SSH y Kubeconfig
         env:
-          SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
-          SSH_USER: ${{ secrets.HETZNER_USER }}
-          SERVER_IP: ${{ secrets.HETZNER_IP }}
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
+          SERVER_IP: ${{ secrets.HETZNER_IP }}
+          SSH_USER: ${{ secrets.HETZNER_USER }}
+          SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
         run: |
+          # 1. Preparar SSH
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -p 2222 -H $SERVER_IP >> ~/.ssh/known_hosts
           
-          # Abrir túnel SSH
-          ssh -i ~/.ssh/id_rsa -p 2222 -f -N -L 6443:127.0.0.1:6443 $SSH_USER@$SERVER_IP
-
-          sleep 5
-          kubectl cluster-info # Prueba rápida para ver si hay conexión
+          # 2. Abrir túnel forzado
+          ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $SSH_USER@$SERVER_IP
           
-          # Setup Kubeconfig
-          mkdir -p ~/.kube
-          echo "$KUBECONFIG_DATA" | base64 --decode > ~/.kube/config
-          # Verificar que el archivo no está vacío (para debug)
-          ls -l ~/.kube/config
+          # 3. Setup Kubeconfig Robusto
+          mkdir -p $HOME/.kube
+          echo "$KUBECONFIG_DATA" | base64 --decode > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
           
-          # Configurar el contexto para que use el túnel
+          # 4. FORZAR VARIABLES Y CONTEXTO
+          # Esto evita que kubectl busque en /etc/ o en el puerto 8080
+          export KUBECONFIG=$HOME/.kube/config
           kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
-          kubectl config set-context default --cluster=default
+          kubectl config set-context default --cluster=default --user=default
           kubectl config use-context default
+          
+          # 5. Prueba de conexión (si falla aquí, el job se detiene con error claro)
+          echo "Verificando conexión con el clúster..."
+          kubectl cluster-info
 
       # --- DESPLIEGUES CONDICIONALES ---
 

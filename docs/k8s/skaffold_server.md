@@ -26,7 +26,7 @@ kubectl create secret tls frontend-tls \
 ```
 
 **Deploy contract using ssh tunnel**
-```bash blockchain
+```bash blockchain ~/blockchain/hetzner/keys-github
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 8565:localhost:8555 sysadmin@135.181.80.57 -t "kubectl port-forward pod/geth-rpc-endpoint-0 -n blockchain 8555:8555"
 
 

@@ -13,7 +13,7 @@ module.exports = {
       url: "http://localhost:8555", // el port HTTP del node N1
       accounts: [
         //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
-        "0x"
+        ""
       ],
       gas: 25_000_000,
       chainId: 1214
@@ -23,7 +23,7 @@ module.exports = {
       url: "http://localhost:8565", // el port HTTP del node N1
       accounts: [
         //"0x<CLAU_PRIVADA_DEL_COMPTE_QUE_HAS_DESBLOQUEJAT>"
-        "0x"
+        ""
       ],
       gas: 25_000_000,
       chainId: 1214

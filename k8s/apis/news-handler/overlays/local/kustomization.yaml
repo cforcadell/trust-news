@@ -3,9 +3,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
+  - ../../configmap.yaml
+  - ../../service.yaml
+  - ../../deployment.yaml
 
-
-# Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
+generatorOptions:
+  disableNameSuffixHash: true
+  
 secretGenerator:
 
 - name: news-handler-secrets

@@ -26,7 +26,7 @@ permissions:
 jobs:
   build-and-deploy-validation:
     runs-on: ubuntu-latest
-    environment: validation # Cambiado de prod a validation
+    environment: prod # Cambiado de prod a validation
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4

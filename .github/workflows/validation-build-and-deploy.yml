@@ -16,8 +16,8 @@ on:
           - infra-prod
           - apis-frontend-prod
   # Opcional: Descomenta esto si quieres que se despliegue SOLO cada vez que haces push a main
-  # push:
-  #   branches: [ "main" ]
+  push:
+    branches: [ "postTFM" ]
 
 permissions:
   contents: read

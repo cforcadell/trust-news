@@ -13,13 +13,6 @@ spec:
       labels:
         app: validate-worker
     spec:
-      initContainers:
-        - name: wait-for-kafka
-          image: busybox:latest
-          command:
-            - /bin/sh
-            - -c
-            - "until nc -z kafka.infra.svc.cluster.local 9092; do echo Waiting for Kafka; sleep 2; done"
       containers:
       - name: worker
         image: validate-asertions
@@ -43,5 +36,5 @@ spec:
       volumes:
       - name: abi-volume
         configMap:
-          name: news-chain-contract
+          name: validator-contract
           items: [{ key: "TrustNews.json", path: "TrustNews.json" }]

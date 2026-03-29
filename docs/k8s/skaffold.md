@@ -187,3 +187,16 @@ get svc -n infra
 Explore + Run query
 
 ```
+```bash  get secret details 
+
+kubectl get secrets -n infra
+kubectl get mongodb-secret -n infra -o jsonpath='{.data}'
+
+
+kubectl get secrets -n apis
+kubectl get secret news-handler-secrets -n apis -o jsonpath='{.data}'
+echo "x" | base64 --decode
+
+kubectl exec -it mongodb-0 -n infra -- mongo -u root -p cforcadellm --authenticationDatabase admin
+
+```

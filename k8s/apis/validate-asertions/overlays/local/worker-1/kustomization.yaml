@@ -2,10 +2,16 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
+  - ../../../base/configmap-common.yaml
   - ../../../base/deployment-validator.yaml
 
 nameSuffix: "-1" # Esto cambia el nombre a validate-worker-1 y validator-secret-1
 
+configMapGenerator:
+- name: validator-contract
+  namespace: apis
+  files:
+    - TrustNews.json=../../../../../../smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
 # Leemos tu archivo .env local para generar el secreto
 secretGenerator:
   - name: validator-secret
@@ -28,4 +34,5 @@ patches:
       - op: replace
         path: /spec/selector/matchLabels/instance
         value: "1"
+
   - path: patch-config-ai.yaml

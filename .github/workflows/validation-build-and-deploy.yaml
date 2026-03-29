@@ -1,7 +1,7 @@
 name: Validation - Build & Deploy
 
 on:
-  # Puedes ejecutarlo a mano desde GitHub
+  # Puedes ejecutarlo a mano desde GitHub.
   workflow_dispatch:
     inputs:
       profile:

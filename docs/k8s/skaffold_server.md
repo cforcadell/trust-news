@@ -116,8 +116,15 @@ kubectl get pvc -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 
 #if we want to stop or start pods
-kubectl scale statefulset --all --replicas=0 -n infra
-kubectl scale statefulset --all --replicas=1 -n infra
+ra
 
+
+```
+
+**start/stop pods**
+```bash 
+
+kubectl scale statefulset --all --replicas=0 -n infra blockchain 
+kubectl scale statefulset --all --replicas=1 -n infra blockchain 
 
 ```

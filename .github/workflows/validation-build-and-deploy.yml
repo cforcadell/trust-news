@@ -72,13 +72,9 @@ jobs:
           kubectl cluster-info
 
       - name: Skaffold Run (Build + Push + Deploy)
-        # Aquí usamos 'skaffold run' en lugar de 'build' y 'deploy' separados.
-        # Esto compilará la imagen etiquetada con el Git SHA, la subirá a GHCR y aplicará los YAMLs en tu servidor.
         run: |
-          # Si se lanzó por workflow_dispatch, usa el perfil elegido. Si fue por push, usa 'all'.
           PROFILE="${{ github.event.inputs.profile || 'all' }}"
           
           skaffold run \
             --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm \
-            --profile=$PROFILE \
-            --push=true
+            --profile=$PROFILE

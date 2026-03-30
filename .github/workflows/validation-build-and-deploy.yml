@@ -23,7 +23,7 @@ permissions:
 jobs:
   build-and-deploy-validation:
     runs-on: ubuntu-latest
-    environment: prod # Asegúrate de que este entorno existe en tu repo si usas secrets específicos
+    environment: prod # Usa los secrets del entorno prod
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4
@@ -72,13 +72,15 @@ jobs:
         run: |
           PROFILE="${{ github.event.inputs.profile || 'all' }}"
           
-          # Extraemos los primeros 7 caracteres del commit actual de GitHub
+          # Extraemos los 7 caracteres del commit
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "Ejecutando despliegue con la etiqueta: $SHORT_SHA"
           
-          # Forzamos a Skaffold a usar este tag exacto en todo el ciclo (build, push y deploy)
+          # 1. Engañamos a Skaffold: le decimos que este clúster NO es local para forzar el push
+          skaffold config set --kube-context default local-cluster false
+          
+          # 2. Ejecutamos sin la bandera --push (ahora lo hará de forma automática)
           skaffold run \
             --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm \
             --tag=$SHORT_SHA \
-            --push=true \
             --profile=$PROFILE

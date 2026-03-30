@@ -12,6 +12,13 @@ spec:
       containers:
       - name: worker
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
+        env:
+        - name: AI_PROVIDER
+          value: "openrouter"
+        - name: MODEL
+          value: "arcee-ai/trinity-large-preview:free"
+        - name: API_URL
+          value: "https://openrouter.ai/api/v1/chat/completions"
         resources:
             requests:
               cpu: "100m"

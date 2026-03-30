@@ -111,12 +111,16 @@ kubectl delete pvc zk-storage-zookeeper-0 -n infra
 
 
 # En caso de problemas con los pvs por charsloops y diferentes ids de cluster
-#parar los pods del perfil 
+#parar los pods del perfil. OPCION LIGHT
 kubectl get pvc -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 
-
-
+# OPCION HARD
+kubectl scale statefulset kafka zookeeper -n infra --replicas=0
+kubectl delete pvc kafka-data-kafka-0 zk-storage-zookeeper-0 -n infra
+kubectl scale statefulset zookeeper -n infra --replicas=1
+# Espera a que Zookeeper esté Running
+kubectl scale statefulset kafka -n infra --replicas=1
 
 ```
 

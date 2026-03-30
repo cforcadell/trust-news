@@ -15,7 +15,6 @@ on:
           - blockchain-prod
           - infra-prod
           - apis-frontend-prod
-  # Opcional: Descomenta esto si quieres que se despliegue SOLO cada vez que haces push a main
 
 permissions:
   contents: read
@@ -24,7 +23,7 @@ permissions:
 jobs:
   build-and-deploy-validation:
     runs-on: ubuntu-latest
-    environment: prod # Cambiado de prod a validation
+    environment: validation # Asegúrate de que este entorno existe en tu repo si usas secrets específicos
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4
@@ -66,13 +65,19 @@ jobs:
           kubectl config set-context default --cluster=default --user=default
           kubectl config use-context default
           
-          echo "Verificando conexión con el clúster de validación..."
+          echo "Verificando conexión con el clúster..."
           kubectl cluster-info
 
       - name: Skaffold Run (Build + Push + Deploy)
         run: |
           PROFILE="${{ github.event.inputs.profile || 'all' }}"
           
+          # Extraemos los primeros 7 caracteres del commit actual de GitHub
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Ejecutando despliegue con la etiqueta: $SHORT_SHA"
+          
+          # Forzamos a Skaffold a usar este tag exacto en todo el ciclo (build, push y deploy)
           skaffold run \
             --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm \
+            --tag=$SHORT_SHA \
             --profile=$PROFILE

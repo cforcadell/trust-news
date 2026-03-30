@@ -1,5 +1,4 @@
 node_modules
-artifacts
 cache
 ignition/deployments/chain-12345/journal.jsonl
 ignition/deployments/chain-12345/build-info/56172074225d99cafa008427fb3ce358.json
@@ -54,3 +53,6 @@ hardhat.config.js
 
 smart-contracts/hardhat.config.js
 smart-contracts/hardhat.config.real.js
+smart-contracts/artifacts/build-info/cad42a9e27863fbf25a1c435ae8dcdd3.json
+smart-contracts/ignition/deployments/chain-12345/artifacts/TokenModule#Token.dbg.json
+smart-contracts/ignition/deployments/chain-12345/artifacts/TokenModule#Token.json

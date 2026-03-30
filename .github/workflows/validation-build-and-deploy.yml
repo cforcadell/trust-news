@@ -75,7 +75,6 @@ jobs:
           echo "Fase 1: Construyendo y forzando push a GHCR con etiqueta $SHORT_SHA..."
           skaffold build \
             --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm \
-            --tag=$SHORT_SHA \
             --push=true \
             --profile=$PROFILE \
             --file-output=build.json

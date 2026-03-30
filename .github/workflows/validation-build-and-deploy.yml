@@ -23,7 +23,7 @@ permissions:
 jobs:
   build-and-deploy-validation:
     runs-on: ubuntu-latest
-    environment: validation # Asegúrate de que este entorno existe en tu repo si usas secrets específicos
+    environment: prod # Asegúrate de que este entorno existe en tu repo si usas secrets específicos
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4

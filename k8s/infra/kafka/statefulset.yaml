@@ -1,4 +1,3 @@
-
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -16,6 +15,17 @@ spec:
         app: kafka
     spec:
       initContainers:
+        # --- NUEVO: Limpieza del ID de cluster obsoleto ---
+        - name: auto-clean-meta-id
+          image: busybox
+          command:
+            - sh
+            - -c
+            - "rm -f /var/lib/kafka/data/meta.properties || true"
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+        # --- EXISTENTE: Espera a Zookeeper ---
         - name: wait-for-zookeeper
           image: confluentinc/cp-kafka:7.6.1
           command:

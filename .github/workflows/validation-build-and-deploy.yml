@@ -1,7 +1,6 @@
 name: Validation - Build & Deploy
 
 on:
-  # Puedes ejecutarlo a mano desde GitHub.
   workflow_dispatch:
     inputs:
       profile:
@@ -23,7 +22,7 @@ permissions:
 jobs:
   build-and-deploy-validation:
     runs-on: ubuntu-latest
-    environment: prod # Usa los secrets del entorno prod
+    environment: prod # Usamos prod para tener acceso a los secrets de Hetzner
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4
@@ -68,19 +67,20 @@ jobs:
           echo "Verificando conexión con el clúster..."
           kubectl cluster-info
 
-      - name: Skaffold Run (Build + Push + Deploy)
+      - name: Skaffold Build & Deploy
         run: |
           PROFILE="${{ github.event.inputs.profile || 'all' }}"
-          
-          # Extraemos los 7 caracteres del commit
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "Ejecutando despliegue con la etiqueta: $SHORT_SHA"
           
-          # 1. Engañamos a Skaffold: le decimos que este clúster NO es local para forzar el push
-          skaffold config set --kube-context default local-cluster false
-          
-          # 2. Ejecutamos sin la bandera --push (ahora lo hará de forma automática)
-          skaffold run \
+          echo "Fase 1: Construyendo y forzando push a GHCR con etiqueta $SHORT_SHA..."
+          skaffold build \
             --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm \
             --tag=$SHORT_SHA \
+            --push=true \
+            --profile=$PROFILE \
+            --file-output=build.json
+            
+          echo "Fase 2: Desplegando en el clúster de Hetzner..."
+          skaffold deploy \
+            --build-artifacts=build.json \
             --profile=$PROFILE

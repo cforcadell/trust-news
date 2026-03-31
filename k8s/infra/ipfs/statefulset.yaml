@@ -17,6 +17,13 @@ spec:
       containers:
         - name: ipfs
           image: ipfs/kubo:latest
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
           ports:
             - containerPort: 5001   # API
             - containerPort: 8080   # Gateway

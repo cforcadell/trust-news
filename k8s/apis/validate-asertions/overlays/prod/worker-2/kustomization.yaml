@@ -34,4 +34,13 @@ patches:
       - op: replace
         path: /spec/selector/matchLabels/instance
         value: "2"
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/valueFrom/secretKeyRef/name
+        value: "validator-secret-2"
+      - op: replace
+        path: /spec/template/spec/containers/0/env/1/valueFrom/secretKeyRef/name
+        value: "validator-secret-2"
+      - op: replace
+        path: /spec/template/spec/containers/0/env/2/valueFrom/secretKeyRef/name
+        value: "validator-secret-2"
   - path: patch-resources.yaml

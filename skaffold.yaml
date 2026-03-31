@@ -4,6 +4,8 @@ metadata:
   name: blockchain-tfm
 
 build:
+  tagPolicy:
+    sha256: {}
   local:
     push: false
     useBuildkit: true

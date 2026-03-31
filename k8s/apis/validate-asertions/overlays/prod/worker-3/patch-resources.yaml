@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: validate-worker # Tiene que coincidir con el nombre de la base
+  namespace: apis
 spec:
   # En producción podríamos querer 2 réplicas por si una cae, 
   # pero si tu worker no soporta concurrencia, déjalo en 1.
@@ -11,10 +12,17 @@ spec:
       containers:
       - name: worker
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
+        env:
+        - name: AI_PROVIDER
+          value: "openrouter"
+        - name: MODEL
+          value: "arcee-ai/trinity-large-preview:free"
+        - name: API_URL
+          value: "https://openrouter.ai/api/v1/chat/completions"
         resources:
-          requests:
-            cpu: "200m"
-            memory: "256Mi"
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

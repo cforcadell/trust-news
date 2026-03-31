@@ -1,7 +1,6 @@
 name: Validation - Build & Deploy
 
 on:
-  # Puedes ejecutarlo a mano desde GitHub.
   workflow_dispatch:
     inputs:
       profile:
@@ -15,9 +14,6 @@ on:
           - blockchain-prod
           - infra-prod
           - apis-frontend-prod
-  # Opcional: Descomenta esto si quieres que se despliegue SOLO cada vez que haces push a main
-  push:
-    branches: [ "postTFM" ]
 
 permissions:
   contents: read
@@ -26,7 +22,7 @@ permissions:
 jobs:
   build-and-deploy-validation:
     runs-on: ubuntu-latest
-    environment: prod # Cambiado de prod a validation
+    environment: prod # Usamos prod para tener acceso a los secrets de Hetzner
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4
@@ -68,17 +64,22 @@ jobs:
           kubectl config set-context default --cluster=default --user=default
           kubectl config use-context default
           
-          echo "Verificando conexión con el clúster de validación..."
+          echo "Verificando conexión con el clúster..."
           kubectl cluster-info
 
-      - name: Skaffold Run (Build + Push + Deploy)
-        # Aquí usamos 'skaffold run' en lugar de 'build' y 'deploy' separados.
-        # Esto compilará la imagen etiquetada con el Git SHA, la subirá a GHCR y aplicará los YAMLs en tu servidor.
+      - name: Skaffold Build & Deploy
         run: |
-          # Si se lanzó por workflow_dispatch, usa el perfil elegido. Si fue por push, usa 'all'.
           PROFILE="${{ github.event.inputs.profile || 'all' }}"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           
-          skaffold run \
+          echo "Fase 1: Construyendo y forzando push a GHCR con etiqueta $SHORT_SHA..."
+          skaffold build \
             --default-repo ghcr.io/${{ github.repository_owner }}/blockchain-tfm \
+            --push=true \
             --profile=$PROFILE \
-            --push=true
+            --file-output=build.json
+            
+          echo "Fase 2: Desplegando en el clúster de Hetzner..."
+          skaffold deploy \
+            --build-artifacts=build.json \
+            --profile=$PROFILE

@@ -16,6 +16,13 @@ spec:
       initContainers: # SECCIÓN A AÑADIR (Corre antes de todo)
         - name: wait-for-kafka
           image: busybox:latest
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
           command:
             - /bin/sh
             - -c

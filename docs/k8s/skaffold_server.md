@@ -26,7 +26,7 @@ kubectl create secret tls frontend-tls \
 ```
 
 **Deploy contract using ssh tunnel**
-```bash blockchain
+```bash blockchain ~/blockchain/hetzner/keys-github
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 8565:localhost:8555 sysadmin@135.181.80.57 -t "kubectl port-forward pod/geth-rpc-endpoint-0 -n blockchain 8555:8555"
 
 
@@ -111,13 +111,32 @@ kubectl delete pvc zk-storage-zookeeper-0 -n infra
 
 
 # En caso de problemas con los pvs por charsloops y diferentes ids de cluster
-#parar los pods del perfil 
+#parar los pods del perfil. OPCION LIGHT
 kubectl get pvc -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 
-#if we want to stop or start pods
-kubectl scale statefulset --all --replicas=0 -n infra
-kubectl scale statefulset --all --replicas=1 -n infra
+# OPCION HARD
+kubectl scale statefulset kafka zookeeper -n infra --replicas=0
+kubectl delete pvc kafka-data-kafka-0 zk-storage-zookeeper-0 -n infra
+kubectl scale statefulset zookeeper -n infra --replicas=1
+# Espera a que Zookeeper esté Running
+kubectl scale statefulset kafka -n infra --replicas=1
 
+```
+
+
+
+```bash tunnel apis ~/blockchain/hetzner/keys-github
+ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
+
+https://localhost:9443/
+```
+
+kubectl get pods -n infra
+**start/stop pods**
+```bash 
+
+kubectl scale statefulset --all --replicas=0 -n infra blockchain 
+kubectl scale statefulset --all --replicas=1 -n infra blockchain 
 
 ```

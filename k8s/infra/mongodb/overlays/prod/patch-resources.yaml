@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: mongodb # Tiene que coincidir con el nombre de la base
+  namespace: infra
 spec:
   # En producción podríamos querer 2 réplicas por si una cae, 
   # pero si tu worker no soporta concurrencia, déjalo en 1.

@@ -15,6 +15,14 @@ spec:
     spec:
       containers:
       - name: grafana
-        image: grafana/grafana:latest
+        # Cambia 'latest' por una versión estable como 11.5.2 o 10.4.8
+        image: grafana/grafana:11.5.2
         ports:
         - containerPort: 3000
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          requests:
+            memory: "256Mi"
+            cpu: "200m"

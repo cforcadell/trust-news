@@ -1,4 +1,4 @@
-# LOKI (Base de datos ligera)
+# LOKI (Versión estable y compatible)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,6 +16,18 @@ spec:
     spec:
       containers:
       - name: loki
-        image: grafana/loki:latest
+        # Usamos la 3.0.0 que es robusta y compatible con los dashboards actuales
+        image: grafana/loki:3.0.0
         ports:
         - containerPort: 3100
+        # Loki es intensivo en disco/memoria, conviene darle un respiro
+        resources:
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+        # Argumento básico para que funcione sin configuración compleja de S3
+        args:
+          - "-config.file=/etc/loki/local-config.yaml"

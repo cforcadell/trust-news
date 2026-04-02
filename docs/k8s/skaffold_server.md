@@ -140,3 +140,12 @@ kubectl scale statefulset --all --replicas=0 -n infra blockchain
 kubectl scale statefulset --all --replicas=1 -n infra blockchain 
 
 ```
+```bash tunnel grafana ~/blockchain/hetzner/keys-github
+ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 3300:127.0.0.1:3300 sysadmin@135.181.80.57 "kubectl port-forward pod/grafana-7964997b9b-skqjw -n infra 3000:3000 --address 0.0.0.0"
+
+http://localhost:3300/
+
+#Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
+
+Explore + Run query
+```

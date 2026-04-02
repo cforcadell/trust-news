@@ -150,7 +150,20 @@ app = FastAPI(title="Validate Asertions API")
 # Funciones internas
 # =========================================================
 def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
-    return ai_validator.verificar_asercion(texto, contexto)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return ai_validator.verificar_asercion(texto, contexto)
+        except HTTPException as e:
+            # Si es un error de Rate Limit (429), esperamos y reintentamos
+            if e.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = 10 ** attempt  # Espera 1s, luego 2s...
+                    logger.warning(f"⚠️ API Rate Limit (429). Reintentando en {wait_time}s (Intento {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+            # Si es otro error o ya superamos los intentos, lanzamos la excepción
+            raise e
 
 async def upload_validation_to_ipfs(validation_doc_bytes: bytes) -> str:
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")

@@ -528,8 +528,18 @@ async def process_kafka_message(data: dict):
 
                 # Guardar request como pendiente (opcional pero útil)
                 pending_requests = doc.get("validation_requests", {})
-                pending_requests.setdefault(id_assert, set())
-                pending_requests[id_assert].add(id_val)
+
+                # 1. Obtenemos lo que haya guardado (si no hay nada, devuelve una lista vacía)
+                current_requests = pending_requests.get(id_assert, [])
+
+                # 2. Lo convertimos a set (vital porque de Mongo siempre viene como lista)
+                requests_set = set(current_requests)
+
+                # 3. Añadimos el nuevo validador sin miedo
+                requests_set.add(id_val)
+
+                # 4. Lo guardamos de vuelta en el diccionario
+                pending_requests[id_assert] = requests_set
 
                 # Persistir
                 await update_order(order_id, {

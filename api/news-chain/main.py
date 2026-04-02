@@ -72,18 +72,22 @@ try:
     with open(CONTRACT_ABI_PATH) as f:
         artifact = json.load(f)
     abi = artifact["abi"]
+    
+    # Check if the node is connected
+    if not w3.is_connected():
+        raise ConnectionError(f"Cannot connect to Web3 RPC: {RPC_URL}")
+
     contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
-    logger.info(f"Conectado a blockchain: {w3.is_connected()} - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
+    
+    # Check if there is actually bytecode deployed at this address
+    if w3.eth.get_code(CONTRACT_ADDRESS) == b'':
+        raise ValueError(f"No smart contract code found at {CONTRACT_ADDRESS}. Is the address correct and the chain synced?")
+
+    logger.info(f"✅ Conectado a blockchain - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
+
 except Exception as e:
-    logger.error(f"Error cargando ABI o inicializando contrato: {e}")
-    class DummyContract:
-        def __init__(self):
-            self.functions = self
-            self.events = self
-            self.process_receipt = lambda x: []
-            self.registerNew = lambda *args: self
-            self.build_transaction = lambda x: {}
-    contract = DummyContract()
+    logger.critical(f"❌ Error crítico inicializando Web3: {e}")
+    raise SystemExit(1) # Kill the app so Docker/K8s knows it failed
 
 
 # =========================================================

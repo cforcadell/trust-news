@@ -15,6 +15,7 @@ Develop v0.0.8
 - endpoints de consulta y de cambio de config de AI validators OK
 - Nuevo proveedor grok
 - endpoint (con validacion de token) que puedan ser llamados del exterior para validacion de noticias e2e y consulta
+- gitlab mirroring
 
 
 

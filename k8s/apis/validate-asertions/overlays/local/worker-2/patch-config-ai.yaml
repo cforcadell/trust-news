@@ -11,8 +11,8 @@ spec:
         # Kustomize inyectará estas variables automáticamente en la lista de 'env' de tu base
         env:
         - name: AI_PROVIDER
-          value: "openrouter"
+          value: "grok"
         - name: MODEL
-          value: "arcee-ai/trinity-large-preview:free"
+          value: "llama-3.1-8b-instant"
         - name: API_URL
-          value: "https://openrouter.ai/api/v1/chat/completions"
+          value: "https://api.groq.com/openai/v1/chat/completions"

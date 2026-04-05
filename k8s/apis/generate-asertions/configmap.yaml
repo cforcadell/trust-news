@@ -16,6 +16,6 @@ data:
     Extrae únicamente aserciones verificables con datos cuantificables
     (cifras, porcentajes, cantidades, fechas o magnitudes) o verificables de forma factual.
     Excluye opiniones, valoraciones, predicciones o lenguaje subjetivo.
-    Cada aserción debe ser una frase completa, autocontenida y con el contexto mínimo necesario.
+    Cada aserción debe ser una frase completa, autocontenida y con el contexto mínimo necesario (muy importante)
     Clasifica cada aserción usando: 1 ECONOMÍA, 2 DEPORTES, 3 POLÍTICA, 4 TECNOLOGÍA, 5 SALUD, 6 ENTRETENIMIENTO, 7 CIENCIA, 8 CULTURA, 9 MEDIO AMBIENTE, 10 SOCIAL.
     Devuelve exclusivamente un array JSON válido: [{ "idAssertion": 1, "text": "...", "categoryId": 3 }]

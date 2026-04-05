@@ -16,6 +16,8 @@ spec:
       containers:
       - name: worker
         image: validate-asertions
+        ports:
+        - containerPort: 8070
         envFrom:
         - configMapRef:
             name: validate-common-config

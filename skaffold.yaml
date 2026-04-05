@@ -9,30 +9,7 @@ build:
   local:
     push: false
     useBuildkit: true
-  artifacts:
-    - image: generate-asertions
-      context: api
-      docker: {dockerfile: generate-asertions/Dockerfile}
-      sync: {infer: ["**/*.py"]}
-    - image: validate-asertions
-      context: api
-      docker: {dockerfile: validate-asertions/Dockerfile}
-      sync: {infer: ["**/*.py"]}
-    - image: news-handler
-      context: api
-      docker: {dockerfile: news-handler/Dockerfile}
-      sync: {infer: ["**/*.py"]}
-    - image: news-chain
-      context: api
-      docker: {dockerfile: news-chain/Dockerfile}
-      sync: {infer: ["**/*.py"]}
-    - image: ipfs-api
-      context: api
-      docker: {dockerfile: ipfs/Dockerfile}
-      sync: {infer: ["**/*.py"]}
-    - image: web-classic
-      context: web_classic
-      docker: {dockerfile: Dockerfile}
+  # Las imágenes (artifacts) se han movido a los perfiles que realmente las necesitan
 
 # --- MANIFESTS GLOBALES ---
 # Lo dejamos vacío en la raíz para que cada perfil inyecte solo lo que necesita
@@ -58,7 +35,6 @@ profiles:
         value: 
           - k8s/namespaces.yaml
 
-
   # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN (Todo es rawYaml según tu find)
   # ---------------------------------------------------------
@@ -68,17 +44,9 @@ profiles:
         path: /manifests/kustomize/paths
         value: 
           - k8s/blockchain/overlays/local
-      # - op: add
-      #   path: /manifests/rawYaml
-      #   value:
-      #     - k8s/blockchain/configmap.yaml
-      #     - k8s/blockchain/ethereum-keystores.yaml
-      #     - k8s/blockchain/bootnode/*.yaml
-      #     - k8s/blockchain/validator/*.yaml
-      #     - k8s/blockchain/rpc/*.yaml
 
   # ---------------------------------------------------------
-  # PERFIL: INFRA (Híbrido)
+  # PERFIL: INFRA (Híbrido) - SIN CONSTRUCCIÓN DE IMÁGENES
   # ---------------------------------------------------------
   - name: infra
     patches:
@@ -91,7 +59,6 @@ profiles:
       - op: add
         path: /manifests/rawYaml
         value:
-          # - k8s/infra/mongodb/*.yaml
           - k8s/infra/zookeeper/*.yaml
           - k8s/infra/kafka/*.yaml
           - k8s/infra/ipfs/*.yaml
@@ -103,20 +70,43 @@ profiles:
           - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
-  # PERFIL: APIS + FRONTEND (Híbrido)
+  # PERFIL: APIS + FRONTEND (Híbrido) - CON CONSTRUCCIÓN
   # ---------------------------------------------------------
   - name: apis-frontend
     patches:
-      
+      # Inyectamos la construcción de imágenes SOLO en este perfil
+      - op: add
+        path: /build/artifacts
+        value:
+          - image: generate-asertions
+            context: api
+            docker: {dockerfile: generate-asertions/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: validate-asertions
+            context: api
+            docker: {dockerfile: validate-asertions/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: news-handler
+            context: api
+            docker: {dockerfile: news-handler/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: news-chain
+            context: api
+            docker: {dockerfile: news-chain/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: ipfs-api
+            context: api
+            docker: {dockerfile: ipfs/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: web-classic
+            context: web_classic
+            docker: {dockerfile: Dockerfile}
+            
       # ipfs-fastapi NO tiene Kustomize, lo inyectamos como rawYaml
       - op: add
         path: /manifests/rawYaml
         value:
           - k8s/apis/ipfs-fastapi/*.yaml
-          # - k8s/apis/validate-asertions/base/configmap-common.yaml
-          # - k8s/apis/news-handler/*.yaml
-          # - k8s/apis/news-chain/*.yaml
-          # - k8s/apis/generate-asertions/*.yaml
       # Estos sí tienen Kustomize
       - op: add
         path: /manifests/kustomize/paths
@@ -132,8 +122,9 @@ profiles:
         path: /portForward
         value:
           - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
-          # No service for validators
-          #- {resourceType: service, resourceName: validate-asertions, namespace: apis, port: 8070, localPort: 8070}
+          - {resourceType: service, resourceName: validate-service-1, namespace: apis, port: 8070, localPort: 8070}
+          - {resourceType: service, resourceName: validate-service-2, namespace: apis, port: 8070, localPort: 8069}
+          - {resourceType: service, resourceName: validate-service-3, namespace: apis, port: 8070, localPort: 8068}
           - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
           - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
           - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
@@ -148,16 +139,9 @@ profiles:
         path: /manifests/kustomize/paths
         value: 
           - k8s/blockchain/overlays/prod
-      # - op: add
-      #   path: /manifests/rawYaml
-      #   value:
-      #     - k8s/blockchain/configmap.yaml
-      #     - k8s/blockchain/ethereum-keystores.yaml
-      #     - k8s/blockchain/bootnode/*.yaml
-      #     - k8s/blockchain/validator/*.yaml
-      #     - k8s/blockchain/rpc/*.yaml
+
   # ---------------------------------------------------------
-  # PERFIL: INFRA PROD
+  # PERFIL: INFRA PROD - SIN CONSTRUCCIÓN DE IMÁGENES
   # ---------------------------------------------------------
   - name: infra-prod
     patches:
@@ -168,7 +152,6 @@ profiles:
       - op: add
         path: /manifests/rawYaml
         value:
-          # - k8s/infra/mongodb/*.yaml
           - k8s/infra/zookeeper/*.yaml
           - k8s/infra/kafka/*.yaml
           - k8s/infra/ipfs/*.yaml
@@ -176,18 +159,42 @@ profiles:
           - k8s/infra/frontend-logs/*.yaml
 
   # ---------------------------------------------------------
-  # PERFIL: APIS + FRONTEND PROD
+  # PERFIL: APIS + FRONTEND PROD - CON CONSTRUCCIÓN
   # ---------------------------------------------------------
   - name: apis-frontend-prod
     patches:
+      # Inyectamos la construcción de imágenes SOLO en este perfil
+      - op: add
+        path: /build/artifacts
+        value:
+          - image: generate-asertions
+            context: api
+            docker: {dockerfile: generate-asertions/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: validate-asertions
+            context: api
+            docker: {dockerfile: validate-asertions/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: news-handler
+            context: api
+            docker: {dockerfile: news-handler/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: news-chain
+            context: api
+            docker: {dockerfile: news-chain/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: ipfs-api
+            context: api
+            docker: {dockerfile: ipfs/Dockerfile}
+            sync: {infer: ["**/*.py"]}
+          - image: web-classic
+            context: web_classic
+            docker: {dockerfile: Dockerfile}
+
       - op: add
         path: /manifests/rawYaml
         value:
           - k8s/apis/ipfs-fastapi/*.yaml
-          # - k8s/apis/validate-asertions/base/configmap-common.yaml
-          # - k8s/apis/news-handler/*.yaml
-          # - k8s/apis/news-chain/*.yaml
-          # - k8s/apis/generate-asertions/*.yaml
       - op: add
         path: /manifests/kustomize/paths
         value:
@@ -197,4 +204,4 @@ profiles:
           - k8s/apis/validate-asertions/overlays/prod/worker-3
           - k8s/apis/news-handler/overlays/prod
           - k8s/apis/news-chain/overlays/prod
-          - k8s/frontend 
+          - k8s/frontend

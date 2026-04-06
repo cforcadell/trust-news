@@ -67,14 +67,16 @@ validation-build-deploy:
     
     - echo "Fase 1 - Construyendo y forzando push al Registry con etiqueta $SHORT_SHA..."
     # Añadidas las barras invertidas (\) para dividir el comando correctamente
-    - skaffold build \
-        --default-repo $CI_REGISTRY_IMAGE \
-        --push=true \
-        --profile=$PROFILE \
-        --file-output=build.json
+    - >
+      skaffold build
+      --default-repo $CI_REGISTRY_IMAGE
+      --push=true
+      --profile=$PROFILE
+      --file-output=build.json
         
     - echo "Fase 2 - Desplegando en el clúster de Hetzner..."
     # Añadidas las barras invertidas (\)
-    - skaffold deploy \
-        --build-artifacts=build.json \
+    - >
+      skaffold deploy 
+        --build-artifacts=build.json 
         --profile=$PROFILE

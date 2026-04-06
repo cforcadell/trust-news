@@ -1,5 +1,5 @@
 # Definición de inputs (equivalente a workflow_dispatch inputs)
-variables:vi git-
+variables:
   PROFILE:
     value: "all"
     description: "Perfil de Skaffold a desplegar (all, setup, blockchain-prod, infra-prod, apis-frontend-prod)"

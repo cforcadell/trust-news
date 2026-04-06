@@ -4,6 +4,7 @@ metadata:
   name: blockchain-tfm
 
 build:
+  concurrency: 1
   tagPolicy:
     sha256: {}
   local:

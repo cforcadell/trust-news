@@ -77,7 +77,4 @@ validation-build-deploy:
         
     - echo "Fase 2 - Desplegando en el clúster de Hetzner..."
     # Añadidas las barras invertidas (\)
-    - >
-      skaffold deploy 
-        --build-artifacts=build.json 
-        --profile=$PROFILE
+    - skaffold deploy --build-artifacts=build.json --profile=$PROFILE

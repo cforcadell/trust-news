@@ -30,7 +30,7 @@ profiles:
   # ---------------------------------------------------------
   - name: setup
     patches:
-      - op: add
+      - op: replace
         path: /manifests/rawYaml
         value: 
           - k8s/namespaces.yaml
@@ -40,7 +40,7 @@ profiles:
   # ---------------------------------------------------------
   - name: blockchain
     patches:
-      - op: add
+      - op: replace
         path: /manifests/kustomize/paths
         value: 
           - k8s/blockchain/overlays/local
@@ -51,12 +51,12 @@ profiles:
   - name: infra
     patches:
       # Mongo sí tiene Kustomize
-      - op: add
+      - op: replace
         path: /manifests/kustomize/paths
         value: 
           - k8s/infra/mongodb/overlays/local
       # El resto son puros YAMLs
-      - op: add
+      - op: replace
         path: /manifests/rawYaml
         value:
           - k8s/infra/zookeeper/*.yaml
@@ -64,7 +64,7 @@ profiles:
           - k8s/infra/ipfs/*.yaml
           - k8s/infra/fluent-bit/*.yaml
           - k8s/infra/frontend-logs/*.yaml
-      - op: add
+      - op: replace
         path: /portForward
         value:
           - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
@@ -103,12 +103,12 @@ profiles:
             docker: {dockerfile: Dockerfile}
             
       # ipfs-fastapi NO tiene Kustomize, lo inyectamos como rawYaml
-      - op: add
+      - op: replace
         path: /manifests/rawYaml
         value:
           - k8s/apis/ipfs-fastapi/*.yaml
       # Estos sí tienen Kustomize
-      - op: add
+      - op: replace
         path: /manifests/kustomize/paths
         value:
           - k8s/apis/generate-asertions/overlays/local
@@ -118,7 +118,7 @@ profiles:
           - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain/overlays/local
           - k8s/frontend
-      - op: add
+      - op: replace
         path: /portForward
         value:
           - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
@@ -135,7 +135,7 @@ profiles:
   # ---------------------------------------------------------
   - name: blockchain-prod
     patches:
-      - op: add
+      - op: replace
         path: /manifests/kustomize/paths
         value: 
           - k8s/blockchain/overlays/prod
@@ -145,11 +145,11 @@ profiles:
   # ---------------------------------------------------------
   - name: infra-prod
     patches:
-      - op: add
+      - op: replace
         path: /manifests/kustomize/paths
         value: 
           - k8s/infra/mongodb/overlays/prod 
-      - op: add
+      - op: replace
         path: /manifests/rawYaml
         value:
           - k8s/infra/zookeeper/*.yaml
@@ -191,11 +191,11 @@ profiles:
             context: web_classic
             docker: {dockerfile: Dockerfile}
 
-      - op: add
+      - op: replace
         path: /manifests/rawYaml
         value:
           - k8s/apis/ipfs-fastapi/*.yaml
-      - op: add
+      - op: replace
         path: /manifests/kustomize/paths
         value:
           - k8s/apis/generate-asertions/overlays/prod 

@@ -122,6 +122,17 @@ kubectl scale statefulset zookeeper -n infra --replicas=1
 # Espera a que Zookeeper esté Running
 kubectl scale statefulset kafka -n infra --replicas=1
 
+# si da un error como[2026-04-06 17:32:08,683] ERROR [Broker id=0] Topic ID in memory: iJda-RnvR96pUSUHN8oq5A does not match the #topic ID for partition fake_news_requests_generate-0 received: OGyzCY0RSoeaDZXuP3WSXg. (state.change.logger)
+#[2026-04-06 17:32:08,684] ERROR [Broker id=0] Topic ID in memory: IEXdjwdiRxuQ9Pbjj57VsA does not match the topic ID for partition #fake_news_requests_blockchain-0 received: GtKQA9sbT8uuEsaHI_eNiw. (state.change.logger)
+
+# Borrar metadatos del tópico de generación
+rm -f ./fake_news_requests_generate-0/partition.metadata
+
+# Borrar metadatos del tópico de blockchain
+rm -f ./fake_news_requests_blockchain-0/partition.metadata
+#matamos pods para que se reinicie
+kubectl delete pod kafka-0 -n infra
+
 ```
 
 
@@ -148,4 +159,7 @@ http://localhost:3300/
 #Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
 
 Explore + Run query
+
+#change inside hetzner. ex: bootnode
+kubectl edit statefulset geth-bootnode -n blockchain
 ```

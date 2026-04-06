@@ -1,80 +1,117 @@
-# Definición de inputs (equivalente a workflow_dispatch inputs)
-variables:
-  PROFILE:
-    value: "all"
-    description: "Perfil de Skaffold a desplegar (all, setup, blockchain-prod, infra-prod, apis-frontend-prod)"
-  DOCKER_HOST: tcp://docker:2375
-  DOCKER_TLS_CERTDIR: ""
 stages:
+  - build
   - deploy
 
-validation-build-deploy:
-  stage: deploy
-  image: docker:cli # Usamos la imagen CLI de Docker (basada en Alpine)
-  services:
-    - docker:dind # Servicio necesario en GitLab para hacer build de contenedores
-  environment:
-    name: prod
+variables:
+  PROFILE:
+    value: "apis-frontend-prod"
+    description: "Perfil de Skaffold"
+  DOCKER_BUILDKIT: "1"
+
+# ---------------------------------------------------------
+# BUILD (solo si hay cambios)
+# ---------------------------------------------------------
+build:
+  stage: build
+  image: docker:cli
   tags:
-    - hetzner-runner # <--- ESTO ENVÍA EL TRABAJO A TU SERVIDOR
-  
-  # Gestión de cómo y cuándo se ejecuta este trabajo
+    - hetzner-runner
+
   rules:
-    # 1. Si lo lanzas desde la web (Run pipeline), usa las variables y arranca del tirón
-    - if: '$CI_PIPELINE_SOURCE == "web"'
-      when: always
-    # 2. Si haces un git push normal, no hace nada automáticamente, requiere hacer clic en "Play"
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-      when: manual
+    - changes:
+        - api/**
+        - web_classic/**
+        - skaffold.yaml
+        - k8s/apis/**
+    - when: manual
 
   before_script:
-    # Instalar dependencias necesarias (usamos apk porque la imagen docker es Alpine)
-    - apk add --no-cache curl openssh-client bash
-    
-    # Instalar Skaffold
+    - apk add --no-cache curl bash
     - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
     - install skaffold /usr/local/bin/
-    
-    # Instalar Kubectl
-    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-    - install kubectl /usr/local/bin/
 
   script:
-    # Login a GitLab Container Registry usando variables inyectadas automáticamente por GitLab
+    - echo "Login registry"
     - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u "$CI_REGISTRY_USER" --password-stdin
 
-    # Configurar Túnel SSH
-    - mkdir -p ~/.ssh
-    - echo "$HETZNER_SSH_KEY" > ~/.ssh/id_rsa
-    - chmod 600 ~/.ssh/id_rsa
-    - ssh-keyscan -p 2222 -H $HETZNER_IP >> ~/.ssh/known_hosts
-    - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $HETZNER_USER@$HETZNER_IP
-
-    # Configurar Kubeconfig (Alpine usa -d en lugar de --decode)
-    - mkdir -p $HOME/.kube
-    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
-    - chmod 600 $HOME/.kube/config
-    
-    - export KUBECONFIG=$HOME/.kube/config
-    - kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
-    - kubectl config set-context default --cluster=default --user=default
-    - kubectl config use-context default
-    
-    - echo "Verificando conexión con el clúster..."
-    - kubectl cluster-info
-
-    # Skaffold Build & Deploy
     - SHORT_SHA=$(echo "$CI_COMMIT_SHA" | cut -c1-7)
-    
-    - echo "Fase 1 - Construyendo y forzando push al Registry con etiqueta $SHORT_SHA..."
-    # Añadidas las barras invertidas (\) para dividir el comando correctamente
+
+    - echo "Build con cache real (sin dind)"
     - >
       skaffold build
       --default-repo $CI_REGISTRY_IMAGE
       --push=true
       --profile=$PROFILE
       --file-output=build.json
-        
-    - echo "Fase 2 - Desplegando en el clúster de Hetzner..."
-    # Añadidas las barras invertidas (\)
+
+  artifacts:
+    paths:
+      - build.json
+    expire_in: 1 day
+
+# ---------------------------------------------------------
+# DEPLOY
+# ---------------------------------------------------------
+deploy:
+  stage: deploy
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  needs:
+    - build
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - when: manual
+
+  before_script:
+    - apk add --no-cache curl openssh-client bash
+    - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    - install skaffold /usr/local/bin/
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - install kubectl /usr/local/bin/
+
+    # SSH tunnel
+    - mkdir -p ~/.ssh
+    - echo "$HETZNER_SSH_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -p 2222 -H $HETZNER_IP >> ~/.ssh/known_hosts
+    - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $HETZNER_USER@$HETZNER_IP
+
+    # kubeconfig
+    - mkdir -p $HOME/.kube
+    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+    - chmod 600 $HOME/.kube/config
+
+    - export KUBECONFIG=$HOME/.kube/config
+    - kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+    - kubectl config use-context default
+
+  script:
+    - echo "Deploy usando artefactos ya construidos"
     - skaffold deploy --build-artifacts=build.json --profile=$PROFILE
+
+    - echo "Verificando rollout"
+    - kubectl rollout status deployment -n apis --timeout=120s || exit 1
+
+# ---------------------------------------------------------
+# ROLLBACK automático si falla
+# ---------------------------------------------------------
+rollback:
+  stage: deploy
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  needs:
+    - deploy
+  when: on_failure
+
+  before_script:
+    - apk add --no-cache kubectl curl
+    - mkdir -p $HOME/.kube
+    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+    - export KUBECONFIG=$HOME/.kube/config
+
+  script:
+    - echo "Rollback automático"
+    - kubectl rollout undo deployment -n apis

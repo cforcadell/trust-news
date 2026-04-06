@@ -9,108 +9,82 @@ build:
   local:
     push: false
     useBuildkit: true
-  # Las imágenes (artifacts) se han movido a los perfiles que realmente las necesitan
-
-# --- MANIFESTS GLOBALES ---
-# Lo dejamos vacío en la raíz para que cada perfil inyecte solo lo que necesita
-manifests:
-  kustomize:
-    buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
-    paths: []
-  rawYaml: [] 
 
 deploy:
   kubectl: {}
-
-portForward: [] 
 
 profiles:
   # ---------------------------------------------------------
   # PERFIL: SETUP
   # ---------------------------------------------------------
   - name: setup
-    patches:
-      - op: replace
-        path: /manifests/rawYaml
-        value: 
-          - k8s/namespaces.yaml
+    manifests:
+      rawYaml:
+        - k8s/namespaces.yaml
 
   # ---------------------------------------------------------
-  # PERFIL: BLOCKCHAIN (Todo es rawYaml según tu find)
+  # PERFIL: BLOCKCHAIN
   # ---------------------------------------------------------
   - name: blockchain
-    patches:
-      - op: replace
-        path: /manifests/kustomize/paths
-        value: 
+    manifests:
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
           - k8s/blockchain/overlays/local
 
   # ---------------------------------------------------------
-  # PERFIL: INFRA (Híbrido) - SIN CONSTRUCCIÓN DE IMÁGENES
+  # PERFIL: INFRA
   # ---------------------------------------------------------
   - name: infra
-    patches:
-      # Mongo sí tiene Kustomize
-      - op: replace
-        path: /manifests/kustomize/paths
-        value: 
+    manifests:
+      rawYaml:
+        - k8s/infra/zookeeper/*.yaml
+        - k8s/infra/kafka/*.yaml
+        - k8s/infra/ipfs/*.yaml
+        - k8s/infra/fluent-bit/*.yaml
+        - k8s/infra/frontend-logs/*.yaml
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
           - k8s/infra/mongodb/overlays/local
-      # El resto son puros YAMLs
-      - op: replace
-        path: /manifests/rawYaml
-        value:
-          - k8s/infra/zookeeper/*.yaml
-          - k8s/infra/kafka/*.yaml
-          - k8s/infra/ipfs/*.yaml
-          - k8s/infra/fluent-bit/*.yaml
-          - k8s/infra/frontend-logs/*.yaml
-      - op: replace
-        path: /portForward
-        value:
-          - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
+    portForward:
+      - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
-  # PERFIL: APIS + FRONTEND (Híbrido) - CON CONSTRUCCIÓN
+  # PERFIL: APIS + FRONTEND
   # ---------------------------------------------------------
   - name: apis-frontend
-    patches:
-      # Inyectamos la construcción de imágenes SOLO en este perfil
-      - op: add
-        path: /build/artifacts
-        value:
-          - image: generate-asertions
-            context: api
-            docker: {dockerfile: generate-asertions/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: validate-asertions
-            context: api
-            docker: {dockerfile: validate-asertions/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: news-handler
-            context: api
-            docker: {dockerfile: news-handler/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: news-chain
-            context: api
-            docker: {dockerfile: news-chain/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: ipfs-api
-            context: api
-            docker: {dockerfile: ipfs/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: web-classic
-            context: web_classic
-            docker: {dockerfile: Dockerfile}
-            
-      # ipfs-fastapi NO tiene Kustomize, lo inyectamos como rawYaml
-      - op: replace
-        path: /manifests/rawYaml
-        value:
-          - k8s/apis/ipfs-fastapi/*.yaml
-      # Estos sí tienen Kustomize
-      - op: replace
-        path: /manifests/kustomize/paths
-        value:
+    build:
+      artifacts:
+        - image: generate-asertions
+          context: api
+          docker: {dockerfile: generate-asertions/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: validate-asertions
+          context: api
+          docker: {dockerfile: validate-asertions/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: news-handler
+          context: api
+          docker: {dockerfile: news-handler/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: news-chain
+          context: api
+          docker: {dockerfile: news-chain/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: ipfs-api
+          context: api
+          docker: {dockerfile: ipfs/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: web-classic
+          context: web_classic
+          docker: {dockerfile: Dockerfile}
+    manifests:
+      rawYaml:
+        - k8s/apis/ipfs-fastapi/*.yaml
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
           - k8s/apis/generate-asertions/overlays/local
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
@@ -118,86 +92,77 @@ profiles:
           - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain/overlays/local
           - k8s/frontend
-      - op: replace
-        path: /portForward
-        value:
-          - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
-          - {resourceType: service, resourceName: validate-service-1, namespace: apis, port: 8070, localPort: 8070}
-          - {resourceType: service, resourceName: validate-service-2, namespace: apis, port: 8070, localPort: 8069}
-          - {resourceType: service, resourceName: validate-service-3, namespace: apis, port: 8070, localPort: 8068}
-          - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
-          - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
-          - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
-          - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}
-  
+    portForward:
+      - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
+      - {resourceType: service, resourceName: validate-service-1, namespace: apis, port: 8070, localPort: 8070}
+      - {resourceType: service, resourceName: validate-service-2, namespace: apis, port: 8070, localPort: 8069}
+      - {resourceType: service, resourceName: validate-service-3, namespace: apis, port: 8070, localPort: 8068}
+      - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
+      - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
+      - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
+      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}
+
   # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN PROD
   # ---------------------------------------------------------
   - name: blockchain-prod
-    patches:
-      - op: replace
-        path: /manifests/kustomize/paths
-        value: 
+    manifests:
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
           - k8s/blockchain/overlays/prod
 
   # ---------------------------------------------------------
-  # PERFIL: INFRA PROD - SIN CONSTRUCCIÓN DE IMÁGENES
+  # PERFIL: INFRA PROD
   # ---------------------------------------------------------
   - name: infra-prod
-    patches:
-      - op: replace
-        path: /manifests/kustomize/paths
-        value: 
+    manifests:
+      rawYaml:
+        - k8s/infra/zookeeper/*.yaml
+        - k8s/infra/kafka/*.yaml
+        - k8s/infra/ipfs/*.yaml
+        - k8s/infra/fluent-bit/*.yaml
+        - k8s/infra/frontend-logs/*.yaml
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
           - k8s/infra/mongodb/overlays/prod 
-      - op: replace
-        path: /manifests/rawYaml
-        value:
-          - k8s/infra/zookeeper/*.yaml
-          - k8s/infra/kafka/*.yaml
-          - k8s/infra/ipfs/*.yaml
-          - k8s/infra/fluent-bit/*.yaml
-          - k8s/infra/frontend-logs/*.yaml
 
   # ---------------------------------------------------------
-  # PERFIL: APIS + FRONTEND PROD - CON CONSTRUCCIÓN
+  # PERFIL: APIS + FRONTEND PROD
   # ---------------------------------------------------------
   - name: apis-frontend-prod
-    patches:
-      # Inyectamos la construcción de imágenes SOLO en este perfil
-      - op: add
-        path: /build/artifacts
-        value:
-          - image: generate-asertions
-            context: api
-            docker: {dockerfile: generate-asertions/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: validate-asertions
-            context: api
-            docker: {dockerfile: validate-asertions/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: news-handler
-            context: api
-            docker: {dockerfile: news-handler/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: news-chain
-            context: api
-            docker: {dockerfile: news-chain/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: ipfs-api
-            context: api
-            docker: {dockerfile: ipfs/Dockerfile}
-            sync: {infer: ["**/*.py"]}
-          - image: web-classic
-            context: web_classic
-            docker: {dockerfile: Dockerfile}
-
-      - op: replace
-        path: /manifests/rawYaml
-        value:
-          - k8s/apis/ipfs-fastapi/*.yaml
-      - op: replace
-        path: /manifests/kustomize/paths
-        value:
+    build:
+      artifacts:
+        - image: generate-asertions
+          context: api
+          docker: {dockerfile: generate-asertions/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: validate-asertions
+          context: api
+          docker: {dockerfile: validate-asertions/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: news-handler
+          context: api
+          docker: {dockerfile: news-handler/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: news-chain
+          context: api
+          docker: {dockerfile: news-chain/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: ipfs-api
+          context: api
+          docker: {dockerfile: ipfs/Dockerfile}
+          sync: {infer: ["**/*.py"]}
+        - image: web-classic
+          context: web_classic
+          docker: {dockerfile: Dockerfile}
+    manifests:
+      rawYaml:
+        - k8s/apis/ipfs-fastapi/*.yaml
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
           - k8s/apis/generate-asertions/overlays/prod 
           - k8s/apis/validate-asertions/overlays/prod/worker-1 
           - k8s/apis/validate-asertions/overlays/prod/worker-2

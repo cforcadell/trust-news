@@ -1,0 +1,13 @@
+sysadmin@trust-news-prod:~$ sudo gitlab-runner start
+Runtime platform                                    arch=amd64 os=linux pid=460175 revision=3b43bf9f version=18.10.1
+
+
+sysadmin@trust-news-prod:~$ sudo gitlab-runner status
+Runtime platform                                    arch=amd64 os=linux pid=460227 revision=3b43bf9f version=18.10.1
+gitlab-runner: Service is running
+
+sysadmin@trust-news-prod:~$ sudo gitlab-runner verify
+Runtime platform                                    arch=amd64 os=linux pid=460259 revision=3b43bf9f version=18.10.1
+Running in system-mode.
+
+Verifying runner... is valid                        correlation_id=9e81a70338289b88-FRA runner=bAqEVaN5k runner_name=trust-news-prod

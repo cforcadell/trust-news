@@ -14,11 +14,11 @@ spec:
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
         env:
         - name: AI_PROVIDER
-          value: "openrouter"
+          value: "grok"
         - name: MODEL
-          value: "arcee-ai/trinity-large-preview:free"
+          value: "llama-3.1-8b-instant"
         - name: API_URL
-          value: "https://openrouter.ai/api/v1/chat/completions"
+          value: "https://api.groq.com/openai/v1/chat/completions"
         resources:
             requests:
               cpu: "100m"

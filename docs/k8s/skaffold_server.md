@@ -163,3 +163,49 @@ Explore + Run query
 #change inside hetzner. ex: bootnode
 kubectl edit statefulset geth-bootnode -n blockchain
 ```
+```bash gitlab secrets
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=apis
+
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=infra
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=blockchain
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=frontend
+
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=apis
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=infra
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=blockchain
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=frontend
+```
+
+

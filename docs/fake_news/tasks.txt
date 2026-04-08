@@ -2,7 +2,7 @@
 prod
 - grafana (specific version) OK
 - cambio en caliente de variables config
-Develop v0.0.8
+Develop v0.0.8.
 - loki persistente
 - Hardering frontend
 - restylish frontend

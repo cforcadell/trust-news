@@ -31,18 +31,26 @@ const CATEGORY_MAP = {
 // =========================================================
 // UTILIDAD: Reemplazo de alert() con UI no bloqueante
 // =========================================================
+// =========================================================
+// UTILIDAD: Toast Notifications (UI no bloqueante)
+// =========================================================
 function alertMessage(message, type = 'info', duration = 3000) {
     const bar = document.getElementById('statusBar');
 
-    // Quitar clases previas de color
-    bar.classList.remove('info', 'primary', 'error');
-
-    // Añadir clase de color y mensaje
+    // Resetear clases y aplicar el mensaje
+    bar.className = 'status-toast';
     bar.textContent = message;
-    bar.classList.add(type);
-    bar.classList.add('show');  // Mostrar barra
+    
+    // Aplicar tipo (color)
+    if(type === 'error') bar.style.backgroundColor = '#ef4444';
+    else if(type === 'primary' || type === 'success') bar.style.backgroundColor = '#10b981';
+    else bar.style.backgroundColor = '#3b82f6';
+    bar.style.color = '#fff';
+    
+    // Forzar reflow para reiniciar la animación y mostrar
+    void bar.offsetWidth; 
+    bar.classList.add('show');
 
-    // Ocultar después del tiempo indicado
     setTimeout(() => {
         bar.classList.remove('show');
     }, duration);
@@ -126,6 +134,12 @@ function showSection(sectionId, reset = true) {
         return;
     }
     activeSection.classList.add("active");
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('onclick').includes(`'${sectionId}'`)) {
+            btn.classList.add('active');
+        }
+    });
 
     if(reset) {
         // ===== RESET de inputs de usuario =====

@@ -1,0 +1,117 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  PROFILE:
+    value: "apis-frontend-prod"
+    description: "Perfil de Skaffold"
+  DOCKER_BUILDKIT: "1"
+
+# ---------------------------------------------------------
+# BUILD (solo si hay cambios)
+# ---------------------------------------------------------
+build:
+  stage: build
+  image: docker:cli
+  tags:
+    - hetzner-runner
+
+  rules:
+    - changes:
+        - api/**
+        - web_classic/**
+        - skaffold.yaml
+        - k8s/apis/**
+    - when: manual
+
+  before_script:
+    - apk add --no-cache curl bash
+    - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    - install skaffold /usr/local/bin/
+
+  script:
+    - echo "Login registry"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u "$CI_REGISTRY_USER" --password-stdin
+
+    - SHORT_SHA=$(echo "$CI_COMMIT_SHA" | cut -c1-7)
+
+    - echo "Build con cache real (sin dind)"
+    - >
+      skaffold build
+      --default-repo $CI_REGISTRY_IMAGE
+      --push=true
+      --profile=$PROFILE
+      --file-output=build.json
+
+  artifacts:
+    paths:
+      - build.json
+    expire_in: 1 day
+
+# ---------------------------------------------------------
+# DEPLOY
+# ---------------------------------------------------------
+deploy:
+  stage: deploy
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  needs:
+    - build
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - when: manual
+
+  before_script:
+    - apk add --no-cache curl openssh-client bash
+    - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    - install skaffold /usr/local/bin/
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - install kubectl /usr/local/bin/
+
+    # SSH tunnel
+    - mkdir -p ~/.ssh
+    - echo "$HETZNER_SSH_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -p 2222 -H $HETZNER_IP >> ~/.ssh/known_hosts
+    - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $HETZNER_USER@$HETZNER_IP
+
+    # kubeconfig
+    - mkdir -p $HOME/.kube
+    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+    - chmod 600 $HOME/.kube/config
+
+    - export KUBECONFIG=$HOME/.kube/config
+    - kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+    - kubectl config use-context default
+
+  script:
+    - echo "Deploy usando artefactos ya construidos"
+    - skaffold deploy --build-artifacts=build.json --profile=$PROFILE
+
+    - echo "Verificando rollout"
+    - kubectl rollout status deployment -n apis --timeout=120s || exit 1
+
+# ---------------------------------------------------------
+# ROLLBACK automático si falla
+# ---------------------------------------------------------
+rollback:
+  stage: deploy
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  needs:
+    - deploy
+  when: on_failure
+
+  before_script:
+    - apk add --no-cache kubectl curl
+    - mkdir -p $HOME/.kube
+    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+    - export KUBECONFIG=$HOME/.kube/config
+
+  script:
+    - echo "Rollback automático"
+    - kubectl rollout undo deployment -n apis

@@ -14,11 +14,11 @@ spec:
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
         env:
         - name: AI_PROVIDER
-          value: "openrouter"
+          value: "gemini"
         - name: MODEL
-          value: "arcee-ai/trinity-large-preview:free"
+          value: "gemini-2.5-flash"
         - name: API_URL
-          value: "https://openrouter.ai/api/v1/chat/completions"
+          value: "https://generativelanguage.googleapis.com/v1beta"
         resources:
             requests:
               cpu: "100m"

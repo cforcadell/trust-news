@@ -18,14 +18,42 @@ from common.blockchain import send_signed_tx, wait_for_receipt_blocking
 from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple
 from common.veredicto import Veredicto, Validacion
 from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash
+from pydantic import BaseModel
+
 
 
 # =========================================================
 # Cargar .env y configurar logger
 # =========================================================
 load_dotenv()
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(),
-                    format="%(asctime)s [%(levelname)s] %(message)s")
+
+class ProviderModelFilter(logging.Filter):
+    """
+    Filtro dinámico para inyectar AI_PROVIDER y MODEL en cada log.
+    """
+    def filter(self, record):
+        provider = globals().get("AI_PROVIDER", os.getenv("AI_PROVIDER", "mistral")).upper()
+        
+        validator = globals().get("ai_validator")
+        if validator and hasattr(validator, "model"):
+            model = validator.model
+        else:
+            model = os.getenv("MODEL", "unknown_model")
+            
+        record.provider_model = f"{provider}_{model}"
+        return True
+
+# 1. Configuramos el formato global
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(provider_model)s: %(message)s"
+)
+
+# 2. LA MAGIA AQUÍ: Inyectamos el filtro en todos los handlers raíz
+for handler in logging.root.handlers:
+    handler.addFilter(ProviderModelFilter())
+
+# 3. Inicializamos nuestro logger (ya no hace falta ponerle el filtro a mano)
 logger = logging.getLogger("validate-asertions")
 
 # =========================================================
@@ -52,6 +80,21 @@ try:
     VALIDATOR_CATEGORIES = [int(x) for x in VALIDATOR_CATEGORIES]
 except Exception:
     VALIDATOR_CATEGORIES = []
+
+# =========================================================
+# Pydantic models
+# =========================================================
+
+
+class AdminConfigResponse(BaseModel):
+    provider: str
+    model: str
+    categories: List[int]
+
+class AdminConfigUpdate(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    categories: Optional[List[int]] = None
 
 # =========================================================
 # AI Validators
@@ -111,6 +154,25 @@ class OpenRouterValidator(AIValidator):
             return resp.json()["choices"][0]["message"]["content"]
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
+class GrokValidator(AIValidator):
+    def __init__(self, api_url: str, api_key: str, model: str):
+        # xAI usa el formato estándar de OpenAI
+        self.api_url = api_url if api_url else "https://api.x.ai/v1/chat/completions"
+        self.api_key = api_key
+        self.model = model
+
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
+        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
+        
+        # Usamos httpx igual que en OpenRouter
+        resp = httpx.post(self.api_url, headers=headers, json=data, timeout=30.0)
+        
+        if resp.status_code == 200:
+            return resp.json()["choices"][0]["message"]["content"]
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    
 def build_ai_validator() -> AIValidator:
     if AI_PROVIDER == "mistral":
         return MistralValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "mistral-tiny"))
@@ -118,6 +180,8 @@ def build_ai_validator() -> AIValidator:
         return GeminiValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gemini-1.5-flash"))
     elif AI_PROVIDER == "openrouter":
         return OpenRouterValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gpt-4o-mini"))
+    elif AI_PROVIDER == "grok":
+        return GrokValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "grok-beta"))
     else:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
 
@@ -150,7 +214,21 @@ app = FastAPI(title="Validate Asertions API")
 # Funciones internas
 # =========================================================
 def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
-    return ai_validator.verificar_asercion(texto, contexto)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return ai_validator.verificar_asercion(texto, contexto)
+        except HTTPException as e:
+            # Si es un error de Rate Limit (429), esperamos y reintentamos
+            if e.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = 10 ** attempt  # Espera 1s, luego 2s...
+                    logger.warning(f"⚠️ API Rate Limit (429). Reintentando en {wait_time}s (Intento {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+            # Si es otro error o ya superamos los intentos, lanzamos la excepción
+            logger.error(f"❌ Error devuelto por la API de IA - HTTP {e.status_code}: {e.detail}")
+            raise e
 
 async def upload_validation_to_ipfs(validation_doc_bytes: bytes) -> str:
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
@@ -380,7 +458,89 @@ async def endpoint_desregistrar_validador():
         logger.exception(f"endpoint_desregistrar_validador error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"])
+def get_admin_config():
+    """Consulta la configuración actual del validador AI y sus categorías."""
+    return AdminConfigResponse(
+        provider=AI_PROVIDER,
+        model=ai_validator.model,
+        categories=VALIDATOR_CATEGORIES
+    )
 
+@app.put("/admin/config", tags=["Admin"])
+async def update_admin_config(config: AdminConfigUpdate):
+    """
+    Modifica provider, modelo y/o categorías. 
+    Si las categorías cambian, realiza la re-inscripción en la blockchain.
+    """
+    # Usamos global para modificar el estado de la app en memoria
+    global AI_PROVIDER, ai_validator, VALIDATOR_CATEGORIES
+
+    # 1. Gestión del Provider y Modelo de IA
+    new_provider = config.provider.lower() if config.provider else AI_PROVIDER
+    new_model = config.model if config.model else ai_validator.model
+
+    # Si se solicitó un cambio en la IA, instanciamos de nuevo el objeto
+    if config.provider or config.model:
+        api_key = os.getenv("API_KEY") 
+        api_url = API_URL
+        
+        try:
+            if new_provider == "mistral":
+                ai_validator = MistralValidator(api_url, api_key, new_model)
+            elif new_provider == "gemini":
+                ai_validator = GeminiValidator(api_url, api_key, new_model)
+            elif new_provider == "openrouter":
+                ai_validator = OpenRouterValidator(api_url, api_key, new_model)
+            elif new_provider == "grok":
+                ai_validator = GrokValidator(api_url, api_key, new_model)
+            else:
+                raise HTTPException(status_code=400, detail=f"Provider desconocido: {new_provider}")
+            
+            AI_PROVIDER = new_provider
+            logger.info(f"🔄 AI Validator actualizado en memoria: {AI_PROVIDER.upper()} - Modelo: {new_model}")
+        except Exception as e:
+            logger.exception("Error al instanciar el nuevo AI Validator")
+            raise HTTPException(status_code=500, detail="Error al cambiar el provider/modelo de IA.")
+
+    # 2. Gestión de Categorías y Blockchain
+    blockchain_receipts = {}
+    
+    if config.categories is not None and config.categories != VALIDATOR_CATEGORIES:
+        logger.info(f"🔄 Cambio de categorías detectado: {VALIDATOR_CATEGORIES} -> {config.categories}. Iniciando re-registro...")
+        
+        # Paso A: Desregistrar el actual
+        tx_unreg, receipt_unreg = await asyncio.to_thread(desregistrar_validador_blockchain)
+        if not tx_unreg:
+            raise HTTPException(status_code=500, detail="Error desregistrando el validador actual en la blockchain.")
+        
+        blockchain_receipts["unregister_tx"] = tx_unreg
+
+        # Paso B: Registrar con las nuevas categorías
+        val_name = f"default-{ACCOUNT_ADDRESS}"  # Mantenemos el estándar de tu startup
+        tx_reg, receipt_reg = await asyncio.to_thread(registrar_validador_blockchain, val_name, config.categories)
+        if not tx_reg:
+            # ¡Ojo! Quedaría desregistrado. Lo ideal sería un rollback, pero asumiendo
+            # un entorno simple, lanzamos la excepción para alertar.
+            raise HTTPException(status_code=500, detail="Error registrando el validador con las nuevas categorías.")
+        
+        blockchain_receipts["register_tx"] = tx_reg
+        
+        # Paso C: Actualizar la variable global si todo fue exitoso
+        VALIDATOR_CATEGORIES = config.categories
+        logger.info(f"✅ Categorías actualizadas en blockchain y memoria: {VALIDATOR_CATEGORIES}")
+
+    return {
+        "status": "ok",
+        "message": "Configuración actualizada correctamente.",
+        "config": {
+            "provider": AI_PROVIDER,
+            "model": ai_validator.model,
+            "categories": VALIDATOR_CATEGORIES
+        },
+        "blockchain_updates": blockchain_receipts if blockchain_receipts else "Sin cambios en blockchain"
+    }
+    
 # =========================================================
 # Blockchain Event Agent
 # =========================================================

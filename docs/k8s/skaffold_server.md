@@ -122,6 +122,17 @@ kubectl scale statefulset zookeeper -n infra --replicas=1
 # Espera a que Zookeeper esté Running
 kubectl scale statefulset kafka -n infra --replicas=1
 
+# si da un error como[2026-04-06 17:32:08,683] ERROR [Broker id=0] Topic ID in memory: iJda-RnvR96pUSUHN8oq5A does not match the #topic ID for partition fake_news_requests_generate-0 received: OGyzCY0RSoeaDZXuP3WSXg. (state.change.logger)
+#[2026-04-06 17:32:08,684] ERROR [Broker id=0] Topic ID in memory: IEXdjwdiRxuQ9Pbjj57VsA does not match the topic ID for partition #fake_news_requests_blockchain-0 received: GtKQA9sbT8uuEsaHI_eNiw. (state.change.logger)
+
+# Borrar metadatos del tópico de generación
+rm -f ./fake_news_requests_generate-0/partition.metadata
+
+# Borrar metadatos del tópico de blockchain
+rm -f ./fake_news_requests_blockchain-0/partition.metadata
+#matamos pods para que se reinicie
+kubectl delete pod kafka-0 -n infra
+
 ```
 
 
@@ -140,3 +151,61 @@ kubectl scale statefulset --all --replicas=0 -n infra blockchain
 kubectl scale statefulset --all --replicas=1 -n infra blockchain 
 
 ```
+```bash tunnel grafana ~/blockchain/hetzner/keys-github
+ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 3300:127.0.0.1:3300 sysadmin@135.181.80.57 "kubectl port-forward pod/grafana-7964997b9b-skqjw -n infra 3000:3000 --address 0.0.0.0"
+
+http://localhost:3300/
+
+#Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
+
+Explore + Run query
+
+#change inside hetzner. ex: bootnode
+kubectl edit statefulset geth-bootnode -n blockchain
+```
+```bash gitlab secrets
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=apis
+
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=infra
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=blockchain
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username= \
+  --docker-password= \
+  --docker-email= \
+  --namespace=frontend
+
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=apis
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=infra
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=blockchain
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=frontend
+```
+
+

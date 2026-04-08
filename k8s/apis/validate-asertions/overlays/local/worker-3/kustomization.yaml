@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - ../../../base/configmap-common.yaml
   - ../../../base/deployment-validator.yaml
+  - service.yaml
 
 nameSuffix: "-3" # Esto cambia el nombre a validate-worker-1 y validator-secret-1
 

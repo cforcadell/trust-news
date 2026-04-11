@@ -49,8 +49,10 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/local
+          - k8s/infra/keycloak/overlays/local
     portForward:
       - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: keycloak, namespace: infra, port: 8443, localPort: 8543, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND
@@ -129,6 +131,7 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/prod 
+          - k8s/infra/keycloak/overlays/prod
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND PROD

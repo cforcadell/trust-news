@@ -1,0 +1,14 @@
+resources:
+  - ../../base
+
+secretGenerator:
+  - name: keycloak-tls-secret
+    files:
+      - tls-keycloak.crt
+      - tls-keycloak.key
+patches:
+  - path: patch-keycloak.yaml
+  - path: patch-postgres.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+namespace: infra

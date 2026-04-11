@@ -1,5 +1,5 @@
 **Just one shot execution**
-```bash infra inside server
+```bash infra inside server create-secrets.sh
 touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env news-handler.env mongodb.env
 chmod 600 *.env
 
@@ -14,6 +14,8 @@ kubectl create secret generic news-chain-secrets --from-env-file=news-chain.env 
 kubectl create secret generic news-handler-secrets --from-env-file=news-handler.env -n apis
 
 kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
+
+kubectl create secret generic mongodb-secret --from-env-file=keycloak.env -n infra
 
 kubectl create secret generic ethereum-secrets  --from-env-file=ethereum.env -n blockchain
 
@@ -163,7 +165,7 @@ Explore + Run query
 #change inside hetzner. ex: bootnode
 kubectl edit statefulset geth-bootnode -n blockchain
 ```
-```bash gitlab secrets
+```bash gitlab secrets create-secrets-gitlab.sh
 kubectl create secret docker-registry gitlab-pull-secret \
   --docker-server=registry.gitlab.com \
   --docker-username= \

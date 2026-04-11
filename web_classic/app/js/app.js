@@ -28,6 +28,12 @@ const CATEGORY_MAP = {
     10: "SOCIAL"
 };
 
+const keycloak = new Keycloak({
+    url: '/auth', 
+    realm: 'TrustNews',
+    clientId: 'TrustNewsWeb'
+});
+
 // =========================================================
 // UTILIDAD: Reemplazo de alert() con UI no bloqueante
 // =========================================================
@@ -1696,12 +1702,33 @@ async function importarNoticia() {
         alert('Error al importar la noticia. Revisa la consola.');
     }
 }
+// =========================================================
+// INICIALIZACIÓN CON PROTECCIÓN
+// =========================================================
+document.addEventListener('DOMContentLoaded', () => {
+    
+    keycloak.init({ 
+        onLoad: 'login-required', // Obliga a loguearse al cargar la web
+        checkLoginIframe: false   // Recomendado para evitar problemas de cookies en localhost
+    }).then(authenticated => {
+        if (authenticated) {
+            console.log("Autenticado con éxito");
+            // Una vez autenticado, cargamos los listeners y la vista
+            initializeApp();
+        }
+    }).catch(err => {
+        console.error("Error al inicializar Keycloak:", err);
+        alertMessage("Error de conexión con el servidor de identidad", "error");
+    });
 
-// =========================================================
-// INICIALIZACIÓN
-// =========================================================
-document.addEventListener('DOMContentLoaded',()=>{
-    // Navigation Listeners
+});
+
+// Extraemos la lógica original a una función aparte
+function initializeApp() {
+    // 1. Mostrar quién está logueado (Opcional pero recomendado)
+    console.log("User:", keycloak.tokenParsed.preferred_username);
+
+    // 2. Navigation Listeners (Tu código original)
     document.querySelectorAll('.menu-title').forEach(title => {
         title.addEventListener('click', () => {
             const submenu = title.nextElementSibling;
@@ -1711,51 +1738,32 @@ document.addEventListener('DOMContentLoaded',()=>{
         });
     });
     
-    // News Listeners
+    // 3. News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
-    document.getElementById('btn-publishNew').addEventListener('click',publishNew);
-    //document.getElementById('btn-findPrevious').addEventListener('click',findPrevious);
+    document.getElementById('btn-publishNew').addEventListener('click', publishNew);
 
     document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
         const text = document.getElementById("newsText").value.trim();
-
         if (!text) {
             alertMessage("Debes escribir o cargar una noticia", "warning");
             return;
         }
-
         alertMessage("Generando aserciones...", "info");
-
         const assertions = await generateAssertionsFromText(text);
-
         const container = document.getElementById("news-assertions-container");
         renderEditableAssertionsTable(container, assertions);
-
         alertMessage("Aserciones generadas", "success");
     });
 
-    
-    // Orders Listeners
-    document.getElementById('btn-findOrder').addEventListener('click',findOrder);
-    document.getElementById('btn-listOrders').addEventListener('click',listOrders);
-    
-    // TX Listeners
+    // 4. El resto de tus Listeners (Orders, TX, IPFS...)
+    document.getElementById('btn-findOrder').addEventListener('click', findOrder);
+    document.getElementById('btn-listOrders').addEventListener('click', listOrders);
     document.getElementById("btn-findTx").addEventListener("click", findTx);
-
-    // Blocks Listeners
     document.getElementById("btn-findBlock").addEventListener("click", findBlock);
-
-    // Contract Listeners
     document.getElementById("btn-findPost").addEventListener("click", findPostById);
-
-    // Consistency Listeners
     document.getElementById("btn-checkConsistency").addEventListener("click", checkOrderConsistency);
-
-    // IPFS Listeners
     document.getElementById("btn-findIpfs").addEventListener("click", findIpfs);
 
-    
-
-    // Initial view
+    // 5. Initial view
     showSection('news');
-});
+}

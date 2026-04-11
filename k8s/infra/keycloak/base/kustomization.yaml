@@ -1,0 +1,5 @@
+resources:
+  - statefulset-keycloak-db.yaml
+  - deployment-keycloak.yaml
+  - service-keycloak-db.yaml
+  - service-keycloak.yaml

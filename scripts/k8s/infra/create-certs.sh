@@ -1,0 +1,1 @@
+openssl req -x509 -newkey rsa:4096 -nodes -keyout tls.key -out tls.crt -days 1000 -subj "/CN=localhost"

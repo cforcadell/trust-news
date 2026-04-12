@@ -24,15 +24,21 @@ spec:
             - name: KC_HOSTNAME
               value: "localhost" # O tu dominio real
             - name: KC_HOSTNAME_PORT
-              value: "8543"
+              value: "7443"
             - name: KC_HTTPS_CERTIFICATE_FILE
               value: "/opt/keycloak/conf/trustnews.crt"
             - name: KC_HTTPS_CERTIFICATE_KEY_FILE
               value: "/opt/keycloak/conf/trustnews.key"
+            - name: KC_HTTP_RELATIVE_PATH
+              value: "/auth"
             - name: KC_PROXY
               value: "reencrypt" # <--- Vital para Nginx(https) -> Keycloak(https)
             - name: KC_HEALTH_ENABLED
               value: "true"
+            - name: KC_HOSTNAME_STRICT
+              value: "false"  # <--- Esto permite que Keycloak responda a diferentes puertos
+            - name: KC_HOSTNAME_STRICT_HTTPS
+              value: "false"
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
@@ -56,11 +62,11 @@ spec:
             
           ports:
             - containerPort: 8443 # Puerto HTTPS por defecto en modo prod
-          readinessProbe:
-            httpGet:
-              scheme: HTTPS 
-              path: /health/ready
-              port: 8443  
+          # readinessProbe:
+          #   httpGet:
+          #     scheme: HTTPS 
+          #     path: /auth/health/ready
+          #     port: 8443  
           volumeMounts:
             - name: certs
               mountPath: "/opt/keycloak/conf/trustnews.crt"

@@ -163,8 +163,49 @@ kubectl delete pvc zk-storage-zookeeper-0 -n infra
 kubectl get pvc -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 #y rearrancar skkafold con el perfil infra
+```
+
+```bash keycloak
+keycloak (sin ir por nginx):
+
+#si no lo abre skaffold
+kubectl port-forward svc/keycloak -n infra 6443:8443
+
+curl -v -k https://localhost:6443/auth/admin/master/console
+
+https://localhost:6443/auth/admin/master/console/
+
 
 ```
+
+Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
+
+Nombre: TrustNews.
+
+Crea el Cliente para la Web (Frontend):
+
+Clients -> Create client.
+
+ClientID: TrustNewsWeb.
+
+Root URL: https://localhost:7443 (o la URL de tu frontend).
+
+Web Origins: * (para evitar problemas de CORS en desarrollo).
+
+Crea el Cliente para los Backends Públicos (Lo que pediste al inicio):
+
+Clients -> Create client.
+
+ClientID: TrustNewsApi.
+
+Client Authentication: Ponlo en ON.
+
+Authorization: Ponlo en OFF.
+
+Authentication Flow: Marca solo Service accounts roles (desmarca el resto).
+
+Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
+
 
 ```bash apis + frontend
 
@@ -177,10 +218,26 @@ kubectl get pods -n frontend
 kubectl logs -n apis -f 
 
 Frontend:
-https://192.168.56.108:8443/
+#si no se levanta el port forward
+kubectl port-forward svc/frontend-service -n frontend 7443:443
+#verify nginx config
+kubectl exec -it -n frontend frontend-web-5769696f49-dljlk -- cat /etc/nginx/conf.d/default.conf
+#realm console
+https://localhost:7443/auth/admin/master/console/
+
+
+https://192.168.56.108:7443/
+#con mapeo de host a vm
+https://localhost:7443/
 
 grafana:
 http://localhost:3000/
+
+
+
+
+
+
 
 get svc -n infra
 

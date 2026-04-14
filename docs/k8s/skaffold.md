@@ -169,11 +169,11 @@ kubectl delete pvc kafka-data-kafka-0 -n infra
 keycloak (sin ir por nginx):
 
 #si no lo abre skaffold
-kubectl port-forward svc/keycloak -n infra 6443:8443
+kubectl port-forward svc/keycloak --address 0.0.0.0 -n infra 7443:8443
 
-curl -v -k https://localhost:6443/auth/admin/master/console
+curl -v -k https://localhost:7443/auth/admin/master/console
 
-https://localhost:6443/auth/admin/master/console/
+https://localhost:7443/auth/admin/master/console/
 
 
 ```
@@ -189,6 +189,7 @@ Clients -> Create client.
 ClientID: TrustNewsWeb.
 
 Root URL: https://localhost:7443 (o la URL de tu frontend).
+Valid redirect: https://localhost:7443/*
 
 Web Origins: * (para evitar problemas de CORS en desarrollo).
 
@@ -226,7 +227,7 @@ kubectl exec -it -n frontend frontend-web-5769696f49-dljlk -- cat /etc/nginx/con
 https://localhost:7443/auth/admin/master/console/
 
 
-https://192.168.56.108:7443/
+#https://192.168.56.108:7443/
 #con mapeo de host a vm
 https://localhost:7443/
 

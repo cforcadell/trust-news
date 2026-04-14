@@ -1714,6 +1714,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (authenticated) {
             console.log("Autenticado con éxito");
             // Una vez autenticado, cargamos los listeners y la vista
+            document.body.classList.add('authenticated');
             initializeApp();
         }
     }).catch(err => {

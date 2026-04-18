@@ -1,25 +1,31 @@
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# Agrupar variables de entorno no crea capas extra, pero mejora la legibilidad
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
+# Crear un usuario y grupo del sistema sin privilegios (UID 1000 por convención)
+RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-COPY news-chain/requirements.txt .
+# Copiar requirements y asignar propietario en la misma capa
+COPY --chown=appuser:appuser news-chain/requirements.txt .
 
-# Instalar dependencias
+# Instalar dependencias como root (antes de cambiar de usuario)
+# Así evitamos problemas de permisos y evitamos crear un entorno virtual
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copiar el resto del código asignando el propietario directamente
+# El flag --chown evita tener que hacer un "RUN chown -R", lo cual duplicaría el peso de los archivos en otra capa
+COPY --chown=appuser:appuser common ./common
+COPY --chown=appuser:appuser news-chain ./news-chain
 
-# Copia la carpeta 'common' y todo su contenido
-COPY common /app/common
-
-# Copia la carpeta 'news' y todo su contenido
-COPY news-chain /app/news-chain
+# Cambiar al usuario sin privilegios
+USER appuser
 
 EXPOSE 8073
 
-# Ejecutar script de creación de topics antes de arrancar FastAPI
-#CMD python init_kafka_topics.py && uvicorn main:app --host 0.0.0.0 --port 8072
-CMD uvicorn news-chain.main:app --host 0.0.0.0 --port 8073
+# Usar el formato exec (array JSON) para el CMD es una mejor práctica
+# Permite que la aplicación reciba correctamente las señales del sistema (como SIGTERM para un apagado limpio)
+CMD ["uvicorn", "news-chain.main:app", "--host", "0.0.0.0", "--port", "8073"]

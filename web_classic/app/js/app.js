@@ -3,10 +3,12 @@
 // =========================================================
 // CONFIGURACIÓN GLOBAL
 // =========================================================
-const API = "/api";
-const TX_API = "/ethereum";
-const IPFS_API = "/ipfs";
-const GENERATE_API = "/generate";
+const BACKEND_BASE = "/backend";
+
+const API = BACKEND_BASE;
+const TX_API = BACKEND_BASE;
+const IPFS_API = BACKEND_BASE;
+const GENERATE_API = BACKEND_BASE;
 
 const MAX_EVENTS_ROWS = 15;
 const POLLING_DURATION = 0; // 20 segundos
@@ -34,9 +36,7 @@ const keycloak = new Keycloak({
     clientId: 'TrustNewsWeb'
 });
 
-// =========================================================
-// UTILIDAD: Reemplazo de alert() con UI no bloqueante
-// =========================================================
+
 // =========================================================
 // UTILIDAD: Toast Notifications (UI no bloqueante)
 // =========================================================
@@ -73,7 +73,25 @@ let currentOrderData = {};
 // =========================================================
 // UTILIDADES
 // =========================================================
+// Nuevo Helper para llamadas al Backend
+async function fetchWithAuth(url, options = {}) {
+    try {
+        // Actualizar token si expira en menos de 30s
+        await keycloak.updateToken(30);
+    } catch (error) {
+        console.error("Fallo al refrescar el token", error);
+        keycloak.login();
+        return;
+    }
 
+    const headers = {
+        ...options.headers,
+        'Authorization': `Bearer ${keycloak.token}`,
+        'Content-Type': 'application/json'
+    };
+
+    return fetch(url, { ...options, headers });
+}
 
 function escapeHTML(str) {
     return str.replace(/[&<>"']/g, function(match) {
@@ -197,10 +215,9 @@ async function pollOrder(orderId, startTime) {
 
 async function generateAssertionsFromText(text) {
     try {
-        const response = await fetch(`${GENERATE_API}/extraer`, {
+        const response = await fetchWithAuth(`${GENERATE_API}/extraer`, {
             method: "POST",
             headers: {
-                "Content-Type": "application/json",
                 "Accept": "application/json"
             },
             body: JSON.stringify({ text })
@@ -339,9 +356,8 @@ async function publishNew() {
     showSection('order');
     document.getElementById("orderId").value = "Publicando...";
 
-    const res = await fetch(`${API}/publishNew`, {
+    const res = await fetchWithAuth(`${API}/publishNew`, {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({text})
     });
 
@@ -390,9 +406,8 @@ async function publishWithAssertions() {
     const payload = { text, assertions };
 
     try {
-        const response = await fetch(`${API}/publishWithAssertions`, {
+        const response = await fetchWithAuth(`${API}/publishWithAssertions`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
 
@@ -430,9 +445,8 @@ async function findPrevious() {
     alertMessage("Buscando verificaciones previas...", 'info');
     
     try {
-        const res = await fetch(`${API}/find-order-by-text`, {
+        const res = await fetchWithAuth(`${API}/find-order-by-text`, {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
             body: JSON.stringify({text})
         });
         
@@ -453,7 +467,7 @@ async function findPrevious() {
 async function listOrders() {
     alertMessage("Listando todas las órdenes...", 'info');
     try {
-        const res = await fetch(`${API}/news`);
+        const res = await fetchWithAuth(`${API}/news`);
         if (!res.ok) throw new Error("Error al obtener la lista de órdenes.");
         
         const data = await res.json();
@@ -495,7 +509,7 @@ async function loadOrderById(orderId, cleanup = true) {
     }
 
     try {
-        const res = await fetch(`${API}/orders/${orderId}`);
+        const res = await fetchWithAuth(`${API}/orders/${orderId}`);
         
         if (!res.ok) {
             const errorText = await res.text();
@@ -522,7 +536,7 @@ async function loadOrderById(orderId, cleanup = true) {
         if (cleanup || res.status !== 304) {
             let eventsData = [];
             try {
-                const resEv = await fetch(`${API}/news/${orderId}/events`);
+                const resEv = await fetchWithAuth(`${API}/news/${orderId}/events`);
                 if (resEv.ok) eventsData = await resEv.json();
             } catch(e){ console.error("Error cargando eventos:", e); }
 
@@ -1113,7 +1127,7 @@ async function findIpfs() {
     alertMessage("Buscando contenido en IPFS...", "info");
 
     try {
-        const res = await fetch(`${IPFS_API}/ipfs/${cid}`);
+        const res = await fetchWithAuth(`${IPFS_API}/ipfs/${cid}`);
         if (!res.ok) throw new Error("Error al obtener datos de IPFS");
 
         const data = await res.json();
@@ -1157,7 +1171,7 @@ async function findTx() {
     alertMessage("Buscando transacción...", 'info');
 
     try {
-        const res = await fetch(`${TX_API}/tx/${hash}`);
+        const res = await fetchWithAuth(`${TX_API}/tx/${hash}`);
         if (!res.ok) throw new Error("Error al obtener la transacción");
         
         const responseData = await res.json();
@@ -1286,7 +1300,7 @@ async function findBlock() {
     alertMessage("Buscando bloque...", 'info');
 
     try {
-        const res = await fetch(`${TX_API}/block/${blockId}`);
+        const res = await fetchWithAuth(`${TX_API}/block/${blockId}`);
         if (!res.ok) throw new Error("Error al obtener el bloque");
         
         const responseData = await res.json();
@@ -1404,7 +1418,7 @@ async function findPostById() {
     alertMessage("Buscando contrato...", "info");
 
     try {
-        const res = await fetch(`${TX_API}/blockchain/post/${postId}`);
+        const res = await fetchWithAuth(`${TX_API}/blockchain/post/${postId}`);
 
         if (!res.ok) throw new Error("Error al obtener Post");
 
@@ -1582,7 +1596,7 @@ async function checkOrderConsistency() {
     `;
 
     try {
-        const response = await fetch(apiUrl);
+        const response = await fetchWithAuth(apiUrl);
 
         if (!response.ok) {
             throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
@@ -1679,11 +1693,10 @@ async function importarNoticia() {
     try {
         // Llamada POST al endpoint
         
-        const response = await fetch(`${API}/extract_text_from_url`, {
+        const response = await fetchWithAuth(`${API}/extract_text_from_url`, {
             method: 'POST',
             headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
+                'Accept': 'application/json'
             },
             body: JSON.stringify({ url })
         });

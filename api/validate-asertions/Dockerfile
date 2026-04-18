@@ -1,26 +1,30 @@
-# Imagen base oficial de Python
 FROM python:3.11-slim
 
-# Crear directorio de la aplicación
+# Variables de entorno agrupadas
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# 1. Crear usuario de sistema (Capa 1)
+RUN useradd -m -u 1000 appuser
+
 WORKDIR /app
 
-# Copiar requisitos primero (para aprovechar caché)
-COPY validate-asertions/requirements.txt .
+# 2. Copiar requirements y asignar permisos (Capa 2)
+COPY --chown=appuser:appuser validate-asertions/requirements.txt .
 
-# Instalar dependencias
+# 3. Instalar dependencias (Capa 3)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código de la aplicación
-#COPY . .
+# 4. Copiar directorios manteniendo estructura (Capa 4)
+# Al usar el punto final (.) como destino, Docker copiará las carpetas
+# 'common' y 'validate-asertions' dentro de /app/ manteniendo sus nombres.
+COPY --chown=appuser:appuser common/ ./common/
+COPY --chown=appuser:appuser validate-asertions/ ./validate-asertions/
 
-# Copia la carpeta 'common' y todo su contenido
-COPY common /app/common
+# Usuario de ejecución
+USER appuser
 
-# Copia la carpeta 'news' y todo su contenido
-COPY validate-asertions /app/validate-asertions
-
-# Exponer el puerto donde correrá la API
 EXPOSE 8070
 
-# Comando por defecto: lanzar uvicorn
+# Formato exec para mejor manejo de procesos
 CMD ["uvicorn", "validate-asertions.main:app", "--host", "0.0.0.0", "--port", "8070"]

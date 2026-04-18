@@ -100,7 +100,7 @@ eth.sendTransaction({
 
 kubectl get pods -n infra
 
-kubectl logs -n infra -f zookeeper-0
+
 kubectl logs -n infra -f kafka-0
 
 
@@ -109,31 +109,6 @@ kubectl get pvc -n infra
 kubectl delete pvc ipfs-storage-ipfs-0 -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
-kubectl delete pvc zk-storage-zookeeper-0 -n infra
-
-
-# En caso de problemas con los pvs por charsloops y diferentes ids de cluster
-#parar los pods del perfil. OPCION LIGHT
-kubectl get pvc -n infra
-kubectl delete pvc kafka-data-kafka-0 -n infra
-
-# OPCION HARD
-kubectl scale statefulset kafka zookeeper -n infra --replicas=0
-kubectl delete pvc kafka-data-kafka-0 zk-storage-zookeeper-0 -n infra
-kubectl scale statefulset zookeeper -n infra --replicas=1
-# Espera a que Zookeeper esté Running
-kubectl scale statefulset kafka -n infra --replicas=1
-
-# si da un error como[2026-04-06 17:32:08,683] ERROR [Broker id=0] Topic ID in memory: iJda-RnvR96pUSUHN8oq5A does not match the #topic ID for partition fake_news_requests_generate-0 received: OGyzCY0RSoeaDZXuP3WSXg. (state.change.logger)
-#[2026-04-06 17:32:08,684] ERROR [Broker id=0] Topic ID in memory: IEXdjwdiRxuQ9Pbjj57VsA does not match the topic ID for partition #fake_news_requests_blockchain-0 received: GtKQA9sbT8uuEsaHI_eNiw. (state.change.logger)
-
-# Borrar metadatos del tópico de generación
-rm -f ./fake_news_requests_generate-0/partition.metadata
-
-# Borrar metadatos del tópico de blockchain
-rm -f ./fake_news_requests_blockchain-0/partition.metadata
-#matamos pods para que se reinicie
-kubectl delete pod kafka-0 -n infra
 
 ```
 

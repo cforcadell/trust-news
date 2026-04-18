@@ -146,7 +146,7 @@ kubectl scale statefulset --all --replicas=1 -n infra
 
 kubectl get pods -n infra
 
-kubectl logs -n infra -f zookeeper-0
+
 kubectl logs -n infra -f kafka-0
 
 
@@ -155,14 +155,8 @@ kubectl get pvc -n infra
 kubectl delete pvc ipfs-storage-ipfs-0 -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
-kubectl delete pvc zk-storage-zookeeper-0 -n infra
 
 
-# En caso de problemas con los pvs por charsloops y diferentes ids de cluster
-#parar los pods del perfil 
-kubectl get pvc -n infra
-kubectl delete pvc kafka-data-kafka-0 -n infra
-#y rearrancar skkafold con el perfil infra
 ```
 
 ```bash keycloak
@@ -207,6 +201,8 @@ Authentication Flow: Marca solo Service accounts roles (desmarca el resto).
 
 Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
 
+En realm settings (TrustNews)
+Frontend URL: https://localhost:7443/auth/
 
 ```bash apis + frontend
 
@@ -235,6 +231,8 @@ grafana:
 http://localhost:3000/
 
 
+keycloak realm master 
+https://localhost:7443/auth/admin/master/console/
 
 
 

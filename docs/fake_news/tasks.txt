@@ -1,21 +1,21 @@
 
-prod
-- grafana (specific version) OK
-- cambio en caliente de variables config
+next version
+- Dockerfile optimizado y securizado
+- Integracion con keycloak
+- nuevo gateway con apis publicas e integrado con keycloak
+- nginx.conf solo usa gateway
+- kafka sin zookeeper. Solo kraft
+
+
 Develop v0.0.9.
 - loki persistente
 - Hardering frontend
 - restylish frontend
-- integracion con keycloak y google. Añadir a usuario como quien envia la validacion.
 - gestión de reputaciones. 
     AI defecto reputacion media
     Especializaciones maxima
     individuales minima o custom
 - estado validated --> dejar en pending y solo cerrar si todas validadas o al cabo de x tiempo
-- endpoints de consulta y de cambio de config de AI validators OK
-- Nuevo proveedor grok
-- endpoint (con validacion de token) que puedan ser llamados del exterior para validacion de noticias e2e y consulta
-- gitlab mirroring.
 
 
 

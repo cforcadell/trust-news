@@ -62,11 +62,11 @@ spec:
             
           ports:
             - containerPort: 8443 # Puerto HTTPS por defecto en modo prod
-          # readinessProbe:
-          #   httpGet:
-          #     scheme: HTTPS 
-          #     path: /auth/health/ready
-          #     port: 8443  
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS 
+              path: /auth/health/ready
+              port: 8443  
           volumeMounts:
             - name: certs
               mountPath: "/opt/keycloak/conf/trustnews.crt"

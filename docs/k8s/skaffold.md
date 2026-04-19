@@ -197,7 +197,7 @@ Client Authentication: Ponlo en ON.
 
 Authorization: Ponlo en OFF.
 
-Authentication Flow: Marca solo Service accounts roles (desmarca el resto).
+Authentication Flow: Marca solo Service accounts roles (desmarca el resto). 
 
 Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
 

@@ -30,11 +30,17 @@ IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.l
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
 
 # Keycloak config
-KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL", "http://localhost:8080")
+KEYCLOAK_SERVER_INNER_URL = os.getenv("KEYCLOAK_SERVER_INNER_URL", "http://localhost:8080")
+
+KEYCLOAK_SERVER_HOSTNAME = os.getenv("KEYCLOAK_SERVER_HOSTNAME", "https://localhost")
+KEYCLOAK_SERVER_PORT  = os.getenv("KEYCLOAK_SERVER_PORT", "7443")
+KEYCLOAK_SERVER_PATH  = os.getenv("KEYCLOAK_SERVER_PATH", "auth")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "TrustNews")
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "TrustNewsWeb")
+KEYCLOAK_REALM_EXTERNAL_URL = f"{KEYCLOAK_SERVER_HOSTNAME}:{KEYCLOAK_SERVER_PORT}/{KEYCLOAK_SERVER_PATH}/realms/{KEYCLOAK_REALM}"
+
 # Obtén la clave pública de tu Keycloak o usa el endpoint de JWKS para validación
-KEYCLOAK_CERTS_URL = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
+KEYCLOAK_CERTS_URL = f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
 
 # ============================================================
 # Autenticación Keycloak (OAuth2 / OIDC)
@@ -46,11 +52,12 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     Valida el token JWT emitido por Keycloak con trazas detalladas de depuración.
     """
     token = credentials.credentials
+    headers_for_keycloak = {"Host": "localhost"}
     
     try:
         # 1. Obtener las claves públicas (JWKS) de Keycloak
         async with aiohttp.ClientSession() as session:
-            async with session.get(KEYCLOAK_CERTS_URL, ssl=False) as resp:
+            async with session.get(KEYCLOAK_CERTS_URL, headers=headers_for_keycloak,ssl=False) as resp:
                 if resp.status != 200:
                     logger.error(f"Error conectando a Keycloak JWKS: {resp.status}")
                     raise HTTPException(status_code=500, detail="No se pudo contactar con el servidor de identidad")
@@ -80,7 +87,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             raise HTTPException(status_code=401, detail="Clave de token no válida")
 
         # 3. Preparar validación y Logs de depuración para 'Invalid Issuer'
-        expected_issuer = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}"
+        expected_issuer = KEYCLOAK_REALM_EXTERNAL_URL
         
         # Extraemos los claims sin validar para comparar en el log si hay error
         unverified_claims = jwt.get_unverified_claims(token)
@@ -95,9 +102,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             rsa_key,
             algorithms=["RS256"],
             audience="account",  # Cambia a tu Client ID si es necesario
-            #issuer=expected_issuer
+            issuer=expected_issuer,
             options={
-                "verify_iss": False  # This bypasses the strict string comparison
+                "verify_iss": True  # This bypasses the strict string comparison
             }
         )
         

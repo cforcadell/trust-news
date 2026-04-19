@@ -36,9 +36,9 @@ spec:
             - name: KC_HEALTH_ENABLED
               value: "true"
             - name: KC_HOSTNAME_STRICT
-              value: "false"  # <--- Esto permite que Keycloak responda a diferentes puertos
+              value: "true"  # <--- Esto permite que Keycloak responda a diferentes puertos
             - name: KC_HOSTNAME_STRICT_HTTPS
-              value: "false"
+              value: "true"
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:

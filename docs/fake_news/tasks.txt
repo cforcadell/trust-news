@@ -6,6 +6,13 @@ next version
 - nginx.conf solo usa gateway
 - kafka sin zookeeper. Solo kraft
 
+- Validacion de Issuer. OK
+- Strict hostname y https. OK
+- ssl=true en certs? No en desa. Incorporar variable
+- crear .env de gateway (tb en prod)
+- mover toda la config volatil a .env. Crear .env examples al no poder subir el bueno (k8s)
+- Validar llamadas a nuevo-post, getorder a nivel de api con obtencio de token oaut. Incorporar a tests automaticos
+
 
 Develop v0.0.9.
 - loki persistente

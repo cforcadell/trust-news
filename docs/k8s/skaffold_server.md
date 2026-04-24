@@ -186,3 +186,8 @@ kubectl patch serviceaccount default \
 ```
 
 
+```bash problemas de connection refused en descargar imágenes (Ej: python:3.11-slim )
+docker pull mirror.gcr.io/library/python:3.11-slim
+
+docker tag mirror.gcr.io/library/python:3.11-slim python:3.11-slim
+```

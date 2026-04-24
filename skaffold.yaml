@@ -38,6 +38,11 @@ profiles:
   # PERFIL: INFRA
   # ---------------------------------------------------------
   - name: infra
+    build:
+      artifacts:
+          - image: keycloak
+            context: keycloak
+            docker: {dockerfile: Dockerfile}
     manifests:
       rawYaml:
         #- k8s/infra/zookeeper/*.yaml
@@ -53,7 +58,6 @@ profiles:
 
     portForward:
       - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
-      - {resourceType: service, resourceName: keycloak, namespace: infra, port: 8443, localPort: 6443, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND
@@ -129,6 +133,11 @@ profiles:
   # PERFIL: INFRA PROD
   # ---------------------------------------------------------
   - name: infra-prod
+    build:
+      artifacts:
+          - image: keycloak
+            context: keycloak
+            docker: {dockerfile: Dockerfile}
     manifests:
       rawYaml:
         #- k8s/infra/zookeeper/*.yaml
@@ -171,6 +180,7 @@ profiles:
         - image: web-classic
           context: web_classic
           docker: {dockerfile: Dockerfile}
+
     manifests:
       rawYaml:
         - k8s/apis/ipfs-fastapi/*.yaml

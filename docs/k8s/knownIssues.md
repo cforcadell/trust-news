@@ -96,3 +96,32 @@ appuser@ipfs-fastapi-7fd856fd48-4ksft:/app$ timeout 2 bash -c "</dev/tcp/kafka.i
 Connection Successful
 
  ```
+
+ ## 8. Reiniciar cluster por problemas de mirrors en local al descargar imagenes 
+
+```bash
+docker stop $(docker ps -q --filter "label=io.x-k8s.kind.cluster")
+
+sudo nano /etc/docker/daemon.json (ex: add "registry-mirrors": ["https://mirror.gcr.io"])
+
+sudo systemctl restart docker 
+
+docker start $(docker ps -a -q --filter "label=io.x-k8s.kind.cluster")
+
+ ```
+
+## 9. Reiniciar cluster por problemas de espacio
+```bash 
+ # Ver clusters Kind existentes
+kind get clusters
+
+# Borrar el cluster (esto elimina los 3 volúmenes gigantes)
+kind delete cluster --name trust-news
+
+# Recrearlo
+kind create cluster --name trust-news --config kind-config.yaml
+
+#ir limpiando por nodos
+ docker exec <nodo-kind> crictl rmi --prune 
+
+```

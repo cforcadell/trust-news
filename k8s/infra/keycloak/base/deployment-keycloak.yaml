@@ -14,31 +14,27 @@ spec:
     spec:
       containers:
         - name: keycloak
-          image: quay.io/keycloak/keycloak:24.0
-          args: ["start"] 
+          image: keycloak
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            - --optimized
+            - --http-enabled=true # Habilita explícitamente el puerto HTTP
           env:
-            - name: KC_DB
-              value: postgres
             - name: KC_DB_URL
               value: "jdbc:postgresql://keycloak-db:5432/keycloak"
-            - name: KC_HOSTNAME
-              value: "localhost" # O tu dominio real
-            - name: KC_HOSTNAME_PORT
-              value: "7443"
-            - name: KC_HTTPS_CERTIFICATE_FILE
-              value: "/opt/keycloak/conf/trustnews.crt"
-            - name: KC_HTTPS_CERTIFICATE_KEY_FILE
-              value: "/opt/keycloak/conf/trustnews.key"
-            - name: KC_HTTP_RELATIVE_PATH
-              value: "/auth"
-            - name: KC_PROXY
-              value: "reencrypt" # <--- Vital para Nginx(https) -> Keycloak(https)
-            - name: KC_HEALTH_ENABLED
-              value: "true"
-            - name: KC_HOSTNAME_STRICT
-              value: "true"  # <--- Esto permite que Keycloak responda a diferentes puertos
+            - name: KC_HOSTNAME_URL
+              value: "https://localhost:7443/auth"       # Fuerza HTTPS globalmente
+            - name: KC_HOSTNAME_ADMIN_URL
+              value: "https://localhost:7443/auth"       # Fuerza HTTPS para la consola admin
+
+
             - name: KC_HOSTNAME_STRICT_HTTPS
               value: "true"
+            - name: KC_HOSTNAME_STRICT
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: "xforwarded"                   # Vital para Keycloak 24+
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
@@ -59,25 +55,13 @@ spec:
                 secretKeyRef:
                   name: keycloak-db-secret
                   key: DB_PASSWORD
-            
           ports:
-            - containerPort: 8443 # Puerto HTTPS por defecto en modo prod
+            - name: http
+              containerPort: 8080 # Puerto estándar HTTP de Keycloak
           readinessProbe:
             httpGet:
-              scheme: HTTPS 
+              scheme: HTTP # Cambiado de HTTPS a HTTP
               path: /auth/health/ready
-              port: 8443  
-          volumeMounts:
-            - name: certs
-              mountPath: "/opt/keycloak/conf/trustnews.crt"
-              subPath: tls.crt
-            - name: certs-key
-              mountPath: "/opt/keycloak/conf/trustnews.key"
-              subPath: tls.key
-      volumes:
-        - name: certs
-          secret:
-            secretName: keycloak-tls-secret
-        - name: certs-key
-          secret:
-            secretName: keycloak-tls-secret
+              port: 8080
+          # Puedes comentar o quitar los volumes de TLS si ya no quieres 
+          # que KC gestione certificados internamente (edge mode).

@@ -206,7 +206,7 @@ Frontend URL: https://localhost:7443/auth/
 
 ```bash apis + frontend
 
-./skaffold dev -p apis-frontend
+./skaffold dev -p apis-frontend  --cache-artifacts=false --cleanup=false
 
 
 kubectl get pods -n apis
@@ -229,6 +229,8 @@ https://localhost:7443/
 
 grafana:
 http://localhost:3000/
+
+https://localhost:7443/backend/docs
 
 
 keycloak realm master 

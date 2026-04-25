@@ -24,7 +24,58 @@ kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infr
 
 kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
 
+kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
+
 kubectl create secret generic ethereum-secrets  --from-env-file=ethereum.env -n blockchain
+
+#create gitlab secrets
+
+create-secrets-gitlab.sh*
+
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=apis
+
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=infra
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=blockchain
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=frontend
+
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=apis
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=infra
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=blockchain
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=frontend
+
+
 
 #inside secrets folder
 kubectl create secret tls keycloak-tls-secret \

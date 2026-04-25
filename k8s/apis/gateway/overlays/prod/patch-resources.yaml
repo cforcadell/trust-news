@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: generate-asertions # Tiene que coincidir con el nombre de la base
+  name: gateway # Tiene que coincidir con el nombre de la base
   namespace: apis
 
 spec:
@@ -11,7 +11,7 @@ spec:
   template:
     spec:
       containers:
-      - name: generate-asertions
+      - name: gateway
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
         resources:
             requests:

@@ -125,3 +125,19 @@ kind create cluster --name trust-news --config kind-config.yaml
  docker exec <nodo-kind> crictl rmi --prune 
 
 ```
+
+## 9. si han caido los nodos de blockchain y se han desincronizados.
+```bash 
+
+sysadmin@trust-news-prod:~/trust-news/scripts$ kubectl exec -it geth-miner-0 -n blockchain -- /bin/sh
+Defaulted container "geth-miner" out of: geth-miner, init-blockchain (init)
+/ # rm -rf /root/.ethereum/geth/chaindata
+/ # rm /root/.ethereum/geth/nodekey # Opcional, fuerza a generar un nuevo ID de nodo
+/ # exit
+
+sysadmin@trust-news-prod:~/trust-news/scripts$ kubectl exec -it geth-rpc-enndpoint-0 -n blockchain -- /bin/sh
+Defaulted container "geth-miner" out of: geth-miner, init-blockchain (init)
+/ # rm -rf /root/.ethereum/geth/chaindata
+/ # rm /root/.ethereum/geth/nodekey # Opcional, fuerza a generar un nuevo ID de nodo
+/ # exit
+```

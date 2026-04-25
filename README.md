@@ -166,11 +166,12 @@ Ensuring the system is **auditable and tamper-resistant**.
 
 ## 🛣️ Roadmap
 * [X] Secure and authenticate plattform
-* [ ] Migrate requests and responses to Validation from Kafka to Blockchain Events
+* [X] Migrate requests and responses to Validation from Kafka to Blockchain Events
 * [ ] Support to Hyperledger Besu or Fabric
-* [ ] Integrate UI with IDP and custom chains for user
+* [X] Integrate UI with IDP and custom chains for user
 * [ ] Validator reputation system
 * [ ] Performance and cost analysis
+* [ ] API Control
 
 ---
 

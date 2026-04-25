@@ -1,5 +1,9 @@
 **Just one shot execution**
-```bash infra inside server create-secrets.sh
+```bash infra inside server 
+scripts/create-namespaces.sh
+
+secrets/create-secrets.sh
+
 touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env news-handler.env mongodb.env
 chmod 600 *.env
 
@@ -13,21 +17,33 @@ kubectl create secret generic news-chain-secrets --from-env-file=news-chain.env 
 
 kubectl create secret generic news-handler-secrets --from-env-file=news-handler.env -n apis
 
+kubectl create secret generic gate-config --from-env-file=gateway.env -n apis
+
+
 kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
 
-kubectl create secret generic mongodb-secret --from-env-file=keycloak.env -n infra
+kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
 
 kubectl create secret generic ethereum-secrets  --from-env-file=ethereum.env -n blockchain
 
 
-kubectl create secret tls frontend-tls \
-  --cert=./web_classic/certs/fullchain.pem \
-  --key=./web_classic/certs/privkey.pem \
-  -n frontend
+
+#kubectl create secret tls frontend-tls \
+#  --cert=./web_classic/certs/fullchain.pem \
+#  --key=./web_classic/certs/privkey.pem \
+#  -n frontend
 
 ```
+**Deploy blockchain resources**
+#use apipeline with PROFILE=blockchain-prod and check peers
+
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "net.peerCount"
+
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
 
 **Deploy contract using ssh tunnel**
+
+
 ```bash blockchain ~/blockchain/hetzner/keys-github
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 8565:localhost:8555 sysadmin@135.181.80.57 -t "kubectl port-forward pod/geth-rpc-endpoint-0 -n blockchain 8555:8555"
 

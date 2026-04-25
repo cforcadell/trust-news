@@ -11,7 +11,7 @@ data:
   GENERATE_ASSERTIONS_URL: "http://generate-asertions.apis.svc.cluster.local:8071"
   
   # Configuración de Keycloak
-  KEYCLOAK_SERVER_INNER_URL: "https://keycloak.infra.svc.cluster.local:8443/auth"
+  KEYCLOAK_SERVER_INNER_URL: "http://keycloak.infra.svc.cluster.local:8080/auth"
   KEYCLOAK_SERVER_URL:  https://localhost:7443/auth
   KEYCLOAK_SERVER_HOSTNAME : "https://localhost"
   KEYCLOAK_SERVER_PORT : "7443"

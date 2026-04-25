@@ -215,7 +215,7 @@ async function pollOrder(orderId, startTime) {
 
 async function generateAssertionsFromText(text) {
     try {
-        const response = await fetchWithAuth(`${GENERATE_API}/extraer`, {
+        const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
             method: "POST",
             headers: {
                 "Accept": "application/json"
@@ -356,7 +356,7 @@ async function publishNew() {
     showSection('order');
     document.getElementById("orderId").value = "Publicando...";
 
-    const res = await fetchWithAuth(`${API}/publishNew`, {
+    const res = await fetchWithAuth(`${API}/orders/publishNew`, {
         method: "POST",
         body: JSON.stringify({text})
     });
@@ -406,7 +406,7 @@ async function publishWithAssertions() {
     const payload = { text, assertions };
 
     try {
-        const response = await fetchWithAuth(`${API}/publishWithAssertions`, {
+        const response = await fetchWithAuth(`${API}/orders/publishWithAssertions`, {
             method: "POST",
             body: JSON.stringify(payload)
         });
@@ -467,7 +467,7 @@ async function findPrevious() {
 async function listOrders() {
     alertMessage("Listando todas las órdenes...", 'info');
     try {
-        const res = await fetchWithAuth(`${API}/news`);
+        const res = await fetchWithAuth(`${API}/orders/list`);
         if (!res.ok) throw new Error("Error al obtener la lista de órdenes.");
         
         const data = await res.json();
@@ -536,7 +536,7 @@ async function loadOrderById(orderId, cleanup = true) {
         if (cleanup || res.status !== 304) {
             let eventsData = [];
             try {
-                const resEv = await fetchWithAuth(`${API}/news/${orderId}/events`);
+                const resEv = await fetchWithAuth(`${API}/orders/${orderId}/events`);
                 if (resEv.ok) eventsData = await resEv.json();
             } catch(e){ console.error("Error cargando eventos:", e); }
 
@@ -1171,7 +1171,7 @@ async function findTx() {
     alertMessage("Buscando transacción...", 'info');
 
     try {
-        const res = await fetchWithAuth(`${TX_API}/tx/${hash}`);
+        const res = await fetchWithAuth(`${TX_API}/blockchain/tx/${hash}`);
         if (!res.ok) throw new Error("Error al obtener la transacción");
         
         const responseData = await res.json();
@@ -1300,7 +1300,7 @@ async function findBlock() {
     alertMessage("Buscando bloque...", 'info');
 
     try {
-        const res = await fetchWithAuth(`${TX_API}/block/${blockId}`);
+        const res = await fetchWithAuth(`${TX_API}/blockchain/block/${blockId}`);
         if (!res.ok) throw new Error("Error al obtener el bloque");
         
         const responseData = await res.json();
@@ -1579,7 +1579,7 @@ async function checkOrderConsistency() {
     const orderId = orderIdInput.value.trim();
     const table = document.getElementById('postConsistency');
 
-    const apiUrl = `${API}/checkOrderConsistency/${orderId}`;
+    const apiUrl = `${API}/orders/checkOrderConsistency/${orderId}`;
 
     if (!orderId) {
         table.innerHTML = '<tr><td colspan="5" class="error">Por favor, introduce un Order ID válido.</td></tr>';

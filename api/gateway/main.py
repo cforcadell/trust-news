@@ -1,17 +1,25 @@
 import os
 import logging
-from typing import Any
+from typing import Any, List
 import aiohttp
 from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, status
 from fastapi.responses import JSONResponse
-from fastapi.security import HTTPBearer, OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
+from pydantic import BaseModel
 from dotenv import load_dotenv
+from common.async_models import (
+    TextoEntrada, 
+    PublishRequest, 
+    PreGeneratedAssertion,
+    PublishWithAssertionsRequest
+)
 
-# Cargar env
+# ============================================================
+# Cargar env y Logging
+# ============================================================
 load_dotenv()
 
-# Logging
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -35,66 +43,27 @@ KEYCLOAK_SERVER_HOSTNAME = os.getenv("KEYCLOAK_SERVER_HOSTNAME", "https://localh
 KEYCLOAK_SERVER_PORT = os.getenv("KEYCLOAK_SERVER_PORT", "7443")
 KEYCLOAK_SERVER_PATH = os.getenv("KEYCLOAK_SERVER_PATH", "auth")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "TrustNews")
-KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "TrustNewsWeb")
 
 KEYCLOAK_REALM_EXTERNAL_URL = f"{KEYCLOAK_SERVER_HOSTNAME}:{KEYCLOAK_SERVER_PORT}/{KEYCLOAK_SERVER_PATH}/realms/{KEYCLOAK_REALM}"
 KEYCLOAK_CERTS_URL = f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
 
 # ============================================================
-# Autenticación Keycloak (OAuth2 / OIDC)
+# Autenticación (Simple Bearer para Swagger)
 # ============================================================
+security = HTTPBearer()
 
-# FIX: Definición del esquema que faltaba (el NameError)
-# El tokenUrl debe ser la ruta relativa desde la raíz del API para Swagger
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-
-@app.post("/auth/login")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    """Intercambia credenciales por un token de Keycloak."""
-    token_url = f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token"
-    
-    payload = {
-        "grant_type": "password",
-        "client_id": KEYCLOAK_CLIENT_ID,
-        "username": form_data.username,
-        "password": form_data.password,
-        "scope": "openid profile email",
-    }
-
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(token_url, data=payload) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    logger.error(f"Keycloak login failed: {data}")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Credenciales incorrectas en Keycloak"
-                    )
-                return {
-                    "access_token": data["access_token"],
-                    "token_type": "bearer",
-                    "expires_in": data.get("expires_in"),
-                    "refresh_token": data.get("refresh_token")
-                }
-        except Exception as e:
-            logger.error(f"Error de conexión con Keycloak: {e}")
-            raise HTTPException(status_code=502, detail="Servidor de identidad no disponible")
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Valida el token JWT emitido por Keycloak."""
-    # En entornos K8s a veces es necesario forzar el Host si Keycloak es estricto
+async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)):
+    """Valida el token JWT pegado en Swagger o enviado por el cliente."""
+    token = auth.credentials
     headers_for_keycloak = {"Host": "localhost"}
     
     try:
-        # 1. Obtener JWKS
         async with aiohttp.ClientSession() as session:
             async with session.get(KEYCLOAK_CERTS_URL, headers=headers_for_keycloak, ssl=False) as resp:
                 if resp.status != 200:
                     raise HTTPException(status_code=500, detail="Error contactando Keycloak")
                 jwks = await resp.json()
 
-        # 2. Obtener KID
         unverified_header = jwt.get_unverified_header(token)
         rsa_key = {}
         for key in jwks["keys"]:
@@ -105,17 +74,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if not rsa_key:
             raise HTTPException(status_code=401, detail="Clave de token no válida")
 
-        # 3. Decodificación
-        # Nota: 'audience' suele ser el client_id o 'account' en Keycloak
         payload = jwt.decode(
             token,
             rsa_key,
             algorithms=["RS256"],
-            audience=["account", KEYCLOAK_CLIENT_ID], 
-            issuer=KEYCLOAK_REALM_EXTERNAL_URL
+            issuer=KEYCLOAK_REALM_EXTERNAL_URL,
+            options={"verify_aud": False}
         )
         
-        logger.info(f"Token validado: {payload.get('preferred_username')}")
+        user = payload.get('preferred_username') or payload.get('client_id') or "service-account"
+        logger.info(f"Token validado para: {user}")
         return payload
 
     except JWTError as e:
@@ -125,11 +93,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         logger.error(f"Unexpected Auth Error: {e}")
         raise HTTPException(status_code=401, detail="Error interno de autenticación")
 
+
 # ============================================================
 # Helper Proxy Asíncrono
 # ============================================================
 async def proxy_request(request: Request, target_url: str):
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    # Recuperamos el body en bytes. FastAPI ya lo ha parseado y validado
+    # con Pydantic en el endpoint, pero lo mantiene en memoria.
     body = await request.body()
     
     async with aiohttp.ClientSession() as session:
@@ -140,7 +111,6 @@ async def proxy_request(request: Request, target_url: str):
                 headers=headers,
                 data=body
             ) as response:
-                # Intentamos parsear JSON si es posible, si no, devolvemos raw
                 resp_content = await response.read()
                 try:
                     content_json = await response.json()
@@ -156,31 +126,69 @@ async def proxy_request(request: Request, target_url: str):
 # ============================================================
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-@router.post("/extraer")
-async def proxy_extraer(request: Request):
+# Añadimos los modelos (body: Modelo) para que Swagger exija el JSON correcto
+
+@router.post("/assertions/generate", tags=["Assertions"])
+async def proxy_extraer(request: Request, body: TextoEntrada):
     return await proxy_request(request, f"{GENERATE_ASSERTIONS_URL}/extraer")
 
-@router.post("/publishNew")
-async def proxy_publish_new(request: Request):
+@router.post("/orders/publishNew", tags=["Orders"])
+async def proxy_publish_new(request: Request, body: PublishRequest):
     return await proxy_request(request, f"{NEWS_HANDLER_URL}/publishNew")
 
-@router.post("/publishWithAssertions")
-async def proxy_publish_with_assertions(request: Request):
+@router.post("/orders/publishWithAssertions", tags=["Orders"])
+async def proxy_publish_with_assertions(request: Request, body: PublishWithAssertionsRequest):
     return await proxy_request(request, f"{NEWS_HANDLER_URL}/publishWithAssertions")
 
-@router.get("/news")
+# Los GET se mantienen igual ya que no llevan body
+@router.get("/orders/list", tags=["Orders"])
 async def proxy_get_news(request: Request):
     return await proxy_request(request, f"{NEWS_HANDLER_URL}/news")
 
-# IPFS Proxy
-@router.get("/ipfs/{cid}")
+@router.get("/ipfs/{cid}", tags=["IPFS"])
 async def proxy_get_ipfs(cid: str, request: Request):
     return await proxy_request(request, f"{IPFS_API_URL}/ipfs/{cid}")
 
-# Ethereum Proxy
-@router.get("/tx/{hash}")
+@router.get("/blockchain/tx/{hash}", tags=["Blockchain"])
 async def proxy_get_tx(hash: str, request: Request):
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/tx/{hash}")
+
+@router.get("/blockchain/block/{block_id}", tags=["Blockchain"])
+async def proxy_get_block(block_id: int, request: Request):
+    """
+    Obtiene información detallada de un bloque específico y sus transacciones.
+    """
+    # Cambia NEWS_CHAIN_URL por la URL de tu microservicio de blockchain
+    return await proxy_request(request, f"{NEWS_CHAIN_URL}/block/{block_id}")
+
+@router.get("/blockchain/post/{post_id}", tags=["Blockchain"])
+async def proxy_get_blockchain_post(post_id: int, request: Request):
+    """
+    Recupera la información completa de un Post directamente desde el Smart Contract,
+    incluyendo su CID de IPFS, aserciones y todas las validaciones asociadas.
+    """
+    # Se redirige al microservicio que maneja la lógica de web3 (news-chain)
+    return await proxy_request(request, f"{NEWS_CHAIN_URL}/blockchain/post/{post_id}")
+
+@router.get("/orders/{order_id}", tags=["Orders"])
+async def proxy_get_order(order_id: str, request: Request):
+    """Enruta la petición de consulta de una orden al news-handler"""
+    return await proxy_request(request, f"{NEWS_HANDLER_URL}/orders/{order_id}")
+
+@router.get("/orders/checkOrderConsistency/{order_id}", tags=["Orders"])
+async def proxy_check_order_consistency(order_id: str, request: Request):
+    """
+    Enruta la petición para comprobar la consistencia de una orden (Order -> IPFS -> Blockchain).
+    """
+    # Si la función vive en news-chain, cambia NEWS_HANDLER_URL por NEWS_CHAIN_URL
+    return await proxy_request(request, f"{NEWS_HANDLER_URL}/checkOrderConsistency/{order_id}")
+
+@router.get("/orders/{order_id}/events", tags=["Orders"])
+async def proxy_get_news_events(order_id: str, request: Request):
+    """
+    Recupera el histórico de eventos de una orden específica (Pipeline events).
+    """
+    return await proxy_request(request, f"{NEWS_HANDLER_URL}/news/{order_id}/events")
 
 app.include_router(router)
 

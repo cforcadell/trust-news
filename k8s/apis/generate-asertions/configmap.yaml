@@ -4,9 +4,12 @@ metadata:
   name: generate-asertions-config
   namespace: apis
 data:
-  OPENROUTER_MODEL: "arcee-ai/trinity-large-preview:free"
+  #OPENROUTER_MODEL: "arcee-ai/trinity-large-preview:free"
+  OPENROUTER_MODEL: "qwen/qwen3-coder:free"
   OPENROUTER_API_URL: "https://openrouter.ai/api/v1/chat/completions"
-  AI_PROVIDER: "openrouter"
+  GEMINI_MODEL: "gemini-2.5-flash"
+  GEMINI_API_URL: "https://generativelanguage.googleapis.com/v1beta"
+  AI_PROVIDER: "gemini"
   KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
   KAFKA_REQUEST_TOPIC: "fake_news_requests_generate"
   KAFKA_RESPONSE_TOPIC: "fake_news_responses"

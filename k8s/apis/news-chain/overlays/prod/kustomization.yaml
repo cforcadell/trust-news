@@ -12,7 +12,12 @@ configMapGenerator:
 - name: news-chain-contract
   files:
     - TrustNews.json=../../../../../smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
-
+- name: news-chain-config
+  namespace: apis
+  behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
+  literals:
+    - CONTRACT_ADDRESS="0x9eA62eb7944349C407B307025644E47bF22F8bCc"
+    - ACCOUNT_ADDRESS="0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b"
 # Reemplaza el comando manual: kubectl create secret generic news-chain-secrets ... Account 0
 # secretGenerator:
 # - name: news-chain-secrets

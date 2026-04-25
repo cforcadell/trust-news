@@ -6,6 +6,12 @@ resources:
   - ../../configmap.yaml
   - ../../service.yaml
   - ../../deployment.yaml
+configMapGenerator:
+- name: generate-asertions-config
+  namespace: apis
+  behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
+  literals:
+    - AI_PROVIDER="gemini"
   
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
 # secretGenerator:

@@ -2,7 +2,7 @@
 **Skaffold**
 
 ```bash blockchain
-./skaffold dev -p setup 
+#./skaffold dev -p setup 
 ```
 
 ```bash blockchain

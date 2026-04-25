@@ -19,22 +19,15 @@ spec:
           args:
             - start
             - --optimized
-            - --http-enabled=true # Habilita explícitamente el puerto HTTP
+            - --http-enabled=true
+          
+          # 1. Cargamos todas las variables normales desde el ConfigMap
+          envFrom:
+            - configMapRef:
+                name: keycloak-env-config
+
+          # 2. Mantenemos las variables sensibles vinculadas a Secrets
           env:
-            - name: KC_DB_URL
-              value: "jdbc:postgresql://keycloak-db:5432/keycloak"
-            - name: KC_HOSTNAME_URL
-              value: "https://localhost:7443/auth"       # Fuerza HTTPS globalmente
-            - name: KC_HOSTNAME_ADMIN_URL
-              value: "https://localhost:7443/auth"       # Fuerza HTTPS para la consola admin
-
-
-            - name: KC_HOSTNAME_STRICT_HTTPS
-              value: "true"
-            - name: KC_HOSTNAME_STRICT
-              value: "true"
-            - name: KC_PROXY_HEADERS
-              value: "xforwarded"                   # Vital para Keycloak 24+
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
@@ -55,13 +48,12 @@ spec:
                 secretKeyRef:
                   name: keycloak-db-secret
                   key: DB_PASSWORD
+
           ports:
             - name: http
-              containerPort: 8080 # Puerto estándar HTTP de Keycloak
+              containerPort: 8080
           readinessProbe:
             httpGet:
-              scheme: HTTP # Cambiado de HTTPS a HTTP
+              scheme: HTTP
               path: /auth/health/ready
               port: 8080
-          # Puedes comentar o quitar los volumes de TLS si ya no quieres 
-          # que KC gestione certificados internamente (edge mode).

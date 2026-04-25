@@ -6,7 +6,14 @@ resources:
   - ../../configmap.yaml
   - ../../service.yaml
   - ../../deployment.yaml
-  
+
+configMapGenerator:
+- name: gateway-config
+  namespace: apis
+  behavior: merge  
+  literals:
+    - KEYCLOAK_SERVER_URL="https://localhost:7443/auth"
+    - KEYCLOAK_SERVER_HOSTNAME="https://localhost"
 
 patches:
   - path: patch-resources.yaml

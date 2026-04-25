@@ -1,5 +1,9 @@
 resources:
-  - ../../base
+  - ../../base/keycloak-config.yaml        
+  - ../../base/deployment-keycloak.yaml
+  - ../../base/service-keycloak.yaml
+  - ../../base/service-keycloak-db.yaml
+  - ../../base/statefulset-keycloak-db.yaml
 
 secretGenerator:
   - name: keycloak-admin-secret

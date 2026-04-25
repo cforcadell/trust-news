@@ -197,5 +197,5 @@ profiles:
           - k8s/apis/validate-asertions/overlays/prod/worker-3
           - k8s/apis/news-handler/overlays/prod
           - k8s/apis/news-chain/overlays/prod
+          - k8s/apis/gateway/overlays/prod
           - k8s/frontend
-          

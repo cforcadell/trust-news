@@ -46,13 +46,13 @@ spec:
       containers:
         - name: geth-miner
           image: ethereum/client-go:v1.10.1
-          resources:
-          requests:
-            cpu: 200m
-            memory: 1Gi   # Subir de 256Mi a 1Gi
-          limits:
-            cpu: 500m
-            memory: 2Gi   # Subir de 512Mi a 2Gi
+          resources:          # <-- Todo debe ir anidado aquí dentro
+            limits:
+              cpu: 500m
+              memory: 2Gi
+            requests:
+              cpu: 200m
+              memory: 1Gi
           # Usamos sh -c y exec para que evalúe correctamente las variables del envFrom
           env:
             - name: POD_IP

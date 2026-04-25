@@ -26,6 +26,11 @@ kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env
 
 kubectl create secret generic ethereum-secrets  --from-env-file=ethereum.env -n blockchain
 
+#inside secrets folder
+kubectl create secret tls keycloak-tls-secret \
+  --cert=./tls-keycloak.crt \
+  --key=./tls-keycloak.key \
+  -n infra
 
 
 #kubectl create secret tls frontend-tls \
@@ -106,12 +111,14 @@ eth.sendTransaction({
   value: web3.toWei(10, "ether")
 })
 
+#check contract
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.getCode("0x9eA62eb7944349C407B307025644E47bF22F8bCc")'
 ```
 
 
 ```bash infra
 
-#use actions deploy workflow
+#use pipeliney  profile infra-prod
 
 
 kubectl get pods -n infra

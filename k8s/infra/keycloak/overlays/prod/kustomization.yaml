@@ -11,11 +11,11 @@ configMapGenerator:
   literals:
     - KC_HOSTNAME_URL="https://localhost:7443/auth"
     - KC_HOSTNAME_ADMIN_URL="https://localhost:7443/auth"
-secretGenerator:
-  - name: keycloak-tls-secret
-    files:
-      - tls-keycloak.crt
-      - tls-keycloak.key
+#secretGenerator:
+#  - name: keycloak-tls-secret
+#    files:
+#      - tls-keycloak.crt
+#      - tls-keycloak.key
 patches:
   - path: patch-keycloak.yaml
   - path: patch-postgres.yaml

@@ -188,7 +188,7 @@ kubectl delete pvc mongodb-storage-mongodb-0 -n infra
 
 
 
-```bash tunnel apis ~/blockchain/hetzner/keys-github
+```bash tunnel vmlinux home-> apis ~/blockchain/hetzner/keys-github
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
 
 https://localhost:9443/
@@ -202,10 +202,20 @@ kubectl scale statefulset --all --replicas=0 -n infra blockchain
 kubectl scale statefulset --all --replicas=1 -n infra blockchain 
 
 ```
-```bash tunnel grafana ~/blockchain/hetzner/keys-github
+**keycloak**
+```bash 
+https://localhost:9443/auth/admin/master/console/
+
+```
+
+
+**grafana**
+```bash tunnel grafana ~/blockchain/hetzner/keys-github. Si ocupado abrir terminal en hetzner y matar proceso netstat -nap | grep 10443
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 3300:127.0.0.1:3300 sysadmin@135.181.80.57 "kubectl port-forward pod/grafana-7964997b9b-skqjw -n infra 3000:3000 --address 0.0.0.0"
 
 http://localhost:3300/
+
+
 
 #Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
 
@@ -214,50 +224,7 @@ Explore + Run query
 #change inside hetzner. ex: bootnode
 kubectl edit statefulset geth-bootnode -n blockchain
 ```
-```bash gitlab secrets create-secrets-gitlab.sh
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=apis
 
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=infra
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=blockchain
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=frontend
-
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=apis
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=infra
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=blockchain
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=frontend
-```
 
 
 ```bash problemas de connection refused en descargar imágenes (Ej: python:3.11-slim )

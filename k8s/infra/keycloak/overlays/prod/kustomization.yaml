@@ -9,8 +9,8 @@ configMapGenerator:
   namespace: infra
   behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
   literals:
-    - KC_HOSTNAME_URL="https://localhost:7443/auth"
-    - KC_HOSTNAME_ADMIN_URL="https://localhost:7443/auth"
+    - KC_HOSTNAME_URL="https://localhost:9443/auth"
+    - KC_HOSTNAME_ADMIN_URL="https://localhost:9443/auth"
 #secretGenerator:
 #  - name: keycloak-tls-secret
 #    files:

@@ -33,6 +33,8 @@ spec:
         envFrom:
         - configMapRef:
             name: generate-asertions-config
+        - secretRef:               
+            name: api-keys         
         env:
         - name: IPFS_API_ADD
           value: "http://ipfs-fastapi.apis.svc.cluster.local:8060/api/v0/add"

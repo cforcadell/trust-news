@@ -74,6 +74,22 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
         if not rsa_key:
             raise HTTPException(status_code=401, detail="Clave de token no válida")
 
+        # ============================================================
+        # INICIO: Logs añadidos para aud y iss
+        # ============================================================
+        unverified_claims = jwt.get_unverified_claims(token)
+        token_iss = unverified_claims.get("iss", "No especificado")
+        token_aud = unverified_claims.get("aud", "No especificado")
+        
+        logger.info("=== Debug de JWT ===")
+        logger.info(f"Issuer recibido (iss): {token_iss}")
+        logger.info(f"Issuer esperado      : {KEYCLOAK_REALM_EXTERNAL_URL}")
+        logger.info(f"Audience (aud)       : {token_aud}")
+        logger.info("====================")
+        # ============================================================
+        # FIN: Logs añadidos para aud y iss
+        # ============================================================
+
         payload = jwt.decode(
             token,
             rsa_key,

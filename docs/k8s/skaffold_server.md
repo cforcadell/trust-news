@@ -206,6 +206,43 @@ kubectl scale statefulset --all --replicas=1 -n infra blockchain
 ```bash 
 https://localhost:9443/auth/admin/master/console/
 
+
+Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
+
+Nombre: TrustNews.
+
+Crea el Cliente para la Web (Frontend):
+
+Clients -> Create client.
+
+ClientID: TrustNewsWeb.
+
+Root URL: https://localhost:9443 (o la URL de tu frontend).
+Valid redirect: https://localhost:9443/*
+
+Web Origins: * (para evitar problemas de CORS en desarrollo).
+
+Crea el Cliente para los Backends Públicos (Lo que pediste al inicio):
+
+Clients -> Create client.
+
+ClientID: TrustNewsApi.
+
+Client Authentication: Ponlo en ON.
+
+Authorization: Ponlo en OFF.
+
+Authentication Flow: Marca solo Service accounts roles (desmarca el resto). 
+
+Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
+
+En realm settings (TrustNews)
+Frontend URL: https://localhost:9443/auth/ ¿?¿?¿?¿?
+
+Craer usuario p federetad identity
+
+
+
 ```
 
 

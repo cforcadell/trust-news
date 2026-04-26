@@ -88,6 +88,7 @@ TrustNews explores a different approach:
 
 * Docker >= 24
 * Docker Compose >= 2
+* Kubernettes
 * 8GB RAM recommended
 
 ### Clone & Run
@@ -115,6 +116,7 @@ After startup, services will be available locally (frontend, APIs, blockchain, I
 ```text
 .
 ├── api  
+     ├── gateway/                         (API gateway)
      ├── news-handler/                    (API and Orchestator validation end to end)
      ├── news-chain/                      (API Smart Contract Abstraction)
      ├── generate-assertions/             (API for generate assertions) 
@@ -133,10 +135,6 @@ After startup, services will be available locally (frontend, APIs, blockchain, I
      ├── hardhat.config.js                (hardhat config)
 ├── volumes/                              (persistent data folder accross contaniners)
 ├── web_classic/                          (frontend folder)
-├── .env.example                          (.env configutation golab example)
-├── docker-compose.apis.yml               (yaml to build apis )
-├── docker-compose.base.yml               (yaml to build core containers )
-├── docker-compose.blockchain.yml         (yaml to build blockchain Geth POA private Network containers )
 └── README.md                             (this file)
 ```
 

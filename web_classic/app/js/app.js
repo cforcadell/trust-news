@@ -3,10 +3,12 @@
 // =========================================================
 // CONFIGURACIÓN GLOBAL
 // =========================================================
-const API = "/api";
-const TX_API = "/ethereum";
-const IPFS_API = "/ipfs";
-const GENERATE_API = "/generate";
+const BACKEND_BASE = "/backend";
+
+const API = BACKEND_BASE;
+const TX_API = BACKEND_BASE;
+const IPFS_API = BACKEND_BASE;
+const GENERATE_API = BACKEND_BASE;
 
 const MAX_EVENTS_ROWS = 15;
 const POLLING_DURATION = 0; // 20 segundos
@@ -28,9 +30,13 @@ const CATEGORY_MAP = {
     10: "SOCIAL"
 };
 
-// =========================================================
-// UTILIDAD: Reemplazo de alert() con UI no bloqueante
-// =========================================================
+const keycloak = new Keycloak({
+    url: '/auth', 
+    realm: 'TrustNews',
+    clientId: 'TrustNewsWeb'
+});
+
+
 // =========================================================
 // UTILIDAD: Toast Notifications (UI no bloqueante)
 // =========================================================
@@ -67,7 +73,25 @@ let currentOrderData = {};
 // =========================================================
 // UTILIDADES
 // =========================================================
+// Nuevo Helper para llamadas al Backend
+async function fetchWithAuth(url, options = {}) {
+    try {
+        // Actualizar token si expira en menos de 30s
+        await keycloak.updateToken(30);
+    } catch (error) {
+        console.error("Fallo al refrescar el token", error);
+        keycloak.login();
+        return;
+    }
 
+    const headers = {
+        ...options.headers,
+        'Authorization': `Bearer ${keycloak.token}`,
+        'Content-Type': 'application/json'
+    };
+
+    return fetch(url, { ...options, headers });
+}
 
 function escapeHTML(str) {
     return str.replace(/[&<>"']/g, function(match) {
@@ -191,10 +215,9 @@ async function pollOrder(orderId, startTime) {
 
 async function generateAssertionsFromText(text) {
     try {
-        const response = await fetch(`${GENERATE_API}/extraer`, {
+        const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
             method: "POST",
             headers: {
-                "Content-Type": "application/json",
                 "Accept": "application/json"
             },
             body: JSON.stringify({ text })
@@ -333,9 +356,8 @@ async function publishNew() {
     showSection('order');
     document.getElementById("orderId").value = "Publicando...";
 
-    const res = await fetch(`${API}/publishNew`, {
+    const res = await fetchWithAuth(`${API}/orders/publishNew`, {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({text})
     });
 
@@ -384,9 +406,8 @@ async function publishWithAssertions() {
     const payload = { text, assertions };
 
     try {
-        const response = await fetch(`${API}/publishWithAssertions`, {
+        const response = await fetchWithAuth(`${API}/orders/publishWithAssertions`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
 
@@ -424,9 +445,8 @@ async function findPrevious() {
     alertMessage("Buscando verificaciones previas...", 'info');
     
     try {
-        const res = await fetch(`${API}/find-order-by-text`, {
+        const res = await fetchWithAuth(`${API}/find-order-by-text`, {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
             body: JSON.stringify({text})
         });
         
@@ -447,7 +467,7 @@ async function findPrevious() {
 async function listOrders() {
     alertMessage("Listando todas las órdenes...", 'info');
     try {
-        const res = await fetch(`${API}/news`);
+        const res = await fetchWithAuth(`${API}/orders/list`);
         if (!res.ok) throw new Error("Error al obtener la lista de órdenes.");
         
         const data = await res.json();
@@ -489,7 +509,7 @@ async function loadOrderById(orderId, cleanup = true) {
     }
 
     try {
-        const res = await fetch(`${API}/orders/${orderId}`);
+        const res = await fetchWithAuth(`${API}/orders/${orderId}`);
         
         if (!res.ok) {
             const errorText = await res.text();
@@ -516,7 +536,7 @@ async function loadOrderById(orderId, cleanup = true) {
         if (cleanup || res.status !== 304) {
             let eventsData = [];
             try {
-                const resEv = await fetch(`${API}/news/${orderId}/events`);
+                const resEv = await fetchWithAuth(`${API}/orders/${orderId}/events`);
                 if (resEv.ok) eventsData = await resEv.json();
             } catch(e){ console.error("Error cargando eventos:", e); }
 
@@ -1107,7 +1127,7 @@ async function findIpfs() {
     alertMessage("Buscando contenido en IPFS...", "info");
 
     try {
-        const res = await fetch(`${IPFS_API}/ipfs/${cid}`);
+        const res = await fetchWithAuth(`${IPFS_API}/ipfs/${cid}`);
         if (!res.ok) throw new Error("Error al obtener datos de IPFS");
 
         const data = await res.json();
@@ -1151,7 +1171,7 @@ async function findTx() {
     alertMessage("Buscando transacción...", 'info');
 
     try {
-        const res = await fetch(`${TX_API}/tx/${hash}`);
+        const res = await fetchWithAuth(`${TX_API}/blockchain/tx/${hash}`);
         if (!res.ok) throw new Error("Error al obtener la transacción");
         
         const responseData = await res.json();
@@ -1280,7 +1300,7 @@ async function findBlock() {
     alertMessage("Buscando bloque...", 'info');
 
     try {
-        const res = await fetch(`${TX_API}/block/${blockId}`);
+        const res = await fetchWithAuth(`${TX_API}/blockchain/block/${blockId}`);
         if (!res.ok) throw new Error("Error al obtener el bloque");
         
         const responseData = await res.json();
@@ -1398,7 +1418,7 @@ async function findPostById() {
     alertMessage("Buscando contrato...", "info");
 
     try {
-        const res = await fetch(`${TX_API}/blockchain/post/${postId}`);
+        const res = await fetchWithAuth(`${TX_API}/blockchain/post/${postId}`);
 
         if (!res.ok) throw new Error("Error al obtener Post");
 
@@ -1559,7 +1579,7 @@ async function checkOrderConsistency() {
     const orderId = orderIdInput.value.trim();
     const table = document.getElementById('postConsistency');
 
-    const apiUrl = `${API}/checkOrderConsistency/${orderId}`;
+    const apiUrl = `${API}/orders/checkOrderConsistency/${orderId}`;
 
     if (!orderId) {
         table.innerHTML = '<tr><td colspan="5" class="error">Por favor, introduce un Order ID válido.</td></tr>';
@@ -1576,7 +1596,7 @@ async function checkOrderConsistency() {
     `;
 
     try {
-        const response = await fetch(apiUrl);
+        const response = await fetchWithAuth(apiUrl);
 
         if (!response.ok) {
             throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
@@ -1673,11 +1693,10 @@ async function importarNoticia() {
     try {
         // Llamada POST al endpoint
         
-        const response = await fetch(`${API}/extract_text_from_url`, {
+        const response = await fetchWithAuth(`${API}/extract_text_from_url`, {
             method: 'POST',
             headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
+                'Accept': 'application/json'
             },
             body: JSON.stringify({ url })
         });
@@ -1696,12 +1715,34 @@ async function importarNoticia() {
         alert('Error al importar la noticia. Revisa la consola.');
     }
 }
+// =========================================================
+// INICIALIZACIÓN CON PROTECCIÓN
+// =========================================================
+document.addEventListener('DOMContentLoaded', () => {
+    
+    keycloak.init({ 
+        onLoad: 'login-required', // Obliga a loguearse al cargar la web
+        checkLoginIframe: false   // Recomendado para evitar problemas de cookies en localhost
+    }).then(authenticated => {
+        if (authenticated) {
+            console.log("Autenticado con éxito");
+            // Una vez autenticado, cargamos los listeners y la vista
+            document.body.classList.add('authenticated');
+            initializeApp();
+        }
+    }).catch(err => {
+        console.error("Error al inicializar Keycloak:", err);
+        alertMessage("Error de conexión con el servidor de identidad", "error");
+    });
 
-// =========================================================
-// INICIALIZACIÓN
-// =========================================================
-document.addEventListener('DOMContentLoaded',()=>{
-    // Navigation Listeners
+});
+
+// Extraemos la lógica original a una función aparte
+function initializeApp() {
+    // 1. Mostrar quién está logueado (Opcional pero recomendado)
+    console.log("User:", keycloak.tokenParsed.preferred_username);
+
+    // 2. Navigation Listeners (Tu código original)
     document.querySelectorAll('.menu-title').forEach(title => {
         title.addEventListener('click', () => {
             const submenu = title.nextElementSibling;
@@ -1711,51 +1752,32 @@ document.addEventListener('DOMContentLoaded',()=>{
         });
     });
     
-    // News Listeners
+    // 3. News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
-    document.getElementById('btn-publishNew').addEventListener('click',publishNew);
-    //document.getElementById('btn-findPrevious').addEventListener('click',findPrevious);
+    document.getElementById('btn-publishNew').addEventListener('click', publishNew);
 
     document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
         const text = document.getElementById("newsText").value.trim();
-
         if (!text) {
             alertMessage("Debes escribir o cargar una noticia", "warning");
             return;
         }
-
         alertMessage("Generando aserciones...", "info");
-
         const assertions = await generateAssertionsFromText(text);
-
         const container = document.getElementById("news-assertions-container");
         renderEditableAssertionsTable(container, assertions);
-
         alertMessage("Aserciones generadas", "success");
     });
 
-    
-    // Orders Listeners
-    document.getElementById('btn-findOrder').addEventListener('click',findOrder);
-    document.getElementById('btn-listOrders').addEventListener('click',listOrders);
-    
-    // TX Listeners
+    // 4. El resto de tus Listeners (Orders, TX, IPFS...)
+    document.getElementById('btn-findOrder').addEventListener('click', findOrder);
+    document.getElementById('btn-listOrders').addEventListener('click', listOrders);
     document.getElementById("btn-findTx").addEventListener("click", findTx);
-
-    // Blocks Listeners
     document.getElementById("btn-findBlock").addEventListener("click", findBlock);
-
-    // Contract Listeners
     document.getElementById("btn-findPost").addEventListener("click", findPostById);
-
-    // Consistency Listeners
     document.getElementById("btn-checkConsistency").addEventListener("click", checkOrderConsistency);
-
-    // IPFS Listeners
     document.getElementById("btn-findIpfs").addEventListener("click", findIpfs);
 
-    
-
-    // Initial view
+    // 5. Initial view
     showSection('news');
-});
+}

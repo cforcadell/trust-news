@@ -1,0 +1,24 @@
+resources:
+  - ../../base/keycloak-config.yaml        
+  - ../../base/deployment-keycloak.yaml
+  - ../../base/service-keycloak.yaml
+  - ../../base/service-keycloak-db.yaml
+  - ../../base/statefulset-keycloak-db.yaml
+configMapGenerator:
+- name: keycloak-env-config
+  namespace: infra
+  behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
+  literals:
+    - KC_HOSTNAME_URL="https://localhost:9443/auth"
+    - KC_HOSTNAME_ADMIN_URL="https://localhost:9443/auth"
+#secretGenerator:
+#  - name: keycloak-tls-secret
+#    files:
+#      - tls-keycloak.crt
+#      - tls-keycloak.key
+patches:
+  - path: patch-keycloak.yaml
+  - path: patch-postgres.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+namespace: infra

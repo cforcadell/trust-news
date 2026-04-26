@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+      - name: gateway
+        #image: tfm-generate-asertions:latest
+        image: gateway
+        imagePullPolicy: IfNotPresent  # Importante para usar la imagen local
+        ports:
+        - containerPort: 8071
+        envFrom:
+        - configMapRef:
+            name: gateway-config

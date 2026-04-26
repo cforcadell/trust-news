@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway # Tiene que coincidir con el nombre de la base
+  namespace: apis
+
+spec:
+  # En producción podríamos querer 2 réplicas por si una cae, 
+  # pero si tu worker no soporta concurrencia, déjalo en 1.
+  replicas: 1 
+  template:
+    spec:
+      containers:
+      - name: gateway
+        # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
+        resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

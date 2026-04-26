@@ -1,5 +1,9 @@
 **Just one shot execution**
-```bash infra inside server
+```bash infra inside server 
+scripts/create-namespaces.sh
+
+secrets/create-secrets.sh
+
 touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env news-handler.env mongodb.env
 chmod 600 *.env
 
@@ -13,19 +17,89 @@ kubectl create secret generic news-chain-secrets --from-env-file=news-chain.env 
 
 kubectl create secret generic news-handler-secrets --from-env-file=news-handler.env -n apis
 
+kubectl create secret generic gate-config --from-env-file=gateway.env -n apis
+
+
 kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
+
+kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
+
+kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
 
 kubectl create secret generic ethereum-secrets  --from-env-file=ethereum.env -n blockchain
 
+#create gitlab secrets
 
-kubectl create secret tls frontend-tls \
-  --cert=./web_classic/certs/fullchain.pem \
-  --key=./web_classic/certs/privkey.pem \
-  -n frontend
+create-secrets-gitlab.sh*
+
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=apis
+
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=infra
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=blockchain
+kubectl create secret docker-registry gitlab-pull-secret \
+  --docker-server=registry.gitlab.com \
+  --docker-username=gitlab+deploy-token-13012600 \
+  --docker-password= \
+  --docker-email=cforcadell@gmail.com \
+  --namespace=frontend
+
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=apis
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=infra
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=blockchain
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
+  --namespace=frontend
+
+
+
+#inside secrets folder
+kubectl create secret tls keycloak-tls-secret \
+  --cert=./tls-keycloak.crt \
+  --key=./tls-keycloak.key \
+  -n infra
+
+
+#kubectl create secret tls frontend-tls \
+#  --cert=./web_classic/certs/fullchain.pem \
+#  --key=./web_classic/certs/privkey.pem \
+#  -n frontend
 
 ```
+**Deploy blockchain resources**
+#use apipeline with PROFILE=blockchain-prod and check peers
+
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "net.peerCount"
+
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
 
 **Deploy contract using ssh tunnel**
+
+
 ```bash blockchain ~/blockchain/hetzner/keys-github
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 8565:localhost:8555 sysadmin@135.181.80.57 -t "kubectl port-forward pod/geth-rpc-endpoint-0 -n blockchain 8555:8555"
 
@@ -88,17 +162,19 @@ eth.sendTransaction({
   value: web3.toWei(10, "ether")
 })
 
+#check contract
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.getCode("0x9eA62eb7944349C407B307025644E47bF22F8bCc")'
 ```
 
 
 ```bash infra
 
-#use actions deploy workflow
+#use pipeliney  profile infra-prod
 
 
 kubectl get pods -n infra
 
-kubectl logs -n infra -f zookeeper-0
+
 kubectl logs -n infra -f kafka-0
 
 
@@ -107,37 +183,12 @@ kubectl get pvc -n infra
 kubectl delete pvc ipfs-storage-ipfs-0 -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
-kubectl delete pvc zk-storage-zookeeper-0 -n infra
-
-
-# En caso de problemas con los pvs por charsloops y diferentes ids de cluster
-#parar los pods del perfil. OPCION LIGHT
-kubectl get pvc -n infra
-kubectl delete pvc kafka-data-kafka-0 -n infra
-
-# OPCION HARD
-kubectl scale statefulset kafka zookeeper -n infra --replicas=0
-kubectl delete pvc kafka-data-kafka-0 zk-storage-zookeeper-0 -n infra
-kubectl scale statefulset zookeeper -n infra --replicas=1
-# Espera a que Zookeeper esté Running
-kubectl scale statefulset kafka -n infra --replicas=1
-
-# si da un error como[2026-04-06 17:32:08,683] ERROR [Broker id=0] Topic ID in memory: iJda-RnvR96pUSUHN8oq5A does not match the #topic ID for partition fake_news_requests_generate-0 received: OGyzCY0RSoeaDZXuP3WSXg. (state.change.logger)
-#[2026-04-06 17:32:08,684] ERROR [Broker id=0] Topic ID in memory: IEXdjwdiRxuQ9Pbjj57VsA does not match the topic ID for partition #fake_news_requests_blockchain-0 received: GtKQA9sbT8uuEsaHI_eNiw. (state.change.logger)
-
-# Borrar metadatos del tópico de generación
-rm -f ./fake_news_requests_generate-0/partition.metadata
-
-# Borrar metadatos del tópico de blockchain
-rm -f ./fake_news_requests_blockchain-0/partition.metadata
-#matamos pods para que se reinicie
-kubectl delete pod kafka-0 -n infra
 
 ```
 
 
 
-```bash tunnel apis ~/blockchain/hetzner/keys-github
+```bash tunnel vmlinux home-> apis ~/blockchain/hetzner/keys-github
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
 
 https://localhost:9443/
@@ -151,10 +202,57 @@ kubectl scale statefulset --all --replicas=0 -n infra blockchain
 kubectl scale statefulset --all --replicas=1 -n infra blockchain 
 
 ```
-```bash tunnel grafana ~/blockchain/hetzner/keys-github
+**keycloak**
+```bash 
+https://localhost:9443/auth/admin/master/console/
+
+
+Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
+
+Nombre: TrustNews.
+
+Crea el Cliente para la Web (Frontend):
+
+Clients -> Create client.
+
+ClientID: TrustNewsWeb.
+
+Root URL: https://localhost:9443 (o la URL de tu frontend).
+Valid redirect: https://localhost:9443/*
+
+Web Origins: * (para evitar problemas de CORS en desarrollo).
+
+Crea el Cliente para los Backends Públicos (Lo que pediste al inicio):
+
+Clients -> Create client.
+
+ClientID: TrustNewsApi.
+
+Client Authentication: Ponlo en ON.
+
+Authorization: Ponlo en OFF.
+
+Authentication Flow: Marca solo Service accounts roles (desmarca el resto). 
+
+Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
+
+En realm settings (TrustNews)
+Frontend URL: https://localhost:9443/auth/ ¿?¿?¿?¿?
+
+Craer usuario p federetad identity
+
+
+
+```
+
+
+**grafana**
+```bash tunnel grafana ~/blockchain/hetzner/keys-github. Si ocupado abrir terminal en hetzner y matar proceso netstat -nap | grep 10443
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 3300:127.0.0.1:3300 sysadmin@135.181.80.57 "kubectl port-forward pod/grafana-7964997b9b-skqjw -n infra 3000:3000 --address 0.0.0.0"
 
 http://localhost:3300/
+
+
 
 #Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
 
@@ -163,49 +261,11 @@ Explore + Run query
 #change inside hetzner. ex: bootnode
 kubectl edit statefulset geth-bootnode -n blockchain
 ```
-```bash gitlab secrets
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=apis
-
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=infra
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=blockchain
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username= \
-  --docker-password= \
-  --docker-email= \
-  --namespace=frontend
 
 
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=apis
 
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=infra
+```bash problemas de connection refused en descargar imágenes (Ej: python:3.11-slim )
+docker pull mirror.gcr.io/library/python:3.11-slim
 
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=blockchain
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=frontend
+docker tag mirror.gcr.io/library/python:3.11-slim python:3.11-slim
 ```
-
-

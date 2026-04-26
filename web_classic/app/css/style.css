@@ -576,3 +576,13 @@ pre, .event-payload-pre {
     50% { transform: scale(1.15);}
     100% { transform: scale(1);}
 }
+
+/* Oculta todo el contenido por defecto */
+body {
+    display: none;
+}
+
+/* Solo se muestra cuando Keycloak confirma el login */
+body.authenticated {
+    display: block;
+}

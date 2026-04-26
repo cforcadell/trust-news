@@ -2,7 +2,7 @@
 **Skaffold**
 
 ```bash blockchain
-./skaffold dev -p setup 
+#./skaffold dev -p setup 
 ```
 
 ```bash blockchain
@@ -62,7 +62,7 @@ kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "eth.blockNumb
 
 >kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.addPeer("enode://af28ee328bbab1085d8f3e6eef110001a4075da8513871091bb25c7111f57e4261270b26791b5d71d6fd9707c1efd4ca17db2010b73fcd7ff1c7cd3a6877531c@10.244.2.13:30304")'4")'
 
->kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
 
 
 #restart blockchain keepong stateful and volumes
@@ -146,7 +146,7 @@ kubectl scale statefulset --all --replicas=1 -n infra
 
 kubectl get pods -n infra
 
-kubectl logs -n infra -f zookeeper-0
+
 kubectl logs -n infra -f kafka-0
 
 
@@ -155,20 +155,60 @@ kubectl get pvc -n infra
 kubectl delete pvc ipfs-storage-ipfs-0 -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
-kubectl delete pvc zk-storage-zookeeper-0 -n infra
 
-
-# En caso de problemas con los pvs por charsloops y diferentes ids de cluster
-#parar los pods del perfil 
-kubectl get pvc -n infra
-kubectl delete pvc kafka-data-kafka-0 -n infra
-#y rearrancar skkafold con el perfil infra
 
 ```
 
+```bash keycloak
+keycloak (sin ir por nginx):
+
+#si no lo abre skaffold
+kubectl port-forward svc/keycloak --address 0.0.0.0 -n infra 7443:8443
+
+curl -v -k https://localhost:7443/auth/admin/master/console
+
+https://localhost:7443/auth/admin/master/console/
+
+
+```
+
+Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
+
+Nombre: TrustNews.
+
+Crea el Cliente para la Web (Frontend):
+
+Clients -> Create client.
+
+ClientID: TrustNewsWeb.
+
+Root URL: https://localhost:7443 (o la URL de tu frontend).
+Valid redirect: https://localhost:7443/*
+
+Web Origins: * (para evitar problemas de CORS en desarrollo).
+
+Crea el Cliente para los Backends Públicos (Lo que pediste al inicio):
+
+Clients -> Create client.
+
+ClientID: TrustNewsApi.
+
+Client Authentication: Ponlo en ON.
+
+Authorization: Ponlo en OFF.
+
+Authentication Flow: Marca solo Service accounts roles (desmarca el resto). 
+
+Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
+
+En realm settings (TrustNews)
+Frontend URL: https://localhost:7443/auth/
+
+Craer usuario p federetad identity
+
 ```bash apis + frontend
 
-./skaffold dev -p apis-frontend
+./skaffold dev -p apis-frontend  --cache-artifacts=false --cleanup=false
 
 
 kubectl get pods -n apis
@@ -177,10 +217,47 @@ kubectl get pods -n frontend
 kubectl logs -n apis -f 
 
 Frontend:
-https://192.168.56.108:8443/
+#si no se levanta el port forward
+kubectl port-forward svc/frontend-service -n frontend 7443:443
+#verify nginx config
+kubectl exec -it -n frontend frontend-web-5769696f49-dljlk -- cat /etc/nginx/conf.d/default.conf
+#realm console
+https://localhost:7443/auth/admin/master/console/
+
+
+#https://192.168.56.108:7443/
+#con mapeo de host a vm
+https://localhost:7443/
 
 grafana:
 http://localhost:3000/
+
+https://localhost:7443/backend/docs
+
+
+keycloak realm master 
+https://localhost:7443/auth/admin/master/console/
+
+#get token 
+curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=TrustNewsApi" \
+  -d "client_secret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+| Service | URL |
+|--------|-----|
+| Frontend | http://127.0.0.1:8000 |
+| IPFS API | http://127.0.0.1:8060/docs |
+| News Handler | http://127.0.0.1:8072/docs |
+| Assertion Generator | http://127.0.0.1:8071/docs |
+| News Chain | http://127.0.0.1:8073/docs |
+| Validator Worker 1 | http://127.0.0.1:8070/docs |
+| Validator Worker 2 | http://127.0.0.1:8069/docs |
+
+---
+
+
 
 get svc -n infra
 

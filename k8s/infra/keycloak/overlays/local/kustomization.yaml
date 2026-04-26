@@ -1,0 +1,23 @@
+resources:
+  - ../../base/keycloak-config.yaml        
+  - ../../base/deployment-keycloak.yaml
+  - ../../base/service-keycloak.yaml
+  - ../../base/service-keycloak-db.yaml
+  - ../../base/statefulset-keycloak-db.yaml
+
+secretGenerator:
+  - name: keycloak-admin-secret
+    envs:
+      - secrets.env
+  - name: keycloak-db-secret
+    envs:
+      - secrets.env
+  - name: keycloak-tls-secret
+    files:
+      - tls.crt
+      - tls.key
+
+
+generatorOptions:
+  disableNameSuffixHash: true
+namespace: infra

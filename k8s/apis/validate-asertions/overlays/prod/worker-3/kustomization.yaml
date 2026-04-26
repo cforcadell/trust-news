@@ -13,6 +13,11 @@ configMapGenerator:
   namespace: apis
   files:
     - TrustNews.json=../../../../../../smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
+- name: validate-common-config
+  namespace: apis
+  behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
+  literals:
+    - CONTRACT_ADDRESS="0x9eA62eb7944349C407B307025644E47bF22F8bCc"
 # Leemos tu archivo .env local para generar el secreto
 # secretGenerator:
 #   - name: validator-secret

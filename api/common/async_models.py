@@ -7,6 +7,8 @@ from common.veredicto import Validacion
 # 🔹 COMMON MODELS
 # ============================================================
 
+
+
 class Multihash(BaseModel):
     """Represents a hash with its function and size (e.g., utilized for IPFS or SHA256 h./ashes)."""
     hash_function: str
@@ -72,6 +74,12 @@ class AsyncMessage(BaseModel):
 # ============================================================
 # 🔹 GENERATE ASSERTIONS
 # ============================================================
+
+class TextoEntrada(BaseModel):
+    text: str
+
+class PublishRequest(BaseModel):
+    text: str
 
 class GenerateAssertionsPayload(BaseModel):
     text: str

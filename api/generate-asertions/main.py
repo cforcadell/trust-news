@@ -1,5 +1,3 @@
-
-
 import os
 import json
 import asyncio
@@ -47,24 +45,20 @@ MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "")
 
-
-
 # Gemini config
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
-
 
 # OpenRouter config
 OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "")
 
-
 PROMPT = os.getenv(
     "PROMPT",
     "Pendiente de Configurar "
- )
+)
 
 # Timeouts / retries
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
@@ -159,7 +153,6 @@ async def call_mistral(text: str) -> List[Assertion]:
                 await asyncio.sleep(RETRY_DELAY)
     return []
 
-
 # ============================================================
 # Llamada asíncrona a Gemini (aiohttp)
 # ============================================================
@@ -184,7 +177,6 @@ async def call_gemini(text: str) -> List[Assertion]:
             "responseSchema": response_schema
         }
     }
-
 
     async with aiohttp.ClientSession() as session:
         for attempt in range(1, MAX_RETRIES + 1):
@@ -229,9 +221,6 @@ async def call_gemini(text: str) -> List[Assertion]:
                     raise HTTPException(status_code=503, detail=str(e))
                 await asyncio.sleep(RETRY_DELAY)
     return []
-
-
-
 
 # ============================================================
 # Llamada asíncrona a OpenRouter (aiohttp) 
@@ -343,9 +332,6 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
 
     return []
 
-
-
-
 # ============================================================
 # Dispatch a proveedor elegido
 # ============================================================
@@ -393,7 +379,6 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
     if not assertion_objs:
         logger.info(f"[{req.order_id}] No se extrajeron aserciones.")
         return
-
 
     # Construir respuesta tipada (AssertionsGeneratedResponse)
     try:
@@ -468,14 +453,12 @@ async def extraer_endpoint(body: TextoEntrada):
     logger.info(f"[{order_id}] Endpoint /extraer (provider={AI_PROVIDER})")
     
     try:
-
         assertion_objs = await extract_assertions_from_text(text)
     except HTTPException as he:
         raise he
     except Exception as e:
         logger.exception("Error generando aserciones")
         raise HTTPException(status_code=500, detail=str(e))
-
 
     try:
         payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, publisher=AI_PROVIDER)

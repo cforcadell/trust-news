@@ -1,23 +1,43 @@
 
-prod
-- grafana (specific version) OK
-- cambio en caliente de variables config
-Develop v0.0.8
-- loki persistente
-- Hardering frontend
-- restylish frontend
-- integracion con keycloak y google. Añadir a usuario como quien envia la validacion.
+next version Develop v0.0.8
+- Dockerfile optimizado y securizado OK 
+- Integracion con keycloak OK 
+- nuevo gateway con apis publicas e integrado con keycloak OK
+- nginx.conf solo usa gateway OK
+- kafka sin zookeeper. Solo kraft OK 
+
+- Validacion de Issuer. OK
+- Strict hostname y https. OK
+- mover toda la config volatil a .env. Crear .env examples al no poder subir el bueno (k8s) OK
+- Validar llamadas a nuevo-post, getorder a nivel de api con obtencio de token oaut. OK Incorporar a tests automaticos
+- Preparar despliegue en prod 
+
+
+Develop v0.0.9
+- keys y rate limit
+- usuarios con limite de consumo
+
+Develop v0.0.10.
+
 - gestión de reputaciones. 
     AI defecto reputacion media
     Especializaciones maxima
     individuales minima o custom
 - estado validated --> dejar en pending y solo cerrar si todas validadas o al cabo de x tiempo
-- endpoints de consulta y de cambio de config de AI validators OK
-- Nuevo proveedor grok
-- endpoint (con validacion de token) que puedan ser llamados del exterior para validacion de noticias e2e y consulta
-- gitlab mirroring.
 
+Develop v0.0.10.
+- Afinar prompts 
+- afinar determinismo
+- cambio de modelo en generate assertions
 
+Develop v0.0.11.
+- integracion con llm dedicado de categoria concreta
+
+Develop v0.0.12.
+- loki persistente
+- Hardering frontend
+- restylish frontend
+- login keycloak personalizado
 
 
 

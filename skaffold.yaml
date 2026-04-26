@@ -38,9 +38,14 @@ profiles:
   # PERFIL: INFRA
   # ---------------------------------------------------------
   - name: infra
+    build:
+      artifacts:
+          - image: keycloak
+            context: keycloak
+            docker: {dockerfile: Dockerfile}
     manifests:
       rawYaml:
-        - k8s/infra/zookeeper/*.yaml
+        #- k8s/infra/zookeeper/*.yaml
         - k8s/infra/kafka/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
@@ -49,6 +54,8 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/local
+          - k8s/infra/keycloak/overlays/local
+
     portForward:
       - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
 
@@ -78,21 +85,28 @@ profiles:
           context: api
           docker: {dockerfile: ipfs/Dockerfile}
           sync: {infer: ["**/*.py"]}
+        - image: gateway
+          context: api
+          docker: {dockerfile: gateway/Dockerfile}
+          sync: {infer: ["**/*.py"]}          
         - image: web-classic
           context: web_classic
           docker: {dockerfile: Dockerfile}
+
     manifests:
       rawYaml:
         - k8s/apis/ipfs-fastapi/*.yaml
       kustomize:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
+
           - k8s/apis/generate-asertions/overlays/local
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
           - k8s/apis/validate-asertions/overlays/local/worker-3
           - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain/overlays/local
+          - k8s/apis/gateway/overlays/local
           - k8s/frontend
     portForward:
       - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
@@ -102,7 +116,8 @@ profiles:
       - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
       - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
       - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
-      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 8443, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: gateway, namespace: apis, port: 8500, localPort: 8500}
+      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 7443, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN PROD
@@ -118,9 +133,14 @@ profiles:
   # PERFIL: INFRA PROD
   # ---------------------------------------------------------
   - name: infra-prod
+    build:
+      artifacts:
+          - image: keycloak
+            context: keycloak
+            docker: {dockerfile: Dockerfile}
     manifests:
       rawYaml:
-        - k8s/infra/zookeeper/*.yaml
+        #- k8s/infra/zookeeper/*.yaml
         - k8s/infra/kafka/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
@@ -129,6 +149,7 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/prod 
+          - k8s/infra/keycloak/overlays/prod
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND PROD
@@ -156,9 +177,14 @@ profiles:
           context: api
           docker: {dockerfile: ipfs/Dockerfile}
           sync: {infer: ["**/*.py"]}
+        - image: gateway
+          context: api
+          docker: {dockerfile: gateway/Dockerfile}
+          sync: {infer: ["**/*.py"]} 
         - image: web-classic
           context: web_classic
           docker: {dockerfile: Dockerfile}
+
     manifests:
       rawYaml:
         - k8s/apis/ipfs-fastapi/*.yaml
@@ -171,4 +197,5 @@ profiles:
           - k8s/apis/validate-asertions/overlays/prod/worker-3
           - k8s/apis/news-handler/overlays/prod
           - k8s/apis/news-chain/overlays/prod
+          - k8s/apis/gateway/overlays/prod
           - k8s/frontend

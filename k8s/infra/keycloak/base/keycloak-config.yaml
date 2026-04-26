@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-env-config
+  namespace: infra
+data:
+  KC_DB_URL: "jdbc:postgresql://keycloak-db:5432/keycloak"
+  KC_HOSTNAME_URL: "https://localhost:7443/auth"
+  KC_HOSTNAME_ADMIN_URL: "https://localhost:7443/auth"
+  KC_HOSTNAME_STRICT_HTTPS: "true"
+  KC_HOSTNAME_STRICT: "true"
+  KC_PROXY_HEADERS: "xforwarded"
+  KC_DB_VENDOR: "postgres" 

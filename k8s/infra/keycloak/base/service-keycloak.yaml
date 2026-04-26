@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: infra
+spec:
+  ports:
+    - name: http
+      port: 8080        # El puerto que usarán Nginx y el Gateway internamente
+      targetPort: 8080  # El puerto que abrimos en el pod con --http-enabled=true
+      protocol: TCP
+  selector:
+    app: keycloak

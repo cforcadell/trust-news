@@ -26,21 +26,16 @@ spec:
               done
       containers:
       - name: generate-asertions
-        #image: tfm-generate-asertions:latest
         image: generate-asertions
-        imagePullPolicy: IfNotPresent  # Importante para usar la imagen local
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8071
         envFrom:
         - configMapRef:
             name: generate-asertions-config
+        - secretRef:               
+            name: api-keys         
         env:
-        - name: OPENROUTER_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: api-keys
-              key: OPENROUTER_API_KEY
-        # URLs apuntando a los servicios internos de K8s
         - name: IPFS_API_ADD
           value: "http://ipfs-fastapi.apis.svc.cluster.local:8060/api/v0/add"
         - name: IPFS_API_CAT

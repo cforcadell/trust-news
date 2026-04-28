@@ -19,6 +19,7 @@ kubectl create secret generic news-handler-secrets --from-env-file=news-handler.
 
 kubectl create secret generic gate-config --from-env-file=gateway.env -n apis
 
+kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n apis
 
 kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
 
@@ -192,6 +193,9 @@ kubectl delete pvc mongodb-storage-mongodb-0 -n infra
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
 
 https://localhost:9443/
+
+https://localhost:9443/backend/docs
+
 ```
 
 kubectl get pods -n infra
@@ -205,6 +209,7 @@ kubectl scale statefulset --all --replicas=1 -n infra blockchain
 **keycloak**
 ```bash 
 https://localhost:9443/auth/admin/master/console/
+
 
 
 Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
@@ -241,6 +246,12 @@ Frontend URL: https://localhost:9443/auth/ ¿?¿?¿?¿?
 
 Craer usuario p federetad identity
 
+#get token
+curl -k -X POST https://localhost:9443/auth/realms/TrustNews/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=TrustNewsApi" \
+  -d "client_secret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 
 ```

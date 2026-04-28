@@ -78,8 +78,12 @@ class AsyncMessage(BaseModel):
 class TextoEntrada(BaseModel):
     text: str
 
+class Cliente(BaseModel):
+    client_id: str
+
 class PublishRequest(BaseModel):
     text: str
+    cliente: Cliente
 
 class GenerateAssertionsPayload(BaseModel):
     text: str
@@ -102,6 +106,20 @@ class AssertionsGeneratedResponse(BaseModel):
     order_id: str
     payload: AssertionGeneratedPayload
 
+
+# ============================================================
+# 🔹 ASERCIONES YA GENERADAS
+# ============================================================   
+    
+class PreGeneratedAssertion(BaseModel):
+    idAssertion: str
+    text: str
+    categoryId: int
+
+class PublishWithAssertionsRequest(BaseModel):
+    text: str
+    cliente: Cliente
+    assertions: List[PreGeneratedAssertion]
 
 # ============================================================
 # 🔹 UPLOAD IPFS
@@ -232,15 +250,3 @@ class ExtractedTextResponse(BaseModel):
     url: str
     title: str
     text: str
-# ============================================================
-# 🔹 ASERCIONES YA GENERADAS
-# ============================================================   
-    
-class PreGeneratedAssertion(BaseModel):
-    idAssertion: str
-    text: str
-    categoryId: int
-
-class PublishWithAssertionsRequest(BaseModel):
-    text: str
-    assertions: List[PreGeneratedAssertion]

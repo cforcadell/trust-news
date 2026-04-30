@@ -27,3 +27,4 @@ data:
   # --- URLs Internas ---
   IPFS_FASTAPI_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"
   NEWS_CHAIN_URL: "http://news-chain.apis.svc.cluster.local:8073"
+  ADMIN_URL: "http://admin.apis.svc.cluster.local:8400"

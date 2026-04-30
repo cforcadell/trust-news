@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from jose import jwt
 from common.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -111,7 +112,7 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
 
 
 # ============================================================
-# Helper Proxy Asíncrono
+# Helpers
 # ============================================================
 async def proxy_request(request: Request, target_url: str):
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
@@ -137,6 +138,19 @@ async def proxy_request(request: Request, target_url: str):
             logger.error(f"Error conectando con {target_url}: {e}")
             raise HTTPException(status_code=502, detail="Error de comunicación interna")
 
+
+# Función auxiliar para extraer el client_id con la fórmula solicitada
+def get_computed_client_id(token: str) -> str:
+    unverified_claims = jwt.get_unverified_claims(token)
+    sub = unverified_claims.get("sub", "unknown_sub")
+    token_client_id = unverified_claims.get("client_id")
+    
+    if token_client_id:
+        return f"{token_client_id}_{sub}"
+    else:
+        return f"user_{sub}"
+    
+    
 # ============================================================
 # Router Principal
 # ============================================================
@@ -149,12 +163,28 @@ async def proxy_extraer(request: Request, body: TextoEntrada):
     return await proxy_request(request, f"{GENERATE_ASSERTIONS_URL}/extraer")
 
 @router.post("/orders/publishNew", tags=["Orders"])
-async def proxy_publish_new(request: Request, body: PublishRequest):
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/publishNew")
+async def proxy_publish_new(
+    request: Request, 
+    auth: HTTPAuthorizationCredentials = Depends(get_current_user) # O Depends(security) según tu setup
+):
+    # Calcular client_id desde el token
+    client_id = get_computed_client_id(auth.credentials)
+    
+    # Inyectar el client_id como query param al microservicio
+    target_url = f"{NEWS_HANDLER_URL}/publishNew?client_id={client_id}"
+    
+    return await proxy_request(request, target_url)
 
 @router.post("/orders/publishWithAssertions", tags=["Orders"])
-async def proxy_publish_with_assertions(request: Request, body: PublishWithAssertionsRequest):
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/publishWithAssertions")
+async def proxy_publish_with_assertions(
+    request: Request, 
+    auth: HTTPAuthorizationCredentials = Depends(get_current_user)
+):
+    client_id = get_computed_client_id(auth.credentials)
+    
+    target_url = f"{NEWS_HANDLER_URL}/publishWithAssertions?client_id={client_id}"
+    
+    return await proxy_request(request, target_url)
 
 # Los GET se mantienen igual ya que no llevan body
 @router.get("/orders/list", tags=["Orders"])

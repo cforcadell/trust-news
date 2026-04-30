@@ -239,15 +239,12 @@ keycloak realm master
 https://localhost:7443/auth/admin/master/console/
 
 #get token 
-curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials" \
-  -d "client_id=TrustNewsApi" \
-  -d "client_secret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxx"
 
 | Service | URL |
 |--------|-----|
 | Frontend | http://127.0.0.1:8000 |
+| Admin | http://127.0.0.1:8400 |
 | IPFS API | http://127.0.0.1:8060/docs |
 | News Handler | http://127.0.0.1:8072/docs |
 | Assertion Generator | http://127.0.0.1:8071/docs |

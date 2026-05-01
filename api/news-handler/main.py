@@ -42,7 +42,8 @@ from common.async_models import (
     ExtractedTextResponse,
     ExtractTextRequest,
     PreGeneratedAssertion,
-    PublishWithAssertionsRequest
+    PublishWithAssertionsRequest,
+    PublishRequest
 )
 
 # =========================================================
@@ -91,9 +92,6 @@ db = None
 orders_collection = None
 order_locks = {}
 
-# ---------- Models ----------
-class PublishRequest(BaseModel):
-    text: str
 
 class EventModel(BaseModel):
     action: str
@@ -1072,7 +1070,7 @@ def _check_validation_details_consistency(order_data: Dict[str, Any], post_data:
 # FastAPI endpoints
 # =========================================================
 @app.post("/publishNew", status_code=202)
-async def publish_new(req: PublishRequest):
+async def publish_new(req: PublishRequest, client_id: str):
     # 1. Comprobación de cuota "news_generation"
     quotas = await fetch_client_quotas(client_id)
     consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
@@ -1100,7 +1098,7 @@ async def publish_new(req: PublishRequest):
         msg = GenerateAssertionsRequest(
             action="generate_assertions",
             order_id=order_id,
-            payload={"text": text}
+            payload={"text": req.text}
         )
         await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
@@ -1113,7 +1111,7 @@ async def publish_new(req: PublishRequest):
     return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
 
 @app.post("/publishWithAssertions", status_code=202)
-async def publish_with_assertions(req: PublishWithAssertionsRequest):
+async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
     # 1. Comprobación de cuota "blockchain_validation"
     quotas = await fetch_client_quotas(client_id)
     consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)

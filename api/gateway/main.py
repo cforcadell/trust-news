@@ -140,10 +140,9 @@ async def proxy_request(request: Request, target_url: str):
 
 
 # Función auxiliar para extraer el client_id con la fórmula solicitada
-def get_computed_client_id(token: str) -> str:
-    unverified_claims = jwt.get_unverified_claims(token)
-    sub = unverified_claims.get("sub", "unknown_sub")
-    token_client_id = unverified_claims.get("client_id")
+def get_computed_client_id(payload: dict) -> str:
+    sub = payload.get("sub", "unknown_sub")
+    token_client_id = payload.get("client_id")
     
     if token_client_id:
         return f"{token_client_id}_{sub}"
@@ -165,10 +164,10 @@ async def proxy_extraer(request: Request, body: TextoEntrada):
 @router.post("/orders/publishNew", tags=["Orders"])
 async def proxy_publish_new(
     request: Request, 
-    auth: HTTPAuthorizationCredentials = Depends(get_current_user) # O Depends(security) según tu setup
+    auth_payload: dict = Depends(get_current_user)
 ):
-    # Calcular client_id desde el token
-    client_id = get_computed_client_id(auth.credentials)
+    # Pasamos directamente el dict a nuestra función
+    client_id = get_computed_client_id(auth_payload)
     
     # Inyectar el client_id como query param al microservicio
     target_url = f"{NEWS_HANDLER_URL}/publishNew?client_id={client_id}"
@@ -178,9 +177,9 @@ async def proxy_publish_new(
 @router.post("/orders/publishWithAssertions", tags=["Orders"])
 async def proxy_publish_with_assertions(
     request: Request, 
-    auth: HTTPAuthorizationCredentials = Depends(get_current_user)
+    auth_payload: dict = Depends(get_current_user)
 ):
-    client_id = get_computed_client_id(auth.credentials)
+    client_id = get_computed_client_id(auth_payload)
     
     target_url = f"{NEWS_HANDLER_URL}/publishWithAssertions?client_id={client_id}"
     

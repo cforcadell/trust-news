@@ -78,12 +78,11 @@ class AsyncMessage(BaseModel):
 class TextoEntrada(BaseModel):
     text: str
 
-class Cliente(BaseModel):
-    client_id: str
+
 
 class PublishRequest(BaseModel):
     text: str
-    cliente: Cliente
+
 
 class GenerateAssertionsPayload(BaseModel):
     text: str
@@ -118,7 +117,6 @@ class PreGeneratedAssertion(BaseModel):
 
 class PublishWithAssertionsRequest(BaseModel):
     text: str
-    cliente: Cliente
     assertions: List[PreGeneratedAssertion]
 
 # ============================================================

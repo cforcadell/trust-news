@@ -3,7 +3,7 @@ import requests
 import pytest
 
 # Dirección base del contenedor (por defecto apunta al puerto 8071)
-API_GENERATION_URL = os.getenv("API_GENERATION_URL", "http://localhost:8071")
+API_GENERATION_URL = os.getenv("API_GENERATION_URL", "http://127.0.0.1:8071")
 
 
 @pytest.mark.integration

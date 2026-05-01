@@ -3,7 +3,7 @@ import pytest
 import requests
 import json
 
-NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://localhost:8074")
+NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://localhost:8073")
 
 @pytest.mark.integration
 def test_publish_new_basic():

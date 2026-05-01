@@ -3,7 +3,7 @@ import os
 import pytest
 
 # URL base del servicio (ajusta el host:puerto según tu docker-compose)
-BASE_URL = os.getenv("VALIDATOR_API_URL", "http://localhost:8069")
+BASE_URL = os.getenv("VALIDATOR_API_URL", "http://localhost:8070")
 
 @pytest.mark.integration
 def test_verificar_asercion():

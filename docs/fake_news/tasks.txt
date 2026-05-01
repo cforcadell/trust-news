@@ -1,5 +1,5 @@
 
-next version Develop v0.0.8
+next version Develop v0.0.8 OK
 - Dockerfile optimizado y securizado OK 
 - Integracion con keycloak OK 
 - nuevo gateway con apis publicas e integrado con keycloak OK
@@ -14,12 +14,18 @@ next version Develop v0.0.8
 
 
 Develop v0.0.9
-- keys y rate limit
-- usuarios con limite de consumo
+- keys & rate limit control OK
+- usuarios con limite de consumo con generate asertions y validations OK
+- new admin module to control new users OK
+- updated python tests OK 
+- autofilter client_id in gateway for all orders endpoints 
+- check autofilter for FE. Restrict order visibility
 
 Develop v0.0.10.
-
-- gestión de reputaciones. 
+- Añadimos tipo de validador: especializados, AI, user
+- servicio de consulta de validadores en news-hadler y consulta de reputaciones. Consulta de nombre, tipo y reputacion
+- Servicio de consulta de categorias y validadores asociados.
+- gestión de reputaciones fuera de la cadena. 
     AI defecto reputacion media
     Especializaciones maxima
     individuales minima o custom
@@ -28,7 +34,7 @@ Develop v0.0.10.
 Develop v0.0.10.
 - Afinar prompts 
 - afinar determinismo
-- cambio de modelo en generate assertions
+- cambio de modelo en generate assertions ¿?
 
 Develop v0.0.11.
 - integracion con llm dedicado de categoria concreta

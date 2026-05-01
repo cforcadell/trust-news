@@ -4,6 +4,8 @@ import uuid
 import logging
 import asyncio
 import base58
+import time
+
 from typing import List, Tuple, Optional, Dict, Any
 from hexbytes import HexBytes
 
@@ -19,7 +21,6 @@ from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multih
 from common.veredicto import Veredicto, Validacion
 from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash
 from pydantic import BaseModel
-
 
 
 # =========================================================

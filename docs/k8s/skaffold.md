@@ -206,6 +206,20 @@ Frontend URL: https://localhost:7443/auth/
 
 Craer usuario p federetad identity
 
+```bash quota & users admin
+
+FE Users
+Create new keycloak user
+Use admin/Clients to define user quota and create inside mondogb: user_<keycloak_user_id>
+http://127.0.0.1:8400/docs
+
+FE Users
+Create new keycloak client 
+Use admin/Clients to define user quota and create inside mondogb: <client-name>_<keycloak_client_hash_id> (see logs or admin console?)
+http://127.0.0.1:8400/docs
+
+```
+
 ```bash apis + frontend
 
 ./skaffold dev -p apis-frontend  --cache-artifacts=false --cleanup=false

@@ -103,7 +103,7 @@ def test_1_publish_new(api_session, computed_client_id):
         "text": "Catalunya tiene una población de más de 7 millones de habitantes de los que 2 millones de niños en edad escolar."
     }
 
-    # Se envía el client_id en el query string para evitar el error 422 anterior
+    # Se envía el client_id en el query string
     r = api_session.post(
         f"{NEWS_HANDLER_URL}/publishNew", 
         json=payload, 
@@ -117,7 +117,8 @@ def test_1_publish_new(api_session, computed_client_id):
     shared_data["order_id"] = data["order_id"]
     logger.info(f"✅ Noticia publicada. Order ID: {shared_data['order_id']}")
 
-def test_2_get_order_status(api_session):
+# MODIFICACIÓN AQUÍ: Se añade el fixture computed_client_id
+def test_2_get_order_status(api_session, computed_client_id):
     """
     PASO 3: Verifica que la orden alcance el estado VALIDATED.
     """
@@ -132,7 +133,14 @@ def test_2_get_order_status(api_session):
     logger.info(f"--- INICIO: test_2_get_order_status para ID {order_id} ---")
 
     while True:
-        r = api_session.get(f"{NEWS_HANDLER_URL}/orders/{order_id}")
+        # MODIFICACIÓN AQUÍ: Se añaden los params obligatorios
+        r = api_session.get(
+            f"{NEWS_HANDLER_URL}/orders/{order_id}",
+            params={
+                "client_id": computed_client_id,
+                "admin": "false" # Testeamos como usuario normal para asegurar que la seguridad es correcta
+            }
+        )
         
         if r.status_code == 200:
             data = r.json()

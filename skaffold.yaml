@@ -210,3 +210,7 @@ profiles:
           - k8s/apis/gateway/overlays/prod
           - k8s/apis/admin/overlays/prod
           - k8s/frontend
+    portForward:
+
+      - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 10443, address: "0.0.0.0"}

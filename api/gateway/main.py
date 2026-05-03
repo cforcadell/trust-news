@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from jose import jwt
 from common.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -111,7 +112,7 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
 
 
 # ============================================================
-# Helper Proxy Asíncrono
+# Helpers
 # ============================================================
 async def proxy_request(request: Request, target_url: str):
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
@@ -137,29 +138,88 @@ async def proxy_request(request: Request, target_url: str):
             logger.error(f"Error conectando con {target_url}: {e}")
             raise HTTPException(status_code=502, detail="Error de comunicación interna")
 
+
+# Función auxiliar para extraer el client_id con la fórmula solicitada
+def get_computed_client_id(payload: dict) -> str:
+    sub = payload.get("sub", "unknown_sub")
+    token_client_id = payload.get("client_id")
+    
+    if token_client_id:
+        return f"{token_client_id}_{sub}"
+    else:
+        return f"user_{sub}"
+    
+def is_admin_user(payload: dict) -> bool:
+    """Extrae los roles del token JWT y comprueba si tiene el rol trust-admin."""
+    realm_access = payload.get("realm_access", {})
+    roles = realm_access.get("roles", [])
+    return "trust-admin" in roles
+
 # ============================================================
 # Router Principal
 # ============================================================
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-# Añadimos los modelos (body: Modelo) para que Swagger exija el JSON correcto
+@router.get("/auth/is-admin", tags=["Auth"])
+async def check_admin_status(auth_payload: dict = Depends(get_current_user)):
+    """Devuelve si el usuario actual tiene el rol de administrador."""
+    return {"is_admin": is_admin_user(auth_payload)}
 
 @router.post("/assertions/generate", tags=["Assertions"])
 async def proxy_extraer(request: Request, body: TextoEntrada):
     return await proxy_request(request, f"{GENERATE_ASSERTIONS_URL}/extraer")
 
 @router.post("/orders/publishNew", tags=["Orders"])
-async def proxy_publish_new(request: Request, body: PublishRequest):
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/publishNew")
+async def proxy_publish_new(
+    request: Request, 
+    auth_payload: dict = Depends(get_current_user)
+):
+    # Pasamos directamente el dict a nuestra función
+    client_id = get_computed_client_id(auth_payload)
+    
+    # Inyectar el client_id como query param al microservicio
+    target_url = f"{NEWS_HANDLER_URL}/publishNew?client_id={client_id}"
+    
+    return await proxy_request(request, target_url)
 
 @router.post("/orders/publishWithAssertions", tags=["Orders"])
-async def proxy_publish_with_assertions(request: Request, body: PublishWithAssertionsRequest):
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/publishWithAssertions")
+async def proxy_publish_with_assertions(
+    request: Request, 
+    auth_payload: dict = Depends(get_current_user)
+):
+    client_id = get_computed_client_id(auth_payload)
+    
+    target_url = f"{NEWS_HANDLER_URL}/publishWithAssertions?client_id={client_id}"
+    
+    return await proxy_request(request, target_url)
 
-# Los GET se mantienen igual ya que no llevan body
+from fastapi import Query
+
+# ============================================================
+# Nuevo endpoint para comprobar si el token es admin
+# ============================================================
+@router.get("/auth/is-admin", tags=["Auth"])
+async def check_admin_status(auth_payload: dict = Depends(get_current_user)):
+    """Devuelve si el usuario actual tiene el rol de administrador."""
+    return {"is_admin": is_admin_user(auth_payload)}
+
+# ============================================================
+# Endpoint modificado para aceptar view_all
+# ============================================================
 @router.get("/orders/list", tags=["Orders"])
-async def proxy_get_news(request: Request):
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/news")
+async def proxy_get_news(
+    request: Request, 
+    view_all: bool = Query(False), 
+    auth_payload: dict = Depends(get_current_user)
+):
+    client_id = get_computed_client_id(auth_payload)
+    
+    # Para ver todas las órdenes, el usuario debe ser admin Y haber marcado el check
+    is_admin = is_admin_user(auth_payload)
+    effective_admin = str(is_admin and view_all).lower()
+    
+    target_url = f"{NEWS_HANDLER_URL}/news?client_id={client_id}&admin={effective_admin}"
+    return await proxy_request(request, target_url)
 
 @router.get("/ipfs/{cid}", tags=["IPFS"])
 async def proxy_get_ipfs(cid: str, request: Request):
@@ -187,24 +247,36 @@ async def proxy_get_blockchain_post(post_id: int, request: Request):
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/blockchain/post/{post_id}")
 
 @router.get("/orders/{order_id}", tags=["Orders"])
-async def proxy_get_order(order_id: str, request: Request):
-    """Enruta la petición de consulta de una orden al news-handler"""
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/orders/{order_id}")
+async def proxy_get_order(order_id: str, request: Request, auth_payload: dict = Depends(get_current_user)):
+    client_id = get_computed_client_id(auth_payload)
+    admin = str(is_admin_user(auth_payload)).lower()
+    
+    target_url = f"{NEWS_HANDLER_URL}/orders/{order_id}?client_id={client_id}&admin={admin}"
+    return await proxy_request(request, target_url)
 
 @router.get("/orders/checkOrderConsistency/{order_id}", tags=["Orders"])
-async def proxy_check_order_consistency(order_id: str, request: Request):
+async def proxy_check_order_consistency(
+    order_id: str, 
+    request: Request, 
+    auth_payload: dict = Depends(get_current_user)
+):
     """
     Enruta la petición para comprobar la consistencia de una orden (Order -> IPFS -> Blockchain).
     """
+    client_id = get_computed_client_id(auth_payload)
+    admin = str(is_admin_user(auth_payload)).lower()
+    
     # Si la función vive en news-chain, cambia NEWS_HANDLER_URL por NEWS_CHAIN_URL
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/checkOrderConsistency/{order_id}")
+    target_url = f"{NEWS_HANDLER_URL}/checkOrderConsistency/{order_id}?client_id={client_id}&admin={admin}"
+    return await proxy_request(request, target_url)
 
 @router.get("/orders/{order_id}/events", tags=["Orders"])
-async def proxy_get_news_events(order_id: str, request: Request):
-    """
-    Recupera el histórico de eventos de una orden específica (Pipeline events).
-    """
-    return await proxy_request(request, f"{NEWS_HANDLER_URL}/news/{order_id}/events")
+async def proxy_get_news_events(order_id: str, request: Request, auth_payload: dict = Depends(get_current_user)):
+    client_id = get_computed_client_id(auth_payload)
+    admin = str(is_admin_user(auth_payload)).lower()
+    
+    target_url = f"{NEWS_HANDLER_URL}/news/{order_id}/events?client_id={client_id}&admin={admin}"
+    return await proxy_request(request, target_url)
 
 app.include_router(router)
 

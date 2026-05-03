@@ -464,10 +464,22 @@ async function findPrevious() {
 // =========================================================
 // OPERACIONES DE ORDERS
 // =========================================================
+// =========================================================
+// OPERACIONES DE ORDERS
+// =========================================================
 async function listOrders() {
     alertMessage("Listando todas las órdenes...", 'info');
+    
+    // 1. Leemos si el check de admin está marcado (si no existe o no está marcado, valdrá false)
+    const chkViewAll = document.getElementById('chk-viewAll');
+    const viewAll = chkViewAll ? chkViewAll.checked : false;
+
+    // 2. Construimos la URL con el parámetro view_all
+    const url = `${API}/orders/list?view_all=${viewAll}`;
+
     try {
-        const res = await fetchWithAuth(`${API}/orders/list`);
+        // 3. Usamos tu helper fetchWithAuth en lugar de fetch directamente
+        const res = await fetchWithAuth(url);
         if (!res.ok) throw new Error("Error al obtener la lista de órdenes.");
         
         const data = await res.json();
@@ -476,8 +488,6 @@ async function listOrders() {
         const detailsContainer = document.getElementById("listFixedDetailsContainer");
         const tabContent = document.getElementById("listTabContent");
         tabs.innerHTML = detailsContainer.innerHTML = tabContent.innerHTML = "";
-        
-
         
         renderTableData(tabContent, data);
         alertMessage(`Órdenes cargadas: ${data.length}`, 'primary');
@@ -880,7 +890,6 @@ function renderValidationsTree(container, validations, assertions) {
 
 
 function renderTableData(container, data) {
-
     // =====================================================
     // Si no hay datos
     // =====================================================
@@ -905,7 +914,15 @@ function renderTableData(container, data) {
     // =====================================================
     // Generación de tabla
     // =====================================================
-    const keys = Object.keys(data[0]);
+    
+    // MEJORA: En lugar de coger solo las keys del primer elemento, 
+    // recopilamos todas las keys de todos los elementos para que no falte 'client_id'
+    const keysSet = new Set();
+    data.forEach(row => Object.keys(row).forEach(k => keysSet.add(k)));
+    
+    // Opcional: Si quieres forzar que order_id y client_id salgan siempre primero,
+    // puedes ordenarlo aquí. Si no, simplemente lo convertimos a array:
+    const keys = Array.from(keysSet);
 
     let html = `<table class="compact-table">
         <thead>
@@ -915,7 +932,8 @@ function renderTableData(container, data) {
 
     html += pageData.map(row => {
         return `<tr>${keys.map(k => {
-            let val = row[k];
+            // Si la fila no tiene esta propiedad, mostramos 'N/A'
+            let val = row[k] !== undefined ? row[k] : 'N/A';
 
             // Resumir tipos complejos
             switch(k) {
@@ -936,10 +954,10 @@ function renderTableData(container, data) {
             }
 
             // links especiales
-            if (k === "order_id") {
-                return `<td><a href="#" onclick="event.preventDefault(); navigateToOrderDetails('${row[k]}')">${row[k]}</a></td>`;
+            if (k === "order_id" && val !== 'N/A') {
+                return `<td><a href="#" onclick="event.preventDefault(); navigateToOrderDetails('${val}')">${val}</a></td>`;
             }
-            if (k === "tx_hash") {
+            if (k === "tx_hash" && val !== 'N/A') {
                 return `<td><a href="#" onclick="event.preventDefault(); navigateToTx('${val}')">${shortHex(val)}</a></td>`;
             }
 
@@ -1715,6 +1733,28 @@ async function importarNoticia() {
         alert('Error al importar la noticia. Revisa la consola.');
     }
 }
+
+let IS_ADMIN = false;
+
+async function checkAdminStatus() {
+    try {
+        const response = await fetch(`${API}/auth/is-admin`, {
+            headers: { 'Authorization': `Bearer ${keycloak.token}` }
+        });
+        if (response.ok) {
+            const data = await response.json();
+            IS_ADMIN = data.is_admin;
+            
+            // Si es admin, mostramos el checkbox en la vista de órdenes
+            if (IS_ADMIN) {
+                document.getElementById('admin-view-container').style.display = 'flex';
+            }
+        }
+    } catch (error) {
+        console.error("Error comprobando el rol de administrador:", error);
+    }
+}
+
 // =========================================================
 // INICIALIZACIÓN CON PROTECCIÓN
 // =========================================================
@@ -1725,7 +1765,8 @@ document.addEventListener('DOMContentLoaded', () => {
         checkLoginIframe: false   // Recomendado para evitar problemas de cookies en localhost
     }).then(authenticated => {
         if (authenticated) {
-            console.log("Autenticado con éxito");
+            console.log("Autenticado con éxito.");
+            checkAdminStatus();
             // Una vez autenticado, cargamos los listeners y la vista
             document.body.classList.add('authenticated');
             initializeApp();

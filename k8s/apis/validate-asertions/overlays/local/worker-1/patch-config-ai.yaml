@@ -13,6 +13,6 @@ spec:
         - name: AI_PROVIDER
           value: "openrouter"
         - name: MODEL
-          value: "arcee-ai/trinity-large-preview:free"
+          value: "google/gemma-4-31b-it:free"
         - name: API_URL
           value: "https://openrouter.ai/api/v1/chat/completions"

@@ -71,8 +71,15 @@
 
         <section id="orders" class="card">
             <h2>Historial de Órdenes</h2>
-            <div id="ordersTopBar" style="margin-bottom: 15px;">
+            <div id="ordersTopBar" style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px;">
                 <button id="btn-listOrders" class="btn-secondary">Refrescar Listado</button>
+                
+                <div id="admin-view-container" style="display: none; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="chk-viewAll" style="cursor: pointer;">
+                    <label for="chk-viewAll" style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">
+                        Ver órdenes de todos los clientes (Admin)
+                    </label>
+                </div>
             </div>
             <div id="listFixedDetailsContainer"></div> 
             <div id="listOrderTabs" class="tabs"></div>

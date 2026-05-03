@@ -19,6 +19,7 @@ kubectl create secret generic news-handler-secrets --from-env-file=news-handler.
 
 kubectl create secret generic gate-config --from-env-file=gateway.env -n apis
 
+kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n apis
 
 kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
 
@@ -188,10 +189,19 @@ kubectl delete pvc mongodb-storage-mongodb-0 -n infra
 
 
 
-```bash tunnel vmlinux home-> apis ~/blockchain/hetzner/keys-github
-ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
+```bash tunnel vmlinux home-> apis c
+#ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
+#in hetzner (scripts/port-forward.sh)
+kubectl port-forward service/frontend-service -n frontend 10443:443
+
+#~/blockchain/hetzner/keys-github (dev)
+ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57
+
 
 https://localhost:9443/
+
+https://localhost:9443/backend/docs
+
 ```
 
 kubectl get pods -n infra
@@ -205,6 +215,7 @@ kubectl scale statefulset --all --replicas=1 -n infra blockchain
 **keycloak**
 ```bash 
 https://localhost:9443/auth/admin/master/console/
+
 
 
 Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
@@ -241,6 +252,11 @@ Frontend URL: https://localhost:9443/auth/ ¿?¿?¿?¿?
 
 Craer usuario p federetad identity
 
+#get token
+curl -k -X POST https://localhost:9443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+
+
 
 
 ```
@@ -268,4 +284,53 @@ kubectl edit statefulset geth-bootnode -n blockchain
 docker pull mirror.gcr.io/library/python:3.11-slim
 
 docker tag mirror.gcr.io/library/python:3.11-slim python:3.11-slim
+```
+
+**admin & quotas**
+```bash admin
+kubectl port-forward service/admin-service -n apis 7400:8400
+
+#~/blockchain/hetzner/keys-github (dev)
+ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 0.0.0.0:7400:127.0.0.1:7400 sysadmin@135.181.80.57
+
+http://127.0.0.1:7400/docs 
+
+
+Ex: craeate user 
+http://localhost:7400/clients
+  {
+    "name": "cforcadellm",
+    "limits": {
+      "news_generation": 99999999,
+      "blockchain_validation": 99999999
+    },
+    "consumed": {
+      "news_generation": 0,
+      "blockchain_validation": 0
+    },
+    "status": "Active",
+    "active_date": "2026-05-01T09:59:08.903000",
+    "deactivate_date": null,
+    "client_id": "user_e96fcb10-25a3-4773-88e0-86452cf3d309"
+  }
+
+
+Ex: craeate API KEY (get sub from existing token)
+http://localhost:7400/clients
+
+  {
+    "name": "Test Quota Client",
+    "limits": {
+      "news_generation": 2,
+      "blockchain_validation": 2
+    },
+    "consumed": {
+      "news_generation": 2,
+      "blockchain_validation": 2
+    },
+    "status": "Active",
+    "active_date": "2026-04-30T18:22:40.269000",
+    "deactivate_date": null,
+    "client_id": "TrustNewsApi_<id_API>"
+  }
 ```

@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-deployment
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin
+  template:
+    metadata:
+      labels:
+        app: admin
+    spec:
+      containers:
+      - name: admin
+        #image: tfm-generate-asertions:latest
+        image: admin
+        imagePullPolicy: IfNotPresent  # Importante para usar la imagen local
+        ports:
+        - containerPort: 8071
+        envFrom:
+        - configMapRef:
+            name: admin-config
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: news-handler-secrets
+              key: MONGO_URI

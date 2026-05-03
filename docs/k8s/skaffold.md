@@ -206,9 +206,41 @@ Frontend URL: https://localhost:7443/auth/
 
 Craer usuario p federetad identity
 
+```bash quota & users admin
+
+FE Users
+Create new keycloak user
+Use admin/Clients to define user quota and create inside mondogb: user_<keycloak_user_id>
+  {
+    "name": "xxxxxxxxxxxxxxxxxx",
+    "limits": {
+      "news_generation": 99999999,
+      "blockchain_validation": 99999999
+    },
+    "consumed": {
+      "news_generation": 0,
+      "blockchain_validation": 0
+    },
+    "status": "Active",
+    "active_date": "2026-05-01T09:59:08.903000",
+    "deactivate_date": null,
+    "client_id": "user_6b84b9c5-b0a0-4da9-9494-52fb9c9517d7"
+  }
+
+http://127.0.0.1:8400/docs
+
+API Users
+Create new keycloak client 
+Use admin/Clients to define user quota and create inside mondogb: <client-name>_<keycloak_client_hash_id> (see logs or admin console?)
+http://127.0.0.1:8400/docs
+
+for admin users create realm role (trust-admin) ans assign 
+
+```
+
 ```bash apis + frontend
 
-./skaffold dev -p apis-frontend  --cache-artifacts=false --cleanup=false
+./skaffold dev -p apis-frontend  --cache-artifacts=true --cleanup=false
 
 
 kubectl get pods -n apis
@@ -239,15 +271,12 @@ keycloak realm master
 https://localhost:7443/auth/admin/master/console/
 
 #get token 
-curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials" \
-  -d "client_id=TrustNewsApi" \
-  -d "client_secret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxx"
 
 | Service | URL |
 |--------|-----|
 | Frontend | http://127.0.0.1:8000 |
+| Admin | http://127.0.0.1:8400 |
 | IPFS API | http://127.0.0.1:8060/docs |
 | News Handler | http://127.0.0.1:8072/docs |
 | Assertion Generator | http://127.0.0.1:8071/docs |

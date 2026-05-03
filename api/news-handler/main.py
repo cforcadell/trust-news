@@ -42,7 +42,8 @@ from common.async_models import (
     ExtractedTextResponse,
     ExtractTextRequest,
     PreGeneratedAssertion,
-    PublishWithAssertionsRequest
+    PublishWithAssertionsRequest,
+    PublishRequest
 )
 
 # =========================================================
@@ -74,7 +75,7 @@ MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "orders")
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 
-
+ADMIN_URL = os.getenv("ADMIN_URL", "http://admin:8000")
 
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
 NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain:8073")
@@ -91,9 +92,6 @@ db = None
 orders_collection = None
 order_locks = {}
 
-# ---------- Models ----------
-class PublishRequest(BaseModel):
-    text: str
 
 class EventModel(BaseModel):
     action: str
@@ -200,6 +198,17 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
     }
     await validations_col.insert_one(val_doc)
     logger.info(f"[{order_id}] 🟢 Validación registrada en MongoDB (Assertion={id_assertion}, Validator={id_validator}).")
+
+# =========================================================
+# Función auxiliar para consultar cuotas
+# =========================================================
+async def fetch_client_quotas(client_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{ADMIN_URL}/clients/{client_id}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=403, detail="Client quotas not found")
+        resp.raise_for_status()
+        return resp.json()
 
 # ===========================
 # manejo blockchain
@@ -316,19 +325,38 @@ async def process_kafka_message(data: dict):
         # 1️⃣ assertions_generated
         # ================================================================
         if action == "assertions_generated":
-            # parsed es AssertionsGeneratedResponse
             doc = await get_order_doc(order_id)
             if not doc:
-                logger.warning(f"[{order_id}] ⚠️ Documento no encontrado en DB.")
                 return
 
             assertions = parsed.payload.assertions or []
-            if not assertions:
-                logger.warning(f"[{order_id}] ⚠️ Payload vacío de aserciones.")
-                return
-
-            # Convert assertions (Pydantic Assertion -> dict)
             assertions_list = [a.model_dump() if isinstance(a, Assertion) else a for a in assertions]
+            num_assertions = len(assertions_list)
+            
+            # 🟢 Control de cuotas de seguridad final (antes de enviar al workflow pesado de IPFS/Blockchain)
+            client_id = doc.get("client_id")
+            if client_id:
+                try:
+                    quotas = await fetch_client_quotas(client_id)
+                    cons_news = quotas.get("consumed", {}).get("news_generation", 0)
+                    lim_news = quotas.get("limits", {}).get("news_generation", 0)
+                    
+                    cons_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
+                    lim_val = quotas.get("limits", {}).get("blockchain_validation", 0)
+
+                    # Reglas: "news_generation" excedida o "blockchain_validation" excedida con lo que viene
+                    if (cons_news > lim_news) or ((cons_val + num_assertions) > lim_val):
+                        logger.warning(f"[{order_id}] ⛔ QUOTA_EXCEDED. News: {cons_news}/{lim_news} | Vals: {cons_val}+{num_assertions}/{lim_val}")
+                        
+                        # Cortamos ejecución: guardamos status, las aserciones generadas, pero NO vamos a IPFS.
+                        await update_order(order_id, {
+                            "status": "QUOTA_EXCEDED",
+                            "assertions": assertions_list
+                        })
+                        return # Finalizamos aquí.
+                except Exception as e:
+                    logger.error(f"[{order_id}] ❌ Error validando cuotas desde el worker: {e}")
+                    return
 
             # Crear documento tipado (usamos DocModel/MetadataModel para validar si quieres)
             try:
@@ -1042,24 +1070,25 @@ def _check_validation_details_consistency(order_data: Dict[str, Any], post_data:
 # FastAPI endpoints
 # =========================================================
 @app.post("/publishNew", status_code=202)
-async def publish_new(req: PublishRequest):
-    text = req.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Empty text")
+async def publish_new(req: PublishRequest, client_id: str):
+    # 1. Comprobación de cuota "news_generation"
+    quotas = await fetch_client_quotas(client_id)
+    consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
+    limits_news = quotas.get("limits", {}).get("news_generation", 0)
+    
+    if consumed_news >= limits_news:
+        raise HTTPException(
+            status_code=429, 
+            detail=f"Quota generate assertions exceded. Limit: {limits_news}, Consumed: {consumed_news}"
+        )
 
+    # 2. Continúa con tu lógica habitual de crear la orden...
     order_id = str(uuid.uuid4())
     order_doc = {
         "order_id": order_id,
-        "status": "PENDING",
-        "text": text,
-        "cid": None,
-        "postId": None,
-        "hash_text": None,
-        "tx_hash": None,
-        "validators_pending": None,
-        "assertions": None,
-        "document": None,
-        "validators": None
+        "text": req.text,
+        "client_id": client_id, # 🔑 Guardar el client_id para luego
+        "status": "CREATED"
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
@@ -1069,7 +1098,7 @@ async def publish_new(req: PublishRequest):
         msg = GenerateAssertionsRequest(
             action="generate_assertions",
             order_id=order_id,
-            payload={"text": text}
+            payload={"text": req.text}
         )
         await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
@@ -1081,20 +1110,77 @@ async def publish_new(req: PublishRequest):
     await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"})
     return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
 
+@app.post("/publishWithAssertions", status_code=202)
+async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
+    # 1. Comprobación de cuota "blockchain_validation"
+    quotas = await fetch_client_quotas(client_id)
+    consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
+    limits_val = quotas.get("limits", {}).get("blockchain_validation", 0)
+    
+    # Opcional: También podemos verificar si (consumed_val + len(req.assertions)) supera el límite
+    if consumed_val >= limits_val:
+         raise HTTPException(
+            status_code=429, 
+            detail=f"Quota validations exceded. Limit: {limits_val}, Consumed: {consumed_val}"
+        )
+
+    order_id = str(uuid.uuid4())
+    order_doc = {
+        "order_id": order_id,
+        "text": req.text,
+        "assertions": [a.dict() for a in req.assertions],
+        "client_id": client_id, # 🔑
+        "status": "ASSERTIONS_REQUESTED"
+    }
+    await save_order_doc(order_doc)
+    logger.info(f"[{order_id}] Order saved in MongoDB with pre-generated assertions")
+
+    # Convertir a Assertion
+    from common.async_models import Assertion
+    assertions_for_payload = [
+        Assertion(idAssertion=a.idAssertion, text=a.text, categoryId=a.categoryId)
+        for a in req.assertions
+    ]
+
+    # Publicar mensaje
+    try:
+        msg = AssertionsGeneratedResponse(
+            action="assertions_generated",
+            order_id=order_id,
+            payload={
+                "text": text,
+                "publisher": "news-handler",
+                "assertions": assertions_for_payload
+            }
+        )
+        await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
+        logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
+        #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
+    except ValidationError as e:
+        logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
+        raise HTTPException(status_code=500, detail="Internal validation error")
+
+    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
+
 @app.get("/orders/{order_id}")
-async def get_order(order_id: str):
+async def get_order(
+    order_id: str, 
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
     order = await orders_collection.find_one({"order_id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    # Extraer el tiempo de creación del ObjectId y formatearlo
+    # Validación: Si no es admin, el client_id de la orden debe coincidir con el consultado
+    if not admin and order.get("client_id") != client_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this order")
+
     try:
         order_object_id = order["_id"]
         created_datetime = order_object_id.generation_time
-        # Formato MM/DD/YYY HH:mm:ss
         order["created"] = created_datetime.strftime("%d/%m/%Y %H:%M:%S")
     except Exception as e:
-        # Manejo de error si _id no es un ObjectId válido (aunque no debería pasar)
         print(f"Error processing ObjectId: {e}")
         order["created"] = "Format Error"
 
@@ -1102,9 +1188,17 @@ async def get_order(order_id: str):
     return order
 
 @app.get("/news/{order_id}/events", response_model=List[EventModel])
-async def get_news_events(order_id: str):
-    # Ya no necesitamos buscar la noticia para su created_at
-    
+async def get_news_events(
+    order_id: str, 
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    # Validar primero la propiedad de la orden si no es administrador
+    if not admin:
+        order = await orders_collection.find_one({"order_id": order_id})
+        if not order or order.get("client_id") != client_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access events for this order")
+
     cursor = db.events.find({"order_id": order_id}, {"_id": 0})
     events = await cursor.to_list(length=100)
 
@@ -1112,17 +1206,11 @@ async def get_news_events(order_id: str):
         raise HTTPException(status_code=404, detail="No hay eventos para esta noticia")
 
     for e in events:
-        ms_timestamp = e.get("timestamp") # Marca de tiempo UNIX absoluta en MS
+        ms_timestamp = e.get("timestamp")
         
         if isinstance(ms_timestamp, (int, float)):
-
-            # 1. Convertir milisegundos a segundos (dividir por 1000)
             unix_seconds = ms_timestamp / 1000.0 
-            
-            # 2. Crear objeto datetime
             event_datetime = datetime.fromtimestamp(unix_seconds)
-            
-            # 3. Formatear a MM/DD/YYY HH:mm:ss
             e["timestamp"] = event_datetime.strftime("%m/%d/%Y %H:%M:%S")
         elif not isinstance(ms_timestamp, str):
             e["timestamp"] = str(ms_timestamp)
@@ -1130,8 +1218,15 @@ async def get_news_events(order_id: str):
     return events
 
 @app.get("/news")
-async def list_news():
-    cursor = db.news.find({}, {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1})
+async def list_news(
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    # Si es admin no filtramos por client_id, si no lo es, añadimos el filtro a la query
+    query = {} if admin else {"client_id": client_id}
+    
+
+    cursor = db.news.find(query, {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1, "client_id": 1})
     news_list = await cursor.to_list(length=1000)
 
     if not news_list:
@@ -1236,8 +1331,20 @@ def extract_text_from_url(request: ExtractTextRequest):
         logger.error(f"Error inesperado al procesar {url}: {e}")
         raise HTTPException(status_code=500, detail="Error interno del servidor.")
 
-@app.get("/checkOrderConsistency/{order_id}", response_model=List[ConsistencyCheckResult])
-async def check_order_consistency(order_id: str):
+@app.get("/checkOrderConsistency/{order_id}")
+async def check_order_consistency(
+    order_id: str,
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    # 1. Recuperar la orden para validación
+    order = await orders_collection.find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # 2. Validar propiedad de la orden si no es admin
+    if not admin and order.get("client_id") != client_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this order")
     """
     Orquesta las pruebas de consistencia Order -> IPFS -> Blockchain.
     """
@@ -1280,60 +1387,7 @@ async def check_order_consistency(order_id: str):
     return all_results
 
 
-@app.post("/publishWithAssertions", status_code=202)
-async def publish_with_assertions(req: PublishWithAssertionsRequest):
-    text = req.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Empty text")
 
-    if not req.assertions or len(req.assertions) == 0:
-        raise HTTPException(status_code=400, detail="No assertions provided")
-
-    order_id = str(uuid.uuid4())
-    order_doc = {
-        "order_id": order_id,
-        "status": "ASSERTIONS_REQUESTED",
-        "text": text,
-        "cid": None,
-        "postId": None,
-        "hash_text": None,
-        "tx_hash": None,
-        "validators_pending": None,
-        "assertions": [a.model_dump() for a in req.assertions],
-        "document": None,
-        "validators": None
-    }
-
-    # Guardar en MongoDB
-    await save_order_doc(order_doc)
-    logger.info(f"[{order_id}] Order saved in MongoDB with pre-generated assertions")
-
-    # Convertir a Assertion
-    from common.async_models import Assertion
-    assertions_for_payload = [
-        Assertion(idAssertion=a.idAssertion, text=a.text, categoryId=a.categoryId)
-        for a in req.assertions
-    ]
-
-    # Publicar mensaje
-    try:
-        msg = AssertionsGeneratedResponse(
-            action="assertions_generated",
-            order_id=order_id,
-            payload={
-                "text": text,
-                "publisher": "news-handler",
-                "assertions": assertions_for_payload
-            }
-        )
-        await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
-        logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
-        #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
-    except ValidationError as e:
-        logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
-        raise HTTPException(status_code=500, detail="Internal validation error")
-
-    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
 
 
 # =========================================================

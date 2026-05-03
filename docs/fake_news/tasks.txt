@@ -1,5 +1,5 @@
 
-next version Develop v0.0.8
+next version Develop v0.0.8 OK
 - Dockerfile optimizado y securizado OK 
 - Integracion con keycloak OK 
 - nuevo gateway con apis publicas e integrado con keycloak OK
@@ -13,22 +13,65 @@ next version Develop v0.0.8
 - Preparar despliegue en prod 
 
 
-Develop v0.0.9
-- keys y rate limit
-- usuarios con limite de consumo
+Develop v0.0.9 Rate Limit 
+- keys & rate limit control OK
+- usuarios con limite de consumo con generate asertions y validations OK
+- new admin module to control new users OK
+- updated python tests OK 
+- autofilter client_id in gateway for all orders endpoints 
+- check autofilter for FE. Restrict order visibility
 
-Develop v0.0.10.
 
-- gestión de reputaciones. 
-    AI defecto reputacion media
-    Especializaciones maxima
-    individuales minima o custom
+Develop v0.0.10. Validators Config and Reputation
+- validators config in chain
+    - Blockchain: new ipfs-config in contract.
+        - update registrattion config to write ipfs-config-hash -> event new_validator_config.
+        - new update registration function to write ipfs-config-hash  -> event new_validator_config
+        - json { name: str,
+                 type: enum (1: "General_AI,", 2: "Trained_IA",3:"Dedicated_Agent",4:"Human") 
+                 , provider: str,
+                 , model: str,
+                 , active_date: date
+                 , updated_date: date,
+                 , end_date:date
+                 , status: enum(1:"Registered",2:"Unregistered",3:"Banned")
+                 }
+        - new validators function: returns validators with its ipfs_hashes
+    - validate-assertions:
+        - call update-config smart contract function startup if ipfs-hash config differts from registered in blockchain even the valiator is already registered. Fon non registered validators add hash-ipfs config logig in register.
+        - call update-config smart contract function on configuration change (@app.put("/admin/config", tags=["Admin"]))
+        - call update-config smart contract function on desregistration endpoint call. Write end_date
+    - news_chain:
+        -  recovers validators functions as new endpoints 
+        - listen new_validator_config anf convert to kafka event reading ipfs data.     
+    - news_handler: Validators cache    
+        - On startup asks news validators function (news-chain) and cache validators
+        - listen event new_validator_config and update cache.
+        - on getting new validation assertion record into mongodb validator config (it can change) related to the validation event. 
+        - new list validators cache endpoint.
+        - new get validator cache endpoint .
+    - Gateway:
+        - route new list validators cache endpoint.
+        - route new get validator cache endpoint .
+
+    - FE: 
+        - Let click on validator to see his config
+        - new validators menu to get them with detailed view on click.
+    - Pydantic models:
+        - Adapt models
+    
+- Reputation policy
+    - consulta de reputaciones. Consulta de nombre, tipo y reputacion
+    - gestión de reputaciones fuera de la cadena. 
+        AI defecto reputacion media
+        Especializaciones maxima
+        individuales minima o custom
 - estado validated --> dejar en pending y solo cerrar si todas validadas o al cabo de x tiempo
 
 Develop v0.0.10.
 - Afinar prompts 
 - afinar determinismo
-- cambio de modelo en generate assertions
+- cambio de modelo en generate assertions ¿?
 
 Develop v0.0.11.
 - integracion con llm dedicado de categoria concreta

@@ -1163,19 +1163,24 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
     return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
 
 @app.get("/orders/{order_id}")
-async def get_order(order_id: str):
+async def get_order(
+    order_id: str, 
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
     order = await orders_collection.find_one({"order_id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    # Extraer el tiempo de creación del ObjectId y formatearlo
+    # Validación: Si no es admin, el client_id de la orden debe coincidir con el consultado
+    if not admin and order.get("client_id") != client_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this order")
+
     try:
         order_object_id = order["_id"]
         created_datetime = order_object_id.generation_time
-        # Formato MM/DD/YYY HH:mm:ss
         order["created"] = created_datetime.strftime("%d/%m/%Y %H:%M:%S")
     except Exception as e:
-        # Manejo de error si _id no es un ObjectId válido (aunque no debería pasar)
         print(f"Error processing ObjectId: {e}")
         order["created"] = "Format Error"
 
@@ -1183,9 +1188,17 @@ async def get_order(order_id: str):
     return order
 
 @app.get("/news/{order_id}/events", response_model=List[EventModel])
-async def get_news_events(order_id: str):
-    # Ya no necesitamos buscar la noticia para su created_at
-    
+async def get_news_events(
+    order_id: str, 
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    # Validar primero la propiedad de la orden si no es administrador
+    if not admin:
+        order = await orders_collection.find_one({"order_id": order_id})
+        if not order or order.get("client_id") != client_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access events for this order")
+
     cursor = db.events.find({"order_id": order_id}, {"_id": 0})
     events = await cursor.to_list(length=100)
 
@@ -1193,17 +1206,11 @@ async def get_news_events(order_id: str):
         raise HTTPException(status_code=404, detail="No hay eventos para esta noticia")
 
     for e in events:
-        ms_timestamp = e.get("timestamp") # Marca de tiempo UNIX absoluta en MS
+        ms_timestamp = e.get("timestamp")
         
         if isinstance(ms_timestamp, (int, float)):
-
-            # 1. Convertir milisegundos a segundos (dividir por 1000)
             unix_seconds = ms_timestamp / 1000.0 
-            
-            # 2. Crear objeto datetime
             event_datetime = datetime.fromtimestamp(unix_seconds)
-            
-            # 3. Formatear a MM/DD/YYY HH:mm:ss
             e["timestamp"] = event_datetime.strftime("%m/%d/%Y %H:%M:%S")
         elif not isinstance(ms_timestamp, str):
             e["timestamp"] = str(ms_timestamp)
@@ -1211,8 +1218,15 @@ async def get_news_events(order_id: str):
     return events
 
 @app.get("/news")
-async def list_news():
-    cursor = db.news.find({}, {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1})
+async def list_news(
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    # Si es admin no filtramos por client_id, si no lo es, añadimos el filtro a la query
+    query = {} if admin else {"client_id": client_id}
+    
+
+    cursor = db.news.find(query, {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1, "client_id": 1})
     news_list = await cursor.to_list(length=1000)
 
     if not news_list:
@@ -1317,8 +1331,20 @@ def extract_text_from_url(request: ExtractTextRequest):
         logger.error(f"Error inesperado al procesar {url}: {e}")
         raise HTTPException(status_code=500, detail="Error interno del servidor.")
 
-@app.get("/checkOrderConsistency/{order_id}", response_model=List[ConsistencyCheckResult])
-async def check_order_consistency(order_id: str):
+@app.get("/checkOrderConsistency/{order_id}")
+async def check_order_consistency(
+    order_id: str,
+    client_id: str = Query(..., description="ID del cliente"), 
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    # 1. Recuperar la orden para validación
+    order = await orders_collection.find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # 2. Validar propiedad de la orden si no es admin
+    if not admin and order.get("client_id") != client_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this order")
     """
     Orquesta las pruebas de consistencia Order -> IPFS -> Blockchain.
     """

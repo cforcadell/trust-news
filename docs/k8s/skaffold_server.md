@@ -288,6 +288,7 @@ docker tag mirror.gcr.io/library/python:3.11-slim python:3.11-slim
 
 **admin & quotas**
 ```bash admin
+#in hetzner (scripts/port-forward.sh)
 kubectl port-forward service/admin-service -n apis 7400:8400
 
 #~/blockchain/hetzner/keys-github (dev)

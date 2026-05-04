@@ -223,13 +223,20 @@ async function generateAssertionsFromText(text) {
             body: JSON.stringify({ text })
         });
 
+        // 🟢 NUEVO: Detectar si el usuario se ha quedado sin cuota (Status 429)
+        if (response.status === 429) {
+            alertMessage("⛔ Límite alcanzado: No te quedan cuotas para generar aserciones.", "error", 5000);
+            return []; // Devolvemos un array vacío para no romper la tabla de la interfaz
+        }
+
+        // Si es otro tipo de error (500, 404, etc.)
         if (!response.ok) throw new Error(`Error API: ${response.status}`);
 
         const data = await response.json();
         return data.payload.assertions || [];
     } catch (err) {
         console.error("Error al generar aserciones:", err);
-        alertMessage("Error al generar aserciones", "error");
+        alertMessage("Error al conectar con el servicio de aserciones", "error");
         return [];
     }
 }

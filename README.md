@@ -68,6 +68,21 @@ TrustNews explores a different approach:
 
 ---
 
+## 🔒 Security 
+
+
+<img src="./docs/img/security.png" width="70%"/>
+
+**Key points**:
+
+* IAM: OIDC Auth for Frontend and OAuth 2.0 (Client Credentials) via Nginx for B2B Partners.
+* Gateway: Token validation and internal ID generation by merging sub and client_id claims.
+* Proxy: Secure request forwarding to the Orchestrator with identity injection via Query Parameters.
+* Quotas: Real-time balance verification via Admin API with proactive blocking (429 Error).
+* Events: Post-processing consumption increment and event dispatching to the Kafka architecture.
+
+---
+
 ## 🧩 Main Components
 
 | Component             | Responsibility                 |

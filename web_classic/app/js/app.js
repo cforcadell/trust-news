@@ -42,24 +42,45 @@ const keycloak = new Keycloak({
 // =========================================================
 function alertMessage(message, type = 'info', duration = 3000) {
     const bar = document.getElementById('statusBar');
+    if (!bar) return;
 
-    // Resetear clases y aplicar el mensaje
-    bar.className = 'status-toast';
-    bar.textContent = message;
-    
-    // Aplicar tipo (color)
-    if(type === 'error') bar.style.backgroundColor = '#ef4444';
-    else if(type === 'primary' || type === 'success') bar.style.backgroundColor = '#10b981';
-    else bar.style.backgroundColor = '#3b82f6';
-    bar.style.color = '#fff';
-    
-    // Forzar reflow para reiniciar la animación y mostrar
-    void bar.offsetWidth; 
+    const normalizedType = type === 'primary' ? 'success' : type;
+    bar.className = `status-toast ${normalizedType}`;
+    bar.textContent = typeof message === 'string' ? message : JSON.stringify(message);
+
+    window.clearTimeout(bar._hideTimer);
+    void bar.offsetWidth;
     bar.classList.add('show');
 
-    setTimeout(() => {
+    bar._hideTimer = window.setTimeout(() => {
         bar.classList.remove('show');
     }, duration);
+}
+
+function setButtonLoading(buttonOrId, isLoading, loadingText = 'Procesando...') {
+    const button = typeof buttonOrId === 'string' ? document.getElementById(buttonOrId) : buttonOrId;
+    if (!button) return;
+
+    if (isLoading) {
+        button.dataset.originalText = button.textContent;
+        button.textContent = loadingText;
+        button.classList.add('is-loading');
+        button.disabled = true;
+    } else {
+        button.textContent = button.dataset.originalText || button.textContent;
+        button.classList.remove('is-loading');
+        button.disabled = false;
+        delete button.dataset.originalText;
+    }
+}
+
+async function withButtonLoading(buttonOrId, task, loadingText = 'Procesando...') {
+    setButtonLoading(buttonOrId, true, loadingText);
+    try {
+        return await task();
+    } finally {
+        setButtonLoading(buttonOrId, false);
+    }
 }
 
 
@@ -94,7 +115,7 @@ async function fetchWithAuth(url, options = {}) {
 }
 
 function escapeHTML(str) {
-    return str.replace(/[&<>"']/g, function(match) {
+    return String(str ?? '').replace(/[&<>"']/g, function(match) {
         return ({
             '&': '&amp;',
             '<': '&lt;',
@@ -1711,11 +1732,12 @@ async function importarNoticia() {
     const newsText = document.getElementById('newsText');
 
     if (!url) {
-        alert('Introduce una URL para importar');
+        alertMessage('Introduce una URL para importar', 'warning');
         return;
     }
 
     try {
+        setButtonLoading('btn-importarNew', true, 'Importando...');
         // Llamada POST al endpoint
         
         const response = await fetchWithAuth(`${API}/extract_text_from_url`, {
@@ -1734,10 +1756,13 @@ async function importarNoticia() {
 
         // Coloca el texto recibido en el textarea
         newsText.value = data.text || '';
+        alertMessage('Noticia importada correctamente', 'success');
 
     } catch (err) {
         console.error(err);
-        alert('Error al importar la noticia. Revisa la consola.');
+        alertMessage('Error al importar la noticia. Revisa la consola.', 'error');
+    } finally {
+        setButtonLoading('btn-importarNew', false);
     }
 }
 
@@ -1745,8 +1770,8 @@ let IS_ADMIN = false;
 
 async function checkAdminStatus() {
     try {
-        const response = await fetch(`${API}/auth/is-admin`, {
-            headers: { 'Authorization': `Bearer ${keycloak.token}` }
+        const response = await fetchWithAuth(`${API}/auth/is-admin`, {
+            headers: { 'Accept': 'application/json' }
         });
         if (response.ok) {
             const data = await response.json();
@@ -1787,6 +1812,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Extraemos la lógica original a una función aparte
 function initializeApp() {
+    if (window.__trustNewsInitialized) return;
+    window.__trustNewsInitialized = true;
     // 1. Mostrar quién está logueado (Opcional pero recomendado)
     console.log("User:", keycloak.tokenParsed.preferred_username);
 
@@ -1802,7 +1829,7 @@ function initializeApp() {
     
     // 3. News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
-    document.getElementById('btn-publishNew').addEventListener('click', publishNew);
+    document.getElementById('btn-publishNew').addEventListener('click', () => withButtonLoading('btn-publishNew', publishNew, 'Publicando...'));
 
     document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
         const text = document.getElementById("newsText").value.trim();
@@ -1810,21 +1837,24 @@ function initializeApp() {
             alertMessage("Debes escribir o cargar una noticia", "warning");
             return;
         }
-        alertMessage("Generando aserciones...", "info");
-        const assertions = await generateAssertionsFromText(text);
-        const container = document.getElementById("news-assertions-container");
-        renderEditableAssertionsTable(container, assertions);
-        alertMessage("Aserciones generadas", "success");
+
+        await withButtonLoading("btn-generateAssertions", async () => {
+            alertMessage("Generando aserciones...", "info");
+            const assertions = await generateAssertionsFromText(text);
+            const container = document.getElementById("news-assertions-container");
+            renderEditableAssertionsTable(container, assertions);
+            alertMessage(assertions.length ? "Aserciones generadas" : "No se han generado aserciones", assertions.length ? "success" : "warning");
+        }, "Generando...");
     });
 
     // 4. El resto de tus Listeners (Orders, TX, IPFS...)
-    document.getElementById('btn-findOrder').addEventListener('click', findOrder);
-    document.getElementById('btn-listOrders').addEventListener('click', listOrders);
-    document.getElementById("btn-findTx").addEventListener("click", findTx);
-    document.getElementById("btn-findBlock").addEventListener("click", findBlock);
-    document.getElementById("btn-findPost").addEventListener("click", findPostById);
-    document.getElementById("btn-checkConsistency").addEventListener("click", checkOrderConsistency);
-    document.getElementById("btn-findIpfs").addEventListener("click", findIpfs);
+    document.getElementById('btn-findOrder').addEventListener('click', () => withButtonLoading('btn-findOrder', findOrder, 'Buscando...'));
+    document.getElementById('btn-listOrders').addEventListener('click', () => withButtonLoading('btn-listOrders', listOrders, 'Cargando...'));
+    document.getElementById("btn-findTx").addEventListener("click", () => withButtonLoading("btn-findTx", findTx, "Buscando..."));
+    document.getElementById("btn-findBlock").addEventListener("click", () => withButtonLoading("btn-findBlock", findBlock, "Buscando..."));
+    document.getElementById("btn-findPost").addEventListener("click", () => withButtonLoading("btn-findPost", findPostById, "Buscando..."));
+    document.getElementById("btn-checkConsistency").addEventListener("click", () => withButtonLoading("btn-checkConsistency", checkOrderConsistency, "Comprobando..."));
+    document.getElementById("btn-findIpfs").addEventListener("click", () => withButtonLoading("btn-findIpfs", findIpfs, "Buscando..."));
 
     // 5. Initial view
     showSection('news');

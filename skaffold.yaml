@@ -121,7 +121,7 @@ profiles:
       - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
       - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
       - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
-      - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400}
+      - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
       - {resourceType: service, resourceName: gateway, namespace: apis, port: 8500, localPort: 8500}
       - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 7443, address: "0.0.0.0"}
 

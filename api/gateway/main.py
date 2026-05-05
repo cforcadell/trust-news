@@ -165,9 +165,22 @@ async def check_admin_status(auth_payload: dict = Depends(get_current_user)):
     """Devuelve si el usuario actual tiene el rol de administrador."""
     return {"is_admin": is_admin_user(auth_payload)}
 
+
+
 @router.post("/assertions/generate", tags=["Assertions"])
-async def proxy_extraer(request: Request, body: TextoEntrada):
-    return await proxy_request(request, f"{GENERATE_ASSERTIONS_URL}/extraer")
+async def proxy_extraer(
+    request: Request,
+    body: TextoEntrada,
+    auth_payload: dict = Depends(get_current_user)
+):
+    # 1. Obtener datos del JWT
+    client_id = get_computed_client_id(auth_payload)
+
+    # 2. Construir URL correcta
+    target_url = f"{GENERATE_ASSERTIONS_URL}/extraer?client_id={client_id}"
+
+    # 3. Proxy
+    return await proxy_request(request, target_url)
 
 @router.post("/orders/publishNew", tags=["Orders"])
 async def proxy_publish_new(

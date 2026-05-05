@@ -4,11 +4,12 @@ import asyncio
 import logging
 import re
 import uuid
+import httpx
 from typing import List, Optional
 
 import aiohttp
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import ValidationError, BaseModel
 from dotenv import load_dotenv
 
@@ -54,6 +55,8 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
 OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "")
+
+ADMIN_URL = os.getenv("ADMIN_URL", "http://admin:8000")
 
 PROMPT = os.getenv(
     "PROMPT",
@@ -438,16 +441,58 @@ async def consume_and_process():
         logger.info("Kafka consumer y producer detenidos")
 
 # ============================================================
+# Quotas cons 
+# ============================================================
+
+
+async def fetch_client_quotas(client_id: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{ADMIN_URL}/clients/{client_id}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=403, detail="Client quotas not found")
+        resp.raise_for_status()
+        return resp.json()
+
+async def update_client_consumed(client_id: str, field: str, new_value: int):
+    async with httpx.AsyncClient() as client:
+        payload = {
+            "consumed": {
+                field: new_value
+            }
+        }
+        # Hacemos PATCH para actualizar solo ese campo en concreto
+        resp = await client.patch(f"{ADMIN_URL}/clients/{client_id}", json=payload)
+        resp.raise_for_status()
+
+# ============================================================
 # Endpoint HTTP 
 # ============================================================
 class TextoEntrada(BaseModel):
     text: str
 
 @app.post("/extraer")
-async def extraer_endpoint(body: TextoEntrada):
-    """
-    Endpoint para test rápido: devuelve AssertionsGeneratedResponse sin pasar por Kafka.
-    """
+async def extraer_texto(
+    body: TextoEntrada,
+    client_id: str = Query(..., description="ID del cliente para cuotas") 
+):
+    # ================================================================
+    # 1️⃣ Control de Cuotas PRE-Extracción
+    # ================================================================
+    try:
+        quotas = await fetch_client_quotas(client_id)
+        cons_news = quotas.get("consumed", {}).get("news_generation", 0)
+        lim_news = quotas.get("limits", {}).get("news_generation", 0)
+
+        if cons_news >= lim_news:
+            logger.warning(f"⛔ QUOTA_EXCEDED para {client_id} en /extraer. ({cons_news}/{lim_news})")
+            raise HTTPException(status_code=429, detail="Quota news_generation exceded")
+            
+    except HTTPException as he:
+        raise he # Re-lanzar error 429
+    except Exception as e:
+        logger.error(f"❌ Error validando cuotas en /extraer: {e}")
+        raise HTTPException(status_code=500, detail="Error interno verificando cuotas.")
+    
     text = body.text
     order_id = str(uuid.uuid4())
     logger.info(f"[{order_id}] Endpoint /extraer (provider={AI_PROVIDER})")
@@ -459,6 +504,13 @@ async def extraer_endpoint(body: TextoEntrada):
     except Exception as e:
         logger.exception("Error generando aserciones")
         raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        await update_client_consumed(client_id, "news_generation", cons_news + 1)
+        logger.info(f"💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id} (Endpoint: /extraer)")
+    except Exception as e:
+        logger.error(f"❌ Error incrementando cuota en /extraer para {client_id}: {e}")
+        # No bloqueamos el return aunque falle la actualización, para no perjudicar al usuario si la BBDD de cuotas falla puntualmente.
 
     try:
         payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, publisher=AI_PROVIDER)

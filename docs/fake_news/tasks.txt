@@ -9,20 +9,21 @@ next version Develop v0.0.8 OK
 - Validacion de Issuer. OK
 - Strict hostname y https. OK
 - mover toda la config volatil a .env. Crear .env examples al no poder subir el bueno (k8s) OK
-- Validar llamadas a nuevo-post, getorder a nivel de api con obtencio de token oaut. OK Incorporar a tests automaticos
-- Preparar despliegue en prod 
+- Validar llamadas a nuevo-post, getorder a nivel de api con obtencio de token oaut. OK Incorporar a tests automaticos OK
+- Preparar despliegue en prod OK
 
 
-Develop v0.0.9 Rate Limit 
+Develop v0.0.9 Rate Limit RELEASED
 - keys & rate limit control OK
 - usuarios con limite de consumo con generate asertions y validations OK
 - new admin module to control new users OK
 - updated python tests OK 
-- autofilter client_id in gateway for all orders endpoints 
-- check autofilter for FE. Restrict order visibility
+- autofilter client_id in gateway for all orders endpoints OK
+- check autofilter for FE. Restrict order visibility OK
 
 
 Develop v0.0.10. Validators Config and Reputation
+- Really decrement quotas on usage. news handler on getting events and generating assertions
 - validators config in chain
     - Blockchain: new ipfs-config in contract.
         - update registrattion config to write ipfs-config-hash -> event new_validator_config.

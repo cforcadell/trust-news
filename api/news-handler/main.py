@@ -209,6 +209,18 @@ async def fetch_client_quotas(client_id: str) -> dict:
             raise HTTPException(status_code=403, detail="Client quotas not found")
         resp.raise_for_status()
         return resp.json()
+    
+    
+async def update_client_consumed(client_id: str, field: str, new_value: int):
+    async with httpx.AsyncClient() as client:
+        payload = {
+            "consumed": {
+                field: new_value
+            }
+        }
+        # Hacemos PATCH para actualizar solo ese campo en concreto
+        resp = await client.patch(f"{ADMIN_URL}/clients/{client_id}", json=payload)
+        resp.raise_for_status()
 
 # ===========================
 # manejo blockchain
@@ -354,6 +366,9 @@ async def process_kafka_message(data: dict):
                             "assertions": assertions_list
                         })
                         return # Finalizamos aquí.
+                    await update_client_consumed(client_id, "news_generation", cons_news + 1)
+                    logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
+                    
                 except Exception as e:
                     logger.error(f"[{order_id}] ❌ Error validando cuotas desde el worker: {e}")
                     return
@@ -622,6 +637,17 @@ async def process_kafka_message(data: dict):
                 if already_done:
                     logger.info(f"[{order_id}] ⚠️ Validación duplicada ignorada (Assertion={id_assert}, Validator={id_val}).")
                     return
+                
+                client_id = doc.get("client_id")
+                if client_id:
+                    try:
+                        quotas = await fetch_client_quotas(client_id)
+                        cons_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
+                        
+                        await update_client_consumed(client_id, "blockchain_validation", cons_val + 1)
+                        logger.info(f"[{order_id}] 💰 Cuota blockchain_validation incrementada a {cons_val + 1} para {client_id}")
+                    except Exception as e:
+                        logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
 
                 validations[id_assert][id_val] = {
                     "approval": status_val,
@@ -1116,15 +1142,22 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
     quotas = await fetch_client_quotas(client_id)
     consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
     limits_val = quotas.get("limits", {}).get("blockchain_validation", 0)
+    cons_news = quotas.get("consumed", {}).get("news_generation", 0)
+    
+
     
     # Opcional: También podemos verificar si (consumed_val + len(req.assertions)) supera el límite
-    if consumed_val >= limits_val:
+    if consumed_val + len(req.assertions) >= limits_val:
          raise HTTPException(
             status_code=429, 
             detail=f"Quota validations exceded. Limit: {limits_val}, Consumed: {consumed_val}"
         )
+    
+    order_id = str(uuid.uuid4())   
 
-    order_id = str(uuid.uuid4())
+    await update_client_consumed(client_id, "news_generation", cons_news + 1)
+    logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
+    
     order_doc = {
         "order_id": order_id,
         "text": req.text,
@@ -1148,11 +1181,15 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
             action="assertions_generated",
             order_id=order_id,
             payload={
-                "text": text,
+                "text": req.text,
                 "publisher": "news-handler",
                 "assertions": assertions_for_payload
             }
         )
+        
+        await update_client_consumed(client_id, "news_generation", cons_news - 1)
+        logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
+        
         await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
         #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())

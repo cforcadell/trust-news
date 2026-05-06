@@ -42,45 +42,24 @@ const keycloak = new Keycloak({
 // =========================================================
 function alertMessage(message, type = 'info', duration = 3000) {
     const bar = document.getElementById('statusBar');
-    if (!bar) return;
 
-    const normalizedType = type === 'primary' ? 'success' : type;
-    bar.className = `status-toast ${normalizedType}`;
-    bar.textContent = typeof message === 'string' ? message : JSON.stringify(message);
-
-    window.clearTimeout(bar._hideTimer);
-    void bar.offsetWidth;
+    // Resetear clases y aplicar el mensaje
+    bar.className = 'status-toast';
+    bar.textContent = message;
+    
+    // Aplicar tipo (color)
+    if(type === 'error') bar.style.backgroundColor = '#ef4444';
+    else if(type === 'primary' || type === 'success') bar.style.backgroundColor = '#10b981';
+    else bar.style.backgroundColor = '#3b82f6';
+    bar.style.color = '#fff';
+    
+    // Forzar reflow para reiniciar la animación y mostrar
+    void bar.offsetWidth; 
     bar.classList.add('show');
 
-    bar._hideTimer = window.setTimeout(() => {
+    setTimeout(() => {
         bar.classList.remove('show');
     }, duration);
-}
-
-function setButtonLoading(buttonOrId, isLoading, loadingText = 'Procesando...') {
-    const button = typeof buttonOrId === 'string' ? document.getElementById(buttonOrId) : buttonOrId;
-    if (!button) return;
-
-    if (isLoading) {
-        button.dataset.originalText = button.textContent;
-        button.textContent = loadingText;
-        button.classList.add('is-loading');
-        button.disabled = true;
-    } else {
-        button.textContent = button.dataset.originalText || button.textContent;
-        button.classList.remove('is-loading');
-        button.disabled = false;
-        delete button.dataset.originalText;
-    }
-}
-
-async function withButtonLoading(buttonOrId, task, loadingText = 'Procesando...') {
-    setButtonLoading(buttonOrId, true, loadingText);
-    try {
-        return await task();
-    } finally {
-        setButtonLoading(buttonOrId, false);
-    }
 }
 
 
@@ -115,7 +94,7 @@ async function fetchWithAuth(url, options = {}) {
 }
 
 function escapeHTML(str) {
-    return String(str ?? '').replace(/[&<>"']/g, function(match) {
+    return str.replace(/[&<>"']/g, function(match) {
         return ({
             '&': '&amp;',
             '<': '&lt;',
@@ -1732,12 +1711,11 @@ async function importarNoticia() {
     const newsText = document.getElementById('newsText');
 
     if (!url) {
-        alertMessage('Introduce una URL para importar', 'warning');
+        alert('Introduce una URL para importar');
         return;
     }
 
     try {
-        setButtonLoading('btn-importarNew', true, 'Importando...');
         // Llamada POST al endpoint
         
         const response = await fetchWithAuth(`${API}/extract_text_from_url`, {
@@ -1756,13 +1734,10 @@ async function importarNoticia() {
 
         // Coloca el texto recibido en el textarea
         newsText.value = data.text || '';
-        alertMessage('Noticia importada correctamente', 'success');
 
     } catch (err) {
         console.error(err);
-        alertMessage('Error al importar la noticia. Revisa la consola.', 'error');
-    } finally {
-        setButtonLoading('btn-importarNew', false);
+        alert('Error al importar la noticia. Revisa la consola.');
     }
 }
 
@@ -1770,8 +1745,8 @@ let IS_ADMIN = false;
 
 async function checkAdminStatus() {
     try {
-        const response = await fetchWithAuth(`${API}/auth/is-admin`, {
-            headers: { 'Accept': 'application/json' }
+        const response = await fetch(`${API}/auth/is-admin`, {
+            headers: { 'Authorization': `Bearer ${keycloak.token}` }
         });
         if (response.ok) {
             const data = await response.json();
@@ -1812,8 +1787,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Extraemos la lógica original a una función aparte
 function initializeApp() {
-    if (window.__trustNewsInitialized) return;
-    window.__trustNewsInitialized = true;
     // 1. Mostrar quién está logueado (Opcional pero recomendado)
     console.log("User:", keycloak.tokenParsed.preferred_username);
 
@@ -1829,7 +1802,7 @@ function initializeApp() {
     
     // 3. News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
-    document.getElementById('btn-publishNew').addEventListener('click', () => withButtonLoading('btn-publishNew', publishNew, 'Publicando...'));
+    document.getElementById('btn-publishNew').addEventListener('click', publishNew);
 
     document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
         const text = document.getElementById("newsText").value.trim();
@@ -1837,25 +1810,254 @@ function initializeApp() {
             alertMessage("Debes escribir o cargar una noticia", "warning");
             return;
         }
-
-        await withButtonLoading("btn-generateAssertions", async () => {
-            alertMessage("Generando aserciones...", "info");
-            const assertions = await generateAssertionsFromText(text);
-            const container = document.getElementById("news-assertions-container");
-            renderEditableAssertionsTable(container, assertions);
-            alertMessage(assertions.length ? "Aserciones generadas" : "No se han generado aserciones", assertions.length ? "success" : "warning");
-        }, "Generando...");
+        alertMessage("Generando aserciones...", "info");
+        const assertions = await generateAssertionsFromText(text);
+        const container = document.getElementById("news-assertions-container");
+        renderEditableAssertionsTable(container, assertions);
+        alertMessage("Aserciones generadas", "success");
     });
 
     // 4. El resto de tus Listeners (Orders, TX, IPFS...)
-    document.getElementById('btn-findOrder').addEventListener('click', () => withButtonLoading('btn-findOrder', findOrder, 'Buscando...'));
-    document.getElementById('btn-listOrders').addEventListener('click', () => withButtonLoading('btn-listOrders', listOrders, 'Cargando...'));
-    document.getElementById("btn-findTx").addEventListener("click", () => withButtonLoading("btn-findTx", findTx, "Buscando..."));
-    document.getElementById("btn-findBlock").addEventListener("click", () => withButtonLoading("btn-findBlock", findBlock, "Buscando..."));
-    document.getElementById("btn-findPost").addEventListener("click", () => withButtonLoading("btn-findPost", findPostById, "Buscando..."));
-    document.getElementById("btn-checkConsistency").addEventListener("click", () => withButtonLoading("btn-checkConsistency", checkOrderConsistency, "Comprobando..."));
-    document.getElementById("btn-findIpfs").addEventListener("click", () => withButtonLoading("btn-findIpfs", findIpfs, "Buscando..."));
+    document.getElementById('btn-findOrder').addEventListener('click', findOrder);
+    document.getElementById('btn-listOrders').addEventListener('click', listOrders);
+    document.getElementById("btn-findTx").addEventListener("click", findTx);
+    document.getElementById("btn-findBlock").addEventListener("click", findBlock);
+    document.getElementById("btn-findPost").addEventListener("click", findPostById);
+    document.getElementById("btn-checkConsistency").addEventListener("click", checkOrderConsistency);
+    document.getElementById("btn-findIpfs").addEventListener("click", findIpfs);
 
     // 5. Initial view
     showSection('news');
 }
+
+// =========================================================
+// UX V1 INTEGRATED OVERRIDES
+// Mantiene la funcionalidad original y mejora presentación visual.
+// =========================================================
+function safeText(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "object") return escapeHTML(JSON.stringify(value));
+    return escapeHTML(String(value));
+}
+
+function statusClass(status) {
+    const normalized = String(status || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    if (normalized.includes("validated")) return "status-validated";
+    if (normalized.includes("error") || normalized.includes("fail")) return "status-error";
+    if (normalized.includes("pending")) return `status-${normalized}`;
+    if (normalized.includes("requested") || normalized.includes("uploaded") || normalized.includes("created") || normalized.includes("registered")) return `status-${normalized}`;
+    return "status-unknown";
+}
+
+function renderStatusBadge(status) {
+    const label = safeText(status || "UNKNOWN");
+    return `<span class="status-badge ${statusClass(status)}">${label}</span>`;
+}
+
+function formatAnyDate(value) {
+    if (!value) return "N/A";
+    const raw = String(value);
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) {
+        return date.toLocaleString("es-ES", {
+            day: "2-digit", month: "2-digit", year: "numeric",
+            hour: "2-digit", minute: "2-digit"
+        });
+    }
+    return safeText(raw);
+}
+
+function shortValue(value, size = 18) {
+    if (!value) return "N/A";
+    const text = String(value);
+    if (text.length <= size) return safeText(text);
+    return `<span title="${safeText(text)}">${safeText(text.slice(0, Math.ceil(size/2)))}…${safeText(text.slice(-Math.floor(size/2)))}</span>`;
+}
+
+// Tabla de órdenes/listados con columnas más visuales, badges de estado y hashes compactos.
+function renderTableData(container, data) {
+    if (!data?.length) {
+        container.innerHTML = "<p class='empty-state'>No hay datos disponibles.</p>";
+        container._fullData = data || [];
+        return;
+    }
+
+    const isOrdersContainer = container.id === "listTabContent";
+    const totalItems = data.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / TABLE_PAGE_SIZE_ORDERS));
+    if (TABLE_PAGE_ORDERS < 1) TABLE_PAGE_ORDERS = 1;
+    if (TABLE_PAGE_ORDERS > totalPages) TABLE_PAGE_ORDERS = totalPages;
+
+    const start = (TABLE_PAGE_ORDERS - 1) * TABLE_PAGE_SIZE_ORDERS;
+    const pageData = data.slice(start, start + TABLE_PAGE_SIZE_ORDERS);
+
+    let keys;
+    if (isOrdersContainer) {
+        const preferred = ["order_id", "client_id", "status", "hash_text", "tx_hash", "created_at", "updated_at", "validators_pending"];
+        const existing = new Set();
+        data.forEach(row => Object.keys(row).forEach(k => existing.add(k)));
+        keys = preferred.filter(k => existing.has(k));
+        [...existing].forEach(k => { if (!keys.includes(k) && !["_id", "document", "assertions", "validations", "validators", "text"].includes(k)) keys.push(k); });
+    } else {
+        const keysSet = new Set();
+        data.forEach(row => Object.keys(row).forEach(k => keysSet.add(k)));
+        keys = Array.from(keysSet);
+    }
+
+    const headerLabels = {
+        order_id: "Order ID",
+        client_id: "Client ID",
+        status: "Estado",
+        hash_text: "Hash texto",
+        tx_hash: "Tx hash",
+        created_at: "Creado",
+        updated_at: "Actualizado",
+        validators_pending: "Pendientes"
+    };
+
+    const rows = pageData.map(row => {
+        return `<tr>${keys.map(k => {
+            let val = row[k] !== undefined ? row[k] : "N/A";
+
+            if (k === "order_id" && val !== "N/A") {
+                return `<td><a class="order-id-link" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${String(val).replace(/'/g, "\\'")}')">#${shortValue(val, 20)} ↗</a></td>`;
+            }
+
+            if (k === "status") {
+                return `<td>${renderStatusBadge(val)}</td>`;
+            }
+
+            if (k === "hash_text" || k === "tx_hash" || String(k).toLowerCase().includes("hash")) {
+                const safe = String(val || "").replace(/'/g, "\\'");
+                if (k === "tx_hash" && val && val !== "N/A") {
+                    return `<td><a class="hash-chip" href="#" onclick="event.preventDefault(); navigateToTx('${safe}')">${shortValue(val, 20)}</a></td>`;
+                }
+                return `<td><span class="hash-chip">${shortValue(val, 22)}</span></td>`;
+            }
+
+            if (k === "created_at" || k === "updated_at" || k === "timestamp" || k === "createdAt") {
+                return `<td>${formatAnyDate(val)}</td>`;
+            }
+
+            if (k === "validators_pending") {
+                return `<td><span class="vote-pill vote-unknown">${safeText(val)}</span></td>`;
+            }
+
+            switch(k) {
+                case "assertions":
+                case "validators":
+                    val = Array.isArray(row[k]) ? row[k].length : 0;
+                    return `<td><span class="vote-pill vote-unknown">${val}</span></td>`;
+                case "validations":
+                    val = row[k] ? Object.keys(row[k]).length : 0;
+                    return `<td><span class="vote-pill vote-true">${val}</span></td>`;
+                case "text":
+                    if (typeof val === "object" && val?.text) val = val.text;
+                    if (typeof val === "string") val = val.substring(0, 80) + (val.length > 80 ? "…" : "");
+                    return `<td>${safeText(val)}</td>`;
+                default:
+                    return `<td>${safeText(val)}</td>`;
+            }
+        }).join("")}</tr>`;
+    }).join("");
+
+    container.innerHTML = `
+        <table class="compact-table visual-orders-table">
+            <thead><tr>${keys.map(k => `<th>${headerLabels[k] || safeText(k)}</th>`).join("")}</tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="pagination">
+            <button onclick="changeTablePage(-1)" ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}>‹ Anterior</button>
+            <span class="vote-pill vote-true">Página ${TABLE_PAGE_ORDERS} / ${totalPages}</span>
+            <button onclick="changeTablePage(1)" ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}>Siguiente ›</button>
+        </div>
+        <p style="color:var(--text-secondary);font-size:.82rem;margin:10px 0 0;">Mostrando ${pageData.length} de ${totalItems} órdenes</p>
+    `;
+    container._fullData = data;
+}
+
+// Árbol de validaciones más visual, con cards por validador y votos coloreados.
+function renderValidationsTree(container, validations, assertions) {
+    if (!validations || Object.keys(validations).length === 0) {
+        container.innerHTML = "<p class='empty-state'>No hay validaciones disponibles para esta orden.</p>";
+        return;
+    }
+
+    let html = `<div class="validation-tree">`;
+
+    for (const [assertionId, validatorsObj] of Object.entries(validations)) {
+        let assertionText = assertions.find(a => a.idAssertion === assertionId)?.text || "(Aserción sin texto)";
+        if (typeof assertionText === "object" && assertionText !== null && assertionText.text) assertionText = assertionText.text;
+
+        const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
+        const approvedCount = literals.filter(v => v === "True").length;
+        const rejectedCount = literals.filter(v => v === "False").length;
+        const unknownCount = literals.filter(v => v === "Unknown").length;
+
+        let status = "unknown";
+        if (approvedCount > rejectedCount) status = "true";
+        else if (rejectedCount > approvedCount) status = "false";
+        else if (unknownCount > 0) status = "pending";
+
+        const validatorsHtml = Object.entries(validatorsObj).map(([validator, info]) => {
+            const lit = getValidationLiteral(info.approval);
+            const litClass = lit === "True" ? "true-news" : lit === "False" ? "false-news" : "partial-news";
+            let desc = info.text || "Sin descripción";
+            if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
+            const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
+            return `
+                <div class="validator-card">
+                    <div class="validator-name">${safeText(info.validator_alias || validator)}</div>
+                    <div class="validator-result ${litClass}">${lit}</div>
+                    <div class="validator-desc">${safeText(desc)}</div>
+                    <div class="validator-tx">${tx}</div>
+                </div>
+            `;
+        }).join("");
+
+        html += `
+            <details class="validation-node" ${status === "true" ? "open" : ""}>
+                <summary class="validation-summary">
+                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}</div>
+                    <div class="vote-pills">
+                        <span class="vote-pill vote-true">${approvedCount} True</span>
+                        <span class="vote-pill vote-false">${rejectedCount} False</span>
+                        <span class="vote-pill vote-unknown">${unknownCount} Unknown</span>
+                    </div>
+                </summary>
+                <div class="validator-grid">
+                    ${validatorsHtml}
+                </div>
+            </details>
+        `;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+// Refuerzo visual de detalles: mantener la tabla original, pero más integrada y compacta.
+const __tnOriginalInitializeApp = initializeApp;
+initializeApp = function initializeAppUXIntegrated() {
+    __tnOriginalInitializeApp();
+
+    const logoutBtn = document.getElementById("btn-logout");
+    if (logoutBtn && !logoutBtn.dataset.bound) {
+        logoutBtn.dataset.bound = "true";
+        logoutBtn.addEventListener("click", () => keycloak.logout({ redirectUri: window.location.origin }));
+    }
+
+    const badge = document.getElementById("sessionBadge");
+    if (badge && keycloak?.tokenParsed?.preferred_username) {
+        badge.textContent = `● Sesión protegida · ${keycloak.tokenParsed.preferred_username}`;
+    }
+
+    const chk = document.getElementById("chk-viewAll");
+    if (chk && !chk.dataset.bound) {
+        chk.dataset.bound = "true";
+        chk.addEventListener("change", () => {
+            TABLE_PAGE_ORDERS = 1;
+            listOrders();
+        });
+    }
+};

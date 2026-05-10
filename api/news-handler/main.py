@@ -5,6 +5,7 @@ import json
 import asyncio
 import logging
 import hashlib
+import re
 import requests
 import httpx
 import time # Añadir import de time
@@ -26,6 +27,7 @@ from common.veredicto import Validacion
 from common.async_models import (
     GenerateAssertionsRequest,
     AssertionsGeneratedResponse,
+    AssertionsNotGeneratedResponse,
     UploadIpfsRequest,
     IpfsUploadedResponse,
     RegisterBlockchainRequest,
@@ -180,6 +182,44 @@ def get_cached_validator_config(validator: str) -> Optional[dict]:
     if not validator:
         return None
     return validators_cache.get(str(validator).lower())
+
+
+async def get_validator_stats(validator: str) -> dict:
+    """Count validation requests sent to a validator and successful responses stored."""
+    validator_lc = str(validator or "").lower()
+    requests_sent = 0
+
+    cursor = orders_collection.find(
+        {"validation_requests": {"$exists": True}},
+        {"_id": 0, "validation_requests": 1}
+    )
+    async for order in cursor:
+        for requested_validators in (order.get("validation_requests") or {}).values():
+            requests_sent += sum(
+                1
+                for item in requested_validators
+                if str(item).lower() == validator_lc
+            )
+
+    successful_responses = await db["validations"].count_documents({
+        "idValidator": {
+            "$regex": f"^{re.escape(str(validator or ''))}$",
+            "$options": "i"
+        }
+    })
+
+    return {
+        "requests_sent": requests_sent,
+        "successful_responses": successful_responses
+    }
+
+
+async def enrich_validator_for_ui(validator: dict) -> dict:
+    enriched = dict(validator)
+    validator_hash = enriched.get("validator", "")
+    enriched["stats"] = await get_validator_stats(validator_hash)
+    enriched.setdefault("categories", [])
+    return enriched
 # ===========================
 # Helpers para hashes
 # ===========================
@@ -300,6 +340,7 @@ async def handle_blockchain_request(order_id: str, text: str, cid: str, assertio
 # =========================================================
 ACTION_TO_MODEL_RESPONSE = {
     "assertions_generated": AssertionsGeneratedResponse,
+    "assertions_not_generated": AssertionsNotGeneratedResponse,
     "ipfs_uploaded": IpfsUploadedResponse,
     "blockchain_registered": BlockchainRegisteredResponse,
     "validation_completed": ValidationCompletedResponse,
@@ -460,6 +501,28 @@ async def process_kafka_message(data: dict):
                 logger.exception(f"[{order_id}] Error validando upload_ipfs request: {e}")
 
             await update_order(order_id, {"status": "IPFS_PENDING"})
+
+        # ================================================================
+        # 1B assertions_not_generated
+        # ================================================================
+        elif action == "assertions_not_generated":
+            doc = await get_order_doc(order_id)
+            if not doc:
+                return
+
+            await update_order(order_id, {
+                "status": "ASSERTIONS_NOT_AVAILABLE",
+                "assertions_error": {
+                    "provider": parsed.payload.publisher,
+                    "error": parsed.payload.error,
+                    "attempts": parsed.payload.attempts
+                }
+            })
+            logger.warning(
+                f"[{order_id}] ASSERTIONS_NOT_AVAILABLE tras "
+                f"{parsed.payload.attempts} intentos con {parsed.payload.publisher}: "
+                f"{parsed.payload.error}"
+            )
 
         # ================================================================
         # 2️⃣ ipfs_uploaded
@@ -1338,7 +1401,8 @@ async def list_validators_cache(
     """New list validators cache endpoint that gets blockchain validators and recovers IPFS data."""
     if recover_ipfs:
         await load_validators_cache_from_chain()
-    return {"validators": list(validators_cache.values())}
+    validators = [await enrich_validator_for_ui(v) for v in validators_cache.values()]
+    return {"validators": validators}
 
 
 @app.get("/validators/cache/{validator_hash}")
@@ -1349,7 +1413,7 @@ async def get_validator_cache(validator_hash: str):
         validator = get_cached_validator_config(validator_hash)
     if not validator:
         raise HTTPException(status_code=404, detail="Validator not found in cache")
-    return validator
+    return await enrich_validator_for_ui(validator)
 
 
 @app.get("/validators/cache/{validator_hash}/validations")
@@ -1368,6 +1432,7 @@ async def get_validator_with_validations_cache(
         validator = get_cached_validator_config(validator_hash)
     if not validator:
         raise HTTPException(status_code=404, detail="Validator not found in cache")
+    validator = await enrich_validator_for_ui(validator)
 
     config = validator.get("config") or {}
     if provider and str(config.get("provider", "")).lower() != provider.lower():
@@ -1386,11 +1451,54 @@ async def get_validator_with_validations_cache(
         if include_order_link:
             for item in validations:
                 item["order_link"] = f"/orders/{item.get('order_id')}" if item.get("order_id") else None
+        order_ids = list({item.get("order_id") for item in validations if item.get("order_id")})
+        orders_by_id = {}
+        if order_ids:
+            orders_cursor = orders_collection.find(
+                {"order_id": {"$in": order_ids}},
+                {"_id": 0, "order_id": 1, "text": 1, "assertions": 1, "validators": 1}
+            )
+            async for order in orders_cursor:
+                orders_by_id[order.get("order_id")] = order
+        for item in validations:
+            order = orders_by_id.get(item.get("order_id"), {})
+            assertion_id = str(item.get("idAssertion", ""))
+            assertion = next(
+                (
+                    a for a in order.get("assertions", [])
+                    if str(a.get("idAssertion")) == assertion_id
+                ),
+                None
+            )
+            validator_assertion = next(
+                (
+                    a for a in order.get("validators", [])
+                    if str(a.get("idAssertion")) == assertion_id
+                ),
+                None
+            )
+            item["assertion_text"] = (
+                (assertion or {}).get("text")
+                or (validator_assertion or {}).get("text")
+                or (item.get("payload") or {}).get("assertion_text")
+                or (item.get("payload") or {}).get("text")
+                or ""
+            )
+            item["categoryId"] = (
+                (assertion or {}).get("categoryId")
+                or (validator_assertion or {}).get("categoryId")
+            )
+            order_text = order.get("text", "")
+            if isinstance(order_text, dict):
+                order_text = order_text.get("text", "")
+            item["order_text"] = order_text or ""
 
     return {
         "validator": validator_hash,
         "ipfs_hash": validator.get("ipfs_hash"),
         "config": config,
+        "categories": validator.get("categories", []),
+        "stats": validator.get("stats", {}),
         "validations": validations,
     }
 

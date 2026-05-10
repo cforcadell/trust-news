@@ -1,0 +1,48 @@
+sequenceDiagram
+  autonumber
+
+  participant NH as api/news-handler
+  participant K as Kafka
+  participant GA as api/generate-asertions
+  participant IPFS as ipfs-fastapi
+  participant NC as api/news-chain
+  participant VA as api/validate-asertions
+  participant ADM as api/admin
+
+  NH->>K: produce fake_news_requests_generate<br/>generate_assertions
+  K-->>GA: consume generate_assertions
+
+  alt assertions generated
+    GA->>K: produce fake_news_responses<br/>assertions_generated
+    K-->>NH: consume assertions_generated
+  else assertions not generated
+    GA->>K: produce fake_news_responses<br/>assertions_not_generated
+    K-->>NH: consume assertions_not_generated
+    NH->>NH: status = ASSERTIONS_NOT_AVAILABLE
+  end
+
+  NH->>ADM: HTTP check/update quotas
+  NH->>K: produce fake_news_requests_ipfs<br/>upload_ipfs
+  K-->>IPFS: consume upload_ipfs
+  IPFS->>K: produce fake_news_responses<br/>ipfs_uploaded
+  K-->>NH: consume ipfs_uploaded
+
+  NH->>K: produce fake_news_requests_blockchain<br/>register_blockchain
+  K-->>NC: consume register_blockchain
+  NC->>K: produce fake_news_responses<br/>blockchain_registered
+  K-->>NH: consume blockchain_registered
+
+  NC->>K: produce fake_news_responses<br/>request_validation
+  K-->>NH: consume request_validation
+  NH->>K: produce fake_news_requests_validate<br/>request_validation
+  K-->>VA: consume request_validation
+
+  VA->>NC: blockchain transaction<br/>addValidation
+  NC->>K: produce fake_news_responses<br/>validation_completed
+  K-->>NH: consume validation_completed
+
+  opt validator config updated
+    NC->>K: produce fake_news_responses<br/>new_validator_config
+    K-->>NH: consume new_validator_config
+  end
+

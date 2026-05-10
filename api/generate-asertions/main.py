@@ -26,6 +26,8 @@ logger = logging.getLogger("generate-assertions-worker")
 from common.async_models import (
     GenerateAssertionsRequest,
     AssertionsGeneratedResponse,
+    AssertionsNotGeneratedPayload,
+    AssertionsNotGeneratedResponse,
     Assertion,
     AssertionGeneratedPayload,
 )
@@ -65,7 +67,8 @@ PROMPT = os.getenv(
 
 # Timeouts / retries
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+NUM_REINTENTOS = int(os.getenv("NUM_REINTENTOS", os.getenv("MAX_RETRIES", "3")))
+MAX_RETRIES = NUM_REINTENTOS
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))
 
 # ============================================================
@@ -112,6 +115,8 @@ async def call_mistral(text: str) -> List[Assertion]:
                     text_resp = await resp.text()
                     if resp.status != 200:
                         logger.error(f"Mistral status {resp.status}: {text_resp}")
+                        if resp.status in [429, 500, 502, 503, 504]:
+                            raise Exception(f"Error temporal Mistral: {resp.status}")
                         raise HTTPException(status_code=resp.status, detail="Error Mistral")
                     
                     data = await resp.json()
@@ -188,6 +193,8 @@ async def call_gemini(text: str) -> List[Assertion]:
                     text_resp = await resp.text()
                     if resp.status != 200:
                         logger.error(f"Gemini status {resp.status}: {text_resp}")
+                        if resp.status in [429, 500, 502, 503, 504]:
+                            raise Exception(f"Error temporal Gemini: {resp.status}")
                         raise HTTPException(status_code=resp.status, detail="Error Gemini")
                     
                     data = await resp.json()
@@ -349,6 +356,29 @@ async def extract_assertions_from_text(text: str) -> List[Assertion]:
     else:
         return []
 
+
+async def publish_assertions_not_generated(
+    producer: AIOKafkaProducer,
+    order_id: str,
+    text: str,
+    error: str,
+):
+    payload = AssertionsNotGeneratedPayload(
+        text=text,
+        publisher=AI_PROVIDER,
+        error=error,
+        attempts=NUM_REINTENTOS,
+    )
+    response = AssertionsNotGeneratedResponse(
+        action="assertions_not_generated",
+        order_id=order_id,
+        payload=payload,
+    )
+    msg_bytes = response.model_dump_json(exclude_none=True).encode("utf-8")
+    await producer.send_and_wait(OUTPUT_TOPIC, msg_bytes)
+    logger.info(f"[{order_id}] Publicado assertions_not_generated en topic {OUTPUT_TOPIC}")
+
+
 # ============================================================
 # Procesar mensaje Kafka entrante
 # ============================================================
@@ -373,14 +403,31 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
         assertion_objs = await extract_assertions_from_text(req.payload.text)
     except HTTPException as he:
         logger.error(f"[{req.order_id}] Error LLM: {he.detail}")
+        try:
+            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(he.detail))
+        except Exception as e:
+            logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {e}")
         return
     except Exception as e:
         logger.exception(f"[{req.order_id}] Error inesperado extrayendo aserciones: {e}")
+        try:
+            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(e))
+        except Exception as publish_error:
+            logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {publish_error}")
         return
 
     # Si la lista está vacía, no hacemos nada más
     if not assertion_objs:
         logger.info(f"[{req.order_id}] No se extrajeron aserciones.")
+        try:
+            await publish_assertions_not_generated(
+                producer,
+                req.order_id,
+                req.payload.text,
+                "No se extrajeron aserciones.",
+            )
+        except Exception as e:
+            logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {e}")
         return
 
     # Construir respuesta tipada (AssertionsGeneratedResponse)

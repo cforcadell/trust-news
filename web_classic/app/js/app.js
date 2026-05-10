@@ -183,7 +183,7 @@ function showSection(sectionId, reset = true) {
             listOrders();
         }
 
-        if (sectionId === "validators") {
+        if (sectionId === "validators" && reset) {
             listValidatorsCache();
         }
 }
@@ -774,7 +774,7 @@ function renderDetails(container, data) {
 
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
-              .filter(([k, v]) => k !== "_id" && k !== "document" && k !== "assertions" && k !== "text" && k !== "status" && k !== "validators_pending" && k !== "validation_requests")
+              .filter(([k, v]) => !["_id", "document", "assertions", "text", "status", "validators_pending", "validation_requests", "validators", "validations"].includes(k))
               .map(([k, v]) => {
                   if (k === "text" && typeof v === "object" && v?.text) v = v.text;
 
@@ -793,11 +793,6 @@ function renderDetails(container, data) {
                   if (k === "cid" && v) {
                       const safeCid = String(v).replace(/'/g, "\\'");
                       return `<tr><th>${safeText(k)}</th><td><a href="#" onclick="event.preventDefault(); navigateToIpfs('${safeCid}'); return false;">${safeText(v)}</a></td></tr>`;
-                  }
-
-                  if (k === "validators" || k === "validations") {
-                      const preview = renderJsonTree(v, k);
-                      return `<tr><th>${safeText(k)}</th><td>${preview}</td></tr>`;
                   }
 
                   if (typeof v === "object") {
@@ -880,7 +875,7 @@ function renderValidationsTree(container, validations, assertions) {
     let html = "";
 
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
-        let assertionText = assertions.find(a => a.idAssertion === assertionId)?.text || "(Aserción sin texto)";
+        let assertionText = assertions.find(a => String(a.idAssertion) === String(assertionId))?.text || "(Aserción sin texto)";
         if (typeof assertionText === 'object' && assertionText !== null && assertionText.text) {
             assertionText = assertionText.text;
         }
@@ -2006,6 +2001,17 @@ function shortValue(value, size = 18) {
     return `<span title="${safeText(text)}">${safeText(text.slice(0, Math.ceil(size/2)))}…${safeText(text.slice(-Math.floor(size/2)))}</span>`;
 }
 
+function renderVotePill(count, label, className) {
+    const zeroClass = Number(count) === 0 ? " vote-pill-zero" : "";
+    return `<span class="vote-pill ${className}${zeroClass}">${safeText(count)} ${safeText(label)}</span>`;
+}
+
+function compactText(value, size = 90) {
+    if (!value) return "";
+    const text = String(value).replace(/\s+/g, " ").trim();
+    return text.length > size ? `${text.slice(0, size)}…` : text;
+}
+
 // Tabla de órdenes/listados con columnas más visuales, badges de estado y hashes compactos.
 function renderTableData(container, data) {
     if (!data?.length) {
@@ -2118,7 +2124,7 @@ function renderValidationsTree(container, validations, assertions) {
     let html = `<div class="validation-tree">`;
 
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
-        let assertionText = assertions.find(a => a.idAssertion === assertionId)?.text || "(Aserción sin texto)";
+        let assertionText = assertions.find(a => String(a.idAssertion) === String(assertionId))?.text || "(Aserción sin texto)";
         if (typeof assertionText === "object" && assertionText !== null && assertionText.text) assertionText = assertionText.text;
 
         const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
@@ -2152,9 +2158,9 @@ function renderValidationsTree(container, validations, assertions) {
                 <summary class="validation-summary">
                     <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}</div>
                     <div class="vote-pills">
-                        <span class="vote-pill vote-true">${approvedCount} True</span>
-                        <span class="vote-pill vote-false">${rejectedCount} False</span>
-                        <span class="vote-pill vote-unknown">${unknownCount} Unknown</span>
+                        ${renderVotePill(approvedCount, "True", "vote-true")}
+                        ${renderVotePill(rejectedCount, "False", "vote-false")}
+                        ${renderVotePill(unknownCount, "Unknown", "vote-unknown")}
                     </div>
                 </summary>
                 <div class="validator-grid">
@@ -2168,11 +2174,119 @@ function renderValidationsTree(container, validations, assertions) {
     container.innerHTML = html;
 }
 
+function renderValidatorValidationsByOrder(container, groupedOrders) {
+    if (!groupedOrders || !Object.keys(groupedOrders).length) {
+        container.innerHTML = "<p class='empty-state'>No hay validaciones para este validador.</p>";
+        return;
+    }
+
+    let html = `<div class="validation-tree">`;
+
+    for (const [orderId, orderData] of Object.entries(groupedOrders)) {
+        const assertionsCount = Object.keys(orderData.validations || {}).length;
+        const titleText = compactText(orderData.text || "Sin texto de noticia", 110);
+        const safeOrder = String(orderId).replace(/'/g, "\\'");
+        html += `
+            <details class="validation-node order-validation-node" open>
+                <summary class="validation-summary order-validation-summary">
+                    <div>
+                        <div class="assertion-title">Orden ${shortValue(orderId, 26)}</div>
+                        <div class="text-muted">(${safeText(titleText)})</div>
+                    </div>
+                    <div class="vote-pills">
+                        <span class="vote-pill vote-unknown">${assertionsCount} aserciones</span>
+                        <a class="btn-secondary btn-small" href="#" onclick="event.preventDefault(); document.getElementById('orderId').value='${safeOrder}'; showSection('order'); loadOrderById('${safeOrder}', true);">Ver orden</a>
+                    </div>
+                </summary>
+                <div class="order-validation-content">
+                    <div id="validator-order-${safeText(orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}"></div>
+                </div>
+            </details>
+        `;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    for (const [orderId, orderData] of Object.entries(groupedOrders)) {
+        const targetId = `validator-order-${String(orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        const target = document.getElementById(targetId);
+        if (target) renderValidationsTree(target, orderData.validations, orderData.assertions);
+    }
+}
+
 
 
 // =========================================================
 // VALIDATORS CACHE
 // =========================================================
+function renderValidatorCategories(categories = []) {
+    if (!Array.isArray(categories) || !categories.length) return "-";
+    const labels = categories.map(cat => {
+        const id = cat.id ?? cat.categoryId ?? cat;
+        const name = cat.name || CATEGORY_MAP[id] || `Categoría ${id}`;
+        return `${name} (${id})`;
+    });
+    const preview = labels.slice(0, 2).join(", ");
+    const extra = labels.length > 2 ? ` +${labels.length - 2}` : "";
+    return `<span class="category-summary" title="${safeText(labels.join("\n"))}">${safeText(preview)}${safeText(extra)}</span>`;
+}
+
+function renderValidatorStats(stats = {}) {
+    return {
+        requests: safeText(stats.requests_sent ?? 0),
+        responses: safeText(stats.successful_responses ?? 0)
+    };
+}
+
+function validatorHashForJs(value) {
+    return String(value || "").replace(/'/g, "\\'");
+}
+
+function renderValidatorsTable(validators) {
+    return `
+        <table class="compact-table visual-orders-table">
+            <thead>
+                <tr>
+                    <th>Validator Hash</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Provider</th>
+                    <th>Model</th>
+                    <th>Categories</th>
+                    <th>Requests</th>
+                    <th>Responses OK</th>
+                    <th>Status</th>
+                    <th>IPFS Config</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${validators.map(v => {
+                    const cfg = v.config || {};
+                    const validator = v.validator || "";
+                    const stats = renderValidatorStats(v.stats);
+                    return `
+                        <tr>
+                            <td><a href="#" onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${shortValue(validator, 18)}</a></td>
+                            <td>${safeText(cfg.name || "-")}</td>
+                            <td>${safeText(cfg.type || "-")}</td>
+                            <td>${safeText(cfg.provider || "-")}</td>
+                            <td>${safeText(cfg.model || "-")}</td>
+                            <td>${renderValidatorCategories(v.categories)}</td>
+                            <td>${stats.requests}</td>
+                            <td>${stats.responses}</td>
+                            <td>${safeText(cfg.status || "-")}</td>
+                            <td>${v.ipfs_hash ? `<a href="#" onclick="event.preventDefault(); showSection('ipfs', false); document.getElementById('ipfsHash').value='${safeText(v.ipfs_hash)}'; findIpfs();">${shortValue(v.ipfs_hash, 18)}</a>` : "-"}</td>
+                            <td><button class="btn-secondary btn-small" onclick="showValidatorValidations('${validatorHashForJs(validator)}')">Ver validaciones</button></td>
+                        </tr>
+                    `;
+                }).join("")}
+            </tbody>
+        </table>
+    `;
+}
+
 async function listValidatorsCache() {
     const container = document.getElementById("validatorsTableContainer");
     const detail = document.getElementById("validatorDetailContainer");
@@ -2192,40 +2306,7 @@ async function listValidatorsCache() {
             return;
         }
 
-        container.innerHTML = `
-            <table class="compact-table visual-orders-table">
-                <thead>
-                    <tr>
-                        <th>Validator Hash</th>
-                        <th>Name</th>
-                        <th>Type</th>
-                        <th>Provider</th>
-                        <th>Model</th>
-                        <th>Status</th>
-                        <th>IPFS Config</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${validators.map(v => {
-                        const cfg = v.config || {};
-                        const validator = v.validator || "";
-                        return `
-                            <tr>
-                                <td><a href="#" onclick="event.preventDefault(); showValidatorDetail('${String(validator).replace(/'/g, "\\'")}')">${shortValue(validator, 18)}</a></td>
-                                <td>${safeText(cfg.name || "-")}</td>
-                                <td>${safeText(cfg.type || "-")}</td>
-                                <td>${safeText(cfg.provider || "-")}</td>
-                                <td>${safeText(cfg.model || "-")}</td>
-                                <td>${safeText(cfg.status || "-")}</td>
-                                <td>${v.ipfs_hash ? `<a href="#" onclick="event.preventDefault(); showSection('ipfs', false); document.getElementById('ipfsHash').value='${safeText(v.ipfs_hash)}'; findIpfs();">${shortValue(v.ipfs_hash, 18)}</a>` : "-"}</td>
-                                <td><button class="btn-secondary btn-small" onclick="showValidatorValidations('${String(validator).replace(/'/g, "\\'")}')">Ver validaciones</button></td>
-                            </tr>
-                        `;
-                    }).join("")}
-                </tbody>
-            </table>
-        `;
+        container.innerHTML = renderValidatorsTable(validators);
     } catch (error) {
         console.error("Error cargando validadores:", error);
         container.innerHTML = "<p class='empty-state'>Error cargando validadores.</p>";
@@ -2234,6 +2315,7 @@ async function listValidatorsCache() {
 }
 
 async function showValidatorDetail(validatorHash) {
+    const container = document.getElementById("validatorsTableContainer");
     const detail = document.getElementById("validatorDetailContainer");
     if (!detail) return;
     detail.innerHTML = "<p class='empty-state'>Cargando configuración...</p>";
@@ -2244,6 +2326,8 @@ async function showValidatorDetail(validatorHash) {
         if (!response.ok) throw new Error(`Error API: ${response.status}`);
         const data = await response.json();
         const cfg = data.config || {};
+        const stats = renderValidatorStats(data.stats);
+        if (container) container.innerHTML = renderValidatorsTable([data]);
         detail.innerHTML = `
             <div class="validator-detail-card">
                 <h3>Configuración del validador</h3>
@@ -2255,6 +2339,9 @@ async function showValidatorDetail(validatorHash) {
                         <tr><th>Type</th><td>${safeText(cfg.type || "-")}</td></tr>
                         <tr><th>Provider</th><td>${safeText(cfg.provider || "-")}</td></tr>
                         <tr><th>Model</th><td>${safeText(cfg.model || "-")}</td></tr>
+                        <tr><th>Categories</th><td>${renderValidatorCategories(data.categories)}</td></tr>
+                        <tr><th>Requests sent</th><td>${stats.requests}</td></tr>
+                        <tr><th>Successful responses</th><td>${stats.responses}</td></tr>
                         <tr><th>Active Date</th><td>${safeText(cfg.active_date || "-")}</td></tr>
                         <tr><th>Updated Date</th><td>${safeText(cfg.updated_date || "-")}</td></tr>
                         <tr><th>End Date</th><td>${safeText(cfg.end_date || "-")}</td></tr>
@@ -2271,6 +2358,7 @@ async function showValidatorDetail(validatorHash) {
 }
 
 async function showValidatorValidations(validatorHash) {
+    const container = document.getElementById("validatorsTableContainer");
     const detail = document.getElementById("validatorDetailContainer");
     if (!detail) return;
     detail.innerHTML = "<p class='empty-state'>Cargando validaciones...</p>";
@@ -2281,14 +2369,40 @@ async function showValidatorValidations(validatorHash) {
         if (!response.ok) throw new Error(`Error API: ${response.status}`);
         const data = await response.json();
         const validations = data.validations || [];
+        if (container) {
+            container.innerHTML = renderValidatorsTable([{
+                validator: data.validator || validatorHash,
+                ipfs_hash: data.ipfs_hash,
+                config: data.config,
+                categories: data.categories,
+                stats: data.stats
+            }]);
+        }
 
-        const grouped = {};
+        const groupedOrders = {};
         validations.forEach(v => {
+            const orderId = String(v.order_id || "sin-order");
             const assertionId = String(v.idAssertion || "-");
-            if (!grouped[assertionId]) grouped[assertionId] = {};
-            grouped[assertionId][validatorHash] = {
+            const assertionText = v.assertion_text || v.payload?.assertion_text || "";
+
+            if (!groupedOrders[orderId]) {
+                groupedOrders[orderId] = {
+                    text: v.order_text || "",
+                    validations: {},
+                    assertions: []
+                };
+            }
+            if (!groupedOrders[orderId].validations[assertionId]) {
+                groupedOrders[orderId].validations[assertionId] = {};
+                groupedOrders[orderId].assertions.push({
+                    idAssertion: assertionId,
+                    text: assertionText || `Aserción ${assertionId}`
+                });
+            }
+
+            groupedOrders[orderId].validations[assertionId][validatorHash] = {
                 approval: v.approval,
-                text: v.payload?.text || v.payload?.descripcion || v.text || "",
+                text: v.payload?.descripcion || v.payload?.text || v.text || "",
                 tx_hash: v.tx_hash,
                 validator_alias: data.config?.name || validatorHash,
                 order_id: v.order_id
@@ -2305,13 +2419,7 @@ async function showValidatorValidations(validatorHash) {
 
         if (validations.length) {
             const tree = document.getElementById("validatorValidationsTree");
-            renderValidationsTree(tree, grouped, []);
-            tree.querySelectorAll(".validator-card").forEach((card, index) => {
-                const orderId = validations[index]?.order_id;
-                if (orderId) {
-                    card.insertAdjacentHTML("beforeend", `<div class="validator-tx">Order: <a href="#" onclick="event.preventDefault(); document.getElementById('orderId').value='${String(orderId).replace(/'/g, "\\'")}'; showSection('order'); loadOrderById('${String(orderId).replace(/'/g, "\\'" )}', true);">${safeText(orderId)}</a></div>`);
-                }
-            });
+            renderValidatorValidationsByOrder(tree, groupedOrders);
         }
     } catch (error) {
         console.error("Error cargando validaciones del validador:", error);

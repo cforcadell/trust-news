@@ -160,6 +160,19 @@ class AssertionsGeneratedResponse(BaseModel):
     payload: AssertionGeneratedPayload
 
 
+class AssertionsNotGeneratedPayload(BaseModel):
+    text: str
+    publisher: str
+    error: str
+    attempts: int
+
+
+class AssertionsNotGeneratedResponse(BaseModel):
+    action: str = "assertions_not_generated"
+    order_id: str
+    payload: AssertionsNotGeneratedPayload
+
+
 # ============================================================
 # 🔹 ASERCIONES YA GENERADAS
 # ============================================================   

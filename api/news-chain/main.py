@@ -164,6 +164,24 @@ def normalize_validator_config(cid: str) -> Optional[ValidatorConfig]:
         logger.warning(f"Config de validador no cumple modelo | cid={cid}: {e}")
         return None
 
+
+def get_validator_categories(validator_address: str, max_category_id: int = 10) -> List[Dict[str, Any]]:
+    """Return the category ids/names where a validator is registered."""
+    categories = []
+    try:
+        checksum = Web3.to_checksum_address(validator_address)
+        for category_id in range(1, max_category_id + 1):
+            validators = contract.functions.getValidatorsByCategory(category_id).call()
+            if any(str(v).lower() == checksum.lower() for v in validators):
+                categories.append({
+                    "id": category_id,
+                    "name": contract.functions.categories(category_id).call()
+                })
+    except Exception as e:
+        logger.warning(f"No se pudieron recuperar categorías del validador {validator_address}: {e}")
+    return categories
+
+
 def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
     class AttrDict(dict):
         def __getattr__(self, item):
@@ -484,7 +502,8 @@ def get_validators_with_config(recover_ipfs: bool = Query(True)):
             validators.append({
                 "validator": safe_hex(address),
                 "ipfs_hash": cid,
-                "config": config.model_dump(mode="json") if config else None
+                "config": config.model_dump(mode="json") if config else None,
+                "categories": get_validator_categories(address)
             })
         return {"result": True, "validators": validators}
     except Exception as e:
@@ -510,7 +529,8 @@ def get_validator_config(validator_address: str, recover_ipfs: bool = Query(True
                 "domain": val_info[0],
                 "reputation": val_info[1],
                 "ipfs_hash": cid,
-                "config": config.model_dump(mode="json") if config else None
+                "config": config.model_dump(mode="json") if config else None,
+                "categories": get_validator_categories(checksum)
             }
         }
     except HTTPException:

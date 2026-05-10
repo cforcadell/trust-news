@@ -437,6 +437,31 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
 .vote-true { color: #3dffad; background: rgba(16,214,154,.12); border: 1px solid rgba(16,214,154,.28); }
 .vote-false { color: #ff6878; background: rgba(255,91,110,.12); border: 1px solid rgba(255,91,110,.28); }
 .vote-unknown { color: #ffbf4c; background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.28); }
+.vote-pill.vote-pill-zero,
+.vote-pill.vote-pill-zero.vote-true,
+.vote-pill.vote-pill-zero.vote-false,
+.vote-pill.vote-pill-zero.vote-unknown {
+  color: #64748b !important;
+  background: rgba(100, 116, 139, .07) !important;
+  border-color: rgba(100, 116, 139, .16) !important;
+  box-shadow: none !important;
+  opacity: .58;
+  filter: grayscale(1) saturate(.2);
+}
+.vote-pill.vote-pill-zero:hover,
+.vote-pill.vote-pill-zero:focus {
+  opacity: .9;
+}
+.category-summary {
+  display: inline-block;
+  max-width: 170px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  cursor: help;
+}
 .validator-grid { display: grid; gap: 10px; padding: 0 14px 14px; }
 .validator-card {
   display: grid;

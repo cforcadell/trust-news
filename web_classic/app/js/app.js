@@ -69,6 +69,38 @@ function alertMessage(message, type = 'info', duration = 3000) {
 
 // Variable global para almacenar la última orden cargada
 let currentOrderData = {};
+let restoringHistoryState = false;
+
+function buildHistoryUrl(state) {
+    if (!state?.section) return window.location.pathname;
+    const value = state.value ? `/${encodeURIComponent(state.value)}` : "";
+    return `#${state.section}${value}`;
+}
+
+function updateAppHistory(state, replace = false) {
+    if (restoringHistoryState) return;
+    if (!state?.section) return;
+    const current = history.state || {};
+    const sameState =
+        current.section === state.section &&
+        current.inputId === state.inputId &&
+        current.value === state.value;
+    if (sameState && !replace) return;
+
+    const method = replace ? "replaceState" : "pushState";
+    history[method](state, "", buildHistoryUrl(state));
+}
+
+function isEditableTarget(target) {
+    if (!target) return false;
+    const tag = target.tagName ? target.tagName.toLowerCase() : "";
+    return (
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        target.isContentEditable
+    );
+}
 
 // =========================================================
 // UTILIDADES
@@ -148,7 +180,7 @@ function mapVeredict(v) {
 // =========================================================
 // SECCIÓN Y NAVEGACIÓN
 // =========================================================
-function showSection(sectionId, reset = true) {
+function showSection(sectionId, reset = true, updateHistory = true) {
     const sections = document.querySelectorAll("section");
     sections.forEach(sec => sec.classList.remove("active"));
 
@@ -178,6 +210,10 @@ function showSection(sectionId, reset = true) {
         const divsDinamicos = activeSection.querySelectorAll(".dynamic-content");
         divsDinamicos.forEach(div => div.innerHTML = "");
     }
+
+        if (updateHistory) {
+            updateAppHistory({ section: sectionId });
+        }
 
         if (sectionId === "orders") {
             listOrders();
@@ -382,6 +418,7 @@ async function publishNew() {
     const newOrderId = data.order_id;
 
     document.getElementById("orderId").value = newOrderId;
+    updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
     alertMessage(`Noticia publicada. Iniciando polling para Order ID: ${newOrderId}`, 'primary');
     pollOrder(newOrderId);
 }
@@ -434,6 +471,7 @@ async function publishWithAssertions() {
         const newOrderId = data.order_id;
 
         document.getElementById("orderId").value = newOrderId;
+        updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
         alertMessage(`Noticia publicada. Iniciando polling para Order ID: ${newOrderId}`, 'primary');
         pollOrder(newOrderId);
         
@@ -513,6 +551,7 @@ async function findOrder() {
     const orderId = document.getElementById("orderId").value.trim();
     if (!orderId) return alertMessage("Introduce un order_id.", 'error');
     await loadOrderById(orderId, true);
+    updateAppHistory({ section: "order", inputId: "orderId", value: orderId });
 }
 
 // =========================================================
@@ -1241,7 +1280,7 @@ async function findIpfs() {
 
         const activeSection = table.closest("section"); // ✅ sección contenedora
         activeSection.appendChild(box); // ✅ dentro de la sección
-
+        updateAppHistory({ section: "ipfs", inputId: "ipfsHash", value: cid });
 
 
     } catch (err) {
@@ -1278,6 +1317,7 @@ async function findTx() {
         if (!responseData.payload) throw new Error("Payload missing in transaction response."); 
         alertMessage(responseData.payload);
         renderTxTable(responseData.payload);
+        updateAppHistory({ section: "tx", inputId: "txHash", value: hash });
         alertMessage("Transacción encontrada.", 'primary');
     } catch (err) {
         console.error(err);
@@ -1326,7 +1366,7 @@ function navigateTo(section, inputId, value, loadFunction) {
     if (!value) return;
 
     // Cambiar de sección visualmente
-    showSection(section);
+    showSection(section, true, false);
 
     // Poner valor en el input
     const input = document.getElementById(inputId);
@@ -1336,11 +1376,7 @@ function navigateTo(section, inputId, value, loadFunction) {
     loadFunction(value);
 
     // Guardar estado en historial
-    history.pushState(
-        { section, inputId, value }, 
-        "", 
-        `#${section}/${value}`
-    );
+    updateAppHistory({ section, inputId, value });
 }
 
 
@@ -1368,21 +1404,30 @@ function navigateToIpfs(ipfsHash) {
     navigateTo("ipfs", "ipfsHash", ipfsHash, findIpfs);
 }
 
-window.onpopstate = function(event) {
+window.onpopstate = async function(event) {
     if (!event.state) return;
 
     const { section, inputId, value } = event.state;
 
-    // No limpiar, solo mostrar
-    showSection(section, false);
-    document.getElementById(inputId).value = value;
+    restoringHistoryState = true;
+    try {
+        // No limpiar, solo mostrar
+        showSection(section, false, false);
+        if (inputId) {
+            const input = document.getElementById(inputId);
+            if (input) input.value = value || "";
+        }
 
-    switch (section) {
-        case "orders": loadOrderById(value, false); break; // evita limpiar
-        case "tx": findTx(); break;
-        case "contract": findPostById(); break;
-        case "blocks": findBlock(); break;
-        case "consistency": checkOrderConsistency(); break;
+        switch (section) {
+            case "order": if (value) await loadOrderById(value, true); break;
+            case "tx": await findTx(); break;
+            case "contract": await findPostById(); break;
+            case "blocks": await findBlock(); break;
+            case "consistency": await checkOrderConsistency(); break;
+            case "ipfs": await findIpfs(); break;
+        }
+    } finally {
+        restoringHistoryState = false;
     }
 };
 
@@ -1408,6 +1453,7 @@ async function findBlock() {
         // 🔹 Renderiza e inserta la tabla
         const blockTable = renderBlockTable(responseData.payload);
         tableContainer.appendChild(blockTable);
+        updateAppHistory({ section: "blocks", inputId: "blockId", value: blockId });
 
         alertMessage("Bloque encontrado.", 'primary');
     } catch (err) {
@@ -1529,6 +1575,7 @@ async function findPostById() {
         // Renderiza tabla igual que bloque
         const contractPost = renderPost(responseData.post);
         tableContainer.appendChild(contractPost);
+        updateAppHistory({ section: "contract", inputId: "postId", value: postId });
 
         alertMessage("Contrato encontrado.", "primary");
 
@@ -1694,6 +1741,7 @@ async function checkOrderConsistency() {
 
         // Renderiza la tabla con los datos obtenidos
         renderConsistencyTable(data);
+        updateAppHistory({ section: "consistency", inputId: "orderIdCons", value: orderId });
 
     } catch (error) {
         console.error('Error al verificar la consistencia:', error);
@@ -1889,8 +1937,19 @@ function initializeApp() {
     document.getElementById("btn-checkConsistency").addEventListener("click", checkOrderConsistency);
     document.getElementById("btn-findIpfs").addEventListener("click", findIpfs);
 
+    if (!document.body.dataset.backspaceBound) {
+        document.body.dataset.backspaceBound = "true";
+        document.addEventListener("keydown", event => {
+            if (event.key === "Backspace" && !isEditableTarget(event.target)) {
+                event.preventDefault();
+                if (history.length > 1) history.back();
+            }
+        });
+    }
+
     // 5. Initial view
-    showSection('news');
+    updateAppHistory({ section: "news" }, true);
+    showSection('news', true, false);
 }
 
 // =========================================================
@@ -2195,7 +2254,7 @@ function renderValidatorValidationsByOrder(container, groupedOrders) {
                     </div>
                     <div class="vote-pills">
                         <span class="vote-pill vote-unknown">${assertionsCount} aserciones</span>
-                        <a class="btn-secondary btn-small" href="#" onclick="event.preventDefault(); document.getElementById('orderId').value='${safeOrder}'; showSection('order'); loadOrderById('${safeOrder}', true);">Ver orden</a>
+                        <a class="btn-secondary btn-small" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${safeOrder}');">Ver orden</a>
                     </div>
                 </summary>
                 <div class="order-validation-content">

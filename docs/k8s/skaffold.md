@@ -82,6 +82,10 @@ kubectl get pv  -n blockchain
 
 
 ```bash deploy contract
+#!!! if we deploy new contract POstId resets to 0. Remember to delete db content o change postId
+# db.events.deleteMany({})
+# db.news.deleteMany({})
+# db.validations.deleteMany({})
 #to allow access through localhost
 kubectl port-forward svc/geth-rpc-endpoint 8555:8555 -n blockchain
 
@@ -240,7 +244,7 @@ for admin users create realm role (trust-admin) ans assign
 
 ```bash apis + frontend
 
-./skaffold dev -p apis-frontend  --cache-artifacts=true --cleanup=false
+./skaffold dev -p apis-frontend  # --cache-artifacts=true --cleanup=false
 
 
 kubectl get pods -n apis

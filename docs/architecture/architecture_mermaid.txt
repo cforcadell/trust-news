@@ -1,0 +1,37 @@
+graph TD
+  subgraph Frontend
+    A[Web UI / Frontend]
+  end
+
+  subgraph API_Services
+    B[api/news-handler]
+    C[api/news-chain]
+    D[api/admin]
+    E[api/generate-asertions]
+    F[api/validate-asertions]
+    G[ipfs-fastapi]
+  end
+
+  subgraph Infrastructure
+    H[Kafka Cluster]
+    I[MongoDB]
+    J[Blockchain / Ethereum]
+  end
+
+  A -->|HTTP REST| B
+  A -->|HTTP REST| D
+  B -->|Kafka Prod: fake_news_requests_generate| E
+  B -->|Kafka Prod: fake_news_requests_ipfs| G
+  B -->|Kafka Prod: fake_news_requests_blockchain| C
+  B -->|Kafka Prod: fake_news_requests_validate| F
+  E -->|Kafka Resp: fake_news_responses| B
+  G -->|Kafka Resp: fake_news_responses| B
+  C -->|Kafka Resp: fake_news_responses| B
+  F -->|Kafka Resp: fake_news_responses| B
+  C -->|Blockchain calls| J
+  B -->|MongoDB writes/reads| I
+  D -->|MongoDB reads| I
+  D -->|Kafka consumes: fake_news_responses| H
+  B -->|Internal HTTP| G
+  B -->|Internal HTTP| C
+  B -->|Internal HTTP| D

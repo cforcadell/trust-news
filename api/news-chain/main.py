@@ -8,7 +8,7 @@ import base58
 import requests
 import ast
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ValidationError
 from dotenv import load_dotenv
@@ -34,7 +34,10 @@ from common.async_models import (
     RequestValidationPayload,
     ValidationCompletedPayload,
     RequestValidationRequest,
-    ValidationCompletedResponse
+    ValidationCompletedResponse,
+    ValidatorConfig,
+    ValidatorConfigEvent,
+    ValidatorConfigEventPayload
 )
 
 
@@ -132,6 +135,34 @@ def ipfs_get_text(cid: str) -> str:
         return None
 
 
+
+
+def ipfs_get_json(cid: str) -> Optional[dict]:
+    raw = ipfs_get_text(cid)
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        content = parsed.get("content") if isinstance(parsed, dict) else None
+        if isinstance(content, str):
+            if content.startswith("b'") or content.startswith('b"'):
+                content = ast.literal_eval(content).decode("utf-8")
+            return json.loads(content)
+        return parsed
+    except Exception as e:
+        logger.warning(f"No se pudo parsear JSON de IPFS | cid={cid}: {e}")
+        return None
+
+
+def normalize_validator_config(cid: str) -> Optional[ValidatorConfig]:
+    data = ipfs_get_json(cid)
+    if not data:
+        return None
+    try:
+        return ValidatorConfig(**data)
+    except Exception as e:
+        logger.warning(f"Config de validador no cumple modelo | cid={cid}: {e}")
+        return None
 
 def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
     class AttrDict(dict):
@@ -404,13 +435,16 @@ def get_info_by_postid(post_id: int):
                         reputation_val = v[2]
                         veredict_val = v[3]
                         cid = v[4]
+                        validator_ipfs_config = v[5] if len(v) > 5 else None
+                        validator_ipfs_hash = multihash_to_base58(validator_ipfs_config) if validator_ipfs_config else None
 
                         validation_entry = {
                             "validatorAddress": validator_addr,
                             "domain": domain_val,
                             "reputation": reputation_val,
                             "veredict": veredict_val,
-                            "cid": multihash_to_base58(cid)
+                            "cid": multihash_to_base58(cid),
+                            "validator_ipfs_hash": validator_ipfs_hash
                         }
                         validations.append(validation_entry)
 
@@ -438,6 +472,54 @@ def get_info_by_postid(post_id: int):
 
 
 
+@app.get("/blockchain/validators")
+def get_validators_with_config(recover_ipfs: bool = Query(True)):
+    """Returns validators with their ipfs_hashes and optionally recovers the IPFS config."""
+    try:
+        addresses, ipfs_configs = contract.functions.getValidatorsWithConfig().call()
+        validators = []
+        for idx, address in enumerate(addresses):
+            cid = multihash_to_base58(ipfs_configs[idx]) if idx < len(ipfs_configs) else None
+            config = normalize_validator_config(cid) if recover_ipfs and cid else None
+            validators.append({
+                "validator": safe_hex(address),
+                "ipfs_hash": cid,
+                "config": config.model_dump(mode="json") if config else None
+            })
+        return {"result": True, "validators": validators}
+    except Exception as e:
+        logger.exception(f"❌ Error al recuperar validadores: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/blockchain/validators/{validator_address}")
+def get_validator_config(validator_address: str, recover_ipfs: bool = Query(True)):
+    """Returns one validator with its ipfs_hash and optionally recovers the IPFS config."""
+    try:
+        checksum = Web3.to_checksum_address(validator_address)
+        val_info = contract.functions.validators(checksum).call()
+        exists = val_info[2] if len(val_info) > 2 else False
+        if not exists:
+            raise HTTPException(status_code=404, detail="Validator not found")
+        cid = multihash_to_base58(val_info[3]) if len(val_info) > 3 else None
+        config = normalize_validator_config(cid) if recover_ipfs and cid else None
+        return {
+            "result": True,
+            "validator": {
+                "validator": checksum,
+                "domain": val_info[0],
+                "reputation": val_info[1],
+                "ipfs_hash": cid,
+                "config": config.model_dump(mode="json") if config else None
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"❌ Error al recuperar validador {validator_address}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # =========================================================
 # AGENTE: LISTENER DE EVENTOS BLOCKCHAIN (VALIDATIONS)
@@ -453,6 +535,7 @@ async def blockchain_event_listener():
     # Pre-cargamos eventos (más eficiente)
     validation_requested_event = contract.events.ValidationRequested()
     validation_submitted_event = contract.events.ValidationSubmitted()
+    new_validator_config_event = contract.events.NewValidatorConfig()
 
     try:
         while True:
@@ -490,6 +573,34 @@ async def blockchain_event_listener():
                             # 🔥 FILTRO 2: solo logs de tu contrato
                             if log["address"].lower() != CONTRACT_ADDRESS.lower():
                                 continue
+
+                            # =================================================
+                            # NewValidatorConfig
+                            # =================================================
+                            try:
+                                ev = new_validator_config_event.process_log(log)
+                                validator = str(ev["args"]["validator"])
+                                ipfs_hash = multihash_to_base58_dict(ev["args"]["ipfsConfig"])
+                                config = normalize_validator_config(ipfs_hash)
+                                logger.info(f"📨 NewValidatorConfig | validator={validator} ipfs_hash={ipfs_hash} tx={tx_hash}")
+
+                                msg = ValidatorConfigEvent(
+                                    payload=ValidatorConfigEventPayload(
+                                        validator=validator,
+                                        ipfs_hash=ipfs_hash,
+                                        config=config,
+                                    )
+                                )
+                                await producer.send_and_wait(
+                                    KAFKA_RESPONSE_TOPIC,
+                                    msg.model_dump_json(exclude_none=True).encode(),
+                                )
+                                continue
+                            except Exception as e:
+                                if "event signature did not match" in str(e):
+                                    pass
+                                else:
+                                    logger.error(f"❌ Error procesando NewValidatorConfig: {str(e)}")
 
                             # =================================================
                             # ValidationRequested

@@ -7,6 +7,7 @@ import base58
 import time
 
 from typing import List, Tuple, Optional, Dict, Any
+from datetime import datetime, timezone
 from hexbytes import HexBytes
 
 
@@ -19,7 +20,7 @@ from abc import ABC, abstractmethod
 from common.blockchain import send_signed_tx, wait_for_receipt_blocking
 from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple
 from common.veredicto import Veredicto, Validacion
-from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash
+from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus
 from pydantic import BaseModel
 
 
@@ -72,6 +73,10 @@ VALIDATION_PROMPT = os.getenv(
     "VALIDATION_PROMPT",
     "Validame la siguiente aserción. Devuelve dos tags: 'resultado' (TRUE, FALSE o UNKNOWN) y 'descripcion'."
 )
+VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
+VALIDATOR_TYPE = int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.General_AI))))
+VALIDATOR_ACTIVE_DATE = os.getenv("VALIDATOR_ACTIVE_DATE", datetime.now(timezone.utc).isoformat())
+VALIDATOR_UPDATED_DATE = os.getenv("VALIDATOR_UPDATED_DATE", VALIDATOR_ACTIVE_DATE)
 
 # =========================================================
 # Parsear categorías
@@ -245,6 +250,69 @@ async def upload_validation_to_ipfs(validation_doc_bytes: bytes) -> str:
     response.raise_for_status()
     return response.json()["cid"]
 
+
+async def upload_json_to_ipfs(filename: str, payload: dict) -> str:
+    ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
+    content_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{ipfs_api_url}/ipfs/upload",
+            data={
+                "filename": filename,
+                "content_bytes": content_bytes
+            }
+        )
+    response.raise_for_status()
+    return response.json()["cid"]
+
+
+def cid_to_multihash_tuple(cid: str):
+    decoded = base58.b58decode(cid)
+    if len(decoded) != 34:
+        raise ValueError(f"CID inválido. Longitud inesperada: {len(decoded)} (esperado 34)")
+    hash_function = decoded[0:1]
+    hash_size = decoded[1:2]
+    digest = decoded[2:]
+    if hash_function != b"\x12":
+        raise ValueError("Solo se soporta SHA-256 (0x12)")
+    if hash_size != b"\x20":
+        raise ValueError("Solo se soporta digest de 32 bytes (0x20)")
+    if len(digest) != 32:
+        raise ValueError("Digest no es 32 bytes")
+    return (hash_function, hash_size, digest)
+
+
+def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered, end_date: Optional[str] = None, updated_date: Optional[str] = None) -> ValidatorConfig:
+    return ValidatorConfig(
+        name=VALIDATOR_NAME,
+        type=ValidatorType(VALIDATOR_TYPE),
+        provider=AI_PROVIDER,
+        model=ai_validator.model,
+        active_date=VALIDATOR_ACTIVE_DATE,
+        updated_date=updated_date or VALIDATOR_UPDATED_DATE,
+        end_date=end_date,
+        status=status,
+    )
+
+
+async def upload_validator_config(status: ValidatorStatus = ValidatorStatus.Registered, end_date: Optional[str] = None, updated_date: Optional[str] = None) -> str:
+    config = build_validator_config(status=status, end_date=end_date, updated_date=updated_date)
+    return await upload_json_to_ipfs(f"validator-config-{ACCOUNT_ADDRESS}.json", config.model_dump(mode="json"))
+
+
+def validator_config_ipfs_hash_from_chain() -> Optional[str]:
+    try:
+        val_info = contract.functions.validators(ACCOUNT_ADDRESS).call()
+        if not val_info:
+            return None
+        ipfs_config = val_info[3] if len(val_info) > 3 else None
+        if not ipfs_config:
+            return None
+        return multihash_to_base58_dict(ipfs_config)
+    except Exception as e:
+        logger.warning(f"No se pudo leer ipfsConfig del validador en blockchain: {e}")
+        return None
+
 async def registrar_validacion_internal(
     postId: Any,
     assertion_id: Any,
@@ -358,19 +426,19 @@ def consultar_tx_status_internal(tx_hash: str) -> Dict[str, Any]:
 # =========================================================
 # Registrar validador (espera confirmación)
 # =========================================================
-def registrar_validador_blockchain(name: str, categories: List[int]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+def registrar_validador_blockchain(name: str, categories: List[int], ipfs_config_hash: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
     Registra validador y espera minado.
     Devuelve (tx_hash, receipt_dict) o (None, None) en error.
     Bloqueante: usar asyncio.to_thread en el event loop.
     """
     try:
-        logger.info(f"Inicio registrar_validador_blockchain -> name: {name}, categories: {categories}")
+        logger.info(f"Inicio registrar_validador_blockchain -> name: {name}, categories: {categories}, ipfs_config_hash: {ipfs_config_hash}")
 
 
 
         # Preparar llamada al contrato
-        fn = contract.functions.registerValidator(name, categories)
+        fn = contract.functions.registerValidator(name, categories, cid_to_multihash_tuple(ipfs_config_hash))
 
         # Enviar transacción
         tx_hash = send_signed_tx(w3,fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
@@ -384,6 +452,29 @@ def registrar_validador_blockchain(name: str, categories: List[int]) -> Tuple[Op
 
     except Exception as e:
         logger.exception(f"Error al registrar validador en blockchain: {e}")
+        return None, None
+
+
+
+# =========================================================
+# Actualizar configuración validador (espera confirmación)
+# =========================================================
+def update_validator_config_blockchain(ipfs_config_hash: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Actualiza el ipfs-config-hash del validador y espera minado.
+    Devuelve (tx_hash, receipt_dict) o (None, None) en error.
+    Bloqueante: usar asyncio.to_thread en el event loop.
+    """
+    try:
+        logger.info(f"Inicio update_validator_config_blockchain -> ipfs_config_hash: {ipfs_config_hash}")
+        fn = contract.functions.updateValidatorConfig(cid_to_multihash_tuple(ipfs_config_hash))
+        tx_hash = send_signed_tx(w3, fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
+        logger.info(f"Transacción enviada: {tx_hash}")
+        receipt = wait_for_receipt_blocking(w3, tx_hash)
+        logger.info(f"Receipt recibido: {receipt}")
+        return tx_hash, receipt
+    except Exception as e:
+        logger.exception(f"Error al actualizar configuración del validador en blockchain: {e}")
         return None, None
 
 
@@ -438,10 +529,11 @@ async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
     """Registra validador (usa VALIDATOR_CATEGORIES si no se pasan). Espera minado."""
     categorias = input.categories if input.categories is not None else VALIDATOR_CATEGORIES
     try:
-        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, input.name, categorias or [])
+        ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered)
+        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, input.name, categorias or [], ipfs_config_hash)
         if tx_hash is None:
             raise HTTPException(status_code=500, detail="Error registrando validador.")
-        return {"status": "ok", "tx_hash": tx_hash, "receipt": receipt}
+        return {"status": "ok", "tx_hash": tx_hash, "ipfs_config_hash": ipfs_config_hash, "receipt": receipt}
     except Exception as e:
         logger.exception(f"endpoint_registrar_validador error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -451,10 +543,15 @@ async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
 async def endpoint_desregistrar_validador():
     """Desregistra validador. Espera minado."""
     try:
+        end_date = datetime.now(timezone.utc).isoformat()
+        ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Unregistered, end_date=end_date, updated_date=end_date)
+        tx_update, receipt_update = await asyncio.to_thread(update_validator_config_blockchain, ipfs_config_hash)
+        if tx_update is None:
+            raise HTTPException(status_code=500, detail="Error actualizando configuración de baja del validador.")
         tx_hash, receipt = await asyncio.to_thread(desregistrar_validador_blockchain)
         if tx_hash is None:
             raise HTTPException(status_code=500, detail="Error desregistrando validador.")
-        return {"status": "ok", "tx_hash": tx_hash, "receipt": receipt}
+        return {"status": "ok", "update_tx_hash": tx_update, "unregister_tx_hash": tx_hash, "ipfs_config_hash": ipfs_config_hash, "receipt": receipt}
     except Exception as e:
         logger.exception(f"endpoint_desregistrar_validador error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -506,30 +603,25 @@ async def update_admin_config(config: AdminConfigUpdate):
 
     # 2. Gestión de Categorías y Blockchain
     blockchain_receipts = {}
-    
-    if config.categories is not None and config.categories != VALIDATOR_CATEGORIES:
-        logger.info(f"🔄 Cambio de categorías detectado: {VALIDATOR_CATEGORIES} -> {config.categories}. Iniciando re-registro...")
-        
-        # Paso A: Desregistrar el actual
-        tx_unreg, receipt_unreg = await asyncio.to_thread(desregistrar_validador_blockchain)
-        if not tx_unreg:
-            raise HTTPException(status_code=500, detail="Error desregistrando el validador actual en la blockchain.")
-        
-        blockchain_receipts["unregister_tx"] = tx_unreg
 
-        # Paso B: Registrar con las nuevas categorías
-        val_name = f"default-{ACCOUNT_ADDRESS}"  # Mantenemos el estándar de tu startup
-        tx_reg, receipt_reg = await asyncio.to_thread(registrar_validador_blockchain, val_name, config.categories)
-        if not tx_reg:
-            # ¡Ojo! Quedaría desregistrado. Lo ideal sería un rollback, pero asumiendo
-            # un entorno simple, lanzamos la excepción para alertar.
-            raise HTTPException(status_code=500, detail="Error registrando el validador con las nuevas categorías.")
-        
-        blockchain_receipts["register_tx"] = tx_reg
-        
-        # Paso C: Actualizar la variable global si todo fue exitoso
+    if config.categories is not None and config.categories != VALIDATOR_CATEGORIES:
+        logger.info(f"🔄 Cambio de categorías detectado: {VALIDATOR_CATEGORIES} -> {config.categories}. Se actualizará la configuración IPFS en blockchain.")
         VALIDATOR_CATEGORIES = config.categories
-        logger.info(f"✅ Categorías actualizadas en blockchain y memoria: {VALIDATOR_CATEGORIES}")
+
+    if config.provider or config.model or config.categories is not None:
+        updated_date = datetime.now(timezone.utc).isoformat()
+        ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered, updated_date=updated_date)
+        current_ipfs_hash = validator_config_ipfs_hash_from_chain()
+
+        if current_ipfs_hash != ipfs_config_hash:
+            tx_update, receipt_update = await asyncio.to_thread(update_validator_config_blockchain, ipfs_config_hash)
+            if not tx_update:
+                raise HTTPException(status_code=500, detail="Error actualizando ipfs-config-hash del validador en blockchain.")
+            blockchain_receipts["update_config_tx"] = tx_update
+            blockchain_receipts["ipfs_config_hash"] = ipfs_config_hash
+        else:
+            blockchain_receipts["ipfs_config_hash"] = ipfs_config_hash
+            logger.info("✅ Configuración IPFS ya registrada en blockchain; no se actualiza.")
 
     return {
         "status": "ok",
@@ -656,9 +748,14 @@ async def startup_event():
         # Comprobar registro existente (si la llamada falla, procedemos a registrar)
         try:
             val_info = contract.functions.validators(ACCOUNT_ADDRESS).call()
-            already = val_info[0] if isinstance(val_info, (list, tuple)) and len(val_info) > 0 else None
-            if already and str(already) != "0x0000000000000000000000000000000000000000":
+            already = val_info[2] if isinstance(val_info, (list, tuple)) and len(val_info) > 2 else False
+            if already:
                 logger.info("Validador ya registrado en blockchain.")
+                ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered)
+                current_ipfs_hash = validator_config_ipfs_hash_from_chain()
+                if current_ipfs_hash != ipfs_config_hash:
+                    logger.info(f"ipfs-config-hash distinto en blockchain: {current_ipfs_hash} -> {ipfs_config_hash}. Actualizando...")
+                    await asyncio.to_thread(update_validator_config_blockchain, ipfs_config_hash)
                 return
         except Exception as e:
             logger.warning(f"No se pudo comprobar validador (se intentará registrar): {e}")
@@ -669,7 +766,8 @@ async def startup_event():
             f"Cuenta: {ACCOUNT_ADDRESS}, Categorías: {VALIDATOR_CATEGORIES or []} (esperando minado)..."
         )
         # Usar 'default-' como nombre si es el registro automático
-        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, f"default-{ACCOUNT_ADDRESS}", VALIDATOR_CATEGORIES or [])
+        ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered)
+        tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, VALIDATOR_NAME, VALIDATOR_CATEGORIES or [], ipfs_config_hash)
         if tx_hash:
             logger.info(f"Validador registrado en startup: {tx_hash}")
         else:

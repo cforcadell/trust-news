@@ -23,21 +23,6 @@ async function main() {
   console.log("📚 Categorías creadas");
 
   // ===============================
-  // VALIDATORS
-  // ===============================
-  await (await trustNews.connect(validator1).registerValidator(
-    "factcheck.org",
-    [1]
-  )).wait();
-
-  await (await trustNews.connect(validator2).registerValidator(
-    "truth.net",
-    [2]
-  )).wait();
-
-  console.log("🧾 Validadores registrados");
-
-  // ===============================
   // MULTIHASH HELPER
   // ===============================
   const mkMultihash = (text) => ({
@@ -45,6 +30,153 @@ async function main() {
     hash_size: "0x20",
     digest: ethers.keccak256(ethers.toUtf8Bytes(text))
   });
+
+  // ===============================
+  // VALIDATOR CONFIG HELPER
+  // ===============================
+  const mkValidatorConfig = ({
+    name,
+    type,
+    provider,
+    model,
+    active_date,
+    updated_date,
+    end_date = "",
+    status
+  }) => JSON.stringify({
+    name,
+    type,
+    provider,
+    model,
+    active_date,
+    updated_date,
+    end_date,
+    status
+  });
+
+  const mkConfigMultihash = (configJson) => ({
+    hash_function: "0x12",
+    hash_size: "0x20",
+    digest: ethers.keccak256(ethers.toUtf8Bytes(configJson))
+  });
+
+  // ===============================
+  // VALIDATORS
+  // ===============================
+  const now = new Date().toISOString();
+
+  const validator1ConfigJson = mkValidatorConfig({
+    name: "factcheck.org",
+    type: 1, // General_AI
+    provider: "mistral",
+    model: "mistral-small-latest",
+    active_date: now,
+    updated_date: now,
+    status: 1 // Registered
+  });
+
+  const validator2ConfigJson = mkValidatorConfig({
+    name: "truth.net",
+    type: 3, // Dedicated_Agent
+    provider: "openrouter",
+    model: "meta-llama/llama-3.1-8b-instruct",
+    active_date: now,
+    updated_date: now,
+    status: 1 // Registered
+  });
+
+  const validator1IpfsConfig = mkConfigMultihash(validator1ConfigJson);
+  const validator2IpfsConfig = mkConfigMultihash(validator2ConfigJson);
+
+  const txReg1 = await trustNews.connect(validator1).registerValidator(
+    "factcheck.org",
+    [1],
+    validator1IpfsConfig
+  );
+  const receiptReg1 = await txReg1.wait();
+
+  const txReg2 = await trustNews.connect(validator2).registerValidator(
+    "truth.net",
+    [2],
+    validator2IpfsConfig
+  );
+  const receiptReg2 = await txReg2.wait();
+
+  console.log("🧾 Validadores registrados");
+
+  // ===============================
+  // READ NewValidatorConfig EVENTS
+  // ===============================
+  const readNewValidatorConfig = (receipt) =>
+    receipt.logs
+      .map(log => {
+        try { return trustNews.interface.parseLog(log); }
+        catch { return null; }
+      })
+      .filter(e => e?.name === "NewValidatorConfig");
+
+  console.log("\n🧩 NewValidatorConfig events:");
+
+  [...readNewValidatorConfig(receiptReg1),
+   ...readNewValidatorConfig(receiptReg2)
+  ].forEach(e => {
+    console.log(
+      ` ➤ Validator ${e.args.validator} | ` +
+      `Digest ${e.args.ipfsConfig.digest}`
+    );
+  });
+
+  // ===============================
+  // UPDATE VALIDATOR CONFIG
+  // ===============================
+  const updatedAt = new Date().toISOString();
+
+  const validator1UpdatedConfigJson = mkValidatorConfig({
+    name: "factcheck.org",
+    type: 1, // General_AI
+    provider: "mistral",
+    model: "mistral-large-latest",
+    active_date: now,
+    updated_date: updatedAt,
+    status: 1 // Registered
+  });
+
+  const validator1UpdatedIpfsConfig = mkConfigMultihash(validator1UpdatedConfigJson);
+
+  const txUpdateConfig = await trustNews.connect(validator1).updateValidatorConfig(
+    validator1UpdatedIpfsConfig
+  );
+  const receiptUpdateConfig = await txUpdateConfig.wait();
+
+  console.log("🔄 Configuración de validator1 actualizada");
+
+  console.log("\n🧩 NewValidatorConfig update event:");
+
+  readNewValidatorConfig(receiptUpdateConfig).forEach(e => {
+    console.log(
+      ` ➤ Validator ${e.args.validator} | ` +
+      `Digest ${e.args.ipfsConfig.digest}`
+    );
+  });
+
+  // ===============================
+  // READ VALIDATORS WITH CONFIG
+  // ===============================
+  const [validatorAddresses, ipfsConfigs] = await trustNews.getValidatorsWithConfig();
+
+  console.log("\n👥 Validadores con configuración IPFS:");
+
+  for (let i = 0; i < validatorAddresses.length; i++) {
+    const addr = validatorAddresses[i];
+    const validator = await trustNews.validators(addr);
+
+    console.log(`\n🔹 Validator #${i}`);
+    console.log(" Address:", addr);
+    console.log(" Domain:", validator.domain);
+    console.log(" Reputation:", validator.reputation.toString());
+    console.log(" Exists:", validator.exists);
+    console.log(" Config digest:", ipfsConfigs[i].digest);
+  }
 
   // ===============================
   // REGISTER NEW POST
@@ -150,12 +282,48 @@ async function main() {
       console.log("   Reputation:", v.reputation.toString());
       console.log("   Veredict:", v.veredict);
       console.log("   Digest:", v.document.digest);
+
+      if (v.validatorIpfsConfig) {
+        console.log("   Validator config digest:", v.validatorIpfsConfig.digest);
+      }
     }
   }
 
   // ===============================
   // UNREGISTER
   // ===============================
+  const endDate = new Date().toISOString();
+
+  const validator1UnregisteredConfigJson = mkValidatorConfig({
+    name: "factcheck.org",
+    type: 1,
+    provider: "mistral",
+    model: "mistral-large-latest",
+    active_date: now,
+    updated_date: endDate,
+    end_date: endDate,
+    status: 2 // Unregistered
+  });
+
+  const validator2UnregisteredConfigJson = mkValidatorConfig({
+    name: "truth.net",
+    type: 3,
+    provider: "openrouter",
+    model: "meta-llama/llama-3.1-8b-instruct",
+    active_date: now,
+    updated_date: endDate,
+    end_date: endDate,
+    status: 2 // Unregistered
+  });
+
+  await (await trustNews.connect(validator1).updateValidatorConfig(
+    mkConfigMultihash(validator1UnregisteredConfigJson)
+  )).wait();
+
+  await (await trustNews.connect(validator2).updateValidatorConfig(
+    mkConfigMultihash(validator2UnregisteredConfigJson)
+  )).wait();
+
   await (await trustNews.connect(validator1).unregisterValidator()).wait();
   await (await trustNews.connect(validator2).unregisterValidator()).wait();
 

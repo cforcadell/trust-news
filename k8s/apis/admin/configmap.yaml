@@ -5,9 +5,9 @@ metadata:
   namespace: apis
 data:
   # URLs de los Microservicios
-  MONGO_DBNAME :  "tfm"
-  ORDERS_COLLECTION_NAME : "orders"
-  QUOTAS_COLLECTION_NAME : "clients_quotas"
+  MONGO_DBNAME: "newsdb"
+  ORDERS_COLLECTION: "news"
+  QUOTAS_COLLECTION_NAME: "clients_quotas"
 
-  KAFKA_BROKER : "kafka.infra.svc.cluster.local:9092"
-  TOPIC_RESPONSES : "fake_news_responses"
+  KAFKA_BROKER: "kafka.infra.svc.cluster.local:9092"
+  TOPIC_RESPONSES: "fake_news_responses"

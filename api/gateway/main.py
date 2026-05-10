@@ -259,6 +259,59 @@ async def proxy_get_blockchain_post(post_id: int, request: Request):
     # Se redirige al microservicio que maneja la lógica de web3 (news-chain)
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/blockchain/post/{post_id}")
 
+
+# ============================================================
+# Validators cache endpoints
+# ============================================================
+@router.get("/validators/cache", tags=["Validators"])
+async def proxy_list_validators_cache(
+    request: Request,
+    recover_ipfs: bool = Query(False),
+    auth_payload: dict = Depends(get_current_user)
+):
+    """
+    Enruta la petición para listar validadores cacheados, protegida por JWT.
+    """
+    target_url = f"{NEWS_HANDLER_URL}/validators/cache?recover_ipfs={str(recover_ipfs).lower()}"
+    return await proxy_request(request, target_url)
+
+@router.get("/validators/cache/{validator_hash}", tags=["Validators"])
+async def proxy_get_validator_cache(
+    validator_hash: str,
+    request: Request,
+    auth_payload: dict = Depends(get_current_user)
+):
+    """
+    Enruta la petición para recuperar el detalle de configuración de un validador cacheado.
+    """
+    target_url = f"{NEWS_HANDLER_URL}/validators/cache/{validator_hash}"
+    return await proxy_request(request, target_url)
+
+@router.get("/validators/cache/{validator_hash}/validations", tags=["Validators"])
+async def proxy_get_validator_cache_validations(
+    validator_hash: str,
+    request: Request,
+    include_validations: bool = Query(False),
+    include_order_link: bool = Query(False),
+    provider: str = Query(None),
+    model: str = Query(None),
+    auth_payload: dict = Depends(get_current_user)
+):
+    """
+    Enruta la petición para recuperar las validaciones asociadas a un validador cacheado.
+    """
+    query_params = [
+        f"include_validations={str(include_validations).lower()}",
+        f"include_order_link={str(include_order_link).lower()}"
+    ]
+    if provider:
+        query_params.append(f"provider={provider}")
+    if model:
+        query_params.append(f"model={model}")
+
+    target_url = f"{NEWS_HANDLER_URL}/validators/cache/{validator_hash}/validations?{'&'.join(query_params)}"
+    return await proxy_request(request, target_url)
+
 @router.get("/orders/{order_id}", tags=["Orders"])
 async def proxy_get_order(order_id: str, request: Request, auth_payload: dict = Depends(get_current_user)):
     client_id = get_computed_client_id(auth_payload)

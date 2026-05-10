@@ -21,13 +21,15 @@ Develop v0.0.9 Rate Limit RELEASED
 - autofilter client_id in gateway for all orders endpoints OK
 - check autofilter for FE. Restrict order visibility OK
 
-
-Develop v0.0.10. Validators Config and Reputation
+Develop v0.0.9.1
 - Really decrement quotas on usage. news handler on getting events and generating assertions
+
+Develop v0.0.10. Validators Config and new FE style
+
 - validators config in chain
     - Blockchain: new ipfs-config in contract.
         - update registrattion config to write ipfs-config-hash -> event new_validator_config.
-        - new update registration function to write ipfs-config-hash  -> event new_validator_config
+        - new update-config function to write ipfs-config-hash  -> event new_validator_config, Change what is necessary in the registration process of the validatot
         - json { name: str,
                  type: enum (1: "General_AI,", 2: "Trained_IA",3:"Dedicated_Agent",4:"Human") 
                  , provider: str,
@@ -49,19 +51,84 @@ Develop v0.0.10. Validators Config and Reputation
         - On startup asks news validators function (news-chain) and cache validators
         - listen event new_validator_config and update cache.
         - on getting new validation assertion record into mongodb validator config (it can change) related to the validation event. 
-        - new list validators cache endpoint.
-        - new get validator cache endpoint .
-    - Gateway:
+        - new list validators cache endpoint that gets blockchain validators and  revovers ipfs data
+        - new get validator with validations cache endpoint (same behaviour of last endpoint). We want to filter by validator hash, provider, model. Optional parameters (default no) that allows to recover validations made with link to order_id
+        
+    - Gateway (add token security to new endpoints as existing endpoints):
         - route new list validators cache endpoint.
         - route new get validator cache endpoint .
+        - route new get validator with validations 
 
     - FE: 
-        - Let click on validator to see his config
-        - new validators menu to get them with detailed view on click.
+        - Let click on validator hash  to see his config
+        - new validators item on main menu to list them on a table  with detailed view on click.
+        - For each validator, button to see validations made (show order_id and link to the order) keeping the format of the validations tree in detailed order
     - Pydantic models:
-        - Adapt models
-    
-- Reputation policy
+        - Adapt models (every pydntic model must be declared in common module )
+
+Prompt:
+Act as an expert editor. Analyze the content I will provide below and apply the requested improvements under a strict constraint: you must keep the original structure, tone, and key fragments of the text/code intact. Do not rewrite from scratch. Only intervene where it is strictly necessary for the improvement, respecting 100% of the logic and the content that already works. If a part does not need changes to meet the objective, leave it exactly as it is. Do not change variable names or function architecture, and do not remove existing comments. Focus exclusively on what is requested without altering the rest of the functional logic -->
+- validators config in chain
+
+    - Blockchain: new ipfs-config in contract.
+        - Update registration config to write ipfs-config-hash -> event new_validator_config.
+        - New update-config function to write ipfs-config-hash -> event new_validator_config.
+        - Change what is necessary in the registration process of the validator.
+        - json {
+              name: str,
+              type: enum (
+                  1: "General_AI",
+                  2: "Trained_AI",
+                  3: "Dedicated_Agent",
+                  4: "Human"
+              ),
+              provider: str,
+              model: str,
+              active_date: date,
+              updated_date: date,
+              end_date: date,
+              status: enum (
+                  1: "Registered",
+                  2: "Unregistered",
+                  3: "Banned"
+              )
+          }
+        - New validators function: returns validators with their ipfs_hashes.
+
+    - validate-assertions:
+        - Call update-config smart contract function on startup if the ipfs-hash config differs from the one registered in blockchain, even if the validator is already registered.
+        - For non-registered validators, add hash-ipfs config logic in register.
+        - Call update-config smart contract function on configuration change (@app.put("/admin/config", tags=["Admin"])).
+        - Call update-config smart contract function on deregistration endpoint call. Write end_date.
+
+    - news_chain:
+        - Recovers validators functions as new endpoints.
+        - Listen new_validator_config and convert it to Kafka event by reading IPFS data.
+
+    - news_handler: Validators cache    
+        - On startup, asks news validators function (news-chain) and caches validators.
+        - Listen event new_validator_config and update cache.
+        - On getting new validation assertion, record into MongoDB the validator config related to the validation event, because it can change.
+        - New list validators cache endpoint that gets blockchain validators and recovers IPFS data.
+        - New get validator with validations cache endpoint, with the same behaviour as the last endpoint.
+        - We want to filter by validator hash, provider, model.
+        - Optional parameters, disabled by default, allow recovering validations made with link to order_id.
+
+    - Gateway (add token security to new endpoints as existing endpoints):
+        - Route new list validators cache endpoint.
+        - Route new get validator cache endpoint.
+        - Route new get validator with validations endpoint.
+
+    - FE: 
+        - Let user click on validator hash to see its config.
+        - New validators item on main menu to list them in a table with detailed view on click.
+        - For each validator, add button to see validations made, showing order_id and link to the order, keeping the format of the validations tree in detailed order.
+
+    - Pydantic models:
+        - Adapt models.
+        - Every Pydantic model must be declared in the common module.
+
+Develop v0.0.11.   Reputation policy
     - consulta de reputaciones. Consulta de nombre, tipo y reputacion
     - gestión de reputaciones fuera de la cadena. 
         AI defecto reputacion media
@@ -69,15 +136,15 @@ Develop v0.0.10. Validators Config and Reputation
         individuales minima o custom
 - estado validated --> dejar en pending y solo cerrar si todas validadas o al cabo de x tiempo
 
-Develop v0.0.10.
+Develop v0.0.12.
 - Afinar prompts 
 - afinar determinismo
 - cambio de modelo en generate assertions ¿?
 
-Develop v0.0.11.
+Develop v0.0.13.
 - integracion con llm dedicado de categoria concreta
 
-Develop v0.0.12.
+Develop v0.0.14.
 - loki persistente
 - Hardering frontend
 - restylish frontend

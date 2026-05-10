@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional, Dict, Any
+from enum import IntEnum
 from common.veredicto import Validacion
 
 
@@ -70,6 +71,59 @@ class ValidatorRegistrationInput(BaseModel):
 class AsyncMessage(BaseModel):
     action: str
     order_id: str
+
+
+
+# ============================================================
+# 🔹 VALIDATOR CONFIG MODELS
+# ============================================================
+class ValidatorType(IntEnum):
+    General_AI = 1
+    Trained_AI = 2
+    Dedicated_Agent = 3
+    Human = 4
+
+
+class ValidatorStatus(IntEnum):
+    Registered = 1
+    Unregistered = 2
+    Banned = 3
+
+
+class ValidatorConfig(BaseModel):
+    name: str
+    type: ValidatorType = ValidatorType.General_AI
+    provider: str
+    model: str
+    active_date: str
+    updated_date: str
+    end_date: Optional[str] = None
+    status: ValidatorStatus = ValidatorStatus.Registered
+
+
+class ValidatorConfigOnChain(BaseModel):
+    validator: str
+    ipfs_hash: str
+    config: Optional[ValidatorConfig] = None
+
+
+class ValidatorConfigEventPayload(BaseModel):
+    validator: str
+    ipfs_hash: str
+    config: Optional[ValidatorConfig] = None
+
+
+class ValidatorConfigEvent(BaseModel):
+    action: str = "new_validator_config"
+    order_id: str = ""
+    payload: ValidatorConfigEventPayload
+
+
+class ValidatorWithValidationsResponse(BaseModel):
+    validator: str
+    ipfs_hash: Optional[str] = None
+    config: Optional[ValidatorConfig] = None
+    validations: List[Dict[str, Any]] = Field(default_factory=list)
 
 # ============================================================
 # 🔹 GENERATE ASSERTIONS
@@ -214,7 +268,7 @@ class ValidationCompletedPayload(BaseModel):
 
 class ValidationCompletedResponse(BaseModel):
     action: str = "validation_completed"
-    order_id: str
+    order_id: str = ""  # Optional - news-chain may not have order_id, only postId
     payload: ValidationCompletedPayload
 
 

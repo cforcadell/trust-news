@@ -57,8 +57,8 @@ class ClientUpdate(BaseModel):
 # Configuración
 # =========================================================
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017")
-MONGO_DBNAME = os.getenv("MONGO_DBNAME", "tfm")
-ORDERS_COLLECTION_NAME = os.getenv("ORDERS_COLLECTION", "orders")
+MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
+ORDERS_COLLECTION_NAME = os.getenv("ORDERS_COLLECTION", "news")
 QUOTAS_COLLECTION_NAME = os.getenv("QUOTAS_COLLECTION", "clients_quotas")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
@@ -93,19 +93,33 @@ async def resolve_client_id(order_id: str = None, post_id: str = None) -> str:
     """
     Busca el client_id en la colección de órdenes (orders).
     Prioriza la búsqueda por order_id. Si no, usa postId.
+    Intenta múltiples formatos de postId (string, int).
     """
     if not order_id and not post_id:
         return None
 
-    if order_id:
+    if order_id and order_id.strip():  # Order ID has value
         doc = await orders_collection.find_one({"order_id": order_id}, {"client_id": 1})
         if doc and "client_id" in doc:
             return doc["client_id"]
 
     if post_id:
-        doc = await orders_collection.find_one({"postId": str(post_id)}, {"client_id": 1})
-        if doc and "client_id" in doc:
-            return doc["client_id"]
+        post_id_str = str(post_id).strip()
+        if not post_id_str:
+            return None
+
+        queries = [
+            {"postId": post_id_str},
+        ]
+
+        if post_id_str.isdigit():
+            queries.append({"postId": int(post_id_str)})
+
+        for query in queries:
+            doc = await orders_collection.find_one(query, {"client_id": 1})
+            if doc and "client_id" in doc:
+                logger.debug(f"✅ Resolved client_id from postId={post_id_str} using query {query}")
+                return doc["client_id"]
 
     return None
 
@@ -180,7 +194,18 @@ async def process_quota_event(data: dict):
         client_id = await resolve_client_id(order_id=order_id, post_id=post_id)
 
         if not client_id:
-            logger.warning(f"⚠️ Event '{action}' discarded. No client_id found in DB for OrderID={order_id} / PostID={post_id}.")
+            # Debug: Try to find what documents exist in the orders collection
+            if post_id:
+                existing_doc = await orders_collection.find_one(
+                    {"postId": {"$exists": True}},
+                    {"order_id": 1, "postId": 1, "client_id": 1},
+                    skip=0
+                )
+                debug_info = f" (Sample order found: postId={existing_doc.get('postId') if existing_doc else 'N/A'}, type={type(existing_doc.get('postId')) if existing_doc else 'N/A'})"
+            else:
+                debug_info = ""
+            
+            logger.warning(f"⚠️ Event '{action}' discarded. No client_id found in DB for OrderID={order_id} / PostID={post_id}.{debug_info}")
             return
 
         # 5. Ejecutar cobro

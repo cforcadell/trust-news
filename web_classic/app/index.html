@@ -38,6 +38,7 @@
                 <button class="nav-btn" onclick="showSection('tx')"><span>↗</span>Buscar Transacciones</button>
                 <button class="nav-btn" onclick="showSection('blocks')"><span>◫</span>Buscar Bloques</button>
                 <button class="nav-btn" onclick="showSection('contract')"><span>⌘</span>Buscar Post (Contract)</button>
+                <button class="nav-btn" onclick="showSection('validators')"><span>◇</span>Validadores</button>
             </div>
         </div>
     </nav>
@@ -172,13 +173,30 @@
             <div class="table-shell"><table id="blockTable"></table></div>
         </section>
 
+
+
+        <section id="validators" class="card page-card compact-tool">
+            <div class="page-head compact-head">
+                <div>
+                    <span class="section-kicker">Validators</span>
+                    <h2>Validadores</h2>
+                    <p>Listado de validadores registrados en blockchain con configuración IPFS y detalle de validaciones.</p>
+                </div>
+                <div class="toolbar">
+                    <button id="btn-listValidators" class="btn-secondary">Refrescar Validadores</button>
+                </div>
+            </div>
+            <div id="validatorsTableContainer" class="table-shell"></div>
+            <div id="validatorDetailContainer" class="details-shell dynamic-content"></div>
+        </section>
+
         <section id="contract" class="card page-card compact-tool">
             <div class="page-head compact-head"><div><span class="section-kicker">Smart Contract</span><h2>Smart Contract (Post)</h2></div></div>
             <div class="input-group search-row">
                 <input type="text" id="postId" placeholder="Introduce post Id">
                 <button id="btn-findPost" class="btn-primary">Buscar Post</button>
             </div>
-            <div class="table-shell"><table id="postTable"></table></div>
+            <div class="table-shell"><div id="postTable"></div></div>
         </section>
     </div>
 </main>

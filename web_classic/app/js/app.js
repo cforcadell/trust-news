@@ -182,6 +182,10 @@ function showSection(sectionId, reset = true) {
         if (sectionId === "orders") {
             listOrders();
         }
+
+        if (sectionId === "validators") {
+            listValidatorsCache();
+        }
 }
 
 
@@ -606,7 +610,10 @@ function renderTabContent(tabName, data, assertions=[]) {
     
     switch(tabName) {
         case "Documento": 
-            container.innerHTML = `<pre class="event-payload-pre">${JSON.stringify(data,null,2)}</pre>`; 
+            container.innerHTML = `
+                <div class="json-box-header">Documento JSON</div>
+                <div class="json-tree">${renderJsonTree(data)}</div>
+            `;
             break;
         case "Validations": 
             renderValidationsTree(container, data, assertions); 
@@ -628,7 +635,17 @@ function renderTabContent(tabName, data, assertions=[]) {
 // RENDER DETALLES Y RESUMEN
 // =========================================================
 
-function renderProcessingFlow(currentStatus, validatorsPending = 0) {
+function getExpectedValidationCount(data) {
+    if (Array.isArray(data.validators)) {
+        return data.validators.reduce((sum, validator) => {
+            const list = validator?.validatorAddresses;
+            return sum + (Array.isArray(list) ? list.length : 0);
+        }, 0);
+    }
+    return 0;
+}
+
+function renderProcessingFlow(currentStatus, validatorsPending = 0, totalValidations = 0) {
     const steps = [
         "PENDING",
         "ASSERTIONS_REQUESTED",
@@ -641,8 +658,10 @@ function renderProcessingFlow(currentStatus, validatorsPending = 0) {
     ];
 
     const currentIndex = steps.indexOf(currentStatus);
-
     const isValidated = currentStatus === "VALIDATED";
+    const validationLabel = totalValidations > 0
+        ? `${validatorsPending}/${totalValidations}`
+        : validatorsPending > 0 ? `${validatorsPending}` : "";
 
     return `
         <div class="process-flow">
@@ -650,12 +669,10 @@ function renderProcessingFlow(currentStatus, validatorsPending = 0) {
                 let cls = "process-step";
                 let label = "";
 
-                // Si es el penúltimo → mostrar número
                 if (step === "VALIDATION_PENDING") {
-                    label = validatorsPending > 0 ? validatorsPending : "";
+                    label = validationLabel;
                 }
 
-                // Caso especial final → todo verde sin animación
                 if (isValidated) {
                     cls += " done";
                 } else {
@@ -698,15 +715,30 @@ function renderDetails(container, data) {
     let percentTrue=0;
     let percentFalse=0;
     
+    const totalValidationRequests = Object.values(data.validation_requests || {}).reduce((sum, items) => {
+        return sum + (Array.isArray(items) ? items.length : 0);
+    }, 0);
+
+    const expectedValidations = getExpectedValidationCount(data);
+    const completedValidations = Object.values(data.validations || {}).reduce((sum, validators) => {
+        return sum + (validators && typeof validators === 'object' ? Object.keys(validators).length : 0);
+    }, 0);
+    const totalValidations = expectedValidations || Math.max(totalValidationRequests, completedValidations + (data.validators_pending || 0), 0);
+    const pendingValidations = Number(data.validators_pending || 0);
+    const progressPercent = totalValidations > 0 ? Math.round(((totalValidations - pendingValidations) / totalValidations) * 100) : 0;
+
+    const formatDetailValue = value => {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "object") return `<pre class="event-payload-pre mt-0">${JSON.stringify(value, null, 2)}</pre>`;
+        return safeText(value);
+    };
+
     // **********************************
     // ** CORRECCIÓN DE PORCENTAJES **
     // **********************************
-    // FIX 1: La variable knownAssertions se redefine como el total de aserciones resueltas (2 + 1 = 3),
-    // para evitar que el cálculo se bloquee (anteriormente daba 0).
     const knownAssertions = trueAssertions + falseAssertions; 
     
     if (knownAssertions !== 0) {
-        // FIX 2: Se usa knownAssertions como denominador para el porcentaje de aserciones resueltas.
         percentTrue = (trueAssertions / knownAssertions) * 100; 
         percentFalse = (falseAssertions / knownAssertions) * 100;
     } 
@@ -736,30 +768,45 @@ function renderDetails(container, data) {
     }
 
     // --- Contenido de las subpestañas
+    const validationRequestCount = Object.values(data.validation_requests || {}).reduce((sum, items) => {
+        return sum + (Array.isArray(items) ? items.length : 0);
+    }, 0);
+
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
-              .filter(([k, v]) => k !== "_id" && k !== "document" && k !== "assertions" && k !== "validations" && k !== "validators" && k !== "text" && k !== "status" && k !== "validators_pending")
+              .filter(([k, v]) => k !== "_id" && k !== "document" && k !== "assertions" && k !== "text" && k !== "status" && k !== "validators_pending" && k !== "validation_requests")
               .map(([k, v]) => {
                   if (k === "text" && typeof v === "object" && v?.text) v = v.text;
 
-                  // Hacer tx_hash clicable
                   if (k === "tx_hash" && v) {
-                      const safeHash = v.replace(/'/g, "\\'");
-                      v = `<a href="#" onclick="event.preventDefault(); navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a>`;
+                      const safeHash = String(v).replace(/'/g, "\\'");
+                      return `<tr><th>${safeText(k)}</th><td><a href="#" onclick="event.preventDefault(); navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a></td></tr>`;
                   }
-                  if (k === "postId" && v) { 
-                      v = `<a href="#" onclick="event.preventDefault(); navigateToPost('${v}'); return false;">${v}</a>`;
+                  if (k === "postId" && v) {
+                      const safeId = String(v).replace(/'/g, "\\'");
+                      return `<tr><th>${safeText(k)}</th><td><a href="#" onclick="event.preventDefault(); navigateToPost('${safeId}'); return false;">${safeText(v)}</a></td></tr>`;
                   }
-                  if (k === "order_id" && v) {                       
-                      v = `<a href="#" onclick="event.preventDefault(); navigateToConsistency('${v}'); return false;">${v}</a>`;
-                      return `<tr><th>Validar vs blockchain</th><td>${v || ''}</td></tr>`;
+                  if (k === "order_id" && v) {
+                      const safeOrder = String(v).replace(/'/g, "\\'");
+                      return `<tr><th>Validar vs blockchain</th><td><a href="#" onclick="event.preventDefault(); navigateToConsistency('${safeOrder}'); return false;">${safeText(v)}</a></td></tr>`;
                   }
                   if (k === "cid" && v) {
-                      v = `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${v}'); return false;">${v}</a>`;
+                      const safeCid = String(v).replace(/'/g, "\\'");
+                      return `<tr><th>${safeText(k)}</th><td><a href="#" onclick="event.preventDefault(); navigateToIpfs('${safeCid}'); return false;">${safeText(v)}</a></td></tr>`;
                   }
 
+                  if (k === "validators" || k === "validations") {
+                      const preview = renderJsonTree(v, k);
+                      return `<tr><th>${safeText(k)}</th><td>${preview}</td></tr>`;
+                  }
 
-                  return `<tr><th>${k}</th><td>${v || ''}</td></tr>`;
+                  if (typeof v === "object") {
+                      v = formatDetailValue(v);
+                  } else {
+                      v = safeText(v);
+                  }
+
+                  return `<tr><th>${safeText(k)}</th><td>${v || ''}</td></tr>`;
               }).join('') +
         `</table>`;
 
@@ -770,11 +817,19 @@ function renderDetails(container, data) {
             <th>Estado de Procesamiento</th>
             <td>
                 ${data.status || "N/A"}
-                ${renderProcessingFlow(data.status || "PENDING", data.validators_pending || 0)}
+                ${renderProcessingFlow(data.status || "PENDING", pendingValidations, totalValidations)}
             </td>
         </tr>
         <tr><th>Noticia (Resumen)</th><td>${data.text || "N/A"}</td></tr>
-        <tr><th>Validators Pendientes</th><td>${data.validators_pending ?? 0}</td></tr>
+        <tr><th>Validaciones pendientes</th><td>
+            <div class="validation-progress">
+                <span>${pendingValidations} pendientes / ${totalValidations} totales</span>
+                <div class="validation-progress-bar">
+                    <div class="validation-progress-fill" style="width:${progressPercent}%;"></div>
+                </div>
+            </div>
+        </td></tr>
+        <tr><th>Validaciones solicitadas</th><td>${totalValidationRequests}</td></tr>
         <tr><th>Aserciones Ciertas</th><td class="true-news"> ${trueAssertions} (${percentTrue.toFixed(1)}%)</td></tr>
         <tr><th>Aserciones Falsas</th><td class="false-news"> ${falseAssertions} (${percentFalse.toFixed(1)}%)</td></tr>
         <tr><th>Validaciones Desconocidas</th><td class="unknown"> ${unknownCount}</td></tr>
@@ -1160,10 +1215,34 @@ async function findIpfs() {
 
         alertMessage("Contenido recuperado.", "primary");
 
+        const rawContent = typeof data.content === "string" ? data.content.trim() : data.content;
+        const normalizedContent = typeof rawContent === "string" && /^b['"]/.test(rawContent)
+            ? rawContent.slice(2, -1)
+            : rawContent;
+
+        const parsedContent = (() => {
+            try {
+                return JSON.parse(normalizedContent);
+            } catch {
+                return normalizedContent;
+            }
+        })();
+
         const box = document.createElement("div");
         box.id = "ipfsContentBox";
         box.className = "post-box dynamic-content";
-        box.innerHTML = `<pre class="event-payload-pre">${escapeHTML(data.content)}</pre>`;
+
+        if (typeof parsedContent === "string") {
+            box.innerHTML = `
+                <div class="json-box-header">Contenido IPFS</div>
+                <pre class="event-payload-pre json-highlight">${escapeHTML(parsedContent)}</pre>
+            `;
+        } else {
+            box.innerHTML = `
+                <div class="json-box-header">Contenido IPFS</div>
+                <div class="json-tree">${renderJsonTree(parsedContent)}</div>
+            `;
+        }
 
         const activeSection = table.closest("section"); // ✅ sección contenedora
         activeSection.appendChild(box); // ✅ dentro de la sección
@@ -1477,24 +1556,20 @@ function renderPost(post) {
     const rows = [
         ["postId", post.postId],
         ["publisher", post.publisher],
-        ["document", post.cid]
-    ];
+        ["document", post.document || post.cid],
+        ["hash_new", post.hash_new]
+    ].filter(([, value]) => value !== undefined && value !== null);
 
     postTable.innerHTML = `
         <tr><th>Campo</th><th>Valor</th></tr>
         ${rows.map(([k, v]) => {
-
-            // Si es CID, lo convertimos en enlace
             if (k === "document" && v) {
-                v = `<a href="#" 
-                        onclick="event.preventDefault(); navigateToIpfs('${v}'); return false;">
-                        ${v}
-                    </a>`;
+                v = `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${String(v).replace(/'/g, "\\'")}'); return false;">${safeText(v)}</a>`;
             }
 
             return `
                 <tr>
-                    <th>${k}</th>
+                    <th>${safeText(k)}</th>
                     <td>${v ?? ""}</td>
                 </tr>
             `;
@@ -1578,13 +1653,6 @@ function renderPost(post) {
             assertionBox.appendChild(content);
             container.appendChild(assertionBox);
         });
-    }
-
-    // Reemplaza contenido
-    const postTableContainer = document.getElementById("postTable");
-    if (postTableContainer) {
-        postTableContainer.innerHTML = "";
-        postTableContainer.appendChild(container);
     }
 
     return container;
@@ -1840,6 +1908,70 @@ function safeText(value) {
     return escapeHTML(String(value));
 }
 
+function syntaxHighlightJson(json) {
+    let str = typeof json === "string" ? json : JSON.stringify(json, null, 2);
+    try {
+        if (typeof json !== "string") {
+            str = JSON.stringify(json, null, 2);
+        } else {
+            const parsed = JSON.parse(json);
+            str = JSON.stringify(parsed, null, 2);
+        }
+    } catch {
+        str = String(json);
+    }
+
+    str = escapeHTML(str);
+    return str.replace(/("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, match => {
+        let cls = "json-number";
+        if (/^\".*\"\s*:$/.test(match)) {
+            cls = "json-key";
+        } else if (/^\"/.test(match)) {
+            cls = "json-string";
+        } else if (/true|false/.test(match)) {
+            cls = "json-boolean";
+        } else if (/null/.test(match)) {
+            cls = "json-null";
+        }
+        return `<span class="${cls}">${match}</span>`;
+    });
+}
+
+function renderJsonTree(value, key = null) {
+    if (value === null || value === undefined) {
+        const label = key ? `<span class="json-node-key">${escapeHTML(key)}:</span> ` : "";
+        return `<div class="json-node"><span class="json-node-key">${label}</span><span class="json-null">null</span></div>`;
+    }
+
+    if (Array.isArray(value)) {
+        const items = value.map(item => renderJsonTree(item)).join("");
+        return `
+            <details class="json-details" open>
+                <summary><span class="json-node-key">${key ? escapeHTML(key) : "Array"}</span> <span class="json-value">[Array, ${value.length}]</span></summary>
+                <div class="json-children">${items}</div>
+            </details>
+        `;
+    }
+
+    if (typeof value === "object") {
+        const entries = Object.entries(value).map(([k, v]) => renderJsonTree(v, k)).join("");
+        return `
+            <details class="json-details" open>
+                <summary><span class="json-node-key">${key ? escapeHTML(key) : "Object"}</span> <span class="json-value">{Object}</span></summary>
+                <div class="json-children">${entries}</div>
+            </details>
+        `;
+    }
+
+    let content = escapeHTML(String(value));
+    let cls = "json-string";
+    if (typeof value === "number") cls = "json-number";
+    else if (typeof value === "boolean") cls = "json-boolean";
+    else if (value === null) cls = "json-null";
+    const label = key ? `<span class="json-node-key">${escapeHTML(key)}:</span> ` : "";
+    return `<div class="json-node">${label}<span class="${cls}">${content}</span></div>`;
+}
+
 function statusClass(status) {
     const normalized = String(status || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_");
     if (normalized.includes("validated")) return "status-validated";
@@ -2007,7 +2139,7 @@ function renderValidationsTree(container, validations, assertions) {
             const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
             return `
                 <div class="validator-card">
-                    <div class="validator-name">${safeText(info.validator_alias || validator)}</div>
+                    <div class="validator-name"><a href="#" onclick="event.preventDefault(); showValidatorDetail('${String(validator).replace(/'/g, "\'")}')">${safeText(info.validator_alias || validator)}</a></div>
                     <div class="validator-result ${litClass}">${lit}</div>
                     <div class="validator-desc">${safeText(desc)}</div>
                     <div class="validator-tx">${tx}</div>
@@ -2016,7 +2148,7 @@ function renderValidationsTree(container, validations, assertions) {
         }).join("");
 
         html += `
-            <details class="validation-node" ${status === "true" ? "open" : ""}>
+            <details class="validation-node">
                 <summary class="validation-summary">
                     <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}</div>
                     <div class="vote-pills">
@@ -2036,6 +2168,157 @@ function renderValidationsTree(container, validations, assertions) {
     container.innerHTML = html;
 }
 
+
+
+// =========================================================
+// VALIDATORS CACHE
+// =========================================================
+async function listValidatorsCache() {
+    const container = document.getElementById("validatorsTableContainer");
+    const detail = document.getElementById("validatorDetailContainer");
+    if (!container) return;
+
+    container.innerHTML = "<p class='empty-state'>Cargando validadores...</p>";
+    if (detail) detail.innerHTML = "";
+
+    try {
+        const response = await fetchWithAuth(`${API}/validators/cache?recover_ipfs=true`);
+        if (!response.ok) throw new Error(`Error API: ${response.status}`);
+        const data = await response.json();
+        const validators = data.validators || [];
+
+        if (!validators.length) {
+            container.innerHTML = "<p class='empty-state'>No hay validadores registrados.</p>";
+            return;
+        }
+
+        container.innerHTML = `
+            <table class="compact-table visual-orders-table">
+                <thead>
+                    <tr>
+                        <th>Validator Hash</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Provider</th>
+                        <th>Model</th>
+                        <th>Status</th>
+                        <th>IPFS Config</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${validators.map(v => {
+                        const cfg = v.config || {};
+                        const validator = v.validator || "";
+                        return `
+                            <tr>
+                                <td><a href="#" onclick="event.preventDefault(); showValidatorDetail('${String(validator).replace(/'/g, "\\'")}')">${shortValue(validator, 18)}</a></td>
+                                <td>${safeText(cfg.name || "-")}</td>
+                                <td>${safeText(cfg.type || "-")}</td>
+                                <td>${safeText(cfg.provider || "-")}</td>
+                                <td>${safeText(cfg.model || "-")}</td>
+                                <td>${safeText(cfg.status || "-")}</td>
+                                <td>${v.ipfs_hash ? `<a href="#" onclick="event.preventDefault(); showSection('ipfs', false); document.getElementById('ipfsHash').value='${safeText(v.ipfs_hash)}'; findIpfs();">${shortValue(v.ipfs_hash, 18)}</a>` : "-"}</td>
+                                <td><button class="btn-secondary btn-small" onclick="showValidatorValidations('${String(validator).replace(/'/g, "\\'")}')">Ver validaciones</button></td>
+                            </tr>
+                        `;
+                    }).join("")}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        console.error("Error cargando validadores:", error);
+        container.innerHTML = "<p class='empty-state'>Error cargando validadores.</p>";
+        alertMessage("Error al cargar validadores", "error");
+    }
+}
+
+async function showValidatorDetail(validatorHash) {
+    const detail = document.getElementById("validatorDetailContainer");
+    if (!detail) return;
+    detail.innerHTML = "<p class='empty-state'>Cargando configuración...</p>";
+    showSection('validators', false);
+
+    try {
+        const response = await fetchWithAuth(`${API}/validators/cache/${encodeURIComponent(validatorHash)}`);
+        if (!response.ok) throw new Error(`Error API: ${response.status}`);
+        const data = await response.json();
+        const cfg = data.config || {};
+        detail.innerHTML = `
+            <div class="validator-detail-card">
+                <h3>Configuración del validador</h3>
+                <table class="compact-table">
+                    <tbody>
+                        <tr><th>Validator Hash</th><td>${safeText(data.validator || validatorHash)}</td></tr>
+                        <tr><th>IPFS Config</th><td>${safeText(data.ipfs_hash || "-")}</td></tr>
+                        <tr><th>Name</th><td>${safeText(cfg.name || "-")}</td></tr>
+                        <tr><th>Type</th><td>${safeText(cfg.type || "-")}</td></tr>
+                        <tr><th>Provider</th><td>${safeText(cfg.provider || "-")}</td></tr>
+                        <tr><th>Model</th><td>${safeText(cfg.model || "-")}</td></tr>
+                        <tr><th>Active Date</th><td>${safeText(cfg.active_date || "-")}</td></tr>
+                        <tr><th>Updated Date</th><td>${safeText(cfg.updated_date || "-")}</td></tr>
+                        <tr><th>End Date</th><td>${safeText(cfg.end_date || "-")}</td></tr>
+                        <tr><th>Status</th><td>${safeText(cfg.status || "-")}</td></tr>
+                    </tbody>
+                </table>
+                <button class="btn-secondary" onclick="showValidatorValidations('${String(validatorHash).replace(/'/g, "\\'")}')">Ver validaciones realizadas</button>
+            </div>
+        `;
+    } catch (error) {
+        console.error("Error cargando detalle de validador:", error);
+        detail.innerHTML = "<p class='empty-state'>Error cargando configuración del validador.</p>";
+    }
+}
+
+async function showValidatorValidations(validatorHash) {
+    const detail = document.getElementById("validatorDetailContainer");
+    if (!detail) return;
+    detail.innerHTML = "<p class='empty-state'>Cargando validaciones...</p>";
+    showSection('validators', false);
+
+    try {
+        const response = await fetchWithAuth(`${API}/validators/cache/${encodeURIComponent(validatorHash)}/validations?include_validations=true&include_order_link=true`);
+        if (!response.ok) throw new Error(`Error API: ${response.status}`);
+        const data = await response.json();
+        const validations = data.validations || [];
+
+        const grouped = {};
+        validations.forEach(v => {
+            const assertionId = String(v.idAssertion || "-");
+            if (!grouped[assertionId]) grouped[assertionId] = {};
+            grouped[assertionId][validatorHash] = {
+                approval: v.approval,
+                text: v.payload?.text || v.payload?.descripcion || v.text || "",
+                tx_hash: v.tx_hash,
+                validator_alias: data.config?.name || validatorHash,
+                order_id: v.order_id
+            };
+        });
+
+        detail.innerHTML = `
+            <div class="validator-detail-card">
+                <h3>Validaciones realizadas</h3>
+                <p class="text-muted">Validator: ${safeText(validatorHash)}</p>
+                ${validations.length ? `<div id="validatorValidationsTree"></div>` : "<p class='empty-state'>No hay validaciones para este validador.</p>"}
+            </div>
+        `;
+
+        if (validations.length) {
+            const tree = document.getElementById("validatorValidationsTree");
+            renderValidationsTree(tree, grouped, []);
+            tree.querySelectorAll(".validator-card").forEach((card, index) => {
+                const orderId = validations[index]?.order_id;
+                if (orderId) {
+                    card.insertAdjacentHTML("beforeend", `<div class="validator-tx">Order: <a href="#" onclick="event.preventDefault(); document.getElementById('orderId').value='${String(orderId).replace(/'/g, "\\'")}'; showSection('order'); loadOrderById('${String(orderId).replace(/'/g, "\\'" )}', true);">${safeText(orderId)}</a></div>`);
+                }
+            });
+        }
+    } catch (error) {
+        console.error("Error cargando validaciones del validador:", error);
+        detail.innerHTML = "<p class='empty-state'>Error cargando validaciones del validador.</p>";
+    }
+}
+
 // Refuerzo visual de detalles: mantener la tabla original, pero más integrada y compacta.
 const __tnOriginalInitializeApp = initializeApp;
 initializeApp = function initializeAppUXIntegrated() {
@@ -2050,6 +2333,12 @@ initializeApp = function initializeAppUXIntegrated() {
     const badge = document.getElementById("sessionBadge");
     if (badge && keycloak?.tokenParsed?.preferred_username) {
         badge.textContent = `● Sesión protegida · ${keycloak.tokenParsed.preferred_username}`;
+    }
+
+    const validatorsBtn = document.getElementById("btn-listValidators");
+    if (validatorsBtn && !validatorsBtn.dataset.bound) {
+        validatorsBtn.dataset.bound = "true";
+        validatorsBtn.addEventListener("click", () => listValidatorsCache());
     }
 
     const chk = document.getElementById("chk-viewAll");

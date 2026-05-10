@@ -43,7 +43,10 @@ from common.async_models import (
     ExtractTextRequest,
     PreGeneratedAssertion,
     PublishWithAssertionsRequest,
-    PublishRequest
+    PublishRequest,
+    ValidatorConfigEvent,
+    ValidatorConfig,
+    ValidatorWithValidationsResponse
 )
 
 # =========================================================
@@ -90,6 +93,7 @@ consumer: Optional[AIOKafkaConsumer] = None
 mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 orders_collection = None
+validators_cache = {}
 order_locks = {}
 
 
@@ -141,6 +145,41 @@ async def get_order_doc(order_id: str) -> Optional[dict]:
 async def get_order_id_by_post_id(post_id: str) -> Optional[str]:
     doc = await orders_collection.find_one({"postId": post_id})
     return doc["order_id"] if doc else None
+
+
+async def load_validators_cache_from_chain():
+    """On startup asks news-chain validators function and cache validators."""
+    global validators_cache
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(f"{NEWS_CHAIN_URL}/blockchain/validators", params={"recover_ipfs": True})
+            resp.raise_for_status()
+            data = resp.json()
+        validators = data.get("validators", [])
+        validators_cache = {str(v.get("validator", "")).lower(): v for v in validators if v.get("validator")}
+        logger.info(f"✅ Validators cache loaded from news-chain: {len(validators_cache)} validators")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load validators cache from news-chain: {e}")
+
+
+def update_validator_cache_from_event(payload: dict):
+    """Listen event new_validator_config and update cache."""
+    global validators_cache
+    validator = str(payload.get("validator", ""))
+    if not validator:
+        return
+    validators_cache[validator.lower()] = {
+        "validator": validator,
+        "ipfs_hash": payload.get("ipfs_hash"),
+        "config": payload.get("config")
+    }
+    logger.info(f"✅ Validators cache updated for {validator}")
+
+
+def get_cached_validator_config(validator: str) -> Optional[dict]:
+    if not validator:
+        return None
+    return validators_cache.get(str(validator).lower())
 # ===========================
 # Helpers para hashes
 # ===========================
@@ -264,7 +303,8 @@ ACTION_TO_MODEL_RESPONSE = {
     "ipfs_uploaded": IpfsUploadedResponse,
     "blockchain_registered": BlockchainRegisteredResponse,
     "validation_completed": ValidationCompletedResponse,
-    "request_validation": RequestValidationRequest
+    "request_validation": RequestValidationRequest,
+    "new_validator_config": ValidatorConfigEvent
 }
 
 async def process_kafka_message(data: dict):
@@ -278,6 +318,12 @@ async def process_kafka_message(data: dict):
         if not action :
             logger.warning("⚠️ Mensaje Kafka sin 'action' ")
             return
+        if action == "new_validator_config":
+            payload = data.get("payload", {}) if isinstance(data.get("payload"), dict) else {}
+            update_validator_cache_from_event(payload)
+            await log_event("validator-config", action, TOPIC_RESPONSES, payload)
+            return
+
 
         # ============================================================
         # 🔁 Resolver order_id a partir de postId si no viene informado
@@ -445,10 +491,15 @@ async def process_kafka_message(data: dict):
         # ================================================================
         elif action == "blockchain_registered":
             payload = parsed.payload.model_dump()
-            postId = payload.get("postId")
+            raw_post_id = payload.get("postId")
+            postId = str(raw_post_id).strip() if raw_post_id is not None else None
             tx_hash = payload.get("tx_hash")
             hash_text = payload.get("hash_text")
             assertions_payload = payload.get("assertions", [])
+
+            if not postId:
+                logger.error(f"[{order_id}] ❌ blockchain_registered payload missing postId, aborting update.")
+                return
 
             if not assertions_payload:
                 logger.warning(f"[{order_id}] ⚠️ blockchain_registered sin assertions, abortando.")
@@ -649,18 +700,21 @@ async def process_kafka_message(data: dict):
                     except Exception as e:
                         logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
 
+                validator_config_snapshot = get_cached_validator_config(id_val)
+
                 validations[id_assert][id_val] = {
                     "approval": status_val,
                     "text": assertion_text,
                     "tx_hash": tx_hash,
-                    "validator_alias": validator_alias
+                    "validator_alias": validator_alias,
+                    "validator_config": validator_config_snapshot
                 }
 
                 await update_order(order_id, {"$set": {"validations": validations}})
                 logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
 
                 # Registrar validación en colección 'validations'
-                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, payload)
+                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, {**payload, "validator_config": validator_config_snapshot})
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
@@ -1276,6 +1330,71 @@ async def list_news(
 
     return news_list
 
+
+@app.get("/validators/cache")
+async def list_validators_cache(
+    recover_ipfs: bool = Query(True, description="Refresh from blockchain/news-chain before returning cache")
+):
+    """New list validators cache endpoint that gets blockchain validators and recovers IPFS data."""
+    if recover_ipfs:
+        await load_validators_cache_from_chain()
+    return {"validators": list(validators_cache.values())}
+
+
+@app.get("/validators/cache/{validator_hash}")
+async def get_validator_cache(validator_hash: str):
+    validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        await load_validators_cache_from_chain()
+        validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        raise HTTPException(status_code=404, detail="Validator not found in cache")
+    return validator
+
+
+@app.get("/validators/cache/{validator_hash}/validations")
+async def get_validator_with_validations_cache(
+    validator_hash: str,
+    provider: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    include_validations: bool = Query(False, description="Optional parameter, default no, to recover validations made"),
+    include_order_link: bool = Query(False, description="Optional parameter, default no, to include order_id link information"),
+    client_id: Optional[str] = Query(None, description="ID del cliente"),
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        await load_validators_cache_from_chain()
+        validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        raise HTTPException(status_code=404, detail="Validator not found in cache")
+
+    config = validator.get("config") or {}
+    if provider and str(config.get("provider", "")).lower() != provider.lower():
+        raise HTTPException(status_code=404, detail="Validator provider does not match filter")
+    if model and str(config.get("model", "")).lower() != model.lower():
+        raise HTTPException(status_code=404, detail="Validator model does not match filter")
+
+    validations = []
+    if include_validations:
+        query = {"idValidator": validator_hash}
+        if not admin and client_id:
+            allowed_orders = await orders_collection.distinct("order_id", {"client_id": client_id})
+            query["order_id"] = {"$in": allowed_orders}
+        cursor = db["validations"].find(query, {"_id": 0}).sort("timestamp", -1)
+        validations = await cursor.to_list(length=1000)
+        if include_order_link:
+            for item in validations:
+                item["order_link"] = f"/orders/{item.get('order_id')}" if item.get("order_id") else None
+
+    return {
+        "validator": validator_hash,
+        "ipfs_hash": validator.get("ipfs_hash"),
+        "config": config,
+        "validations": validations,
+    }
+
+
 @app.post("/find-order-by-text")
 async def find_order_by_text(request: PublishRequest):
     global orders_collection
@@ -1432,7 +1551,7 @@ async def check_order_consistency(
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
-    global producer, consumer, mongo_client, db, orders_collection
+    global producer, consumer, mongo_client, db, orders_collection, validators_cache
 
     # MongoDB
     mongo_client = AsyncIOMotorClient(MONGO_URI)
@@ -1445,9 +1564,13 @@ async def startup_event():
         await db["events"].create_index([("order_id", 1)])
         await db["events"].create_index([("action", 1)])
         await db["validations"].create_index([("order_id", 1)])
+        await db["validations"].create_index([("idValidator", 1)])
+        await db["validations"].create_index([("idValidator", 1), ("order_id", 1)])
         logger.info("MongoDB indexes for events and validations ensured")
     except Exception as e:
         logger.warning(f"Could not create indexes: {e}")
+
+    await load_validators_cache_from_chain()
 
     # Kafka producer
     producer = AIOKafkaProducer(

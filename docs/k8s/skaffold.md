@@ -309,6 +309,25 @@ kubectl get secrets -n apis
 kubectl get secret news-handler-secrets -n apis -o jsonpath='{.data}'
 echo "x" | base64 --decode
 
+```
+
+
+```bash  get secret details 
+
 kubectl exec -it mongodb-0 -n infra -- mongo -u root -p cforcadellm --authenticationDatabase admin
 
+> show collections
+events
+news
+validations
+> db.news.countDocuments({})
+8
+> db.news.deleteMany({})
+{ "acknowledged" : true, "deletedCount" : 8 }
+> db.news.countDocuments({})
+0
+> db.events.deleteMany({})
+{ "acknowledged" : true, "deletedCount" : 99 }
+> db.validations.deleteMany({})
+{ "acknowledged" : true, "deletedCount" : 22 }
 ```

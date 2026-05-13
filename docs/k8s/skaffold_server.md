@@ -191,16 +191,18 @@ kubectl delete pvc mongodb-storage-mongodb-0 -n infra
 
 ```bash tunnel vmlinux home-> apis c
 #ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
-#in hetzner (scripts/port-forward.sh)
+
+#in hetzner (~/trust-news/scripts/port-forward.sh)
 kubectl port-forward service/frontend-service -n frontend 10443:443
 
-#~/blockchain/hetzner/keys-github (dev)
+# in local vm machine ~/blockchain/hetzner/keys-github (dev)
 ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57
 
 
 https://localhost:9443/
 
 https://localhost:9443/backend/docs
+
 
 ```
 

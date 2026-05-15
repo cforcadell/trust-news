@@ -4,12 +4,14 @@ import json
 import asyncio
 from datetime import datetime, timezone
 from enum import Enum
+from decimal import Decimal, InvalidOperation
 from fastapi import FastAPI, HTTPException, Query
+import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiokafka import AIOKafkaConsumer
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 # =========================================================
 # Importación de Modelos de Mensajes
@@ -53,6 +55,37 @@ class ClientUpdate(BaseModel):
     status: Optional[ClientStatus] = None
     deactivate_date: Optional[datetime] = None
 
+class OpenRouterPrice(BaseModel):
+    prompt_per_token_usd: str
+    completion_per_token_usd: str
+    prompt_per_million_usd: float
+    completion_per_million_usd: float
+
+class OpenRouterValidatorEnv(BaseModel):
+    AI_PROVIDER: str = "openrouter"
+    MODEL: str
+    API_URL: str = "https://openrouter.ai/api/v1/chat/completions"
+
+class OpenRouterModelRecommendation(BaseModel):
+    rank: int
+    model: str
+    name: str
+    quality_score: float
+    value_score: float
+    price: OpenRouterPrice
+    estimated_validation_cost_usd: float
+    context_length: Optional[int] = None
+    max_completion_tokens: Optional[int] = None
+    env: OpenRouterValidatorEnv
+    reason: str
+
+class OpenRouterRecommendationsResponse(BaseModel):
+    generated_at: datetime
+    source_url: str
+    pricing_note: str
+    estimation_note: str
+    recommendations: List[OpenRouterModelRecommendation]
+
 # =========================================================
 # Configuración
 # =========================================================
@@ -63,6 +96,14 @@ QUOTAS_COLLECTION_NAME = os.getenv("QUOTAS_COLLECTION", "clients_quotas")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
+
+OPENROUTER_MODELS_URL = os.getenv("OPENROUTER_MODELS_URL", "https://openrouter.ai/api/v1/models")
+OPENROUTER_CHAT_COMPLETIONS_URL = os.getenv(
+    "OPENROUTER_CHAT_COMPLETIONS_URL",
+    "https://openrouter.ai/api/v1/chat/completions"
+)
+OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL")
+OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "TrustNews Admin")
 
 # Mapeo de acciones cobrables y sus modelos
 ACTION_TO_QUOTA_MODEL = {
@@ -141,6 +182,123 @@ async def record_consumption(client_id: str, service_type: str, cost: int = 1):
         logger.info(f"💰 Quota updated | Client: {client_id} | Service: {service_type} | +{cost}")
     except Exception as e:
         logger.error(f"❌ Error updating quota for {client_id}: {e}")
+
+
+# =========================================================
+# OpenRouter helpers
+# =========================================================
+def decimal_or_none(value: Any) -> Optional[Decimal]:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+def price_per_million(price_per_token: Decimal) -> float:
+    return float(price_per_token * Decimal("1000000"))
+
+def quality_score_for_model(model_id: str, name: str) -> float:
+    """
+    Estimación heurística de calidad: OpenRouter expone precios/capacidad, pero no
+    un benchmark único comparable en /models. Priorizamos familias fuertes y
+    modelos habitualmente buenos para clasificación/validación de texto.
+    """
+    text = f"{model_id} {name}".lower()
+    score = 50.0
+
+    quality_terms = {
+        "gpt-5": 98,
+        "claude-4": 97,
+        "gemini-2.5-pro": 96,
+        "gpt-4.1": 92,
+        "claude-3.5": 90,
+        "claude-3-5": 90,
+        "gemini-2.5-flash": 88,
+        "deepseek-r1": 87,
+        "deepseek-v3": 86,
+        "qwen3": 84,
+        "llama-4": 84,
+        "gpt-4o-mini": 82,
+        "haiku": 82,
+        "mistral": 78,
+        "nova": 76,
+        "llama-3": 74,
+    }
+
+    for term, term_score in quality_terms.items():
+        if term in text:
+            score = max(score, float(term_score))
+
+    if "free" in text:
+        score -= 4
+    if "preview" in text or "experimental" in text or "beta" in text:
+        score -= 3
+
+    return max(1.0, min(score, 100.0))
+
+def model_reason(model_id: str, prompt_per_m: float, completion_per_m: float, quality_score: float) -> str:
+    if prompt_per_m == 0 and completion_per_m == 0:
+        return "Muy buen candidato para pruebas y validaciones de bajo coste; revisa límites/rate limits de modelos gratuitos."
+    if quality_score >= 90:
+        return "Alta calidad esperada manteniendo un coste razonable para validación de aserciones."
+    if prompt_per_m <= 0.5 and completion_per_m <= 2:
+        return "Coste bajo por token y calidad suficiente para clasificación TRUE/FALSE/UNKNOWN."
+    return "Buen equilibrio entre coste, contexto disponible y calidad estimada."
+
+def build_openrouter_recommendation(model: Dict[str, Any], rank: int) -> Optional[OpenRouterModelRecommendation]:
+    pricing = model.get("pricing") or {}
+    prompt_price = decimal_or_none(pricing.get("prompt"))
+    completion_price = decimal_or_none(pricing.get("completion"))
+
+    if prompt_price is None or completion_price is None:
+        return None
+    if prompt_price < 0 or completion_price < 0:
+        return None
+
+    model_id = model.get("id")
+    if not model_id:
+        return None
+
+    name = model.get("name") or model_id
+    quality_score = quality_score_for_model(model_id, name)
+    prompt_per_m = price_per_million(prompt_price)
+    completion_per_m = price_per_million(completion_price)
+
+    estimated_cost = float((prompt_price * Decimal("1000")) + (completion_price * Decimal("250")))
+    weighted_price_per_m = float((prompt_price * Decimal("0.75") + completion_price * Decimal("0.25")) * Decimal("1000000"))
+    value_score = quality_score / max(weighted_price_per_m, 0.05)
+
+    return OpenRouterModelRecommendation(
+        rank=rank,
+        model=model_id,
+        name=name,
+        quality_score=round(quality_score, 2),
+        value_score=round(value_score, 4),
+        price=OpenRouterPrice(
+            prompt_per_token_usd=str(prompt_price),
+            completion_per_token_usd=str(completion_price),
+            prompt_per_million_usd=round(prompt_per_m, 6),
+            completion_per_million_usd=round(completion_per_m, 6),
+        ),
+        estimated_validation_cost_usd=round(estimated_cost, 8),
+        context_length=model.get("context_length"),
+        max_completion_tokens=model.get("top_provider", {}).get("max_completion_tokens") or model.get("max_completion_tokens"),
+        env=OpenRouterValidatorEnv(
+            MODEL=model_id,
+            API_URL=OPENROUTER_CHAT_COMPLETIONS_URL,
+        ),
+        reason=model_reason(model_id, prompt_per_m, completion_per_m, quality_score),
+    )
+
+def is_text_generation_model(model: Dict[str, Any]) -> bool:
+    architecture = model.get("architecture") or {}
+    input_modalities = architecture.get("input_modalities") or []
+    output_modalities = architecture.get("output_modalities") or []
+
+    if input_modalities and "text" not in input_modalities:
+        return False
+    if output_modalities and "text" not in output_modalities:
+        return False
+    return True
 
 
 # =========================================================
@@ -251,6 +409,80 @@ async def consume_responses_for_quotas():
 # =========================================================
 # Endpoints REST
 # =========================================================
+@app.get("/ai/openrouter/recommendations", response_model=OpenRouterRecommendationsResponse)
+async def get_openrouter_model_recommendations(
+    limit: int = Query(8, ge=1, le=30, description="Número de modelos recomendados a devolver"),
+    include_free: bool = Query(True, description="Incluir modelos gratuitos en la recomendación"),
+    min_quality_score: float = Query(70, ge=1, le=100, description="Calidad mínima estimada por heurística interna"),
+):
+    """
+    Devuelve modelos de OpenRouter ordenados por relación calidad/precio.
+    La configuración está lista para validate-asertions: AI_PROVIDER=openrouter y MODEL=<id>.
+    """
+    headers = {"Accept": "application/json"}
+    if OPENROUTER_SITE_URL:
+        headers["HTTP-Referer"] = OPENROUTER_SITE_URL
+    if OPENROUTER_APP_TITLE:
+        headers["X-Title"] = OPENROUTER_APP_TITLE
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(OPENROUTER_MODELS_URL, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"OpenRouter devolvió un error al listar modelos: {e.response.text}"
+        )
+    except Exception as e:
+        logger.exception(f"❌ Error connecting to OpenRouter models API: {e}")
+        raise HTTPException(status_code=502, detail=f"No se pudo conectar a OpenRouter: {e}")
+
+    raw_models = payload.get("data")
+    if not isinstance(raw_models, list):
+        raise HTTPException(status_code=502, detail="Respuesta inesperada de OpenRouter: falta data[].")
+
+    recommendations = []
+    for raw_model in raw_models:
+        if not isinstance(raw_model, dict) or not is_text_generation_model(raw_model):
+            continue
+
+        recommendation = build_openrouter_recommendation(raw_model, rank=0)
+        if not recommendation:
+            continue
+        if not include_free and (
+            recommendation.price.prompt_per_million_usd == 0
+            and recommendation.price.completion_per_million_usd == 0
+        ):
+            continue
+        if recommendation.quality_score < min_quality_score:
+            continue
+
+        recommendations.append(recommendation)
+
+    recommendations.sort(
+        key=lambda item: (
+            item.value_score,
+            item.quality_score,
+            item.context_length or 0,
+        ),
+        reverse=True,
+    )
+
+    selected = recommendations[:limit]
+    for index, recommendation in enumerate(selected, start=1):
+        recommendation.rank = index
+
+    return OpenRouterRecommendationsResponse(
+        generated_at=datetime.now(timezone.utc),
+        source_url=OPENROUTER_MODELS_URL,
+        pricing_note="OpenRouter publica pricing.prompt y pricing.completion como USD por token; aquí también se muestra USD por millón de tokens.",
+        estimation_note="estimated_validation_cost_usd asume una validación típica de 1000 tokens de entrada y 250 de salida.",
+        recommendations=selected,
+    )
+
+
 @app.post("/clients", response_model=dict, status_code=201)
 async def create_client(client: ClientCreate):
     existing = await quotas_collection.find_one({"client_id": client.client_id})

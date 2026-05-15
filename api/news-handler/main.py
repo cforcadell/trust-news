@@ -220,6 +220,30 @@ async def enrich_validator_for_ui(validator: dict) -> dict:
     enriched["stats"] = await get_validator_stats(validator_hash)
     enriched.setdefault("categories", [])
     return enriched
+
+
+def validator_summary_for_ui(validator: dict) -> dict:
+    summary = dict(validator)
+    summary.setdefault("categories", [])
+    summary.pop("stats", None)
+    return summary
+
+
+def attach_validator_config_snapshots(order: dict) -> dict:
+    validations = order.get("validations") or {}
+    if not isinstance(validations, dict):
+        return order
+
+    for validators_by_assertion in validations.values():
+        if not isinstance(validators_by_assertion, dict):
+            continue
+        for validator_hash, validation in validators_by_assertion.items():
+            if not isinstance(validation, dict) or validation.get("validator_config"):
+                continue
+            validator_config = get_cached_validator_config(validator_hash)
+            if validator_config:
+                validation["validator_config"] = validator_summary_for_ui(validator_config)
+    return order
 # ===========================
 # Helpers para hashes
 # ===========================
@@ -1339,6 +1363,7 @@ async def get_order(
         order["created"] = "Format Error"
 
     order["_id"] = str(order_object_id)
+    attach_validator_config_snapshots(order)
     return order
 
 @app.get("/news/{order_id}/events", response_model=List[EventModel])
@@ -1401,7 +1426,7 @@ async def list_validators_cache(
     """New list validators cache endpoint that gets blockchain validators and recovers IPFS data."""
     if recover_ipfs:
         await load_validators_cache_from_chain()
-    validators = [await enrich_validator_for_ui(v) for v in validators_cache.values()]
+    validators = [validator_summary_for_ui(v) for v in validators_cache.values()]
     return {"validators": validators}
 
 

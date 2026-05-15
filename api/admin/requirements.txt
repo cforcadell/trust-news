@@ -4,3 +4,4 @@ motor
 aiokafka
 loguru
 pydantic
+httpx

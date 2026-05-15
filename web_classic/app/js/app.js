@@ -2174,6 +2174,14 @@ function renderTableData(container, data) {
 }
 
 // Árbol de validaciones más visual, con cards por validador y votos coloreados.
+function renderValidatorProviderModelTitle(info = {}) {
+    const config = info.validator_config?.config || info.config || info.validator_config || {};
+    const provider = config.provider || info.provider;
+    const model = config.model || info.model;
+    if (!provider && !model) return "";
+    return `title="${safeText(provider || "-")} | ${safeText(model || "-")}"`;
+}
+
 function renderValidationsTree(container, validations, assertions) {
     if (!validations || Object.keys(validations).length === 0) {
         container.innerHTML = "<p class='empty-state'>No hay validaciones disponibles para esta orden.</p>";
@@ -2202,9 +2210,10 @@ function renderValidationsTree(container, validations, assertions) {
             let desc = info.text || "Sin descripción";
             if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
             const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
+            const validatorTooltip = renderValidatorProviderModelTitle(info);
             return `
                 <div class="validator-card">
-                    <div class="validator-name"><a href="#" onclick="event.preventDefault(); showValidatorDetail('${String(validator).replace(/'/g, "\'")}')">${safeText(info.validator_alias || validator)}</a></div>
+                    <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${String(validator).replace(/'/g, "\'")}')">${safeText(info.validator_alias || validator)}</a></div>
                     <div class="validator-result ${litClass}">${lit}</div>
                     <div class="validator-desc">${safeText(desc)}</div>
                     <div class="validator-tx">${tx}</div>
@@ -2313,8 +2322,6 @@ function renderValidatorsTable(validators) {
                     <th>Provider</th>
                     <th>Model</th>
                     <th>Categories</th>
-                    <th>Requests</th>
-                    <th>Responses OK</th>
                     <th>Status</th>
                     <th>IPFS Config</th>
                     <th>Acciones</th>
@@ -2324,7 +2331,6 @@ function renderValidatorsTable(validators) {
                 ${validators.map(v => {
                     const cfg = v.config || {};
                     const validator = v.validator || "";
-                    const stats = renderValidatorStats(v.stats);
                     return `
                         <tr>
                             <td><a href="#" onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${shortValue(validator, 18)}</a></td>
@@ -2333,8 +2339,6 @@ function renderValidatorsTable(validators) {
                             <td>${safeText(cfg.provider || "-")}</td>
                             <td>${safeText(cfg.model || "-")}</td>
                             <td>${renderValidatorCategories(v.categories)}</td>
-                            <td>${stats.requests}</td>
-                            <td>${stats.responses}</td>
                             <td>${safeText(cfg.status || "-")}</td>
                             <td>${v.ipfs_hash ? `<a href="#" onclick="event.preventDefault(); showSection('ipfs', false); document.getElementById('ipfsHash').value='${safeText(v.ipfs_hash)}'; findIpfs();">${shortValue(v.ipfs_hash, 18)}</a>` : "-"}</td>
                             <td><button class="btn-secondary btn-small" onclick="showValidatorValidations('${validatorHashForJs(validator)}')">Ver validaciones</button></td>
@@ -2464,6 +2468,7 @@ async function showValidatorValidations(validatorHash) {
                 text: v.payload?.descripcion || v.payload?.text || v.text || "",
                 tx_hash: v.tx_hash,
                 validator_alias: data.config?.name || validatorHash,
+                validator_config: { config: data.config || {} },
                 order_id: v.order_id
             };
         });

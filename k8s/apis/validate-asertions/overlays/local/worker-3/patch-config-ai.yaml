@@ -11,8 +11,8 @@ spec:
         # Kustomize inyectará estas variables automáticamente en la lista de 'env' de tu base
         env:
         - name: AI_PROVIDER
-          value: "gemini"
+          value: "openrouter"
         - name: MODEL
-          value: "gemini-2.5-flash"
+          value: "qwen/qwen3-30b-a3b"
         - name: API_URL
-          value: "https://generativelanguage.googleapis.com/v1beta"
+          value: "https://openrouter.ai/api/v1/chat/completions"

@@ -31,10 +31,14 @@ const CATEGORY_MAP = {
 };
 
 const keycloak = new Keycloak({
-    url: '/auth', 
+    url: '/auth',
     realm: 'TrustNews',
     clientId: 'TrustNewsWeb'
 });
+
+function t(key, params = {}) {
+    return window.I18N?.t(key, params) || key;
+}
 
 
 // =========================================================
@@ -46,15 +50,15 @@ function alertMessage(message, type = 'info', duration = 3000) {
     // Resetear clases y aplicar el mensaje
     bar.className = 'status-toast';
     bar.textContent = message;
-    
+
     // Aplicar tipo (color)
     if(type === 'error') bar.style.backgroundColor = '#ef4444';
     else if(type === 'primary' || type === 'success') bar.style.backgroundColor = '#10b981';
     else bar.style.backgroundColor = '#3b82f6';
     bar.style.color = '#fff';
-    
+
     // Forzar reflow para reiniciar la animación y mostrar
-    void bar.offsetWidth; 
+    void bar.offsetWidth;
     bar.classList.add('show');
 
     setTimeout(() => {
@@ -148,7 +152,7 @@ function shortHex(value) {
 }
 
 function getValidationLiteral(value) {
-    const numericValue = parseInt(value, 10); 
+    const numericValue = parseInt(value, 10);
     if (isNaN(numericValue)) return "DESCONOCIDO";
 
     switch (numericValue) {
@@ -160,7 +164,7 @@ function getValidationLiteral(value) {
 }
 
 function formatDate(ts) {
-    const timestampValue = parseFloat(ts); 
+    const timestampValue = parseFloat(ts);
     if (isNaN(timestampValue) || timestampValue === 0) return "N/A";
     const milliseconds = timestampValue * 1000;
     const d = new Date(milliseconds);
@@ -233,7 +237,7 @@ function showSection(sectionId, reset = true, updateHistory = true) {
 // =========================================================
 async function pollOrder(orderId, startTime) {
     const start = startTime || Date.now();
-    await loadOrderById(orderId, false); 
+    await loadOrderById(orderId, false);
 
     const detailsContainer = document.getElementById("fixedDetailsContainer");
     const statusElement = detailsContainer.querySelector('.status-value');
@@ -413,7 +417,7 @@ async function publishNew() {
         document.getElementById("orderId").value = "Error...";
         return;
     }
-    
+
     const data = await res.json();
     const newOrderId = data.order_id;
 
@@ -465,8 +469,8 @@ async function publishWithAssertions() {
         }
 
         const data = await response.json();
-        
-        showSection('order');  
+
+        showSection('order');
 
         const newOrderId = data.order_id;
 
@@ -474,7 +478,7 @@ async function publishWithAssertions() {
         updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
         alertMessage(`Noticia publicada. Iniciando polling para Order ID: ${newOrderId}`, 'primary');
         pollOrder(newOrderId);
-        
+
         return data;
     } catch (error) {
         console.error("Error al publicar con aserciones:", error);
@@ -490,19 +494,19 @@ async function publishWithAssertions() {
 async function findPrevious() {
     const text = document.getElementById("newsText").value.trim();
     if (!text) return alertMessage("Introduce un texto a buscar.", 'error');
-    
+
     alertMessage("Buscando verificaciones previas...", 'info');
-    
+
     try {
         const res = await fetchWithAuth(`${API}/find-order-by-text`, {
             method: "POST",
             body: JSON.stringify({text})
         });
-        
+
         if (!res.ok) throw new Error("API responded with error.");
 
         const data = await res.json();
-        renderTableData(document.getElementById("findResults"), data); 
+        renderTableData(document.getElementById("findResults"), data);
         alertMessage(`Se encontraron ${data.length} resultados.`, 'primary');
     } catch (e) {
         alertMessage("Error de conexión o datos inválidos al buscar.", 'error');
@@ -517,8 +521,8 @@ async function findPrevious() {
 // OPERACIONES DE ORDERS
 // =========================================================
 async function listOrders() {
-    alertMessage("Listando todas las órdenes...", 'info');
-    
+    alertMessage(t("messages.listingOrders"), 'info');
+
     // 1. Leemos si el check de admin está marcado (si no existe o no está marcado, valdrá false)
     const chkViewAll = document.getElementById('chk-viewAll');
     const viewAll = chkViewAll ? chkViewAll.checked : false;
@@ -530,26 +534,26 @@ async function listOrders() {
         // 3. Usamos tu helper fetchWithAuth en lugar de fetch directamente
         const res = await fetchWithAuth(url);
         if (!res.ok) throw new Error("Error al obtener la lista de órdenes.");
-        
+
         const data = await res.json();
-        
+
         const tabs = document.getElementById("listOrderTabs");
         const detailsContainer = document.getElementById("listFixedDetailsContainer");
         const tabContent = document.getElementById("listTabContent");
         tabs.innerHTML = detailsContainer.innerHTML = tabContent.innerHTML = "";
-        
+
         renderTableData(tabContent, data);
-        alertMessage(`Órdenes cargadas: ${data.length}`, 'primary');
+        alertMessage(t("messages.ordersLoaded", { count: data.length }), 'primary');
 
     } catch (e) {
-        alertMessage("Error al listar órdenes. Ver consola.", 'error');
+        alertMessage(t("messages.listOrdersError"), 'error');
         console.error("List Orders Error:", e);
     }
 }
 
 async function findOrder() {
     const orderId = document.getElementById("orderId").value.trim();
-    if (!orderId) return alertMessage("Introduce un order_id.", 'error');
+    if (!orderId) return alertMessage(t("messages.enterOrderId"), 'error');
     await loadOrderById(orderId, true);
     updateAppHistory({ section: "order", inputId: "orderId", value: orderId });
 }
@@ -560,17 +564,17 @@ async function findOrder() {
 async function loadOrderById(orderId, cleanup = true) {
     const tabs = document.getElementById("orderTabs");
     const detailsContainer = document.getElementById("fixedDetailsContainer");
-    const tabContent = document.getElementById("tabContent"); 
+    const tabContent = document.getElementById("tabContent");
 
-    if (cleanup) tabs.innerHTML = ''; 
-    
+    if (cleanup) tabs.innerHTML = '';
+
     if (cleanup) {
-        detailsContainer.innerHTML = `<div class="p-4 text-center text-gray-400">Cargando detalles de la orden <strong>${orderId}</strong>...</div>`;
+        detailsContainer.innerHTML = `<div class="p-4 text-center text-gray-400">${t("messages.loadingOrder", { orderId })}</div>`;
     }
 
     try {
         const res = await fetchWithAuth(`${API}/orders/${orderId}`);
-        
+
         if (!res.ok) {
             const errorText = await res.text();
             detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
@@ -578,7 +582,7 @@ async function loadOrderById(orderId, cleanup = true) {
                 Mensaje: ${errorText || 'Error desconocido'}
             </div>`;
             tabs.innerHTML = tabContent.innerHTML = '';
-            alertMessage(`Error: Order ID ${orderId} no encontrada.`, 'error');
+            alertMessage(t("messages.orderNotFound", { orderId }), 'error');
             return;
         }
 
@@ -601,10 +605,10 @@ async function loadOrderById(orderId, cleanup = true) {
             } catch(e){ console.error("Error cargando eventos:", e); }
 
             const sections = [
-                {name: "Asertions", data: data.assertions || []},
-                {name: "Documento", data: data.document || null},
-                {name: "Validations", data: data.validations || {}},
-                {name: "Eventos", data: eventsData} 
+                {key: "assertions", name: t("tabs.assertions"), data: data.assertions || []},
+                {key: "document", name: t("tabs.document"), data: data.document || null},
+                {key: "validations", name: t("tabs.validations"), data: data.validations || {}},
+                {key: "events", name: t("tabs.events"), data: eventsData}
             ];
 
             if (cleanup || tabs.children.length === 0) {
@@ -612,21 +616,22 @@ async function loadOrderById(orderId, cleanup = true) {
                 sections.forEach((s,i) => {
                     const btn = document.createElement("button");
                     btn.innerText = s.name;
+                    btn.dataset.tabKey = s.key;
                     btn.className = 'tab-button';
                     btn.onclick = () => {
                         document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
                         btn.classList.add("activeTab");
-                        renderTabContent(s.name, s.data, data.assertions); 
+                        renderTabContent(s.key, s.data, data.assertions);
                     };
                     if(i===0) btn.classList.add("activeTab");
                     tabs.appendChild(btn);
-                    if(i===0) renderTabContent(s.name, s.data, data.assertions);
+                    if(i===0) renderTabContent(s.key, s.data, data.assertions);
                 });
             } else {
                 const activeTab = tabs.querySelector('.activeTab');
                 if (activeTab) {
-                    const sec = sections.find(s => s.name === activeTab.innerText);
-                    if (sec) renderTabContent(sec.name, sec.data, data.assertions);
+                    const sec = sections.find(s => s.key === activeTab.dataset.tabKey);
+                    if (sec) renderTabContent(sec.key, sec.data, data.assertions);
                 }
             }
         }
@@ -636,7 +641,7 @@ async function loadOrderById(orderId, cleanup = true) {
         </div>`;
         tabs.innerHTML = tabContent.innerHTML = '';
         console.error(error);
-        alertMessage("Error crítico al cargar la orden.", 'error');
+        alertMessage(t("messages.criticalOrderError"), 'error');
     }
 }
 
@@ -644,26 +649,26 @@ async function loadOrderById(orderId, cleanup = true) {
 // RENDER TAB CONTENT
 // =========================================================
 function renderTabContent(tabName, data, assertions=[]) {
-    const container = document.getElementById("tabContent"); 
-    container.innerHTML = ""; 
-    
+    const container = document.getElementById("tabContent");
+    container.innerHTML = "";
+
     switch(tabName) {
-        case "Documento": 
+        case "document":
             container.innerHTML = `
-                <div class="json-box-header">Documento JSON</div>
+                <div class="json-box-header">${t("tabs.document")} JSON</div>
                 <div class="json-tree">${renderJsonTree(data)}</div>
             `;
             break;
-        case "Validations": 
-            renderValidationsTree(container, data, assertions); 
+        case "validations":
+            renderValidationsTree(container, data, assertions);
             break;
-        case "Eventos": 
-            renderEventsTable(container, data); 
+        case "events":
+            renderEventsTable(container, data);
             break;
-        case "Asertions": 
-            renderAssertions(container, data); 
+        case "assertions":
+            renderAssertions(container, data);
             break;
-        default: 
+        default:
             container.innerHTML = `<pre class="event-payload-pre">${JSON.stringify(data,null,2)}</pre>`;
             break;
     }
@@ -798,30 +803,31 @@ function buildVerificationSummary(order) {
     }
 
     const statusMap = {
-        verified: { statusLabel: "Verificada", statusIcon: "🟢" },
-        partial: { statusLabel: "Parcialmente verificada", statusIcon: "🟡" },
-        contradicted: { statusLabel: "Desmentida", statusIcon: "🔴" },
-        inconclusive: { statusLabel: "No concluyente", statusIcon: "🟠" },
-        pending: { statusLabel: "Pendiente", statusIcon: "⚪" }
+        verified: { statusLabel: t("summary.verified"), statusIcon: "🟢" },
+        partial: { statusLabel: t("summary.partial"), statusIcon: "🟡" },
+        contradicted: { statusLabel: t("summary.contradicted"), statusIcon: "🔴" },
+        inconclusive: { statusLabel: t("summary.inconclusive"), statusIcon: "🟠" },
+        pending: { statusLabel: t("summary.pending"), statusIcon: "⚪" }
     };
 
-    const assertionBreakdown = `${pluralizeEs(confirmedAssertions, "confirmada", "confirmadas")}, ${pluralizeEs(contradictedAssertions, "desmentida", "desmentidas")} y ${pluralizeEs(inconclusiveAssertions, "no concluyente", "no concluyentes")}`;
+    const joinWord = window.I18N?.getLanguage() === "en" ? " and " : " y ";
+    const assertionBreakdown = `${pluralizeEs(confirmedAssertions, t("summary.confirmedOne"), t("summary.confirmedMany"))}, ${pluralizeEs(contradictedAssertions, t("summary.disprovedOne"), t("summary.disprovedMany"))}${joinWord}${pluralizeEs(inconclusiveAssertions, t("summary.inconclusiveOne"), t("summary.inconclusiveMany"))}`;
     const knownAssertions = confirmedAssertions + contradictedAssertions;
     const confidenceLabel = knownAssertions > 0
-        ? `Confirmadas entre las verificadas: ${confirmedAssertions}/${knownAssertions}`
-        : "Sin afirmaciones verificadas todavía";
+        ? t("summary.confirmedAmongVerified", { confirmed: confirmedAssertions, known: knownAssertions })
+        : t("summary.noVerifiedAssertions");
 
     let conclusionText;
     if (statusKey === "pending") {
-        conclusionText = `La verificación sigue en curso: ${completedValidations}/${totalValidations || completedValidations} validaciones de IA completadas.`;
+        conclusionText = t("summary.pendingConclusion", { completed: completedValidations, total: totalValidations || completedValidations });
     } else if (statusKey === "verified") {
-        conclusionText = `La noticia queda verificada: ${assertionBreakdown}. No se detectan afirmaciones desmentidas.`;
+        conclusionText = t("summary.verifiedConclusion", { breakdown: assertionBreakdown });
     } else if (statusKey === "contradicted") {
-        conclusionText = `La noticia queda desmentida: predominan las afirmaciones rechazadas por los validadores. Resultado: ${assertionBreakdown}.`;
+        conclusionText = t("summary.disprovedConclusion", { breakdown: assertionBreakdown });
     } else if (statusKey === "partial") {
-        conclusionText = `La noticia contiene afirmaciones mezcladas: ${assertionBreakdown}. No debe considerarse plenamente fiable.`;
+        conclusionText = t("summary.partialConclusion", { breakdown: assertionBreakdown });
     } else {
-        conclusionText = `La verificación no permite una conclusión firme: ${assertionBreakdown}. Conviene revisar las evidencias antes de decidir.`;
+        conclusionText = t("summary.inconclusiveConclusion", { breakdown: assertionBreakdown });
     }
 
     return {
@@ -843,11 +849,11 @@ function buildVerificationSummary(order) {
 
 
 function renderDetails(container, data) {
-    container.innerHTML = '<h3 class="text-lg font-bold mb-4">Detalles de la Orden</h3>';
+    container.innerHTML = `<h3 class="text-lg font-bold mb-4">${t("tabs.details")}</h3>`;
 
     const summary = buildVerificationSummary(data);
     const progressPercent = summary.totalValidations > 0 ? Math.round((summary.completedValidations / summary.totalValidations) * 100) : 0;
-    const consensusLabel = summary.pendingValidations === 0 && summary.totalValidations > 0 ? "Consenso completo" : "Consenso parcial";
+    const consensusLabel = summary.pendingValidations === 0 && summary.totalValidations > 0 ? t("summary.fullConsensus") : t("summary.partialConsensus");
 
     const formatDetailValue = value => {
         if (value === null || value === undefined) return "";
@@ -892,27 +898,27 @@ function renderDetails(container, data) {
         <div class="verification-summary-card status-${summary.statusKey}">
             <div class="verification-summary-main">
                 <div>
-                    <span class="summary-kicker">Resultado de verificación</span>
+                    <span class="summary-kicker">${t("summary.verificationResult")}</span>
                     <div class="verification-headline">${summary.statusIcon} ${safeText(summary.statusLabel)}</div>
                     <p class="verification-conclusion">${safeText(summary.conclusionText)}</p>
                 </div>
                 <span class="summary-confidence">${safeText(summary.confidenceLabel)}</span>
             </div>
             <div class="verification-chip-grid assertion-result-grid" aria-label="Resultado por afirmaciones">
-                <span class="summary-kicker">Resultado por afirmación</span>
-                <span class="summary-chip chip-confirmed">✅ Confirmadas: ${summary.confirmedAssertions} de ${summary.totalAssertions}</span>
-                <span class="summary-chip chip-contradicted">❌ Desmentidas: ${summary.contradictedAssertions} de ${summary.totalAssertions}</span>
-                <span class="summary-chip chip-inconclusive">❔ No concluyentes: ${summary.inconclusiveAssertions} de ${summary.totalAssertions}</span>
+                <span class="summary-kicker">${t("summary.resultByAssertion")}</span>
+                <span class="summary-chip chip-confirmed">✅ ${t("summary.confirmed")}: ${summary.confirmedAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
+                <span class="summary-chip chip-contradicted">❌ ${t("summary.disproved")}: ${summary.contradictedAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
+                <span class="summary-chip chip-inconclusive">❔ ${t("summary.notConclusive")}: ${summary.inconclusiveAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
             </div>
             <div class="verification-ai-row">
                 <div class="validation-progress">
-                    <span>${summary.completedValidations}/${summary.totalValidations || summary.completedValidations} validaciones completadas · ${consensusLabel}</span>
+                    <span>${t("summary.completedValidations", { completed: summary.completedValidations, total: summary.totalValidations || summary.completedValidations, consensus: consensusLabel })}</span>
                     <div class="validation-progress-bar">
                         <div class="validation-progress-fill" style="width:${progressPercent}%;"></div>
                     </div>
                 </div>
                 <div class="validator-votes" aria-label="Votos de validadores">
-                    <span class="summary-kicker">Votos de validadores</span>
+                    <span class="summary-kicker">${t("summary.validatorVotes")}</span>
                     <span class="summary-chip chip-confirmed">✅ ${summary.validatorVotes.true} True</span>
                     <span class="summary-chip chip-contradicted">❌ ${summary.validatorVotes.false} False</span>
                     <span class="summary-chip chip-inconclusive">❔ ${summary.validatorVotes.unknown} Unknown</span>
@@ -920,21 +926,21 @@ function renderDetails(container, data) {
             </div>
         </div>
         <table class="compact-table summary-metrics-table">
-            <tr><th>ID de Orden</th><td>${safeText(data.order_id || "N/A")}</td></tr>
-            <tr><th>Progreso</th><td>${renderStatusBadge(data.status || "N/A")}${renderProcessingFlow(data.status || "PENDING", summary.pendingValidations, summary.totalValidations)}</td></tr>
-            <tr><th>Noticia (Resumen)</th><td>${safeText(data.text || "N/A")}</td></tr>
-            <tr><th>Validaciones pendientes</th><td>${summary.pendingValidations}</td></tr>
-            <tr><th>Validaciones totales</th><td>${summary.totalValidations}</td></tr>
-            <tr><th>Afirmaciones confirmadas</th><td class="true-news">${summary.confirmedAssertions}</td></tr>
-            <tr><th>Afirmaciones desmentidas</th><td class="false-news">${summary.contradictedAssertions}</td></tr>
-            <tr><th>Votos no concluyentes</th><td class="unknown">${summary.validatorVotes.unknown}</td></tr>
+            <tr><th>${t("summary.orderId")}</th><td>${safeText(data.order_id || "N/A")}</td></tr>
+            <tr><th>${t("summary.progress")}</th><td>${renderStatusBadge(data.status || "N/A")}${renderProcessingFlow(data.status || "PENDING", summary.pendingValidations, summary.totalValidations)}</td></tr>
+            <tr><th>${t("summary.newsSummary")}</th><td>${safeText(data.text || "N/A")}</td></tr>
+            <tr><th>${t("summary.pendingValidations")}</th><td>${summary.pendingValidations}</td></tr>
+            <tr><th>${t("summary.totalValidations")}</th><td>${summary.totalValidations}</td></tr>
+            <tr><th>${t("summary.confirmedAssertions")}</th><td class="true-news">${summary.confirmedAssertions}</td></tr>
+            <tr><th>${t("summary.disprovedAssertions")}</th><td class="false-news">${summary.contradictedAssertions}</td></tr>
+            <tr><th>${t("summary.inconclusiveVotes")}</th><td class="unknown">${summary.validatorVotes.unknown}</td></tr>
         </table>`;
 
     // --- Subpestañas internas
      container.innerHTML = `
         <div class="sub-tabs flex space-x-2 border-b border-gray-600 mb-4">
-            <button class="subTab activeSubTab p-2 text-sm font-medium" data-target="summaryTab">Resumen</button>
-            <button class="subTab p-2 text-sm font-medium" data-target="detailsTab">Detalles</button>
+            <button class="subTab activeSubTab p-2 text-sm font-medium" data-target="summaryTab">${t("tabs.summary")}</button>
+            <button class="subTab p-2 text-sm font-medium" data-target="detailsTab">${t("tabs.details")}</button>
         </div>
         <div id="summaryTab" class="bg-gray-800 p-4 rounded-lg">${summaryHtml}</div>
         <div id="detailsTab" style="display:none;" class="bg-gray-800 p-4 rounded-lg">${detailsHtml}</div>
@@ -1027,7 +1033,7 @@ function renderValidationsTree(container, validations, assertions) {
                             <th>Validator</th>
                             <th>Resultado</th>
                             <th>Descripción</th>
-                            <th>tx_hash</th>                        
+                            <th>tx_hash</th>
                         </tr>
                     </thead>
                     <tbody>${tableRows}</tbody>
@@ -1071,12 +1077,12 @@ function renderTableData(container, data) {
     // =====================================================
     // Generación de tabla
     // =====================================================
-    
-    // MEJORA: En lugar de coger solo las keys del primer elemento, 
+
+    // MEJORA: En lugar de coger solo las keys del primer elemento,
     // recopilamos todas las keys de todos los elementos para que no falte 'client_id'
     const keysSet = new Set();
     data.forEach(row => Object.keys(row).forEach(k => keysSet.add(k)));
-    
+
     // Opcional: Si quieres forzar que order_id y client_id salgan siempre primero,
     // puedes ordenarlo aquí. Si no, simplemente lo convertimos a array:
     const keys = Array.from(keysSet);
@@ -1129,7 +1135,7 @@ function renderTableData(container, data) {
     // =====================================================
     html += `
         <div class="pagination flex items-center justify-center gap-4 mt-4">
-            <button 
+            <button
                 class="px-3 py-1 bg-gray-700 rounded disabled:opacity-40"
                 onclick="changeTablePage(-1)"
                 ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}
@@ -1137,7 +1143,7 @@ function renderTableData(container, data) {
 
             <span class="text-sm">Página ${TABLE_PAGE_ORDERS} / ${totalPages}</span>
 
-            <button 
+            <button
                 class="px-3 py-1 bg-gray-700 rounded disabled:opacity-40"
                 onclick="changeTablePage(1)"
                 ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}
@@ -1154,7 +1160,7 @@ function renderTableData(container, data) {
 function changeTablePage(delta) {
     TABLE_PAGE_ORDERS += delta;
 
-    const container = document.getElementById("listTabContent");  
+    const container = document.getElementById("listTabContent");
     renderTableData(container, container._fullData);
 }
 
@@ -1269,7 +1275,7 @@ function renderAssertions(container, assertions) {
     assertions.forEach(a => {
         const catDesc = CATEGORY_MAP[a.categoryId] || `(${a.categoryId})`;
         const textValue = (typeof a.text === 'object' && a.text?.text) ? a.text.text : a.text;
-        
+
         html += `
             <tr>
                 <td class="id-col"><span>${a.idAssertion}</span></td>
@@ -1372,10 +1378,10 @@ async function findTx() {
     try {
         const res = await fetchWithAuth(`${TX_API}/blockchain/tx/${hash}`);
         if (!res.ok) throw new Error("Error al obtener la transacción");
-        
+
         const responseData = await res.json();
         // 🎯 CORRECCIÓN APLICADA: Usar el campo 'payload'
-        if (!responseData.payload) throw new Error("Payload missing in transaction response."); 
+        if (!responseData.payload) throw new Error("Payload missing in transaction response.");
         alertMessage(responseData.payload);
         renderTxTable(responseData.payload);
         updateAppHistory({ section: "tx", inputId: "txHash", value: hash });
@@ -1507,9 +1513,9 @@ async function findBlock() {
     try {
         const res = await fetchWithAuth(`${TX_API}/blockchain/block/${blockId}`);
         if (!res.ok) throw new Error("Error al obtener el bloque");
-        
+
         const responseData = await res.json();
-        if (!responseData.payload) throw new Error("Payload missing in block response."); 
+        if (!responseData.payload) throw new Error("Payload missing in block response.");
 
         // 🔹 Renderiza e inserta la tabla
         const blockTable = renderBlockTable(responseData.payload);
@@ -1731,7 +1737,7 @@ function renderPost(post) {
                         <tr><th>Veredicto</th><td>${mapVeredict(v.veredict)}</td></tr>
                         <tr><th>cid</th>
                             <td>
-                                ${v.cid 
+                                ${v.cid
                                     ? `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${v.cid}'); return false;">
                                             ${v.cid}
                                     </a>`
@@ -1875,7 +1881,7 @@ function renderConsistencyTable(results) {
 }
 
 // =========================================================
-// IMPORTAR NOTICIA 
+// IMPORTAR NOTICIA
 // =========================================================
 
 async function importarNoticia() {
@@ -1883,13 +1889,13 @@ async function importarNoticia() {
     const newsText = document.getElementById('newsText');
 
     if (!url) {
-        alert('Introduce una URL para importar');
+        alert(t("messages.importUrl"));
         return;
     }
 
     try {
         // Llamada POST al endpoint
-        
+
         const response = await fetchWithAuth(`${API}/extract_text_from_url`, {
             method: 'POST',
             headers: {
@@ -1909,7 +1915,7 @@ async function importarNoticia() {
 
     } catch (err) {
         console.error(err);
-        alert('Error al importar la noticia. Revisa la consola.');
+        alert(t("messages.importError"));
     }
 }
 
@@ -1923,7 +1929,7 @@ async function checkAdminStatus() {
         if (response.ok) {
             const data = await response.json();
             IS_ADMIN = data.is_admin;
-            
+
             // Si es admin, mostramos el checkbox en la vista de órdenes
             if (IS_ADMIN) {
                 document.getElementById('admin-view-container').style.display = 'flex';
@@ -1938,8 +1944,8 @@ async function checkAdminStatus() {
 // INICIALIZACIÓN CON PROTECCIÓN
 // =========================================================
 document.addEventListener('DOMContentLoaded', () => {
-    
-    keycloak.init({ 
+
+    keycloak.init({
         onLoad: 'login-required', // Obliga a loguearse al cargar la web
         checkLoginIframe: false   // Recomendado para evitar problemas de cookies en localhost
     }).then(authenticated => {
@@ -1952,7 +1958,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }).catch(err => {
         console.error("Error al inicializar Keycloak:", err);
-        alertMessage("Error de conexión con el servidor de identidad", "error");
+        alertMessage(t("messages.identityError"), "error");
     });
 
 });
@@ -1971,7 +1977,7 @@ function initializeApp() {
             }
         });
     });
-    
+
     // 3. News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
     document.getElementById('btn-publishNew').addEventListener('click', publishNew);
@@ -1979,14 +1985,14 @@ function initializeApp() {
     document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
         const text = document.getElementById("newsText").value.trim();
         if (!text) {
-            alertMessage("Debes escribir o cargar una noticia", "warning");
+            alertMessage(t("messages.writeNews"), "warning");
             return;
         }
-        alertMessage("Generando aserciones...", "info");
+        alertMessage(t("messages.generatingAssertions"), "info");
         const assertions = await generateAssertionsFromText(text);
         const container = document.getElementById("news-assertions-container");
         renderEditableAssertionsTable(container, assertions);
-        alertMessage("Aserciones generadas", "success");
+        alertMessage(t("messages.assertionsGenerated"), "success");
     });
 
     // 4. El resto de tus Listeners (Orders, TX, IPFS...)
@@ -2097,18 +2103,8 @@ function statusClass(status) {
 }
 
 function renderStatusBadge(status) {
-    const statusLabels = {
-        VALIDATED: "Completada",
-        PENDING: "Pendiente",
-        VALIDATION_PENDING: "Validación pendiente",
-        ASSERTIONS_REQUESTED: "Aserciones solicitadas",
-        DOCUMENT_CREATED: "Documento creado",
-        IPFS_PENDING: "IPFS pendiente",
-        IPFS_UPLOADED: "IPFS subido",
-        BLOCKCHAIN_PENDING: "Blockchain pendiente"
-    };
     const rawStatus = String(status || "UNKNOWN");
-    const label = safeText(statusLabels[rawStatus] || rawStatus);
+    const label = safeText(t(`status.${rawStatus}`) === `status.${rawStatus}` ? rawStatus : t(`status.${rawStatus}`));
     return `<span class="status-badge ${statusClass(rawStatus)}">${label}</span>`;
 }
 
@@ -2563,10 +2559,30 @@ async function showValidatorValidations(validatorHash) {
     }
 }
 
+window.addEventListener("trustnews:languagechange", () => {
+    if (currentOrderData?.order_id) {
+        const detailsContainer = document.getElementById("fixedDetailsContainer");
+        if (detailsContainer) renderDetails(detailsContainer, currentOrderData);
+    }
+    const badge = document.getElementById("sessionBadge");
+    if (badge && keycloak?.tokenParsed?.preferred_username) {
+        badge.textContent = `${t("header.protectedSession")} · ${keycloak.tokenParsed.preferred_username}`;
+    }
+});
+
 // Refuerzo visual de detalles: mantener la tabla original, pero más integrada y compacta.
 const __tnOriginalInitializeApp = initializeApp;
 initializeApp = function initializeAppUXIntegrated() {
     __tnOriginalInitializeApp();
+
+    window.I18N?.applyTranslations(document);
+
+    const languageSelector = document.getElementById("languageSelector");
+    if (languageSelector && !languageSelector.dataset.bound) {
+        languageSelector.dataset.bound = "true";
+        languageSelector.value = window.I18N?.getLanguage?.() || "es";
+        languageSelector.addEventListener("change", event => window.I18N?.setLanguage(event.target.value));
+    }
 
     const logoutBtn = document.getElementById("btn-logout");
     if (logoutBtn && !logoutBtn.dataset.bound) {
@@ -2576,7 +2592,7 @@ initializeApp = function initializeAppUXIntegrated() {
 
     const badge = document.getElementById("sessionBadge");
     if (badge && keycloak?.tokenParsed?.preferred_username) {
-        badge.textContent = `● Sesión protegida · ${keycloak.tokenParsed.preferred_username}`;
+        badge.textContent = `${t("header.protectedSession")} · ${keycloak.tokenParsed.preferred_username}`;
     }
 
     const validatorsBtn = document.getElementById("btn-listValidators");

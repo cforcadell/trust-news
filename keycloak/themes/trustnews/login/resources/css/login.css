@@ -451,3 +451,31 @@ label {
   margin: 0 auto !important;
 }
 
+/* Keep branding inside the login frame, not as a detached top header */
+.login-pf-page-header,
+.login-pf-page .login-pf-page-header,
+#kc-header,
+#kc-header-wrapper {
+  display: none !important;
+}
+
+#kc-page-title::before {
+  content: "TN · Trust News" !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  margin: 0 0 18px !important;
+  padding: 8px 12px !important;
+  border-radius: 999px !important;
+  background: rgba(16, 214, 154, .12) !important;
+  border: 1px solid rgba(13, 148, 136, .35) !important;
+  color: #06101f !important;
+  font-size: .88rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+#kc-page-title {
+  margin-top: 0 !important;
+}
+

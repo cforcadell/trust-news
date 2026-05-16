@@ -727,90 +727,134 @@ function renderProcessingFlow(currentStatus, validatorsPending = 0, totalValidat
 
 
 
-function renderDetails(container, data) {
-    container.innerHTML = '<h3 class="text-lg font-bold mb-4">Detalles de la Orden</h3>';
+function pluralizeEs(count, singular, plural) {
+    return `${count} ${count === 1 ? singular : plural}`;
+}
 
-    // --- Estadísticas (Resumen)
-    let totalAssertions = 0, trueAssertions = 0, falseAssertions = 0, unknownCount = 0;
-    if (data.validations) {
-        for (const assertionId in data.validations) {
-            totalAssertions++;
-            const validators = data.validations[assertionId];
-            let approved = 0, rejected = 0;
-            Object.values(validators).forEach(v => {
-                const lit = getValidationLiteral(v.approval);
-                if (lit === "True") approved++;
-                else if (lit === "False") rejected++;
-                else if (lit === "Unknown") unknownCount++;
-            });
-            const known = approved - rejected;
-            if (known > 0)  trueAssertions++;
-            else if (known < 0) falseAssertions++;
-            // Nota: En su data, ninguna aserción resulta en known === 0, 
-            // por eso trueAssertions es 2 y falseAssertions es 1.
-        }
-    }
+function getAssertionId(assertion, fallbackIndex) {
+    if (!assertion || typeof assertion !== "object") return String(fallbackIndex);
+    return String(assertion.idAssertion ?? assertion.id ?? assertion.assertion_id ?? fallbackIndex);
+}
 
-    let percentTrue=0;
-    let percentFalse=0;
-    
-    const totalValidationRequests = Object.values(data.validation_requests || {}).reduce((sum, items) => {
+function buildVerificationSummary(order) {
+    const validations = order.validations || {};
+    const validationRequestCount = Object.values(order.validation_requests || {}).reduce((sum, items) => {
         return sum + (Array.isArray(items) ? items.length : 0);
     }, 0);
 
-    const expectedValidations = getExpectedValidationCount(data);
-    const completedValidations = Object.values(data.validations || {}).reduce((sum, validators) => {
-        return sum + (validators && typeof validators === 'object' ? Object.keys(validators).length : 0);
+    const expectedValidations = getExpectedValidationCount(order);
+    const completedValidations = Object.values(validations).reduce((sum, validators) => {
+        return sum + (validators && typeof validators === "object" ? Object.keys(validators).length : 0);
     }, 0);
-    const totalValidations = expectedValidations || Math.max(totalValidationRequests, completedValidations + (data.validators_pending || 0), 0);
-    const pendingValidations = Number(data.validators_pending || 0);
-    const progressPercent = totalValidations > 0 ? Math.round(((totalValidations - pendingValidations) / totalValidations) * 100) : 0;
+    const totalValidations = expectedValidations || Math.max(validationRequestCount, completedValidations + Number(order.validators_pending || 0), 0);
+    const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - completedValidations, 0);
+
+    const assertionIds = new Set(Object.keys(validations).map(String));
+    (order.assertions || []).forEach((assertion, index) => assertionIds.add(getAssertionId(assertion, index)));
+
+    const validatorVotes = { true: 0, false: 0, unknown: 0 };
+    let confirmedAssertions = 0;
+    let contradictedAssertions = 0;
+    let inconclusiveAssertions = 0;
+
+    assertionIds.forEach(assertionId => {
+        const validators = validations[assertionId] || {};
+        let trueVotes = 0;
+        let falseVotes = 0;
+        let unknownVotes = 0;
+
+        Object.values(validators).forEach(v => {
+            const lit = getValidationLiteral(v?.approval);
+            if (lit === "True") trueVotes++;
+            else if (lit === "False") falseVotes++;
+            else unknownVotes++;
+        });
+
+        validatorVotes.true += trueVotes;
+        validatorVotes.false += falseVotes;
+        validatorVotes.unknown += unknownVotes;
+
+        if (trueVotes > falseVotes) confirmedAssertions++;
+        else if (falseVotes > trueVotes) contradictedAssertions++;
+        else inconclusiveAssertions++;
+    });
+
+    const totalAssertions = assertionIds.size;
+    const hasMixedResult = [confirmedAssertions, contradictedAssertions, inconclusiveAssertions].filter(Boolean).length > 1;
+    let statusKey = "inconclusive";
+
+    if (totalValidations > 0 && completedValidations < totalValidations) {
+        statusKey = "pending";
+    } else if (totalAssertions === 0) {
+        statusKey = completedValidations > 0 ? "inconclusive" : "pending";
+    } else if (contradictedAssertions > confirmedAssertions && contradictedAssertions >= inconclusiveAssertions) {
+        statusKey = "contradicted";
+    } else if (inconclusiveAssertions > confirmedAssertions && inconclusiveAssertions >= contradictedAssertions) {
+        statusKey = "inconclusive";
+    } else if (confirmedAssertions > 0 && contradictedAssertions === 0 && confirmedAssertions >= inconclusiveAssertions) {
+        statusKey = inconclusiveAssertions > 0 ? "partial" : "verified";
+    } else if (hasMixedResult) {
+        statusKey = "partial";
+    }
+
+    const statusMap = {
+        verified: { statusLabel: "Verificada", statusIcon: "🟢" },
+        partial: { statusLabel: "Parcialmente verificada", statusIcon: "🟡" },
+        contradicted: { statusLabel: "Desmentida", statusIcon: "🔴" },
+        inconclusive: { statusLabel: "No concluyente", statusIcon: "🟠" },
+        pending: { statusLabel: "Pendiente", statusIcon: "⚪" }
+    };
+
+    const assertionBreakdown = `${pluralizeEs(confirmedAssertions, "confirmada", "confirmadas")}, ${pluralizeEs(contradictedAssertions, "desmentida", "desmentidas")} y ${pluralizeEs(inconclusiveAssertions, "no concluyente", "no concluyentes")}`;
+    const knownAssertions = confirmedAssertions + contradictedAssertions;
+    const confidenceLabel = knownAssertions > 0
+        ? `Confirmadas entre las verificadas: ${confirmedAssertions}/${knownAssertions}`
+        : "Sin afirmaciones verificadas todavía";
+
+    let conclusionText;
+    if (statusKey === "pending") {
+        conclusionText = `La verificación sigue en curso: ${completedValidations}/${totalValidations || completedValidations} validaciones de IA completadas.`;
+    } else if (statusKey === "verified") {
+        conclusionText = `La noticia queda verificada: ${assertionBreakdown}. No se detectan afirmaciones desmentidas.`;
+    } else if (statusKey === "contradicted") {
+        conclusionText = `La noticia queda desmentida: predominan las afirmaciones rechazadas por los validadores. Resultado: ${assertionBreakdown}.`;
+    } else if (statusKey === "partial") {
+        conclusionText = `La noticia contiene afirmaciones mezcladas: ${assertionBreakdown}. No debe considerarse plenamente fiable.`;
+    } else {
+        conclusionText = `La verificación no permite una conclusión firme: ${assertionBreakdown}. Conviene revisar las evidencias antes de decidir.`;
+    }
+
+    return {
+        statusKey,
+        statusLabel: statusMap[statusKey].statusLabel,
+        statusIcon: statusMap[statusKey].statusIcon,
+        confidenceLabel,
+        conclusionText,
+        totalAssertions,
+        confirmedAssertions,
+        contradictedAssertions,
+        inconclusiveAssertions,
+        totalValidations,
+        completedValidations,
+        pendingValidations,
+        validatorVotes
+    };
+}
+
+
+function renderDetails(container, data) {
+    container.innerHTML = '<h3 class="text-lg font-bold mb-4">Detalles de la Orden</h3>';
+
+    const summary = buildVerificationSummary(data);
+    const progressPercent = summary.totalValidations > 0 ? Math.round((summary.completedValidations / summary.totalValidations) * 100) : 0;
+    const consensusLabel = summary.pendingValidations === 0 && summary.totalValidations > 0 ? "Consenso completo" : "Consenso parcial";
 
     const formatDetailValue = value => {
         if (value === null || value === undefined) return "";
         if (typeof value === "object") return `<pre class="event-payload-pre mt-0">${JSON.stringify(value, null, 2)}</pre>`;
         return safeText(value);
     };
-
-    // **********************************
-    // ** CORRECCIÓN DE PORCENTAJES **
-    // **********************************
-    const knownAssertions = trueAssertions + falseAssertions; 
-    
-    if (knownAssertions !== 0) {
-        percentTrue = (trueAssertions / knownAssertions) * 100; 
-        percentFalse = (falseAssertions / knownAssertions) * 100;
-    } 
-    // **********************************
-
-
-    let overallTag = "Sin Validaciones", overallClass = "unknown";
-    if (totalAssertions > 0) {
-        if (trueAssertions > falseAssertions && trueAssertions > 0) { 
-            if (percentTrue === 100) 
-                overallTag = "Totalmente Cierta: 100% Aserciones Válidas"
-            else
-                overallTag = "Mayoritariamente Cierta: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; 
-            overallClass = "true-news"; 
-            
-        }
-        else if (falseAssertions > trueAssertions && falseAssertions > 0) { 
-            // FIX 3: Usar percentFalse para el mensaje de Mayoría Falsa.
-            overallTag = " Mayoritariamente Falsa: "+percentFalse.toFixed(1)+"% Aserciones Falsas"; 
-            overallClass = "false-news"; 
-        }
-        else if (trueAssertions === falseAssertions && knownAssertions > 0) {
-             overallTag = " Validación Mixta: "+percentTrue.toFixed(1)+"% Aserciones Válidas"; 
-             overallClass = "partial-news";
-        }
-        else { overallTag = "Pendiente / Indefinido: 0.0% Aserciones Válidas"; overallClass = "unknown"; }
-    }
-
     // --- Contenido de las subpestañas
-    const validationRequestCount = Object.values(data.validation_requests || {}).reduce((sum, items) => {
-        return sum + (Array.isArray(items) ? items.length : 0);
-    }, 0);
-
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
               .filter(([k, v]) => !["_id", "document", "assertions", "text", "status", "validators_pending", "validation_requests", "validators", "validations"].includes(k))
@@ -844,30 +888,47 @@ function renderDetails(container, data) {
               }).join('') +
         `</table>`;
 
-    const summaryHtml = `<table class="compact-table">
-        <tr><th>ID de Orden</th><td>${data.order_id || "N/A"}</td></tr>
-        <tr><th>Estado General</th><td class="status-value ${overallClass}" data-status="${data.status || 'UNKNOWN'}"> ${overallTag}</td></tr>
-        <tr>
-            <th>Estado de Procesamiento</th>
-            <td>
-                ${data.status || "N/A"}
-                ${renderProcessingFlow(data.status || "PENDING", pendingValidations, totalValidations)}
-            </td>
-        </tr>
-        <tr><th>Noticia (Resumen)</th><td>${data.text || "N/A"}</td></tr>
-        <tr><th>Validaciones pendientes</th><td>
-            <div class="validation-progress">
-                <span>${pendingValidations} pendientes / ${totalValidations} totales</span>
-                <div class="validation-progress-bar">
-                    <div class="validation-progress-fill" style="width:${progressPercent}%;"></div>
+    const summaryHtml = `
+        <div class="verification-summary-card status-${summary.statusKey}">
+            <div class="verification-summary-main">
+                <div>
+                    <span class="summary-kicker">Resultado de verificación</span>
+                    <div class="verification-headline">${summary.statusIcon} ${safeText(summary.statusLabel)}</div>
+                    <p class="verification-conclusion">${safeText(summary.conclusionText)}</p>
+                </div>
+                <span class="summary-confidence">${safeText(summary.confidenceLabel)}</span>
+            </div>
+            <div class="verification-chip-grid assertion-result-grid" aria-label="Resultado por afirmaciones">
+                <span class="summary-kicker">Resultado por afirmación</span>
+                <span class="summary-chip chip-confirmed">✅ Confirmadas: ${summary.confirmedAssertions} de ${summary.totalAssertions}</span>
+                <span class="summary-chip chip-contradicted">❌ Desmentidas: ${summary.contradictedAssertions} de ${summary.totalAssertions}</span>
+                <span class="summary-chip chip-inconclusive">❔ No concluyentes: ${summary.inconclusiveAssertions} de ${summary.totalAssertions}</span>
+            </div>
+            <div class="verification-ai-row">
+                <div class="validation-progress">
+                    <span>${summary.completedValidations}/${summary.totalValidations || summary.completedValidations} validaciones completadas · ${consensusLabel}</span>
+                    <div class="validation-progress-bar">
+                        <div class="validation-progress-fill" style="width:${progressPercent}%;"></div>
+                    </div>
+                </div>
+                <div class="validator-votes" aria-label="Votos de validadores">
+                    <span class="summary-kicker">Votos de validadores</span>
+                    <span class="summary-chip chip-confirmed">✅ ${summary.validatorVotes.true} True</span>
+                    <span class="summary-chip chip-contradicted">❌ ${summary.validatorVotes.false} False</span>
+                    <span class="summary-chip chip-inconclusive">❔ ${summary.validatorVotes.unknown} Unknown</span>
                 </div>
             </div>
-        </td></tr>
-        <tr><th>Validaciones solicitadas</th><td>${totalValidationRequests}</td></tr>
-        <tr><th>Aserciones Ciertas</th><td class="true-news"> ${trueAssertions} (${percentTrue.toFixed(1)}%)</td></tr>
-        <tr><th>Aserciones Falsas</th><td class="false-news"> ${falseAssertions} (${percentFalse.toFixed(1)}%)</td></tr>
-        <tr><th>Validaciones Desconocidas</th><td class="unknown"> ${unknownCount}</td></tr>
-    </table>`;
+        </div>
+        <table class="compact-table summary-metrics-table">
+            <tr><th>ID de Orden</th><td>${safeText(data.order_id || "N/A")}</td></tr>
+            <tr><th>Progreso</th><td>${renderStatusBadge(data.status || "N/A")}${renderProcessingFlow(data.status || "PENDING", summary.pendingValidations, summary.totalValidations)}</td></tr>
+            <tr><th>Noticia (Resumen)</th><td>${safeText(data.text || "N/A")}</td></tr>
+            <tr><th>Validaciones pendientes</th><td>${summary.pendingValidations}</td></tr>
+            <tr><th>Validaciones totales</th><td>${summary.totalValidations}</td></tr>
+            <tr><th>Afirmaciones confirmadas</th><td class="true-news">${summary.confirmedAssertions}</td></tr>
+            <tr><th>Afirmaciones desmentidas</th><td class="false-news">${summary.contradictedAssertions}</td></tr>
+            <tr><th>Votos no concluyentes</th><td class="unknown">${summary.validatorVotes.unknown}</td></tr>
+        </table>`;
 
     // --- Subpestañas internas
      container.innerHTML = `
@@ -2036,8 +2097,19 @@ function statusClass(status) {
 }
 
 function renderStatusBadge(status) {
-    const label = safeText(status || "UNKNOWN");
-    return `<span class="status-badge ${statusClass(status)}">${label}</span>`;
+    const statusLabels = {
+        VALIDATED: "Completada",
+        PENDING: "Pendiente",
+        VALIDATION_PENDING: "Validación pendiente",
+        ASSERTIONS_REQUESTED: "Aserciones solicitadas",
+        DOCUMENT_CREATED: "Documento creado",
+        IPFS_PENDING: "IPFS pendiente",
+        IPFS_UPLOADED: "IPFS subido",
+        BLOCKCHAIN_PENDING: "Blockchain pendiente"
+    };
+    const rawStatus = String(status || "UNKNOWN");
+    const label = safeText(statusLabels[rawStatus] || rawStatus);
+    return `<span class="status-badge ${statusClass(rawStatus)}">${label}</span>`;
 }
 
 function formatAnyDate(value) {

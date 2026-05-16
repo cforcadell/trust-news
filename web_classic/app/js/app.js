@@ -73,6 +73,7 @@ function alertMessage(message, type = 'info', duration = 3000) {
 
 // Variable global para almacenar la última orden cargada
 let currentOrderData = {};
+let currentOrderEvents = [];
 let restoringHistoryState = false;
 
 function buildHistoryUrl(state) {
@@ -595,14 +596,15 @@ async function loadOrderById(orderId, cleanup = true) {
             if (!data.order_id) return;
         }
 
-        renderDetails(detailsContainer, data);
+        let eventsData = currentOrderEvents;
 
         if (cleanup || res.status !== 304) {
-            let eventsData = [];
+            eventsData = [];
             try {
                 const resEv = await fetchWithAuth(`${API}/orders/${orderId}/events`);
                 if (resEv.ok) eventsData = await resEv.json();
             } catch(e){ console.error("Error cargando eventos:", e); }
+            currentOrderEvents = eventsData;
 
             const sections = [
                 {key: "assertions", name: t("tabs.assertions"), data: data.assertions || []},
@@ -635,6 +637,8 @@ async function loadOrderById(orderId, cleanup = true) {
                 }
             }
         }
+
+        renderDetails(detailsContainer, data, eventsData);
     } catch (error) {
         detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
             Error de conexión o JSON inválido: ${error.message}
@@ -736,12 +740,78 @@ function pluralizeEs(count, singular, plural) {
     return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function parseEventTimestamp(value) {
+    if (value === null || value === undefined || value === "") return null;
+
+    if (typeof value === "number") {
+        const milliseconds = value > 9999999999 ? value : value * 1000;
+        const date = new Date(milliseconds);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const raw = String(value).trim();
+    const eventMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (eventMatch) {
+        const [, month, day, year, hours, minutes, seconds = "0"] = eventMatch;
+        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds));
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseOrderTimestamp(value) {
+    if (value === null || value === undefined || value === "") return null;
+
+    const raw = String(value).trim();
+    const orderMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (orderMatch) {
+        const [, day, month, year, hours, minutes, seconds = "0"] = orderMatch;
+        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds));
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    return parseEventTimestamp(value);
+}
+
+function formatDurationMinutesSeconds(milliseconds) {
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) return "";
+    const totalSeconds = Math.round(milliseconds / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
+}
+
+function getEndToEndValidationDuration(order, events = []) {
+    if (!Array.isArray(events) || events.length === 0) return "";
+
+    const validationStarts = events
+        .filter(event => event?.action === "request_validation")
+        .map(event => parseEventTimestamp(event.timestamp))
+        .filter(Boolean);
+    const validationCompletions = events
+        .filter(event => event?.action === "validation_completed")
+        .map(event => parseEventTimestamp(event.timestamp))
+        .filter(Boolean);
+
+    if (validationCompletions.length === 0) return "";
+
+    const startDate = validationStarts.length
+        ? new Date(Math.min(...validationStarts.map(date => date.getTime())))
+        : parseOrderTimestamp(order.created || order.created_at || order.createdAt);
+    const endDate = new Date(Math.max(...validationCompletions.map(date => date.getTime())));
+
+    if (!startDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "";
+    return formatDurationMinutesSeconds(endDate.getTime() - startDate.getTime());
+}
+
 function getAssertionId(assertion, fallbackIndex) {
     if (!assertion || typeof assertion !== "object") return String(fallbackIndex);
     return String(assertion.idAssertion ?? assertion.id ?? assertion.assertion_id ?? fallbackIndex);
 }
 
-function buildVerificationSummary(order) {
+function buildVerificationSummary(order, events = []) {
     const validations = order.validations || {};
     const validationRequestCount = Object.values(order.validation_requests || {}).reduce((sum, items) => {
         return sum + (Array.isArray(items) ? items.length : 0);
@@ -843,17 +913,32 @@ function buildVerificationSummary(order) {
         totalValidations,
         completedValidations,
         pendingValidations,
+        validationDuration: pendingValidations === 0 && completedValidations > 0
+            ? getEndToEndValidationDuration(order, events)
+            : "",
         validatorVotes
     };
 }
 
 
-function renderDetails(container, data) {
+function renderDetails(container, data, events = []) {
     container.innerHTML = `<h3 class="text-lg font-bold mb-4">${t("tabs.details")}</h3>`;
 
-    const summary = buildVerificationSummary(data);
+    const summary = buildVerificationSummary(data, events);
     const progressPercent = summary.totalValidations > 0 ? Math.round((summary.completedValidations / summary.totalValidations) * 100) : 0;
     const consensusLabel = summary.pendingValidations === 0 && summary.totalValidations > 0 ? t("summary.fullConsensus") : t("summary.partialConsensus");
+    const completedValidationsLabel = summary.validationDuration
+        ? t("summary.completedValidationsWithDuration", {
+            completed: summary.completedValidations,
+            total: summary.totalValidations || summary.completedValidations,
+            consensus: consensusLabel,
+            duration: summary.validationDuration
+        })
+        : t("summary.completedValidations", {
+            completed: summary.completedValidations,
+            total: summary.totalValidations || summary.completedValidations,
+            consensus: consensusLabel
+        });
 
     const formatDetailValue = value => {
         if (value === null || value === undefined) return "";
@@ -912,7 +997,7 @@ function renderDetails(container, data) {
             </div>
             <div class="verification-ai-row">
                 <div class="validation-progress">
-                    <span>${t("summary.completedValidations", { completed: summary.completedValidations, total: summary.totalValidations || summary.completedValidations, consensus: consensusLabel })}</span>
+                    <span>${safeText(completedValidationsLabel)}</span>
                     <div class="validation-progress-bar">
                         <div class="validation-progress-fill" style="width:${progressPercent}%;"></div>
                     </div>
@@ -2562,7 +2647,7 @@ async function showValidatorValidations(validatorHash) {
 window.addEventListener("trustnews:languagechange", () => {
     if (currentOrderData?.order_id) {
         const detailsContainer = document.getElementById("fixedDetailsContainer");
-        if (detailsContainer) renderDetails(detailsContainer, currentOrderData);
+        if (detailsContainer) renderDetails(detailsContainer, currentOrderData, currentOrderEvents);
     }
     const badge = document.getElementById("sessionBadge");
     if (badge && keycloak?.tokenParsed?.preferred_username) {

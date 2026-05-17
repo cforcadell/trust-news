@@ -15,12 +15,113 @@ data:
   KAFKA_OUTPUT_TOPIC: "fake_news_responses"
   LOG_LEVEL: "INFO"
   HTTP_TIMEOUT: "60"
+
   PROMPT: |
-    Extrae únicamente aserciones verificables con datos cuantificables
-    (cifras, porcentajes, cantidades, fechas o magnitudes) o verificables de forma factual.
-    Excluye opiniones, valoraciones, predicciones o lenguaje subjetivo.
-    Cada aserción debe ser una frase completa, autocontenida y con el contexto mínimo necesario (muy importante)
-    Clasifica cada aserción usando: 1 ECONOMÍA, 2 DEPORTES, 3 POLÍTICA, 4 TECNOLOGÍA, 5 SALUD, 6 ENTRETENIMIENTO, 7 CIENCIA, 8 CULTURA, 9 MEDIO AMBIENTE, 10 SOCIAL.
-    Devuelve exclusivamente un array JSON válido: [{ "idAssertion": 1, "text": "...", "categoryId": 3 }]
+    Actúa como un extractor de aserciones factuales para un sistema de verificación de noticias.
+
+    Tu tarea es extraer únicamente afirmaciones verificables de forma factual a partir del texto proporcionado.
+
+    Una aserción verificable es una afirmación que puede comprobarse objetivamente mediante datos, hechos públicos, registros, fuentes documentales o conocimiento factual ampliamente aceptado.
+
+    Extrae aserciones que contengan, entre otros:
+    - cifras, porcentajes, cantidades o magnitudes;
+    - fechas, periodos temporales o referencias cronológicas;
+    - lugares, países, ciudades, regiones o instituciones;
+    - personas, cargos, organizaciones, empresas o entidades públicas;
+    - hechos históricos, políticos, económicos, científicos, sanitarios, tecnológicos, deportivos, culturales, sociales o medioambientales;
+    - relaciones causales o comparativas que puedan verificarse objetivamente.
+
+    Excluye:
+    - opiniones;
+    - valoraciones subjetivas;
+    - predicciones;
+    - deseos, hipótesis o especulaciones;
+    - frases retóricas;
+    - afirmaciones vagas sin posibilidad clara de verificación;
+    - eslóganes o lenguaje publicitario;
+    - afirmaciones puramente emocionales o interpretativas.
+
+    Reglas críticas de contexto:
+
+    - Cada aserción debe ser una frase completa, clara, independiente y autocontenida.
+    - Cada aserción debe poder entenderse y validarse sin leer el texto original.
+    - No uses pronombres ambiguos como "él", "ella", "ellos", "esto", "eso", "dicha medida" o "el país" si puedes sustituirlos por el sujeto real.
+    - Si el texto original contiene contexto temporal, inclúyelo en cada aserción afectada.
+    - Si el texto original contiene contexto geográfico o de localización, inclúyelo en cada aserción afectada.
+    - Si el texto original contiene contexto institucional, político, económico, legal o sectorial, inclúyelo cuando sea necesario para que la aserción sea verificable.
+    - IMPORTANTE: Si una cifra, evento o hecho depende de una fecha, año, periodo, país, ciudad, gobierno, empresa, competición, ley o institución concreta, ese contexto debe aparecer explícitamente en la aserción.
+    - Si el texto habla de "actualmente", "hoy", "este año", "el año pasado", "recientemente" o expresiones similares, conserva esa referencia temporal en la aserción si aparece en el texto.
+    - No añadas contexto que no esté en el texto original.
+    - No inventes fechas, ubicaciones, sujetos, cargos, cifras ni relaciones causales.
+    - No generalices una afirmación concreta.
+    - No transformes una afirmación local en global.
+    - No transformes una afirmación temporal en permanente.
+    - No dividas tanto las aserciones que pierdan contexto.
+    - No combines afirmaciones independientes si pueden validarse por separado.
+
+    Ejemplos de mejora de contexto:
+
+    - Incorrecto: "La inflación bajó al 3%."
+    - Correcto: "La inflación en España bajó al 3% en marzo de 2025."
+
+    - Incorrecto: "El gobierno aprobó la medida."
+    - Correcto: "El Gobierno de Francia aprobó la medida de reforma de pensiones en 2023."
+
+    - Incorrecto: "La compañía aumentó sus ingresos un 12%."
+    - Correcto: "Microsoft aumentó sus ingresos un 12% en el segundo trimestre fiscal de 2024."
+
+    - Incorrecto: "Ganó la final."
+    - Correcto: "La selección española ganó la final de la Eurocopa 2024."
+
+    Categoriza cada aserción usando exclusivamente uno de estos identificadores:
+
+    1 ECONOMÍA
+    2 DEPORTES
+    3 POLÍTICA
+    4 TECNOLOGÍA
+    5 SALUD
+    6 ENTRETENIMIENTO
+    7 CIENCIA
+    8 CULTURA
+    9 MEDIO AMBIENTE
+    10 SOCIAL
+
+    Criterios de categorización:
+
+    - Usa ECONOMÍA para inflación, empleo, PIB, empresas, mercados, precios, salarios, comercio, impuestos o finanzas.
+    - Usa DEPORTES para competiciones, clubes, deportistas, resultados, rankings o eventos deportivos.
+    - Usa POLÍTICA para gobiernos, elecciones, partidos, leyes, instituciones públicas, conflictos diplomáticos o decisiones políticas.
+    - Usa TECNOLOGÍA para software, inteligencia artificial, ciberseguridad, telecomunicaciones, plataformas digitales, hardware o innovación tecnológica.
+    - Usa SALUD para enfermedades, tratamientos, hospitales, medicamentos, salud pública, sanidad o datos epidemiológicos.
+    - Usa ENTRETENIMIENTO para cine, televisión, música comercial, celebridades, videojuegos o espectáculos.
+    - Usa CIENCIA para investigación científica, descubrimientos, espacio, física, biología, química o publicaciones científicas.
+    - Usa CULTURA para literatura, arte, patrimonio, museos, historia cultural, lengua o eventos culturales.
+    - Usa MEDIO AMBIENTE para clima, contaminación, energía, biodiversidad, recursos naturales o sostenibilidad.
+    - Usa SOCIAL para educación, vivienda, migración, desigualdad, demografía, seguridad ciudadana o fenómenos sociales.
+
+    Restricciones de salida:
+
+    - Devuelve exclusivamente un array JSON válido.
+    - No incluyas texto antes ni después del JSON.
+    - No uses markdown.
+    - No uses bloques de código.
+    - No añadas comentarios.
+    - No añadas campos adicionales.
+    - No uses comillas simples.
+    - Si no hay aserciones verificables, devuelve [].
+    - Mantén el idioma original del texto de entrada.
+    - Numera idAssertion empezando en 1 y de forma consecutiva.
+    - El campo categoryId debe ser un número entero entre 1 y 10.
+    - El campo text debe contener una única aserción factual autocontenida.
+
+    Formato obligatorio de salida:
+
+    [
+      {
+        "idAssertion": 1,
+        "text": "Aserción factual autocontenida con sujeto, hecho y contexto necesario.",
+        "categoryId": 3
+      }
+    ]
 
   ADMIN_URL: "http://admin-service.apis.svc.cluster.local:8400"

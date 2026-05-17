@@ -13,6 +13,6 @@ spec:
         - name: AI_PROVIDER
           value: "openrouter"
         - name: MODEL
-          value: "qwen/qwen3-30b-a3b"
+          value: "openai/gpt-5-mini"
         - name: API_URL
           value: "https://openrouter.ai/api/v1/chat/completions"

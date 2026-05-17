@@ -20,8 +20,9 @@ from abc import ABC, abstractmethod
 from common.blockchain import send_signed_tx, wait_for_receipt_blocking
 from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple
 from common.veredicto import Veredicto, Validacion
-from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus
-from pydantic import BaseModel
+from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationMode, ValidatorConfigEvent, ValidatorConfigEventPayload
+from pydantic import BaseModel, ValidationError
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 
 # =========================================================
@@ -77,6 +78,16 @@ VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.General_AI))))
 VALIDATOR_ACTIVE_DATE = os.getenv("VALIDATOR_ACTIVE_DATE", datetime.now(timezone.utc).isoformat())
 VALIDATOR_UPDATED_DATE = os.getenv("VALIDATOR_UPDATED_DATE", VALIDATOR_ACTIVE_DATE)
+
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", "kafka:9092"))
+KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
+KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
+KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
+KAFKA_MECHANISM = os.getenv("KAFKA_MECHANISM", "PLAIN")
+TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", "trustnews.validation.requests")
+TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses"))
+light_consumer: Optional[AIOKafkaConsumer] = None
+light_producer: Optional[AIOKafkaProducer] = None
 
 # =========================================================
 # Parsear categorías
@@ -199,6 +210,171 @@ def clean_ai_response_text(text: str) -> str:
 
 ai_validator = build_ai_validator()
 logger.info(f"AI Validator inicializado: {AI_PROVIDER.upper()}")
+
+
+def kafka_security_kwargs():
+    protocol = (KAFKA_SECURITY_PROTOCOL or "").upper()
+    mechanism = KAFKA_MECHANISM or ""
+
+    if "SASL" in protocol:
+        if not (KAFKA_USERNAME and KAFKA_PASSWORD):
+            logger.warning(
+                "⚠️ Kafka SASL requested but username/password are incomplete; "
+                "falling back to default PLAINTEXT client settings."
+            )
+            return {}
+        return {
+            "security_protocol": KAFKA_SECURITY_PROTOCOL,
+            "sasl_mechanism": mechanism,
+            "sasl_plain_username": KAFKA_USERNAME,
+            "sasl_plain_password": KAFKA_PASSWORD,
+        }
+
+    kwargs = {}
+    if KAFKA_SECURITY_PROTOCOL:
+        kwargs["security_protocol"] = KAFKA_SECURITY_PROTOCOL
+    return kwargs
+
+
+def parse_validator_api_response(result_text: str) -> Tuple[Validacion, str]:
+    parsed_result = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
+    normalized = parsed_result.resultado.upper()
+    if normalized == "TRUE":
+        return Validacion.TRUE, parsed_result.descripcion
+    if normalized == "FALSE":
+        return Validacion.FALSE, parsed_result.descripcion
+    return Validacion.UNKNOWN, parsed_result.descripcion
+
+
+def validator_config_event_payload(
+    ipfs_config_hash: Optional[str],
+    source: str = "validate-asertions",
+    status: ValidatorStatus = ValidatorStatus.Registered,
+    categories: Optional[List[int]] = None,
+) -> ValidatorConfigEvent:
+    return ValidatorConfigEvent(
+        payload=ValidatorConfigEventPayload(
+            validator=ACCOUNT_ADDRESS,
+            ipfs_hash=ipfs_config_hash,
+            config=build_validator_config(status=status),
+            categories=categories if categories is not None else (VALIDATOR_CATEGORIES or []),
+            source=source,
+            timestamp=datetime.now(timezone.utc).isoformat()
+        )
+    )
+
+
+async def publish_validator_config_event(
+    ipfs_config_hash: Optional[str],
+    source: str = "validate-asertions",
+    status: ValidatorStatus = ValidatorStatus.Registered,
+    categories: Optional[List[int]] = None,
+):
+    msg = validator_config_event_payload(ipfs_config_hash, source=source, status=status, categories=categories)
+    producer = None
+    try:
+        producer = AIOKafkaProducer(
+            bootstrap_servers=KAFKA_BROKER,
+            **kafka_security_kwargs()
+        )
+        await producer.start()
+        await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json(exclude_none=True).encode("utf-8"))
+        logger.info(
+            f"📣 Validator config event sent | topic={TOPIC_RESPONSES} "
+            f"validator={ACCOUNT_ADDRESS} categories={msg.payload.categories or []} source={source}"
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Could not publish validator config event to news-handler: {e}")
+    finally:
+        if producer:
+            try:
+                await producer.stop()
+            except Exception:
+                pass
+
+
+async def handle_light_validation_request(req: LightValidationRequest):
+    payload = req.payload
+    validator_id = str(payload.validator_id or "")
+    if validator_id.lower() != ACCOUNT_ADDRESS.lower():
+        return
+
+    logger.info(
+        f"[LIGHT] Request received | order_id={payload.order_id} "
+        f"assertion={payload.assertion_index} validator={ACCOUNT_ADDRESS} category={payload.category}"
+    )
+
+    verdict = Validacion.UNKNOWN
+    description = ""
+    error = None
+    try:
+        result_text = await asyncio.to_thread(verificar_asercion, payload.assertion_text, payload.original_text)
+        verdict, description = parse_validator_api_response(result_text)
+    except Exception as e:
+        error = str(e)
+        description = error
+        logger.exception(
+            f"[LIGHT] Error validating assertion | order_id={payload.order_id} "
+            f"assertion={payload.assertion_index} validator={ACCOUNT_ADDRESS}"
+        )
+
+    response = LightValidationResponse(
+        order_id=payload.order_id,
+        payload={
+            "order_id": payload.order_id,
+            "validation_mode": ValidationMode.LIGHT,
+            "assertion_index": payload.assertion_index,
+            "idAssertion": payload.idAssertion,
+            "validator_id": ACCOUNT_ADDRESS,
+            "category": payload.category,
+            "verdict": verdict,
+            "description": description,
+            "confidence": None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "correlation_id": payload.correlation_id,
+            "error": error
+        }
+    )
+    await light_producer.send_and_wait(TOPIC_RESPONSES, response.model_dump_json().encode("utf-8"))
+    logger.info(
+        f"[LIGHT] Response sent | order_id={payload.order_id} assertion={payload.assertion_index} "
+        f"validator={ACCOUNT_ADDRESS} category={payload.category} verdict={int(verdict)}"
+    )
+
+
+async def consume_light_validation_requests():
+    global light_consumer, light_producer
+    light_consumer = AIOKafkaConsumer(
+        TOPIC_LIGHT_VALIDATION_REQUESTS,
+        bootstrap_servers=KAFKA_BROKER,
+        group_id=f"validate-asertions-light-{ACCOUNT_ADDRESS.lower()}",
+        auto_offset_reset="earliest",
+        **kafka_security_kwargs()
+    )
+    light_producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_BROKER,
+        **kafka_security_kwargs()
+    )
+
+    await light_consumer.start()
+    await light_producer.start()
+    logger.info(f"[LIGHT] Kafka consumer subscribed to {TOPIC_LIGHT_VALIDATION_REQUESTS} as {ACCOUNT_ADDRESS}")
+
+    try:
+        async for msg in light_consumer:
+            try:
+                data = json.loads(msg.value.decode("utf-8"))
+                req = LightValidationRequest(**data)
+                if req.payload.validation_mode != ValidationMode.LIGHT:
+                    continue
+                await handle_light_validation_request(req)
+            except ValidationError as e:
+                logger.warning(f"[LIGHT] Invalid Kafka request ignored: {e}")
+            except Exception as e:
+                logger.exception(f"[LIGHT] Error processing Kafka request: {e}")
+    finally:
+        await light_consumer.stop()
+        await light_producer.stop()
 
 # =========================================================
 # Web3 + contrato
@@ -423,6 +599,19 @@ def consultar_tx_status_internal(tx_hash: str) -> Dict[str, Any]:
         logger.debug(f"consultar_tx_status_internal: receipt aún no disponible o error: {e}")
         return {"status": "pending", "result": False, "tx_hash": tx_hash}
 
+
+def receipt_succeeded(receipt: Optional[Dict[str, Any]]) -> bool:
+    if not receipt:
+        return False
+    if isinstance(receipt, dict):
+        return receipt.get("status") == 1
+    return getattr(receipt, "status", None) == 1
+
+
+def require_successful_receipt(receipt: Optional[Dict[str, Any]], message: str):
+    if not receipt_succeeded(receipt):
+        raise HTTPException(status_code=500, detail=message)
+
 # =========================================================
 # Registrar validador (espera confirmación)
 # =========================================================
@@ -533,6 +722,8 @@ async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
         tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, input.name, categorias or [], ipfs_config_hash)
         if tx_hash is None:
             raise HTTPException(status_code=500, detail="Error registrando validador.")
+        require_successful_receipt(receipt, "La transacción de registro del validador falló.")
+        await publish_validator_config_event(ipfs_config_hash, source="registrar_validador", categories=categorias or [])
         return {"status": "ok", "tx_hash": tx_hash, "ipfs_config_hash": ipfs_config_hash, "receipt": receipt}
     except Exception as e:
         logger.exception(f"endpoint_registrar_validador error: {e}")
@@ -548,9 +739,12 @@ async def endpoint_desregistrar_validador():
         tx_update, receipt_update = await asyncio.to_thread(update_validator_config_blockchain, ipfs_config_hash)
         if tx_update is None:
             raise HTTPException(status_code=500, detail="Error actualizando configuración de baja del validador.")
+        require_successful_receipt(receipt_update, "La transacción de actualización de baja del validador falló.")
         tx_hash, receipt = await asyncio.to_thread(desregistrar_validador_blockchain)
         if tx_hash is None:
             raise HTTPException(status_code=500, detail="Error desregistrando validador.")
+        require_successful_receipt(receipt, "La transacción de desregistro del validador falló.")
+        await publish_validator_config_event(ipfs_config_hash, source="desregistrar_validador", status=ValidatorStatus.Unregistered)
         return {"status": "ok", "update_tx_hash": tx_update, "unregister_tx_hash": tx_hash, "ipfs_config_hash": ipfs_config_hash, "receipt": receipt}
     except Exception as e:
         logger.exception(f"endpoint_desregistrar_validador error: {e}")
@@ -617,11 +811,15 @@ async def update_admin_config(config: AdminConfigUpdate):
             tx_update, receipt_update = await asyncio.to_thread(update_validator_config_blockchain, ipfs_config_hash)
             if not tx_update:
                 raise HTTPException(status_code=500, detail="Error actualizando ipfs-config-hash del validador en blockchain.")
+            require_successful_receipt(receipt_update, "La transacción de actualización de configuración del validador falló.")
             blockchain_receipts["update_config_tx"] = tx_update
             blockchain_receipts["ipfs_config_hash"] = ipfs_config_hash
         else:
             blockchain_receipts["ipfs_config_hash"] = ipfs_config_hash
             logger.info("✅ Configuración IPFS ya registrada en blockchain; no se actualiza.")
+
+    event_ipfs_hash = blockchain_receipts.get("ipfs_config_hash") if isinstance(blockchain_receipts, dict) else validator_config_ipfs_hash_from_chain()
+    await publish_validator_config_event(event_ipfs_hash, source="admin_config")
 
     return {
         "status": "ok",
@@ -715,15 +913,9 @@ class BlockchainEventAgent:
                 "metadata": content_obj.get("metadata", {})
             }
             result_text = await asyncio.to_thread(verificar_asercion, document)
-            parsed_result = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
-            if parsed_result.resultado == "TRUE":
-                estado_enum = Validacion.TRUE
-            elif parsed_result.resultado == "FALSE":
-                estado_enum = Validacion.FALSE
-            else:
-                estado_enum = Validacion.UNKNOWN
+            estado_enum, descripcion = parse_validator_api_response(result_text)
 
-            veredicto = Veredicto(parsed_result.descripcion, estado_enum)
+            veredicto = Veredicto(descripcion, estado_enum)
             tx_hash, receipt = await registrar_validacion_internal(post_id, assertion_index, veredicto)
             if receipt and receipt.get("status") == 1:
                 logger.info(f"✅ Validación registrada en blockchain: {tx_hash}")
@@ -741,6 +933,8 @@ async def startup_event():
     agent = BlockchainEventAgent(w3, contract, ACCOUNT_ADDRESS, ipfs_api_url)
     asyncio.create_task(agent.start())
     logger.info("🟢 Blockchain Event Agent iniciado")
+    asyncio.create_task(consume_light_validation_requests())
+    logger.info("[LIGHT] Kafka validation request listener started")
     
         # registrar validador en startup (si no está registrado)
 
@@ -755,7 +949,11 @@ async def startup_event():
                 current_ipfs_hash = validator_config_ipfs_hash_from_chain()
                 if current_ipfs_hash != ipfs_config_hash:
                     logger.info(f"ipfs-config-hash distinto en blockchain: {current_ipfs_hash} -> {ipfs_config_hash}. Actualizando...")
-                    await asyncio.to_thread(update_validator_config_blockchain, ipfs_config_hash)
+                    tx_update, receipt_update = await asyncio.to_thread(update_validator_config_blockchain, ipfs_config_hash)
+                    if not tx_update or not receipt_succeeded(receipt_update):
+                        logger.error("Actualización de configuración del validador en startup falló; no se publica evento de caché.")
+                        return
+                await publish_validator_config_event(ipfs_config_hash, source="startup_existing")
                 return
         except Exception as e:
             logger.warning(f"No se pudo comprobar validador (se intentará registrar): {e}")
@@ -768,8 +966,11 @@ async def startup_event():
         # Usar 'default-' como nombre si es el registro automático
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered)
         tx_hash, receipt = await asyncio.to_thread(registrar_validador_blockchain, VALIDATOR_NAME, VALIDATOR_CATEGORIES or [], ipfs_config_hash)
-        if tx_hash:
+        if tx_hash and receipt_succeeded(receipt):
             logger.info(f"Validador registrado en startup: {tx_hash}")
+            await publish_validator_config_event(ipfs_config_hash, source="startup_registered")
+        elif tx_hash:
+            logger.error(f"Registro de validador en startup falló en blockchain: tx={tx_hash}, receipt={receipt}")
         else:
             logger.error("Registro de validador en startup falló.")
     except Exception as e:

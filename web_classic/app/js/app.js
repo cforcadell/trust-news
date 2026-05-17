@@ -152,6 +152,21 @@ function shortHex(value) {
   return value;
 }
 
+function getSelectedValidationMode() {
+    return document.getElementById("validationMode")?.value || "BLOCKCHAIN";
+}
+
+function isLightOrder(order) {
+    return String(order?.validation_mode || "BLOCKCHAIN").toUpperCase() === "LIGHT";
+}
+
+function updateValidationModeHelp() {
+    const selected = getSelectedValidationMode();
+    document.querySelectorAll("[data-mode-help]").forEach(el => {
+        el.hidden = el.getAttribute("data-mode-help") !== selected;
+    });
+}
+
 function getValidationLiteral(value) {
     const numericValue = parseInt(value, 10);
     if (isNaN(numericValue)) return "DESCONOCIDO";
@@ -410,7 +425,7 @@ async function publishNew() {
 
     const res = await fetchWithAuth(`${API}/orders/publishNew`, {
         method: "POST",
-        body: JSON.stringify({text})
+        body: JSON.stringify({text, validation_mode: getSelectedValidationMode()})
     });
 
     if (!res.ok) {
@@ -456,7 +471,7 @@ async function publishWithAssertions() {
         return alertMessage("Debes tener al menos una aserción", 'error');
     }
 
-    const payload = { text, assertions };
+    const payload = { text, assertions, validation_mode: getSelectedValidationMode() };
 
     try {
         const response = await fetchWithAuth(`${API}/orders/publishWithAssertions`, {
@@ -501,7 +516,7 @@ async function findPrevious() {
     try {
         const res = await fetchWithAuth(`${API}/find-order-by-text`, {
             method: "POST",
-            body: JSON.stringify({text})
+            body: JSON.stringify({text, validation_mode: getSelectedValidationMode()})
         });
 
         if (!res.ok) throw new Error("API responded with error.");
@@ -606,9 +621,10 @@ async function loadOrderById(orderId, cleanup = true) {
             } catch(e){ console.error("Error cargando eventos:", e); }
             currentOrderEvents = eventsData;
 
+            const lightMode = isLightOrder(data);
             const sections = [
                 {key: "assertions", name: t("tabs.assertions"), data: data.assertions || []},
-                {key: "document", name: t("tabs.document"), data: data.document || null},
+                {key: "document", name: t("tabs.document"), data: data.document || null, disabled: lightMode},
                 {key: "validations", name: t("tabs.validations"), data: data.validations || {}},
                 {key: "events", name: t("tabs.events"), data: eventsData}
             ];
@@ -620,20 +636,26 @@ async function loadOrderById(orderId, cleanup = true) {
                     btn.innerText = s.name;
                     btn.dataset.tabKey = s.key;
                     btn.className = 'tab-button';
+                    if (s.disabled) {
+                        btn.disabled = true;
+                        btn.classList.add("disabled-tab");
+                        btn.title = "Detalle blockchain/IPFS no disponible para validaciones en modo Light.";
+                    }
                     btn.onclick = () => {
+                        if (s.disabled) return;
                         document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
                         btn.classList.add("activeTab");
-                        renderTabContent(s.key, s.data, data.assertions);
+                        renderTabContent(s.key, s.data, data.assertions, data);
                     };
                     if(i===0) btn.classList.add("activeTab");
                     tabs.appendChild(btn);
-                    if(i===0) renderTabContent(s.key, s.data, data.assertions);
+                    if(i===0) renderTabContent(s.key, s.data, data.assertions, data);
                 });
             } else {
                 const activeTab = tabs.querySelector('.activeTab');
                 if (activeTab) {
                     const sec = sections.find(s => s.key === activeTab.dataset.tabKey);
-                    if (sec) renderTabContent(sec.key, sec.data, data.assertions);
+                    if (sec && !sec.disabled) renderTabContent(sec.key, sec.data, data.assertions, data);
                 }
             }
         }
@@ -652,12 +674,16 @@ async function loadOrderById(orderId, cleanup = true) {
 // =========================================================
 // RENDER TAB CONTENT
 // =========================================================
-function renderTabContent(tabName, data, assertions=[]) {
+function renderTabContent(tabName, data, assertions=[], orderData=null) {
     const container = document.getElementById("tabContent");
     container.innerHTML = "";
 
     switch(tabName) {
         case "document":
+            if (isLightOrder(orderData)) {
+                container.innerHTML = `<p class="empty-state">Detalle blockchain/IPFS no disponible para validaciones en modo Light.</p>`;
+                break;
+            }
             container.innerHTML = `
                 <div class="json-box-header">${t("tabs.document")} JSON</div>
                 <div class="json-tree">${renderJsonTree(data)}</div>
@@ -940,6 +966,7 @@ function renderDetails(container, data, events = []) {
             consensus: consensusLabel
         });
 
+    const lightMode = isLightOrder(data);
     const formatDetailValue = value => {
         if (value === null || value === undefined) return "";
         if (typeof value === "object") return `<pre class="event-payload-pre mt-0">${JSON.stringify(value, null, 2)}</pre>`;
@@ -952,6 +979,9 @@ function renderDetails(container, data, events = []) {
               .map(([k, v]) => {
                   if (k === "text" && typeof v === "object" && v?.text) v = v.text;
 
+                  if (lightMode && ["tx_hash", "postId", "cid"].includes(k)) {
+                      return `<tr><th>${safeText(k)}</th><td><span class="text-muted">not_available</span></td></tr>`;
+                  }
                   if (k === "tx_hash" && v) {
                       const safeHash = String(v).replace(/'/g, "\\'");
                       return `<tr><th>${safeText(k)}</th><td><a href="#" onclick="event.preventDefault(); navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a></td></tr>`;
@@ -1014,7 +1044,9 @@ function renderDetails(container, data, events = []) {
             <tr><th>${t("summary.orderId")}</th><td>${safeText(data.order_id || "N/A")}</td></tr>
             <tr><th>${t("summary.progress")}</th><td>${renderStatusBadge(data.status || "N/A")}${renderProcessingFlow(data.status || "PENDING", summary.pendingValidations, summary.totalValidations)}</td></tr>
             <tr><th>${t("summary.newsSummary")}</th><td>${safeText(data.text || "N/A")}</td></tr>
+            <tr><th>Modo</th><td>${safeText(data.validation_mode || "BLOCKCHAIN")}</td></tr>
             <tr><th>${t("summary.pendingValidations")}</th><td>${summary.pendingValidations}</td></tr>
+            <tr><th>Sin validador</th><td>${Array.isArray(data.assertions_without_validator) ? data.assertions_without_validator.length : 0}</td></tr>
             <tr><th>${t("summary.totalValidations")}</th><td>${summary.totalValidations}</td></tr>
             <tr><th>${t("summary.confirmedAssertions")}</th><td class="true-news">${summary.confirmedAssertions}</td></tr>
             <tr><th>${t("summary.disprovedAssertions")}</th><td class="false-news">${summary.contradictedAssertions}</td></tr>
@@ -2066,6 +2098,8 @@ function initializeApp() {
     // 3. News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
     document.getElementById('btn-publishNew').addEventListener('click', publishNew);
+    document.getElementById('validationMode')?.addEventListener('change', updateValidationModeHelp);
+    updateValidationModeHelp();
 
     document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
         const text = document.getElementById("newsText").value.trim();
@@ -2243,7 +2277,7 @@ function renderTableData(container, data) {
 
     let keys;
     if (isOrdersContainer) {
-        const preferred = ["order_id", "client_id", "status", "hash_text", "tx_hash", "created_at", "updated_at", "validators_pending"];
+        const preferred = ["order_id", "client_id", "validation_mode", "status", "hash_text", "tx_hash", "created_at", "updated_at", "validators_pending"];
         const existing = new Set();
         data.forEach(row => Object.keys(row).forEach(k => existing.add(k)));
         keys = preferred.filter(k => existing.has(k));
@@ -2257,6 +2291,7 @@ function renderTableData(container, data) {
     const headerLabels = {
         order_id: "Order ID",
         client_id: "Client ID",
+        validation_mode: "Modo",
         status: "Estado",
         hash_text: "Hash texto",
         tx_hash: "Tx hash",

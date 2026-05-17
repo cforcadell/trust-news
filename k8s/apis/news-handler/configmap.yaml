@@ -15,14 +15,16 @@ data:
   TOPIC_REQUESTS_BLOCKCHAIN: "fake_news_requests_blockchain"
   TOPIC_REQUESTS_VALIDATE: "fake_news_requests_validate"
   TOPIC_RESPONSES: "fake_news_responses"
-  
+  TOPIC_LIGHT_VALIDATION_REQUESTS: "fake_news_requests_light_validation"
+  TOPIC_LIGHT_VALIDATION_RESPONSES: "fake_news_responses"
+
   # --- MongoDB ---
   MONGO_DBNAME: "newsdb"
   MONGO_COLLECTION: "news"
   
   # --- App Config ---
   MAX_WORKERS: "3"
-  EMULATE_BLOCKCHAIN_REQUESTS: "false"
+
   
   # --- URLs Internas ---
   IPFS_FASTAPI_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"

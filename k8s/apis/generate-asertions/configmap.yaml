@@ -11,8 +11,8 @@ data:
   GEMINI_API_URL: "https://generativelanguage.googleapis.com/v1beta"
   AI_PROVIDER: "gemini"
   KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
-  KAFKA_REQUEST_TOPIC: "fake_news_requests_generate"
-  KAFKA_RESPONSE_TOPIC: "fake_news_responses"
+  KAFKA_INPUT_TOPIC: "fake_news_requests_generate"
+  KAFKA_OUTPUT_TOPIC: "fake_news_responses"
   LOG_LEVEL: "INFO"
   HTTP_TIMEOUT: "60"
   PROMPT: |

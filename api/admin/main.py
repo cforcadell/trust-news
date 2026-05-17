@@ -92,7 +92,7 @@ class OpenRouterRecommendationsResponse(BaseModel):
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017")
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
 ORDERS_COLLECTION_NAME = os.getenv("ORDERS_COLLECTION", "news")
-QUOTAS_COLLECTION_NAME = os.getenv("QUOTAS_COLLECTION", "clients_quotas")
+QUOTAS_COLLECTION_NAME = os.getenv("QUOTAS_COLLECTION_NAME", "clients_quotas")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")

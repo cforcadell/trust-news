@@ -435,7 +435,8 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
         payload = AssertionGeneratedPayload(
             text=req.payload.text,
             assertions=assertion_objs, # Se usa directamente la lista de modelos
-            publisher=AI_PROVIDER
+            publisher=AI_PROVIDER,
+            validation_mode=req.payload.validation_mode
         )
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=req.order_id, payload=payload)
     except ValidationError as e:

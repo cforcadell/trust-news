@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional, Dict, Any
-from enum import IntEnum
+from enum import Enum, IntEnum
 from common.veredicto import Validacion
 
 
@@ -73,6 +73,11 @@ class AsyncMessage(BaseModel):
     order_id: str
 
 
+class ValidationMode(str, Enum):
+    BLOCKCHAIN = "BLOCKCHAIN"
+    LIGHT = "LIGHT"
+
+
 
 # ============================================================
 # 🔹 VALIDATOR CONFIG MODELS
@@ -109,8 +114,11 @@ class ValidatorConfigOnChain(BaseModel):
 
 class ValidatorConfigEventPayload(BaseModel):
     validator: str
-    ipfs_hash: str
+    ipfs_hash: Optional[str] = None
     config: Optional[ValidatorConfig] = None
+    categories: Optional[List[int]] = None
+    source: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
 class ValidatorConfigEvent(BaseModel):
@@ -136,10 +144,12 @@ class TextoEntrada(BaseModel):
 
 class PublishRequest(BaseModel):
     text: str
+    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
 
 
 class GenerateAssertionsPayload(BaseModel):
     text: str
+    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
 
 
 class GenerateAssertionsRequest(BaseModel):
@@ -152,6 +162,7 @@ class AssertionGeneratedPayload(BaseModel):
     text: str
     assertions: List[Assertion]
     publisher: str
+    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
 
 
 class AssertionsGeneratedResponse(BaseModel):
@@ -185,6 +196,7 @@ class PreGeneratedAssertion(BaseModel):
 class PublishWithAssertionsRequest(BaseModel):
     text: str
     assertions: List[PreGeneratedAssertion]
+    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
 
 # ============================================================
 # 🔹 UPLOAD IPFS
@@ -254,6 +266,7 @@ class RequestValidationPayload(BaseModel):
     idAssertion: str
     text: str
     context: Optional[str] = None
+    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
 
 
 class RequestValidationRequest(BaseModel):
@@ -277,6 +290,7 @@ class ValidationCompletedPayload(BaseModel):
     text: str
     tx_hash: str
     validator_alias: str
+    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
 
 
 class ValidationCompletedResponse(BaseModel):
@@ -286,6 +300,52 @@ class ValidationCompletedResponse(BaseModel):
 
 
     
+
+# ============================================================
+# 🔹 LIGHT VALIDATION KAFKA FLOW
+# ============================================================
+
+class LightValidationRequestPayload(BaseModel):
+    order_id: str
+    postId: Optional[str] = None
+    validation_mode: ValidationMode = ValidationMode.LIGHT
+    assertion_index: int
+    idAssertion: str
+    assertion_text: str
+    category: int
+    validator_id: str
+    original_text: Optional[str] = None
+    client_id: Optional[str] = None
+    correlation_id: str
+    timestamp: str
+
+
+class LightValidationRequest(BaseModel):
+    action: str = "light_validation_request"
+    order_id: str
+    payload: LightValidationRequestPayload
+
+
+class LightValidationResponsePayload(BaseModel):
+    order_id: str
+    validation_mode: ValidationMode = ValidationMode.LIGHT
+    assertion_index: int
+    idAssertion: str
+    validator_id: str
+    category: int
+    verdict: Validacion
+    description: str
+    confidence: Optional[float] = None
+    timestamp: str
+    correlation_id: str
+    error: Optional[str] = None
+
+
+class LightValidationResponse(BaseModel):
+    action: str = "light_validation_completed"
+    order_id: str
+    payload: LightValidationResponsePayload
+
 class ValidatorAPIResponse(BaseModel):
     resultado: str
     descripcion: str

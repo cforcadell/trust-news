@@ -48,7 +48,10 @@ from common.async_models import (
     PublishRequest,
     ValidatorConfigEvent,
     ValidatorConfig,
-    ValidatorWithValidationsResponse
+    ValidatorWithValidationsResponse,
+    ValidationMode,
+    LightValidationRequest,
+    LightValidationResponse
 )
 
 # =========================================================
@@ -73,6 +76,8 @@ TOPIC_REQUESTS_IPFS = os.getenv("TOPIC_REQUESTS_IPFS", "fake_news_requests_ipfs"
 TOPIC_REQUESTS_BLOCKCHAIN = os.getenv("TOPIC_REQUESTS_BLOCKCHAIN", "fake_news_requests_blockchain")
 TOPIC_REQUESTS_VALIDATE = os.getenv("TOPIC_REQUESTS_VALIDATE", "fake_news_requests_validate")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
+TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", "trustnews.validation.requests")
+TOPIC_LIGHT_VALIDATION_RESPONSES = os.getenv("TOPIC_LIGHT_VALIDATION_RESPONSES", "trustnews.validation.responses")
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017")
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "tfm")
@@ -84,6 +89,7 @@ ADMIN_URL = os.getenv("ADMIN_URL", "http://admin:8000")
 
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
 NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain:8073")
+GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions:8071")
 
 
 # =========================================================
@@ -164,18 +170,41 @@ async def load_validators_cache_from_chain():
         logger.warning(f"⚠️ Could not load validators cache from news-chain: {e}")
 
 
-def update_validator_cache_from_event(payload: dict):
-    """Listen event new_validator_config and update cache."""
+async def update_validator_cache_from_event(payload: dict):
+    """Listen validator config events and keep the local cache coherent for BLOCKCHAIN and LIGHT flows."""
     global validators_cache
     validator = str(payload.get("validator", ""))
     if not validator:
         return
+
+    if validators_cache is None:
+        validators_cache = {}
+
+    if not validators_cache:
+        try:
+            await load_validators_cache_from_chain()
+            logger.info("✅ Validators cache initialized before applying validator config event")
+        except Exception as e:
+            logger.warning(f"⚠️ Validators cache could not be initialized from chain before event: {e}")
+
+    existing = validators_cache.get(validator.lower(), {})
+    incoming_categories = payload.get("categories")
+    if incoming_categories is None:
+        incoming_categories = existing.get("categories", [])
+
     validators_cache[validator.lower()] = {
+        **existing,
         "validator": validator,
-        "ipfs_hash": payload.get("ipfs_hash"),
-        "config": payload.get("config")
+        "ipfs_hash": payload.get("ipfs_hash", existing.get("ipfs_hash")),
+        "config": payload.get("config") or existing.get("config"),
+        "categories": incoming_categories or [],
+        "updated_at": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "source": payload.get("source", existing.get("source", "validator-event"))
     }
-    logger.info(f"✅ Validators cache updated for {validator}")
+    logger.info(
+        f"✅ Validators cache updated from event | validator={validator} "
+        f"categories={validators_cache[validator.lower()].get('categories', [])}"
+    )
 
 
 def get_cached_validator_config(validator: str) -> Optional[dict]:
@@ -244,6 +273,152 @@ def attach_validator_config_snapshots(order: dict) -> dict:
             if validator_config:
                 validation["validator_config"] = validator_summary_for_ui(validator_config)
     return order
+
+
+def normalize_validation_mode(value) -> ValidationMode:
+    if isinstance(value, ValidationMode):
+        return value
+    return ValidationMode(str(value or ValidationMode.BLOCKCHAIN.value).upper())
+
+
+def is_validator_active(validator: dict) -> bool:
+    config = validator.get("config") or {}
+    status = config.get("status")
+    return status in (None, 1, "1", "Registered", "registered")
+
+
+def validator_supports_category(validator: dict, category_id: int) -> bool:
+    categories = validator.get("categories") or []
+    for category in categories:
+        if isinstance(category, dict) and int(category.get("id", -1)) == int(category_id):
+            return True
+        try:
+            if int(category) == int(category_id):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def get_light_validators_for_category(category_id: int) -> List[dict]:
+    return [
+        v for v in validators_cache.values()
+        if v.get("validator") and is_validator_active(v) and validator_supports_category(v, category_id)
+    ]
+
+
+def light_document_for_order(order_id: str, text: str, assertions: list) -> dict:
+    return {
+        "order_id": order_id,
+        "text": text,
+        "assertions": assertions,
+        "metadata": {
+            "generated_by": "news-handler",
+            "timestamp": asyncio.get_event_loop().time(),
+            "validation_mode": ValidationMode.LIGHT.value,
+            "ipfs": "not_available",
+            "blockchain": "not_available"
+        }
+    }
+
+
+async def generate_assertions_direct_light(order_id: str, text: str, client_id: str) -> List[dict]:
+    logger.info(f"[LIGHT] Calling generate-asertions directly | order_id={order_id}")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"{GENERATE_ASSERTIONS_URL}/extraer",
+            params={"client_id": client_id},
+            json={"text": text}
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    parsed = AssertionsGeneratedResponse(**data)
+    return [a.model_dump() if isinstance(a, Assertion) else a for a in parsed.payload.assertions]
+
+
+async def dispatch_light_validation_requests(order_id: str, text: str, assertions_list: list, client_id: Optional[str] = None):
+    validators_info = []
+    validation_requests = {}
+    no_validator_assertions = []
+    total_pending = 0
+
+    for index, assertion in enumerate(assertions_list):
+        assertion_id = str(assertion.get("idAssertion", index))
+        category_id = int(assertion.get("categoryId", 0) or 0)
+        assertion_text = assertion.get("text", "")
+        validators = get_light_validators_for_category(category_id)
+        validator_ids = [str(v.get("validator")) for v in validators]
+
+        validators_info.append({
+            "idAssertion": assertion_id,
+            "validatorAddresses": validator_ids,
+            "text": assertion_text,
+            "categoryId": category_id
+        })
+        validation_requests[assertion_id] = validator_ids
+
+        if not validator_ids:
+            no_validator_assertions.append(assertion_id)
+            logger.warning(f"[LIGHT] No active validators for category | order_id={order_id} assertion={assertion_id} category={category_id}")
+            continue
+
+        for validator_id in validator_ids:
+            correlation_id = f"{order_id}:{assertion_id}:{validator_id}"
+            msg = LightValidationRequest(
+                order_id=order_id,
+                payload={
+                    "order_id": order_id,
+                    "postId": None,
+                    "validation_mode": ValidationMode.LIGHT,
+                    "assertion_index": index,
+                    "idAssertion": assertion_id,
+                    "assertion_text": assertion_text,
+                    "category": category_id,
+                    "validator_id": validator_id,
+                    "original_text": text,
+                    "client_id": client_id,
+                    "correlation_id": correlation_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            await producer.send_and_wait(TOPIC_LIGHT_VALIDATION_REQUESTS, msg.model_dump_json().encode("utf-8"))
+            await log_event(order_id, msg.action, TOPIC_LIGHT_VALIDATION_REQUESTS, msg.payload.model_dump())
+            logger.info(f"[LIGHT] Dispatching validation request to Kafka | order_id={order_id} assertion={assertion_id} validator={validator_id}")
+            total_pending += 1
+
+    status = "VALIDATION_PENDING" if total_pending else "NO_VALIDATORS_AVAILABLE"
+    await update_order(order_id, {
+        "$set": {
+            "validators": validators_info,
+            "validation_requests": validation_requests,
+            "validators_pending": total_pending,
+            "assertions_without_validator": no_validator_assertions,
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+    })
+    return total_pending
+
+
+async def start_light_flow(order_id: str, text: str, assertions_list: list, client_id: Optional[str] = None):
+    logger.info(f"[LIGHT] Starting lightweight validation flow | order_id={order_id}")
+    logger.info(f"[LIGHT] Skipping IPFS and blockchain publication | order_id={order_id}")
+    document = light_document_for_order(order_id, text, assertions_list)
+    await update_order(order_id, {
+        "$set": {
+            "validation_mode": ValidationMode.LIGHT.value,
+            "assertions": assertions_list,
+            "document": document,
+            "cid": None,
+            "postId": None,
+            "tx_hash": None,
+            "hash_text": hash_text_to_multihash(text).digest,
+            "status": "DOCUMENT_CREATED",
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+    })
+    logger.info(f"[LIGHT] Generated assertions | order_id={order_id} count={len(assertions_list)}")
+    await dispatch_light_validation_requests(order_id, text, assertions_list, client_id)
 # ===========================
 # Helpers para hashes
 # ===========================
@@ -369,7 +544,8 @@ ACTION_TO_MODEL_RESPONSE = {
     "blockchain_registered": BlockchainRegisteredResponse,
     "validation_completed": ValidationCompletedResponse,
     "request_validation": RequestValidationRequest,
-    "new_validator_config": ValidatorConfigEvent
+    "new_validator_config": ValidatorConfigEvent,
+    "light_validation_completed": LightValidationResponse
 }
 
 async def process_kafka_message(data: dict):
@@ -385,7 +561,12 @@ async def process_kafka_message(data: dict):
             return
         if action == "new_validator_config":
             payload = data.get("payload", {}) if isinstance(data.get("payload"), dict) else {}
-            update_validator_cache_from_event(payload)
+            try:
+                parsed_event = ValidatorConfigEvent(**data)
+                payload = parsed_event.payload.model_dump()
+            except ValidationError as e:
+                logger.warning(f"⚠️ Validator config event failed schema validation, applying raw payload: {e}")
+            await update_validator_cache_from_event(payload)
             await log_event("validator-config", action, TOPIC_RESPONSES, payload)
             return
 
@@ -455,6 +636,13 @@ async def process_kafka_message(data: dict):
             assertions = parsed.payload.assertions or []
             assertions_list = [a.model_dump() if isinstance(a, Assertion) else a for a in assertions]
             num_assertions = len(assertions_list)
+            validation_mode = normalize_validation_mode(doc.get("validation_mode", getattr(parsed.payload, "validation_mode", ValidationMode.BLOCKCHAIN)))
+
+            if validation_mode == ValidationMode.LIGHT:
+                await start_light_flow(order_id, doc.get("text", ""), assertions_list, doc.get("client_id"))
+                return
+
+            logger.info(f"[BLOCKCHAIN] Using existing blockchain validation flow | order_id={order_id}")
             
             # 🟢 Control de cuotas de seguridad final (antes de enviar al workflow pesado de IPFS/Blockchain)
             client_id = doc.get("client_id")
@@ -739,6 +927,70 @@ async def process_kafka_message(data: dict):
         # ================================================================
         # 5 validation_completed
         # ================================================================
+        elif action == "light_validation_completed":
+            payload = parsed.payload.model_dump()
+            id_val = payload.get("validator_id")
+            id_assert = str(payload.get("idAssertion"))
+            approval_raw = payload.get("verdict")
+            status_val = Validacion(approval_raw)
+            description = payload.get("description", "")
+            category = payload.get("category")
+            assertion_index = payload.get("assertion_index")
+            correlation_id = payload.get("correlation_id")
+            error = payload.get("error")
+
+            logger.info(f"[LIGHT] Validation response received | order_id={order_id} assertion={id_assert} validator={id_val} verdict={status_val}")
+
+            if not id_val or not id_assert:
+                logger.warning(f"[LIGHT] validation response without validator/assertion | order_id={order_id}")
+                return
+
+            lock = await get_order_lock(order_id)
+            async with lock:
+                doc = await get_order_doc(order_id)
+                if not doc:
+                    logger.warning(f"[LIGHT] Order not found for validation response | order_id={order_id}")
+                    return
+
+                if normalize_validation_mode(doc.get("validation_mode")) != ValidationMode.LIGHT:
+                    logger.warning(f"[LIGHT] Ignoring LIGHT response for non-LIGHT order | order_id={order_id}")
+                    return
+
+                validations = doc.get("validations", {})
+                validations.setdefault(id_assert, {})
+                if id_val in validations[id_assert]:
+                    logger.info(f"[LIGHT] Duplicate validation ignored | order_id={order_id} assertion={id_assert} validator={id_val}")
+                    return
+
+                validator_config_snapshot = get_cached_validator_config(id_val)
+                validations[id_assert][id_val] = {
+                    "approval": status_val,
+                    "text": description,
+                    "tx_hash": None,
+                    "validator_alias": (validator_config_snapshot or {}).get("config", {}).get("name", ""),
+                    "validator_config": validator_config_snapshot,
+                    "validation_mode": ValidationMode.LIGHT.value,
+                    "category": category,
+                    "assertion_index": assertion_index,
+                    "correlation_id": correlation_id,
+                    "error": error
+                }
+                await update_order(order_id, {"$set": {"validations": validations, "updated_at": datetime.now(timezone.utc).isoformat()}})
+                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, {**payload, "validator_config": validator_config_snapshot})
+
+                validators_cfg = doc.get("validators", [])
+                total_pending = 0
+                for v in validators_cfg:
+                    aid = str(v.get("idAssertion"))
+                    expected = set(v.get("validatorAddresses") or [])
+                    done = set(validations.get(aid, {}).keys())
+                    total_pending += len(expected - done)
+
+                await update_order(order_id, {"$set": {"validators_pending": total_pending}})
+                if total_pending == 0:
+                    await update_order(order_id, {"$set": {"status": "VALIDATED", "updated_at": datetime.now(timezone.utc).isoformat()}})
+                    logger.info(f"[LIGHT] All validations completed | order_id={order_id}")
+
         elif action == "validation_completed":
             payload = parsed.payload.model_dump()
             postId = str(payload.get("postId", ""))
@@ -839,13 +1091,14 @@ async def consume_responses_loop():
 
     consumer = AIOKafkaConsumer(
         TOPIC_RESPONSES,
+        TOPIC_LIGHT_VALIDATION_RESPONSES,
         bootstrap_servers=KAFKA_BROKER,
         group_id="fake-news-orchestrator-group",
         auto_offset_reset="earliest",
         **kafka_security_kwargs()
     )
     await consumer.start()
-    logger.info(f"Kafka consumer subscribed to {TOPIC_RESPONSES}")
+    logger.info(f"Kafka consumer subscribed to {TOPIC_RESPONSES} and {TOPIC_LIGHT_VALIDATION_RESPONSES}")
 
     try:
         async for msg in consumer:
@@ -1255,27 +1508,38 @@ async def publish_new(req: PublishRequest, client_id: str):
         "order_id": order_id,
         "text": req.text,
         "client_id": client_id, # 🔑 Guardar el client_id para luego
-        "status": "CREATED"
+        "status": "CREATED",
+        "validation_mode": normalize_validation_mode(req.validation_mode).value,
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
 
     # Publicar petición a generar aserciones con GenerateAssertionsRequest
     try:
-        msg = GenerateAssertionsRequest(
-            action="generate_assertions",
-            order_id=order_id,
-            payload={"text": req.text}
-        )
-        await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
-        logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
-        await log_event(order_id, msg.action, TOPIC_REQUESTS_GENERATE, msg.payload.model_dump())
+        validation_mode = normalize_validation_mode(req.validation_mode)
+        if validation_mode == ValidationMode.LIGHT:
+            assertions_list = await generate_assertions_direct_light(order_id, req.text, client_id)
+            await start_light_flow(order_id, req.text, assertions_list, client_id)
+        else:
+            msg = GenerateAssertionsRequest(
+                action="generate_assertions",
+                order_id=order_id,
+                payload={"text": req.text, "validation_mode": validation_mode}
+            )
+            await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
+            logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
+            await log_event(order_id, msg.action, TOPIC_REQUESTS_GENERATE, msg.payload.model_dump())
     except ValidationError as e:
         logger.exception(f"[{order_id}] Error validando generate_assertions request: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")
 
-    await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"})
-    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
+    current = await get_order_doc(order_id)
+    final_status = (current or {}).get("status", "ASSERTIONS_REQUESTED")
+    if normalize_validation_mode(req.validation_mode) == ValidationMode.BLOCKCHAIN:
+        await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"})
+        final_status = "ASSERTIONS_REQUESTED"
+    return {"order_id": order_id, "status": final_status, "validation_mode": normalize_validation_mode(req.validation_mode).value}
 
 @app.post("/publishWithAssertions", status_code=202)
 async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
@@ -1304,7 +1568,9 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         "text": req.text,
         "assertions": [a.dict() for a in req.assertions],
         "client_id": client_id, # 🔑
-        "status": "ASSERTIONS_REQUESTED"
+        "status": "ASSERTIONS_REQUESTED",
+        "validation_mode": normalize_validation_mode(req.validation_mode).value,
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB with pre-generated assertions")
@@ -1318,27 +1584,35 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
 
     # Publicar mensaje
     try:
-        msg = AssertionsGeneratedResponse(
-            action="assertions_generated",
-            order_id=order_id,
-            payload={
-                "text": req.text,
-                "publisher": "news-handler",
-                "assertions": assertions_for_payload
-            }
-        )
-        
-        await update_client_consumed(client_id, "news_generation", cons_news - 1)
-        logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
-        
-        await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
-        logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
-        #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
+        validation_mode = normalize_validation_mode(req.validation_mode)
+        if validation_mode == ValidationMode.LIGHT:
+            await update_client_consumed(client_id, "news_generation", cons_news - 1)
+            logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
+            await start_light_flow(order_id, req.text, [a.model_dump() for a in assertions_for_payload], client_id)
+        else:
+            msg = AssertionsGeneratedResponse(
+                action="assertions_generated",
+                order_id=order_id,
+                payload={
+                    "text": req.text,
+                    "publisher": "news-handler",
+                    "assertions": assertions_for_payload,
+                    "validation_mode": validation_mode
+                }
+            )
+            
+            await update_client_consumed(client_id, "news_generation", cons_news - 1)
+            logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
+            
+            await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
+            logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
+            #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
     except ValidationError as e:
         logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")
 
-    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
+    current = await get_order_doc(order_id)
+    return {"order_id": order_id, "status": (current or {}).get("status", "ASSERTIONS_REQUESTED"), "validation_mode": normalize_validation_mode(req.validation_mode).value}
 
 @app.get("/orders/{order_id}")
 async def get_order(
@@ -1699,6 +1973,7 @@ async def startup_event():
         await db["validations"].create_index([("order_id", 1)])
         await db["validations"].create_index([("idValidator", 1)])
         await db["validations"].create_index([("idValidator", 1), ("order_id", 1)])
+        await db["validations"].create_index([("order_id", 1), ("idAssertion", 1), ("idValidator", 1)], unique=True)
         logger.info("MongoDB indexes for events and validations ensured")
     except Exception as e:
         logger.warning(f"Could not create indexes: {e}")

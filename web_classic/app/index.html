@@ -79,6 +79,18 @@
 
                     <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar." data-i18n-placeholder="sections.newsText"></textarea>
 
+                    <div class="validation-mode-panel">
+                        <label for="validationMode">Modo de validación</label>
+                        <select id="validationMode" name="validation_mode">
+                            <option value="BLOCKCHAIN" selected>Blockchain</option>
+                            <option value="LIGHT">Light</option>
+                        </select>
+                        <div class="mode-help">
+                            <span data-mode-help="BLOCKCHAIN">Validación completa con trazabilidad blockchain e IPFS</span>
+                            <span data-mode-help="LIGHT" hidden>Validación rápida sin publicación en blockchain/IPFS</span>
+                        </div>
+                    </div>
+
                     <div class="action-bar sticky-actions">
                         <button id="btn-generateAssertions" class="btn-secondary" data-i18n="sections.generateAssertions">Generar Aserciones</button>
                         <button id="btn-publishNew" class="btn-primary" data-i18n="sections.publishNews">Publicar Noticia</button>

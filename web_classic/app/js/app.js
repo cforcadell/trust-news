@@ -803,7 +803,12 @@ function parseOrderTimestamp(value) {
 
 function formatDurationMinutesSeconds(milliseconds) {
     if (!Number.isFinite(milliseconds) || milliseconds < 0) return "";
-    const totalSeconds = Math.round(milliseconds / 1000);
+    return formatDurationSeconds(milliseconds / 1000);
+}
+
+function formatDurationSeconds(secondsValue) {
+    const totalSeconds = Math.round(Number(secondsValue));
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "-";
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = String(totalSeconds % 60).padStart(2, "0");
     return `${minutes}:${seconds}`;
@@ -2391,12 +2396,14 @@ function renderValidationsTree(container, validations, assertions) {
             let desc = info.text || "Sin descripción";
             if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
             const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
+            const responseTime = formatDurationSeconds(info.response_time_seconds);
             const validatorTooltip = renderValidatorProviderModelTitle(info);
             return `
                 <div class="validator-card">
                     <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${String(validator).replace(/'/g, "\'")}')">${safeText(info.validator_alias || validator)}</a></div>
                     <div class="validator-result ${litClass}">${lit}</div>
                     <div class="validator-desc">${safeText(desc)}</div>
+                    <div class="validator-response-time" title="Tiempo request-response">${safeText(responseTime)}</div>
                     <div class="validator-tx">${tx}</div>
                 </div>
             `;
@@ -2484,7 +2491,8 @@ function renderValidatorCategories(categories = []) {
 function renderValidatorStats(stats = {}) {
     return {
         requests: safeText(stats.requests_sent ?? 0),
-        responses: safeText(stats.successful_responses ?? 0)
+        responses: safeText(stats.successful_responses ?? 0),
+        avgResponseTime: formatDurationSeconds(stats.avg_response_time_seconds)
     };
 }
 
@@ -2586,6 +2594,7 @@ async function showValidatorDetail(validatorHash) {
                         <tr><th>Categories</th><td>${renderValidatorCategories(data.categories)}</td></tr>
                         <tr><th>Requests sent</th><td>${stats.requests}</td></tr>
                         <tr><th>Successful responses</th><td>${stats.responses}</td></tr>
+                        <tr><th>Average response time</th><td>${stats.avgResponseTime}</td></tr>
                         <tr><th>Active Date</th><td>${safeText(cfg.active_date || "-")}</td></tr>
                         <tr><th>Updated Date</th><td>${safeText(cfg.updated_date || "-")}</td></tr>
                         <tr><th>End Date</th><td>${safeText(cfg.end_date || "-")}</td></tr>
@@ -2650,7 +2659,8 @@ async function showValidatorValidations(validatorHash) {
                 tx_hash: v.tx_hash,
                 validator_alias: data.config?.name || validatorHash,
                 validator_config: { config: data.config || {} },
-                order_id: v.order_id
+                order_id: v.order_id,
+                response_time_seconds: v.response_time_seconds
             };
         });
 

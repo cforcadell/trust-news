@@ -164,7 +164,18 @@ async def load_validators_cache_from_chain():
             resp.raise_for_status()
             data = resp.json()
         validators = data.get("validators", [])
-        validators_cache = {str(v.get("validator", "")).lower(): v for v in validators if v.get("validator")}
+        previous_cache = validators_cache or {}
+        refreshed_cache = {}
+        for validator in validators:
+            validator_hash = str(validator.get("validator", "")).lower()
+            if not validator_hash:
+                continue
+            previous = previous_cache.get(validator_hash, {})
+            refreshed_cache[validator_hash] = {
+                **validator,
+                "metrics_reset_at": previous.get("metrics_reset_at")
+            }
+        validators_cache = refreshed_cache
         logger.info(f"✅ Validators cache loaded from news-chain: {len(validators_cache)} validators")
     except Exception as e:
         logger.warning(f"⚠️ Could not load validators cache from news-chain: {e}")
@@ -199,6 +210,7 @@ async def update_validator_cache_from_event(payload: dict):
         "config": payload.get("config") or existing.get("config"),
         "categories": incoming_categories or [],
         "updated_at": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "metrics_reset_at": payload.get("metrics_reset_at") or existing.get("metrics_reset_at"),
         "source": payload.get("source", existing.get("source", "validator-event"))
     }
     logger.info(
@@ -213,40 +225,105 @@ def get_cached_validator_config(validator: str) -> Optional[dict]:
     return validators_cache.get(str(validator).lower())
 
 
-async def get_validator_stats(validator: str) -> dict:
-    """Count validation requests sent to a validator and successful responses stored."""
-    validator_lc = str(validator or "").lower()
-    requests_sent = 0
+def parse_iso_datetime(value) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
 
-    cursor = orders_collection.find(
-        {"validation_requests": {"$exists": True}},
-        {"_id": 0, "validation_requests": 1}
-    )
-    async for order in cursor:
-        for requested_validators in (order.get("validation_requests") or {}).values():
-            requests_sent += sum(
-                1
-                for item in requested_validators
-                if str(item).lower() == validator_lc
-            )
 
-    successful_responses = await db["validations"].count_documents({
-        "idValidator": {
-            "$regex": f"^{re.escape(str(validator or ''))}$",
-            "$options": "i"
-        }
-    })
+def validator_stats_since(validator: dict) -> Optional[datetime]:
+    return parse_iso_datetime((validator or {}).get("metrics_reset_at"))
+
+
+def datetime_to_event_ms(value: Optional[datetime]) -> Optional[int]:
+    if not value:
+        return None
+    return int(value.timestamp() * 1000)
+
+
+async def find_validation_request_timestamp_ms(order_id: str, id_assertion: str, id_validator: str) -> Optional[int]:
+    validator_lc = str(id_validator or "").lower()
+    assertion_id = str(id_assertion or "")
+    query = {
+        "order_id": order_id,
+        "action": {"$in": ["request_validation", "validation_requested", "light_validation_request"]},
+        "$or": [
+            {"payload.idValidator": {"$regex": f"^{re.escape(str(id_validator or ''))}$", "$options": "i"}},
+            {"payload.validator_id": {"$regex": f"^{re.escape(str(id_validator or ''))}$", "$options": "i"}},
+        ],
+        "$and": [{
+            "$or": [
+                {"payload.idAssertion": assertion_id},
+                {"payload.assertion_id": assertion_id},
+                {"payload.assertion_index": assertion_id},
+            ]
+        }]
+    }
+    event = await db["events"].find_one(query, {"timestamp": 1}, sort=[("timestamp", 1)])
+    timestamp = (event or {}).get("timestamp")
+    if isinstance(timestamp, (int, float)):
+        return int(timestamp)
+    if isinstance(timestamp, str):
+        parsed = parse_iso_datetime(timestamp)
+        return datetime_to_event_ms(parsed)
+    return None
+
+
+async def calculate_validation_response_time_seconds(order_id: str, id_assertion: str, id_validator: str, response_ms: int) -> Optional[float]:
+    request_ms = await find_validation_request_timestamp_ms(order_id, id_assertion, id_validator)
+    if request_ms is None:
+        return None
+    return max(0.0, round((response_ms - request_ms) / 1000.0, 3))
+
+
+async def get_validator_stats(validator: str, since: Optional[datetime] = None) -> dict:
+    """Count requests/responses for the current validator configuration window."""
+    validator_filter = {"$regex": f"^{re.escape(str(validator or ''))}$", "$options": "i"}
+    since_ms = datetime_to_event_ms(since)
+
+    request_query = {
+        "action": {"$in": ["request_validation", "validation_requested", "light_validation_request"]},
+        "$or": [
+            {"payload.idValidator": validator_filter},
+            {"payload.validator_id": validator_filter},
+        ]
+    }
+    if since_ms is not None:
+        request_query["timestamp"] = {"$gte": since_ms}
+    requests_sent = await db["events"].count_documents(request_query)
+
+    validation_query = {"idValidator": validator_filter}
+    if since is not None:
+        validation_query["created_at"] = {"$gte": since.isoformat()}
+    successful_responses = await db["validations"].count_documents(validation_query)
+
+    avg_response_time_seconds = None
+    pipeline = [
+        {"$match": {**validation_query, "response_time_seconds": {"$type": "number"}}},
+        {"$group": {"_id": None, "avg": {"$avg": "$response_time_seconds"}}}
+    ]
+    async for row in db["validations"].aggregate(pipeline):
+        avg_response_time_seconds = round(float(row.get("avg", 0)), 3)
 
     return {
         "requests_sent": requests_sent,
-        "successful_responses": successful_responses
+        "successful_responses": successful_responses,
+        "avg_response_time_seconds": avg_response_time_seconds
     }
 
 
 async def enrich_validator_for_ui(validator: dict) -> dict:
     enriched = dict(validator)
     validator_hash = enriched.get("validator", "")
-    enriched["stats"] = await get_validator_stats(validator_hash)
+    enriched["stats"] = await get_validator_stats(validator_hash, validator_stats_since(enriched))
     enriched.setdefault("categories", [])
     return enriched
 
@@ -444,7 +521,7 @@ async def log_event(order_id: str, action: str, topic: str, payload: dict):
     await events_col.insert_one(event_doc)
     logger.info(f"[{order_id}] 🟢 Evento '{action}' registrado en MongoDB ({topic}).")
 
-async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: Validacion, tx_hash: str, payload: dict):
+async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: Validacion, tx_hash: str, payload: dict, response_time_seconds: Optional[float] = None):
     global db
     if not order_id:
         logger.warning(f"Intento de log_validation sin order_id, ignorado.")
@@ -459,7 +536,9 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
         "approval": approval,
         "tx_hash": tx_hash,
         "payload": payload,
-        "timestamp": asyncio.get_event_loop().time()
+        "timestamp": asyncio.get_event_loop().time(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "response_time_seconds": response_time_seconds
     }
     await validations_col.insert_one(val_doc)
     logger.info(f"[{order_id}] 🟢 Validación registrada en MongoDB (Assertion={id_assertion}, Validator={id_validator}).")
@@ -949,6 +1028,8 @@ async def process_kafka_message(data: dict):
                     logger.info(f"[LIGHT] Duplicate validation ignored | order_id={order_id} assertion={id_assert} validator={id_val}")
                     return
 
+                response_ms = int(time.time() * 1000)
+                response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
                 validator_config_snapshot = get_cached_validator_config(id_val)
                 validations[id_assert][id_val] = {
                     "approval": status_val,
@@ -960,10 +1041,11 @@ async def process_kafka_message(data: dict):
                     "category": category,
                     "assertion_index": assertion_index,
                     "correlation_id": correlation_id,
-                    "error": error
+                    "error": error,
+                    "response_time_seconds": response_time_seconds
                 }
                 await update_order(order_id, {"$set": {"validations": validations, "updated_at": datetime.now(timezone.utc).isoformat()}})
-                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, {**payload, "validator_config": validator_config_snapshot})
+                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, {**payload, "validator_config": validator_config_snapshot}, response_time_seconds)
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
@@ -1026,6 +1108,8 @@ async def process_kafka_message(data: dict):
                     except Exception as e:
                         logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
 
+                response_ms = int(time.time() * 1000)
+                response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
                 validator_config_snapshot = get_cached_validator_config(id_val)
 
                 validations[id_assert][id_val] = {
@@ -1033,14 +1117,15 @@ async def process_kafka_message(data: dict):
                     "text": assertion_text,
                     "tx_hash": tx_hash,
                     "validator_alias": validator_alias,
-                    "validator_config": validator_config_snapshot
+                    "validator_config": validator_config_snapshot,
+                    "response_time_seconds": response_time_seconds
                 }
 
                 await update_order(order_id, {"$set": {"validations": validations}})
                 logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
 
                 # Registrar validación en colección 'validations'
-                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, {**payload, "validator_config": validator_config_snapshot})
+                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, {**payload, "validator_config": validator_config_snapshot}, response_time_seconds)
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0

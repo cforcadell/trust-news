@@ -251,6 +251,7 @@ def validator_config_event_payload(
     source: str = "validate-asertions",
     status: ValidatorStatus = ValidatorStatus.Registered,
     categories: Optional[List[int]] = None,
+    metrics_reset_at: Optional[str] = None,
 ) -> ValidatorConfigEvent:
     return ValidatorConfigEvent(
         payload=ValidatorConfigEventPayload(
@@ -259,7 +260,8 @@ def validator_config_event_payload(
             config=build_validator_config(status=status),
             categories=categories if categories is not None else (VALIDATOR_CATEGORIES or []),
             source=source,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            metrics_reset_at=metrics_reset_at
         )
     )
 
@@ -269,8 +271,9 @@ async def publish_validator_config_event(
     source: str = "validate-asertions",
     status: ValidatorStatus = ValidatorStatus.Registered,
     categories: Optional[List[int]] = None,
+    metrics_reset_at: Optional[str] = None,
 ):
-    msg = validator_config_event_payload(ipfs_config_hash, source=source, status=status, categories=categories)
+    msg = validator_config_event_payload(ipfs_config_hash, source=source, status=status, categories=categories, metrics_reset_at=metrics_reset_at)
     producer = None
     try:
         producer = AIOKafkaProducer(
@@ -769,8 +772,12 @@ async def update_admin_config(config: AdminConfigUpdate):
     global AI_PROVIDER, ai_validator, VALIDATOR_CATEGORIES
 
     # 1. Gestión del Provider y Modelo de IA
+    old_provider = AI_PROVIDER
+    old_model = ai_validator.model
     new_provider = config.provider.lower() if config.provider else AI_PROVIDER
     new_model = config.model if config.model else ai_validator.model
+    model_config_changed = new_provider != old_provider or new_model != old_model
+    metrics_reset_at = datetime.now(timezone.utc).isoformat() if model_config_changed else None
 
     # Si se solicitó un cambio en la IA, instanciamos de nuevo el objeto
     if config.provider or config.model:
@@ -819,7 +826,7 @@ async def update_admin_config(config: AdminConfigUpdate):
             logger.info("✅ Configuración IPFS ya registrada en blockchain; no se actualiza.")
 
     event_ipfs_hash = blockchain_receipts.get("ipfs_config_hash") if isinstance(blockchain_receipts, dict) else validator_config_ipfs_hash_from_chain()
-    await publish_validator_config_event(event_ipfs_hash, source="admin_config")
+    await publish_validator_config_event(event_ipfs_hash, source="admin_config", metrics_reset_at=metrics_reset_at)
 
     return {
         "status": "ok",

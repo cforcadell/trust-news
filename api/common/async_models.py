@@ -119,6 +119,7 @@ class ValidatorConfigEventPayload(BaseModel):
     categories: Optional[List[int]] = None
     source: Optional[str] = None
     timestamp: Optional[str] = None
+    metrics_reset_at: Optional[str] = None
 
 
 class ValidatorConfigEvent(BaseModel):

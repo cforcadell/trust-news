@@ -514,7 +514,7 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
 .validator-grid { display: grid; gap: 10px; padding: 0 14px 14px; }
 .validator-card {
   display: grid;
-  grid-template-columns: 220px 100px 1fr 130px;
+  grid-template-columns: 220px 100px 1fr 90px 130px;
   gap: 12px;
   padding: 12px;
   border-radius: 14px;
@@ -526,6 +526,7 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
 .validator-result { font-weight: 900; }
 .validator-desc { color: #e2e8f0; line-height: 1.45; max-height: 120px; overflow: auto; }
 .validator-desc pre { margin: 0; }
+.validator-response-time { color: var(--accent-cyan); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 900; }
 .validator-tx { word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* Pre / JSON */

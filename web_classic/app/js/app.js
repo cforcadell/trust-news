@@ -812,12 +812,14 @@ function formatDurationMinutesSeconds(milliseconds) {
 function getEndToEndValidationDuration(order, events = []) {
     if (!Array.isArray(events) || events.length === 0) return "";
 
+    const startActions = new Set(["request_validation", "validation_requested", "light_validation_request"]);
+    const completionActions = new Set(["validation_completed", "light_validation_completed"]);
     const validationStarts = events
-        .filter(event => event?.action === "request_validation")
+        .filter(event => startActions.has(event?.action))
         .map(event => parseEventTimestamp(event.timestamp))
         .filter(Boolean);
     const validationCompletions = events
-        .filter(event => event?.action === "validation_completed")
+        .filter(event => completionActions.has(event?.action))
         .map(event => parseEventTimestamp(event.timestamp))
         .filter(Boolean);
 
@@ -953,18 +955,11 @@ function renderDetails(container, data, events = []) {
     const summary = buildVerificationSummary(data, events);
     const progressPercent = summary.totalValidations > 0 ? Math.round((summary.completedValidations / summary.totalValidations) * 100) : 0;
     const consensusLabel = summary.pendingValidations === 0 && summary.totalValidations > 0 ? t("summary.fullConsensus") : t("summary.partialConsensus");
-    const completedValidationsLabel = summary.validationDuration
-        ? t("summary.completedValidationsWithDuration", {
-            completed: summary.completedValidations,
-            total: summary.totalValidations || summary.completedValidations,
-            consensus: consensusLabel,
-            duration: summary.validationDuration
-        })
-        : t("summary.completedValidations", {
-            completed: summary.completedValidations,
-            total: summary.totalValidations || summary.completedValidations,
-            consensus: consensusLabel
-        });
+    const completedValidationsLabel = t("summary.completedValidations", {
+        completed: summary.completedValidations,
+        total: summary.totalValidations || summary.completedValidations,
+        consensus: consensusLabel
+    });
 
     const lightMode = isLightOrder(data);
     const formatDetailValue = value => {
@@ -1045,12 +1040,7 @@ function renderDetails(container, data, events = []) {
             <tr><th>${t("summary.progress")}</th><td>${renderStatusBadge(data.status || "N/A")}${renderProcessingFlow(data.status || "PENDING", summary.pendingValidations, summary.totalValidations)}</td></tr>
             <tr><th>${t("summary.newsSummary")}</th><td>${safeText(data.text || "N/A")}</td></tr>
             <tr><th>Modo</th><td>${safeText(data.validation_mode || "BLOCKCHAIN")}</td></tr>
-            <tr><th>${t("summary.pendingValidations")}</th><td>${summary.pendingValidations}</td></tr>
-            <tr><th>Sin validador</th><td>${Array.isArray(data.assertions_without_validator) ? data.assertions_without_validator.length : 0}</td></tr>
-            <tr><th>${t("summary.totalValidations")}</th><td>${summary.totalValidations}</td></tr>
-            <tr><th>${t("summary.confirmedAssertions")}</th><td class="true-news">${summary.confirmedAssertions}</td></tr>
-            <tr><th>${t("summary.disprovedAssertions")}</th><td class="false-news">${summary.contradictedAssertions}</td></tr>
-            <tr><th>${t("summary.inconclusiveVotes")}</th><td class="unknown">${summary.validatorVotes.unknown}</td></tr>
+            <tr><th>${t("summary.validationTotalTime")}</th><td>${safeText(summary.validationDuration || "N/A")}</td></tr>
         </table>`;
 
     // --- Subpestañas internas
@@ -1300,7 +1290,10 @@ function renderEventsTable(container, events) {
         "register_blockchain": "⛓️",
         "blockchain_registered": "🔗",
         "request_validation": "🔍",
-        "validation_completed": "✔️"
+        "validation_requested": "🔍",
+        "light_validation_request": "🔍",
+        "validation_completed": "✔️",
+        "light_validation_completed": "✔️"
     };
 
     function renderPage(page) {

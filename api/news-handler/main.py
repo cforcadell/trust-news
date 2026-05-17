@@ -322,19 +322,6 @@ def light_document_for_order(order_id: str, text: str, assertions: list) -> dict
     }
 
 
-async def generate_assertions_direct_light(order_id: str, text: str, client_id: str) -> List[dict]:
-    logger.info(f"[LIGHT] Calling generate-asertions directly | order_id={order_id}")
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            f"{GENERATE_ASSERTIONS_URL}/extraer",
-            params={"client_id": client_id},
-            json={"text": text}
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    parsed = AssertionsGeneratedResponse(**data)
-    return [a.model_dump() if isinstance(a, Assertion) else a for a in parsed.payload.assertions]
-
 
 async def dispatch_light_validation_requests(order_id: str, text: str, assertions_list: list, client_id: Optional[str] = None):
     validators_info = []
@@ -1515,31 +1502,23 @@ async def publish_new(req: PublishRequest, client_id: str):
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
 
-    # Publicar petición a generar aserciones con GenerateAssertionsRequest
+    # LIGHT y BLOCKCHAIN comparten la solicitud/respuesta de aserciones por Kafka.
     try:
         validation_mode = normalize_validation_mode(req.validation_mode)
-        if validation_mode == ValidationMode.LIGHT:
-            assertions_list = await generate_assertions_direct_light(order_id, req.text, client_id)
-            await start_light_flow(order_id, req.text, assertions_list, client_id)
-        else:
-            msg = GenerateAssertionsRequest(
-                action="generate_assertions",
-                order_id=order_id,
-                payload={"text": req.text, "validation_mode": validation_mode}
-            )
-            await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
-            logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
-            await log_event(order_id, msg.action, TOPIC_REQUESTS_GENERATE, msg.payload.model_dump())
+        msg = GenerateAssertionsRequest(
+            action="generate_assertions",
+            order_id=order_id,
+            payload={"text": req.text, "validation_mode": validation_mode}
+        )
+        await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
+        logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
+        await log_event(order_id, msg.action, TOPIC_REQUESTS_GENERATE, msg.payload.model_dump())
     except ValidationError as e:
         logger.exception(f"[{order_id}] Error validando generate_assertions request: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")
 
-    current = await get_order_doc(order_id)
-    final_status = (current or {}).get("status", "ASSERTIONS_REQUESTED")
-    if normalize_validation_mode(req.validation_mode) == ValidationMode.BLOCKCHAIN:
-        await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"})
-        final_status = "ASSERTIONS_REQUESTED"
-    return {"order_id": order_id, "status": final_status, "validation_mode": normalize_validation_mode(req.validation_mode).value}
+    await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"})
+    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED", "validation_mode": normalize_validation_mode(req.validation_mode).value}
 
 @app.post("/publishWithAssertions", status_code=202)
 async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
@@ -1582,31 +1561,25 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         for a in req.assertions
     ]
 
-    # Publicar mensaje
+    # Publicar respuesta equivalente a la del generador; el consumidor bifurca por validation_mode.
     try:
         validation_mode = normalize_validation_mode(req.validation_mode)
-        if validation_mode == ValidationMode.LIGHT:
-            await update_client_consumed(client_id, "news_generation", cons_news - 1)
-            logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
-            await start_light_flow(order_id, req.text, [a.model_dump() for a in assertions_for_payload], client_id)
-        else:
-            msg = AssertionsGeneratedResponse(
-                action="assertions_generated",
-                order_id=order_id,
-                payload={
-                    "text": req.text,
-                    "publisher": "news-handler",
-                    "assertions": assertions_for_payload,
-                    "validation_mode": validation_mode
-                }
-            )
-            
-            await update_client_consumed(client_id, "news_generation", cons_news - 1)
-            logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
-            
-            await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
-            logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
-            #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
+        msg = AssertionsGeneratedResponse(
+            action="assertions_generated",
+            order_id=order_id,
+            payload={
+                "text": req.text,
+                "publisher": "news-handler",
+                "assertions": assertions_for_payload,
+                "validation_mode": validation_mode
+            }
+        )
+
+        await update_client_consumed(client_id, "news_generation", cons_news - 1)
+        logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
+
+        await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
+        logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
     except ValidationError as e:
         logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")

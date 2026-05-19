@@ -273,6 +273,18 @@ async function pollOrder(orderId, startTime) {
 // OPERACIONES DE ASSERTIONS
 // ========================================================
 
+function renderAssertionsProgress(container, message, percent = 0) {
+    if (!container) return;
+    container.innerHTML = `
+        <div class="validation-progress">
+            <span>${escapeHTML(message)}</span>
+            <div class="validation-progress-bar">
+                <div class="validation-progress-fill" style="width:${Math.min(100, Math.max(0, percent))}%;"></div>
+            </div>
+        </div>
+    `;
+}
+
 async function generateAssertionsFromText(text) {
     try {
         const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
@@ -2002,14 +2014,15 @@ function renderConsistencyTable(results) {
 async function importarNoticia() {
     const url = document.getElementById('newsUrl').value.trim();
     const newsText = document.getElementById('newsText');
+    const importBtn = document.getElementById('btn-importarNew');
 
     if (!url) {
-        alert(t("messages.importUrl"));
+        alertMessage(t("messages.importUrl"), "error");
         return;
     }
 
     try {
-        // Llamada POST al endpoint
+        if (importBtn) importBtn.disabled = true;
 
         const response = await fetchWithAuth(`${API}/extract_text_from_url`, {
             method: 'POST',
@@ -2019,18 +2032,29 @@ async function importarNoticia() {
             body: JSON.stringify({ url })
         });
 
-        if (!response.ok) {
-            throw new Error(`Error en la solicitud: ${response.status}`);
+        let data = null;
+        try {
+            data = await response.json();
+        } catch (_) {
+            data = null;
         }
 
-        const data = await response.json();
+        if (!response.ok) {
+            const detail = data?.detail || `HTTP ${response.status}`;
+            throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
 
-        // Coloca el texto recibido en el textarea
-        newsText.value = data.text || '';
+        const text = String(data?.text || "").trim();
+        if (!text) throw new Error("La importación no devolvió texto utilizable.");
+
+        newsText.value = text;
+        alertMessage("Noticia importada correctamente", "success");
 
     } catch (err) {
-        console.error(err);
-        alert(t("messages.importError"));
+        console.error("Error importando noticia:", err);
+        alertMessage(`Error al importar: ${err.message || t("messages.importError")}`, "error", 6000);
+    } finally {
+        if (importBtn) importBtn.disabled = false;
     }
 }
 
@@ -2101,13 +2125,24 @@ function initializeApp() {
 
     document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
         const text = document.getElementById("newsText").value.trim();
+        const container = document.getElementById("news-assertions-container");
         if (!text) {
             alertMessage(t("messages.writeNews"), "warning");
             return;
         }
+        if (container) {
+            renderAssertionsProgress(container, t("messages.generatingAssertions"), 20);
+        }
         alertMessage(t("messages.generatingAssertions"), "info");
         const assertions = await generateAssertionsFromText(text);
-        const container = document.getElementById("news-assertions-container");
+        if (container) {
+            if (!assertions || assertions.length === 0) {
+                renderAssertionsProgress(container, t("messages.assertionsGenerated"), 100);
+                container.innerHTML += `<div class="mt-4">${t("messages.noAssertionsFound") || "No se generaron aserciones."}</div>`;
+            } else {
+                renderAssertionsProgress(container, t("messages.assertionsGenerated"), 100);
+            }
+        }
         renderEditableAssertionsTable(container, assertions);
         alertMessage(t("messages.assertionsGenerated"), "success");
     });

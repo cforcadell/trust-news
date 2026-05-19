@@ -51,3 +51,4 @@ data:
   # IPFS (Namespace apis)
   IPFS_API_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"
   LOG_LEVEL: "INFO"
+  TEMPERATURE: "0.0"

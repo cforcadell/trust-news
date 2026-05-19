@@ -1920,21 +1920,36 @@ def extract_text_from_url(request: ExtractTextRequest):
             raise HTTPException(status_code=resp.status_code, detail=f"No se pudo acceder a la URL.")
         
         doc = Document(resp.text)
-        title = doc.title()
-        main_content_html = doc.summary()
-        
-        if not main_content_html:
-            raise ValueError("No se pudo identificar el contenido principal.")
+        title = (doc.title() or "").strip()
+        main_content_html = doc.summary() or ""
+        clean_text = ""
 
-        root = lxml.html.fromstring(main_content_html)
-        clean_text = root.text_content().strip()
-        lines = [line.strip() for line in clean_text.splitlines() if line.strip()]
-        final_clean_text = "\n".join(lines)
-        
-        if not final_clean_text:
-            raise ValueError("El texto extraído está vacío.")
+        if main_content_html:
+            root = lxml.html.fromstring(main_content_html)
+            clean_text = root.text_content().strip()
 
-        return ExtractedTextResponse(url=str(url), title=title, text=final_clean_text)
+        if not clean_text:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form", "noscript"]):
+                tag.decompose()
+
+            title = title or (soup.title.get_text(" ", strip=True) if soup.title else "")
+            candidates = soup.find_all(["article", "main"]) or [soup.body or soup]
+            paragraphs = []
+            for candidate in candidates:
+                paragraphs.extend(
+                    p.get_text(" ", strip=True)
+                    for p in candidate.find_all(["p", "h1", "h2", "li"])
+                )
+            clean_text = "\n".join(line for line in paragraphs if len(line) > 40)
+
+        lines = [re.sub(r"\s+", " ", line).strip() for line in clean_text.splitlines() if line.strip()]
+        final_clean_text = "\n".join(dict.fromkeys(lines))
+
+        if len(final_clean_text) < 80:
+            raise ValueError("No se pudo extraer suficiente texto útil de la URL.")
+
+        return ExtractedTextResponse(url=str(url), title=title or str(url), text=final_clean_text)
 
     except requests.exceptions.Timeout:
         logger.error(f"Timeout al acceder a URL: {url}")
@@ -1946,7 +1961,7 @@ def extract_text_from_url(request: ExtractTextRequest):
     
     except ValueError as e:
         logger.warning(f"Error de extracción para {url}: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e))
     
     except Exception as e:
         logger.error(f"Error inesperado al procesar {url}: {e}")

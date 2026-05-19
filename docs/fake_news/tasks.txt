@@ -130,12 +130,14 @@ Act as an expert editor. Analyze the content I will provide below and apply the 
 
 Develop v0.0.11.
 - Afinar prompts 
+    temperatura y maximo de aserciones como parametros
 - afinar determinismo.
 - cambio de modelo en generate assertions ¿?
 - endpoints de recomendación de modelos apirouter economicos 
 - cambiar login  skin OK
 - cambiar resultado validacion con mejoras visuales OK
 - soporte multiidioma (castellano + ingles)
+
 
 Develop v0.0.12.
 - integración con X/Trhreads

@@ -13,7 +13,8 @@ from common.async_models import (
     TextoEntrada, 
     PublishRequest, 
     PreGeneratedAssertion,
-    PublishWithAssertionsRequest
+    PublishWithAssertionsRequest,
+    ExtractTextRequest
 )
 
 # ============================================================
@@ -204,6 +205,15 @@ async def proxy_publish_with_assertions(
     
     target_url = f"{NEWS_HANDLER_URL}/publishWithAssertions?client_id={client_id}"
     
+    return await proxy_request(request, target_url)
+
+@router.post("/extract_text_from_url", tags=["News Import"])
+async def proxy_extract_text_from_url(
+    request: Request,
+    body: ExtractTextRequest,
+    auth_payload: dict = Depends(get_current_user)
+):
+    target_url = f"{NEWS_HANDLER_URL}/extract_text_from_url"
     return await proxy_request(request, target_url)
 
 from fastapi import Query

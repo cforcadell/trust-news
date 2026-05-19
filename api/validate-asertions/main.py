@@ -78,6 +78,7 @@ VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.General_AI))))
 VALIDATOR_ACTIVE_DATE = os.getenv("VALIDATOR_ACTIVE_DATE", datetime.now(timezone.utc).isoformat())
 VALIDATOR_UPDATED_DATE = os.getenv("VALIDATOR_UPDATED_DATE", VALIDATOR_ACTIVE_DATE)
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", "kafka:9092"))
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
@@ -122,32 +123,34 @@ class AIValidator(ABC):
         pass
 
 class MistralValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str):
+    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
         self.api_url = api_url
         self.api_key = api_key
         self.model = model
+        self.temperature = temperature
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
         import requests
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
+        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
         resp = requests.post(self.api_url, headers=headers, json=data)
         if resp.status_code == 200:
             return resp.json()["choices"][0]["message"]["content"]
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 class GeminiValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str):
+    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
         self.api_url = api_url
         self.api_key = api_key
         self.model = model
+        self.temperature = temperature
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
         prompt = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.2, "topK": 40, "topP": 0.8},
+            "generationConfig": {"temperature": self.temperature, "topK": 40, "topP": 0.8},
         }
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         resp = httpx.post(f"{self.api_url}/models/{self.model}:generateContent", headers=headers, json=payload)
@@ -157,31 +160,33 @@ class GeminiValidator(AIValidator):
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 class OpenRouterValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str):
+    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
         self.api_url = api_url
         self.api_key = api_key
         self.model = model
+        self.temperature = temperature
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
+        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
         resp = httpx.post(self.api_url, headers=headers, json=data)
         if resp.status_code == 200:
             return resp.json()["choices"][0]["message"]["content"]
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 class GrokValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str):
+    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
         # xAI usa el formato estándar de OpenAI
         self.api_url = api_url if api_url else "https://api.x.ai/v1/chat/completions"
         self.api_key = api_key
         self.model = model
+        self.temperature = temperature
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": 0.3}
+        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
         
         # Usamos httpx igual que en OpenRouter
         resp = httpx.post(self.api_url, headers=headers, json=data, timeout=30.0)
@@ -192,13 +197,13 @@ class GrokValidator(AIValidator):
     
 def build_ai_validator() -> AIValidator:
     if AI_PROVIDER == "mistral":
-        return MistralValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "mistral-tiny"))
+        return MistralValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "mistral-tiny"), TEMPERATURE)
     elif AI_PROVIDER == "gemini":
-        return GeminiValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gemini-1.5-flash"))
+        return GeminiValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gemini-1.5-flash"), TEMPERATURE)
     elif AI_PROVIDER == "openrouter":
-        return OpenRouterValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gpt-4o-mini"))
+        return OpenRouterValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gpt-4o-mini"), TEMPERATURE)
     elif AI_PROVIDER == "grok":
-        return GrokValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "grok-beta"))
+        return GrokValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "grok-beta"), TEMPERATURE)
     else:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
 

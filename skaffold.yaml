@@ -107,7 +107,7 @@ profiles:
           - k8s/apis/generate-asertions/overlays/local
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
-          - k8s/apis/validate-asertions/overlays/local/worker-3
+          #- k8s/apis/validate-asertions/overlays/local/worker-3
           - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain/overlays/local
           - k8s/apis/gateway/overlays/local

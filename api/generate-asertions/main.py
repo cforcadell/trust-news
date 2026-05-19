@@ -65,6 +65,15 @@ PROMPT = os.getenv(
     "Pendiente de Configurar "
 )
 
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.1"))
+MAX_ASSERTIONS = int(os.getenv("MAX_ASSERTIONS", "20"))
+
+def build_assertions_prompt(text: str) -> str:
+    return (
+        f"{PROMPT}\n\nTexto a analizar:\n{text}\n\n"
+        f" IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones ."
+    )
+
 # Timeouts / retries
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
 NUM_REINTENTOS = int(os.getenv("NUM_REINTENTOS", os.getenv("MAX_RETRIES", "3")))
@@ -98,12 +107,12 @@ async def call_mistral(text: str) -> List[Assertion]:
     if not (MISTRAL_API_URL and MISTRAL_API_KEY):
         raise HTTPException(status_code=500, detail="Mistral no está configurado en variables de entorno.")
 
-    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = build_assertions_prompt(text)
     headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MISTRAL_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
-        "temperature": 0.2,
+        "temperature": TEMPERATURE,
         # Solicitar formato estructurado JSON
         "response_format": {"type": "json_object"}
     }
@@ -169,7 +178,7 @@ async def call_gemini(text: str) -> List[Assertion]:
     if not (GEMINI_API_URL and GEMINI_API_KEY):
         raise HTTPException(status_code=500, detail="Gemini no está configurado en variables de entorno.")
 
-    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = build_assertions_prompt(text)
 
     api_endpoint = f"{GEMINI_API_URL}/models/{GEMINI_MODEL}:generateContent"
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
@@ -180,7 +189,7 @@ async def call_gemini(text: str) -> List[Assertion]:
     payload = {
         "contents": [{"parts": [{"text": full_prompt}]}],
         "generationConfig": {
-            "temperature": 0.2,
+            "temperature": TEMPERATURE,
             "responseMimeType": "application/json",
             "responseSchema": response_schema
         }
@@ -247,7 +256,7 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
         )
 
     # Construir prompt
-    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = build_assertions_prompt(text)
     if contexto:
         full_prompt += f"\nContexto adicional:\n{contexto}"
 
@@ -261,7 +270,7 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
     payload = {
         "model": OPENROUTER_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
-        "temperature": 0.3
+        "temperature": TEMPERATURE
     }
 
     logger.info(f"Llamando a OpenRouter con prompt: {full_prompt[:200]}...")

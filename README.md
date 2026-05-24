@@ -1,11 +1,11 @@
 # 📰 TrustNews
 
-> **Automated news verification using AI, IPFS and Ethereum**
+> **Automated news verification using AI, IPFS and Ethereum**  
 > Proof of Concept (Academic / Research Project)
 
 ![status](https://img.shields.io/badge/status-proof--of--concept-blue)
 ![python](https://img.shields.io/badge/python-3.10+-blue)
-![docker](https://img.shields.io/badge/docker-compose-blue)
+![kubernetes](https://img.shields.io/badge/kubernetes-skaffold-blue)
 ![blockchain](https://img.shields.io/badge/blockchain-ethereum-lightgrey)
 ![license](https://img.shields.io/badge/license-academic-lightgrey)
 
@@ -16,11 +16,12 @@
 **TrustNews** is a **Proof of Concept** for a system that automatically verifies news content by:
 
 * Breaking news into **atomic, objective assertions**
-* Validating each assertion using **AI-based validators**
+* Validating each assertion using **AI-based validators** or dedicated validators with his own database Knowledge
+* Enriching RAG validators with **evidence-search** and preferred official sources
 * Persisting the full validation process **immutably on Ethereum**
 * Storing documents in a **distributed way using IPFS**
 
-The entire verification pipeline is **fully automated and unattended**, from publication to final validation.
+The verification pipeline is designed to run automatically from publication to final validation, while keeping the process auditable end to end.
 
 ---
 
@@ -36,6 +37,7 @@ TrustNews explores a different approach:
 
 * ✅ Assertions instead of full-text validation
 * ✅ Multiple automated validators
+* ✅ Evidence-backed RAG validation
 * ✅ Tamper-proof validation history
 * ✅ Full traceability (Order → IPFS → Blockchain)
 
@@ -43,19 +45,21 @@ TrustNews explores a different approach:
 
 ## 🧠 Core Ideas
 
-1. **Atomic Assertions**
+1. **Atomic Assertions**  
    News is decomposed into small, verifiable statements.
 
-2. **Unattended Validation**
+2. **Unattended Validation**  
    AI validators automatically verify assertions without human intervention.
 
-3. **Immutable Traceability**
-   Every step is recorded either in IPFS or Ethereum.
+3. **Evidence Search**  
+   RAG validators can retrieve and cache supporting sources, prioritizing configurable official domains.
+
+4. **Immutable Traceability**  
+   Every step is recorded either in MongoDB, IPFS, Kafka events, or Ethereum.
 
 ---
 
 ## 🏗️ Architecture (High Level)
-
 
 <img src="./docs/img/Architecture.png" width="70%"/>
 
@@ -63,13 +67,14 @@ TrustNews explores a different approach:
 
 * Domain-oriented microservices
 * Asynchronous messaging (Kafka)
-* Pluggable AI validators
+* Pluggable AI validators (memory, online search, RAG evidence)
+* MongoDB-backed order, quota, validator and evidence data
 * Private Ethereum network (PoA)
+* Kubernetes/Skaffold local and production overlays
 
 ---
 
-## 🔒 Security 
-
+## 🔒 Security
 
 <img src="./docs/img/security.png" width="70%"/>
 
@@ -80,20 +85,27 @@ TrustNews explores a different approach:
 * Proxy: Secure request forwarding to the Orchestrator with identity injection via Query Parameters.
 * Quotas: Real-time balance verification via Admin API with proactive blocking (429 Error).
 * Events: Post-processing consumption increment and event dispatching to the Kafka architecture.
+* Secrets: Local overlays use ignored `.env` files; production secrets are created outside the repository.
 
 ---
 
 ## 🧩 Main Components
 
-| Component             | Responsibility                 |
-| --------------------- | ------------------------------ |
-| `news-handler`        | End-to-end orchestration       |
-| `generate-assertions` | AI-based assertion extraction  |
-| `validate-assertions` | Automated assertion validation |
-| `news-chain`          | Blockchain access layer        |
-| `ipfs-fastapi`        | Document storage abstraction   |
-| `TrustNews.sol`       | Immutable system state         |
-| `web_classic`         | User interaction & monitoring  |
+| Component | Responsibility |
+| --- | --- |
+| `gateway` | Authenticated API entrypoint |
+| `admin` | Quotas, clients, model recommendations and evidence-search config CRUD |
+| `news-handler` | End-to-end orchestration and Kafka event handling |
+| `generate-assertions` | AI-based assertion extraction |
+| `validate-assertions` | Automated assertion validation workers |
+| `evidence-search` | Tavily-backed evidence retrieval with MongoDB cache |
+| `news-chain` | Blockchain access layer |
+| `ipfs-fastapi` | Document storage abstraction |
+| `mongodb` | Orders, quotas, validator cache, evidence and config data |
+| `mongo-express` | Local MongoDB inspection UI |
+| `keycloak` | Identity provider |
+| `TrustNews.sol` | Immutable system state |
+| `web_classic` | User interaction and monitoring |
 
 ---
 
@@ -102,86 +114,172 @@ TrustNews explores a different approach:
 ### Prerequisites
 
 * Docker >= 24
-* Docker Compose >= 2
-* Kubernettes
+* Kubernetes local cluster (Kind is used in the project docs)
+* Skaffold v4
+* kubectl
 * 8GB RAM recommended
 
-### Clone & Run
+### Clone
 
 ```bash
 git clone https://github.com/<your-user>/trustnews.git
 cd trustnews
-docker compose up --build
 ```
 
-For further info see docs folder.
+### Local Environment Files
 
-* installation.md helps you to setup and run the project.
-* installation_blockchain.md guides you to set up a configure private geth POA network.
-* scripts_blockchain.md to deploy and test TrustNews contract.
+Create local `.env` files from the examples before running Skaffold. Real secrets must not be committed.
 
-After startup, services will be available locally (frontend, APIs, blockchain, IPFS).
+Important local files:
 
-> ⏳ First startup may take a few minutes (Ethereum + Kafka initialization)
+```text
+k8s/infra/mongodb/overlays/local/mongodb.env
+k8s/infra/mongo-express/overlays/local/mongo-express.env
+k8s/infra/keycloak/overlays/local/keycloak.env
+k8s/apis/generate-asertions/overlays/local/generate-asertions.env
+k8s/apis/mongodb-app/overlays/local/mongodb-app.env
+k8s/apis/news-chain/overlays/local/news-chain.env
+k8s/apis/evidence-search/overlays/local/tavily.env
+k8s/apis/validate-asertions/overlays/local/worker-*/worker-*.env
+```
+
+MongoDB local examples:
+
+```bash
+cp k8s/infra/mongodb/overlays/local/mongodb.env.example \
+  k8s/infra/mongodb/overlays/local/mongodb.env
+cp k8s/apis/mongodb-app/overlays/local/mongodb-app.env.example \
+  k8s/apis/mongodb-app/overlays/local/mongodb-app.env
+cp k8s/infra/mongo-express/overlays/local/mongo-express.env.example \
+  k8s/infra/mongo-express/overlays/local/mongo-express.env
+```
+
+`mongodb.env` creates the MongoDB root/admin user and the application user `app_trust_user`. Runtime services use only `mongodb-app-secret`, whose `MONGO_URI` must authenticate `app_trust_user` against `newsdb` with `readWrite` permissions. Mongo Express keeps using the admin/root secret for database inspection.
+
+Production overlays expect sensitive secrets to be created outside the repository, usually with:
+
+```bash
+kubectl create secret generic <secret-name> --from-env-file=<file>.env -n <namespace>
+```
+
+### Local Kubernetes Run
+
+The repository is aligned around Skaffold profiles:
+
+```bash
+skaffold dev -p setup
+skaffold dev -p blockchain
+skaffold dev -p infra
+skaffold dev -p apis-frontend
+```
+
+Main local URLs exposed by Skaffold:
+
+| Service | URL |
+| --- | --- |
+| Frontend | https://localhost:7443 |
+| Keycloak admin console | https://localhost:7443/auth/admin/master/console/ |
+| Admin API | http://localhost:8400/docs |
+| Gateway | http://localhost:8500/docs |
+| Evidence Search | http://localhost:8074/docs |
+| Mongo Express | http://localhost:8081 |
+| Kafdrop | http://localhost:9000 |
+| Grafana | http://localhost:3000 |
+
+> ⏳ First startup may take a few minutes while Ethereum, Kafka, MongoDB, IPFS and Keycloak stabilize.
+
+For detailed commands, see:
+
+* `docs/k8s/skaffold.md` for the current Kubernetes/Skaffold workflow.
+* `docs/k8s/kind.md` for Kind setup notes.
+* `docs/docker/installation_blockchain.md` for private Geth PoA setup notes.
+* `docs/blockchain/scripts_blockchain.md` for smart contract deploy/test scripts.
 
 ---
 
-## 📂 Project Structure (main folders) & files
+## 🔎 Evidence Search Configuration
+
+RAG validators can call `evidence-search`, which queries Tavily and caches sources in MongoDB. Search preference is configurable in MongoDB collection:
+
+```text
+newsdb.evidence_search_configs
+```
+
+The Admin API exposes CRUD endpoints:
+
+```http
+GET    /evidence-search/configs
+GET    /evidence-search/configs/{config_id}
+PUT    /evidence-search/configs/{config_id}
+PATCH  /evidence-search/configs/{config_id}
+DELETE /evidence-search/configs/{config_id}
+```
+
+Example for category `1`:
+
+```bash
+curl -X PUT http://localhost:8400/evidence-search/configs/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category_id": 1,
+    "category_name": "ECONOMÍA",
+    "preferred_domains": ["ine.es", "idescat.cat", "gencat.cat", "eurostat.ec.europa.eu"],
+    "query_terms": ["estadística oficial", "fuente oficial"],
+    "official_first": true,
+    "enabled": true
+  }'
+```
+
+`evidence-search` first searches preferred domains with Tavily `include_domains`, then falls back to a general search when needed. Cached evidence stores the config version, so changing a config can refresh stale evidence.
+
+---
+
+## 📂 Project Structure (main folders)
 
 ```text
 .
-├── api  
-     ├── gateway/                         (API gateway)
-     ├── news-handler/                    (API and Orchestator validation end to end)
-     ├── news-chain/                      (API Smart Contract Abstraction)
-     ├── generate-assertions/             (API for generate assertions) 
-     ├── validate-assertions/             (API for validate assertions)
-     ├── common/                          (Common modules)
-     ├── mongo/                           (mongo DB Configuration)
-     ├── ipfs/                            (API for validate assertions)
-     ├── kafka/                           (Kafka Configuration)
-     ├── test/                            (Test Units)
-├── blockchain/                           (Configuration files for Geth POA private Network)
-├── docs/                                 (Doc files)
-├── scripts/                              (scripts for build and start/stop containers)
-├── smart-contracts/
-     ├── contracts/                       (smart contract folder)
-     ├── scripts/                         (scripts for deploy and test smart contract)
-     ├── hardhat.config.js                (hardhat config)
-├── volumes/                              (persistent data folder accross contaniners)
-├── web_classic/                          (frontend folder)
-└── README.md                             (this file)
+├── api/
+│   ├── admin/                  quotas, clients and evidence config
+│   ├── common/                 shared models and utilities
+│   ├── evidence-search/        RAG evidence search and cache
+│   ├── gateway/                API gateway
+│   ├── generate-asertions/     assertion generation service
+│   ├── ipfs/                   IPFS API abstraction
+│   ├── news-chain/             smart contract API abstraction
+│   ├── news-handler/           orchestration service
+│   ├── tests/                  unit tests
+│   └── validate-asertions/     validator workers
+├── blockchain/                 Geth PoA network manifests/config
+├── docs/                       documentation
+├── k8s/                        Kubernetes manifests and Kustomize overlays
+├── scripts/                    helper scripts
+├── smart-contracts/            Solidity contracts and Hardhat scripts
+├── web_classic/                frontend
+└── README.md
 ```
-
----
-
-## 🔐 Configuration & Secrets
-
-* `.env.example` provided
-* Each developer must create its own `.env`
-* **Never commit real secrets**
-
-AI providers and blockchain accounts are configured via environment variables.
 
 ---
 
 ## ✅ Integrity Checks
 
-The system includes **automatic consistency checks** across:
+The system includes consistency checks across:
 
 * MongoDB orders
 * IPFS documents
 * Ethereum posts, assertions and validations
+* Kafka validation events
 
-Ensuring the system is **auditable and tamper-resistant**.
+This helps keep the validation process auditable and tamper-resistant.
 
 ---
 
 ## 🛣️ Roadmap
-* [X] Secure and authenticate plattform
-* [X] Migrate requests and responses to Validation from Kafka to Blockchain Events
-* [ ] Support to Hyperledger Besu or Fabric
+
+* [X] Secure and authenticate platform
+* [X] Migrate requests and responses to validation from Kafka to blockchain events
 * [X] Integrate UI with IDP and custom chains for user
+* [X] Evidence-backed RAG validation
+* [ ] Support Hyperledger Besu or Fabric
 * [ ] Validator reputation system
 * [ ] Performance and cost analysis
 * [ ] API Control
@@ -208,5 +306,3 @@ Academic / research use only.
 ## 👤 Author
 
 Developed as a **Master Thesis – Proof of Concept**.
-
----

@@ -270,8 +270,8 @@ kubectl logs -f deployment/validate-worker-1 -n apis
 
 kind load docker-image tfm-news-handler:latest --name trust-news
 
-kubectl create secret generic news-handler-secrets \
-  --from-literal=MONGO_URI='mongodb://root:xxxxxxx@mongodb.infra.svc.cluster.local:27017' \
+kubectl create secret generic mongodb-app-secret \
+  --from-literal=MONGO_URI='mongodb://app_trust_user:xxxxxxx@mongodb.infra.svc.cluster.local:27017/newsdb?authSource=newsdb' \
   -n apis
 
 kubectl apply -f k8s/apis/news-handler/ -n apis

@@ -13,6 +13,12 @@ spec:
       - name: worker
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
         env:
+        - name: VALIDATOR_TYPE
+          value: "1"
+        - name: USE_EVIDENCE_SEARCH
+          value: "false"
+        - name: ONLINE_SEARCH_ENABLED
+          value: "false"
         - name: AI_PROVIDER
           value: "gemini"
         - name: MODEL

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evidence-search
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evidence-search
+  template:
+    metadata:
+      labels:
+        app: evidence-search
+    spec:
+      containers:
+      - name: evidence-search
+        image: evidence-search
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8074
+        envFrom:
+        - configMapRef:
+            name: evidence-search-config
+        - secretRef:
+            name: tavily-secret
+        - secretRef:
+            name: mongodb-app-secret
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8074
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8074
+          initialDelaySeconds: 15
+          periodSeconds: 20

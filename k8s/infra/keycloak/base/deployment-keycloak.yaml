@@ -12,6 +12,24 @@ spec:
       labels:
         app: keycloak
     spec:
+      initContainers:
+        - name: wait-for-keycloak-db
+          image: postgres:15
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-secret
+                  key: DB_USER
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h keycloak-db -p 5432 -U "$KC_DB_USERNAME" -d keycloak; do
+                echo "Waiting for keycloak-db:5432..."
+                sleep 2
+              done
       containers:
         - name: keycloak
           image: keycloak
@@ -57,3 +75,7 @@ spec:
               scheme: HTTP
               path: /auth/health/ready
               port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12

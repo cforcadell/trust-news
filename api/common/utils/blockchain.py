@@ -46,3 +46,22 @@ def wait_for_receipt_blocking(w3,tx_hash: str, timeout: Optional[int] = None) ->
     except Exception as e:
         logger.error(f"Error esperando receipt de {tx_hash}: {e}")
         return None
+
+def send_and_wait(w3, function_call, account_address, private_key, timeout: Optional[int] = None, gas_estimate=3_000_000):
+    tx_hash = send_signed_tx(w3, function_call, account_address, private_key, gas_estimate=gas_estimate)
+    receipt = wait_for_receipt_blocking(w3, tx_hash, timeout=timeout)
+    return tx_hash, receipt
+
+
+def receipt_succeeded(receipt: Optional[Dict[str, Any]]) -> bool:
+    if not receipt:
+        return False
+    if isinstance(receipt, dict):
+        return receipt.get("status") == 1
+    return getattr(receipt, "status", None) == 1
+
+
+def require_successful_receipt(receipt: Optional[Dict[str, Any]], message: str):
+    if not receipt_succeeded(receipt):
+        raise RuntimeError(message)
+    return receipt

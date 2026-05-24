@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional, Dict, Any
 from enum import Enum, IntEnum
-from common.veredicto import Validacion
+from common.models.veredicto import Validacion
 
 
 # ============================================================
@@ -42,6 +42,7 @@ class Metadata(BaseModel):
 
 class Document(BaseModel):
     """Document structure used before blockchain registration."""
+    order_id: Optional[str] = None
     text: str
     assertions: List[Assertion]
     metadata: Optional[Metadata]
@@ -83,10 +84,52 @@ class ValidationMode(str, Enum):
 # 🔹 VALIDATOR CONFIG MODELS
 # ============================================================
 class ValidatorType(IntEnum):
+    LLM_MEMORY_VALIDATION = 1
+    LLM_SEARCH_VALIDATION = 2
+    RAG_EVIDENCE_VALIDATION = 3
+    DETERMINISTIC_VALIDATION = 4
+    HUMAN = 5
+    # Backward-compatible aliases for existing cached/IPFS configs.
     General_AI = 1
     Trained_AI = 2
     Dedicated_Agent = 3
-    Human = 4
+    Human = 5
+
+
+VALIDATOR_TYPE_WEIGHTS = {
+    ValidatorType.LLM_MEMORY_VALIDATION: 0.25,
+    ValidatorType.LLM_SEARCH_VALIDATION: 0.5,
+    ValidatorType.RAG_EVIDENCE_VALIDATION: 0.8,
+    ValidatorType.DETERMINISTIC_VALIDATION: 1.0,
+    ValidatorType.HUMAN: 0.1,
+}
+
+
+def get_validator_type_weight(validator_type: ValidatorType | int | str | None) -> float:
+    try:
+        parsed = ValidatorType(int(validator_type))
+    except Exception:
+        try:
+            parsed = ValidatorType[str(validator_type)]
+        except Exception:
+            parsed = ValidatorType.LLM_MEMORY_VALIDATION
+    return VALIDATOR_TYPE_WEIGHTS.get(parsed, 0.25)
+
+
+def normalize_validation_result(result: Any) -> str:
+    raw = getattr(result, "name", result)
+    if isinstance(raw, int):
+        if raw == 1:
+            return "TRUE"
+        if raw == 2:
+            return "FALSE"
+        return "UNKNOWN"
+    value = str(raw or "").upper()
+    if value in {"TRUE", "SUPPORTED"}:
+        return "TRUE"
+    if value in {"FALSE", "REFUTED"}:
+        return "FALSE"
+    return "UNKNOWN"
 
 
 class ValidatorStatus(IntEnum):
@@ -189,10 +232,8 @@ class AssertionsNotGeneratedResponse(BaseModel):
 # 🔹 ASERCIONES YA GENERADAS
 # ============================================================   
     
-class PreGeneratedAssertion(BaseModel):
-    idAssertion: str
-    text: str
-    categoryId: int
+class PreGeneratedAssertion(Assertion):
+    pass
 
 class PublishWithAssertionsRequest(BaseModel):
     text: str
@@ -336,7 +377,9 @@ class LightValidationResponsePayload(BaseModel):
     category: int
     verdict: Validacion
     description: str
-    confidence: Optional[float] = None
+    confidence: Optional[float | str] = None
+    sources: Optional[List[Dict[str, Any]]] = None
+    evidence_used: Optional[List[Dict[str, Any]]] = None
     timestamp: str
     correlation_id: str
     error: Optional[str] = None
@@ -350,6 +393,9 @@ class LightValidationResponse(BaseModel):
 class ValidatorAPIResponse(BaseModel):
     resultado: str
     descripcion: str
+    confidence: Optional[str] = None
+    sources: Optional[List[Dict[str, Any]]] = None
+    evidence_used: Optional[List[Dict[str, Any]]] = None
 
 # ============================================================
 # 🔹 CONSISTENCY MODELS

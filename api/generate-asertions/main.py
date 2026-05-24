@@ -2,7 +2,6 @@ import os
 import json
 import asyncio
 import logging
-import re
 import uuid
 import httpx
 from typing import List, Optional
@@ -10,7 +9,7 @@ from typing import List, Optional
 import aiohttp
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import ValidationError, BaseModel
+from pydantic import ValidationError
 from dotenv import load_dotenv
 
 # Cargar env
@@ -23,14 +22,18 @@ logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)
 logger = logging.getLogger("generate-assertions-worker")
 
 # Importa modelos pydantic
-from common.async_models import (
+from common.models.async_models import (
     GenerateAssertionsRequest,
     AssertionsGeneratedResponse,
     AssertionsNotGeneratedPayload,
     AssertionsNotGeneratedResponse,
     Assertion,
     AssertionGeneratedPayload,
+    TextoEntrada,
 )
+from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
+from common.utils.llm_json import extract_chat_content, parse_model_list
 
 # ============================================================
 # Config / constantes (desde env)
@@ -39,9 +42,9 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 logger.info(f"Proveedor de IA seleccionado: {AI_PROVIDER.upper()}")
 
 # Kafka
-BROKER_URL = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", "kafka:9092"))
-INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", os.getenv("ASSERTIONS_REQUEST_TOPIC", "fake_news_requests_generate"))
-OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TOPIC", "fake_news_responses"))
+BROKER_URL = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP))
+INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", os.getenv("ASSERTIONS_REQUEST_TOPIC", DEFAULT_TOPIC_REQUESTS_GENERATE))
+OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES))
 
 # Mistral config
 MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
@@ -92,12 +95,11 @@ app = FastAPI(title="Generate Assertions Worker (Typed)")
 def get_assertions_schema() -> dict:
     """Genera el JSON Schema para List[Assertion] que los LLM deben seguir."""
     assertion_schema = Assertion.model_json_schema(by_alias=True)
-    
-    # Creamos el esquema para un array de esos objetos
-    return {
-        "type": "array",
-        "items": assertion_schema,
-    }
+    return {"type": "array", "items": assertion_schema}
+
+
+def parse_assertions_content(content) -> List[Assertion]:
+    return parse_model_list(content, Assertion, list_key="assertions", id_field="idAssertion")
 
 # ============================================================
 # Llamada asíncrona a Mistral (aiohttp)
@@ -130,34 +132,10 @@ async def call_mistral(text: str) -> List[Assertion]:
                     
                     data = await resp.json()
                     
-                    # 1. Extraer el contenido (debe ser un string JSON)
                     try:
-                        content = data["choices"][0]["message"]["content"]
-                    except (KeyError, TypeError):
-                        logger.error(f"Mistral response format unexpected: {data}")
-                        raise ValueError("Estructura de respuesta Mistral inesperada.")
-                    
-                    # 2. Parsear el string JSON a una lista de diccionarios
-                    try:
-                        parsed_list = json.loads(content)
-                        if not isinstance(parsed_list, list):
-                             # Si es un dict, intentar ver si contiene la lista de aserciones.
-                            if isinstance(parsed_list, dict) and "assertions" in parsed_list:
-                                parsed_list = parsed_list["assertions"]
-                            else:
-                                raise ValueError("Mistral no devolvió un array JSON raíz.")
-
-                    except json.JSONDecodeError:
-                        logger.error(f"Mistral devolvió JSON inválido: {content}")
-                        raise ValueError("Respuesta de Mistral no es JSON válido.")
-                    
-                    # 3. Validar y convertir la lista de diccionarios a List[Assertion]
-                    try:
-                        for idx, item in enumerate(parsed_list, start=1):
-                            item["idAssertion"] = str(idx)
-                        return [Assertion(**item) for item in parsed_list]
-                    except ValidationError as e:
-                        logger.error(f"Mistral devolvió un JSON que no cumple el esquema Assertion: {e}")
+                        return parse_assertions_content(extract_chat_content(data))
+                    except (ValueError, ValidationError) as e:
+                        logger.error(f"Mistral devolvió una respuesta inválida: {e}")
                         raise ValueError("Mistral devolvió un JSON con esquema incorrecto.")
 
             except HTTPException:
@@ -208,27 +186,11 @@ async def call_gemini(text: str) -> List[Assertion]:
                     
                     data = await resp.json()
                     
-                    # 1. El JSON esperado contiene candidates -> content -> parts -> text (que es el string JSON)
                     try:
                         json_string = data["candidates"][0]["content"]["parts"][0]["text"]
-                        parsed_list = json.loads(json_string)
-
-                    except (KeyError, IndexError, json.JSONDecodeError) as e:
-                        logger.error(f"Error parsing Gemini response structure or JSON: {e}; raw: {text_resp}")
-                        raise ValueError("Respuesta de Gemini no contiene el JSON esperado.")
-
-                    # 2. Validar y convertir la lista de diccionarios a List[Assertion]
-                    # El LLM ya debería haber garantizado el formato gracias al responseSchema
-                    if not isinstance(parsed_list, list):
-                        raise ValueError("Gemini devolvió un tipo inesperado (no es lista JSON).")
-
-                    try:
-                        for idx, item in enumerate(parsed_list, start=1):
-                            item["idAssertion"] = str(idx)
-                        # Convertimos los dicts resultantes a modelos Pydantic
-                        return [Assertion(**item) for item in parsed_list]
-                    except ValidationError as e:
-                        logger.error(f"Gemini devolvió un JSON que no cumple el esquema Assertion: {e}")
+                        return parse_assertions_content(json_string)
+                    except (KeyError, IndexError, ValueError, ValidationError) as e:
+                        logger.error(f"Gemini devolvió una respuesta inválida: {e}; raw: {text_resp}")
                         raise ValueError("Gemini devolvió un JSON con esquema incorrecto.")
             
             except HTTPException:
@@ -297,43 +259,10 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
                     data = await resp.json()
                     
                     try:
-                        content = data["choices"][0]["message"]["content"]
-                    except (KeyError, TypeError):
-                        logger.error(f"Estructura de respuesta inesperada: {data}")
-                        raise ValueError("Estructura de respuesta OpenRouter inesperada.")
-
-                    if not content:
-                        raise ValueError("OpenRouter devolvió contenido vacío.")
-
-                    # --- Lógica de Procesamiento de Contenido ---
-                    parsed_list = []
-
-                    if isinstance(content, list):
-                        parsed_list = content
-                    elif isinstance(content, str):
-                        # 1. Limpieza de Markdown y espacios
-                        # Eliminamos ```json, ``` y cualquier espacio en blanco al inicio/final
-                        clean_content = re.sub(r"```json|```", "", content).strip()
-                        
-                        try:
-                            parsed_list = json.loads(clean_content)
-                            logger.debug(f"JSON parseado correctamente tras limpieza")
-                        except json.JSONDecodeError as je:
-                            logger.error(f"Error al decodificar JSON. Contenido original: {content}")
-                            raise ValueError(f"La respuesta no pudo ser parseada como JSON: {str(je)}")
-                    else:
-                        raise ValueError(f"Tipo de contenido inesperado: {type(content)}")
-
-                    # Validar esquema Assertion y asignar idAssertion
-                    if not isinstance(parsed_list, list):
-                        raise ValueError("El resultado final no es una lista de aserciones.")
-
-                    assertions = []
-                    for idx, item in enumerate(parsed_list, start=1):
-                        # Aseguramos que el idAssertion sea un string consecutivo
-                        item["idAssertion"] = str(idx)
-                        # Asumimos que Assertion es un modelo Pydantic
-                        assertions.append(Assertion(**item))
+                        assertions = parse_assertions_content(extract_chat_content(data))
+                    except (ValueError, ValidationError) as e:
+                        logger.error(f"OpenRouter devolvió una respuesta inválida: {e}")
+                        raise ValueError("OpenRouter devolvió un JSON con esquema incorrecto.")
 
                     logger.info(f"OpenRouter devolvió {len(assertions)} aserciones válidas")
                     return assertions
@@ -503,30 +432,14 @@ async def consume_and_process():
 
 
 async def fetch_client_quotas(client_id: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{ADMIN_URL}/clients/{client_id}")
-        if resp.status_code == 404:
-            raise HTTPException(status_code=403, detail="Client quotas not found")
-        resp.raise_for_status()
-        return resp.json()
+    return await fetch_admin_client_quotas(ADMIN_URL, client_id)
 
 async def update_client_consumed(client_id: str, field: str, new_value: int):
-    async with httpx.AsyncClient() as client:
-        payload = {
-            "consumed": {
-                field: new_value
-            }
-        }
-        # Hacemos PATCH para actualizar solo ese campo en concreto
-        resp = await client.patch(f"{ADMIN_URL}/clients/{client_id}", json=payload)
-        resp.raise_for_status()
+    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value)
 
 # ============================================================
 # Endpoint HTTP 
 # ============================================================
-class TextoEntrada(BaseModel):
-    text: str
-
 @app.post("/extraer")
 async def extraer_texto(
     body: TextoEntrada,

@@ -9,7 +9,7 @@ from jose import jwt, JWTError
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from jose import jwt
-from common.async_models import (
+from common.models.async_models import (
     TextoEntrada, 
     PublishRequest, 
     PreGeneratedAssertion,

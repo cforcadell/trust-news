@@ -38,6 +38,61 @@ data:
     - El valor de "resultado" debe ser exactamente "TRUE", "FALSE" o "UNKNOWN".
     - El idioma de la respuesta debe ser el mismo que el de la aserción validada.
 
+  VALIDATOR_TYPE: "1"
+  USE_EVIDENCE_SEARCH: "false"
+  ONLINE_SEARCH_ENABLED: "false"
+  EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
+
+  LLM_MEMORY_VALIDATION_PROMPT: |
+    Actúa como validador factual prudente.
+    Valida la aserción usando tu conocimiento general y razonamiento lógico.
+    No inventes información.
+    Si no puedes verificarlo con suficiente seguridad, devuelve UNKNOWN.
+    Devuelve exclusivamente JSON válido:
+    {
+      "resultado": "TRUE | FALSE | UNKNOWN",
+      "descripcion": "Justificación breve y objetiva"
+    }
+
+  LLM_SEARCH_VALIDATION_PROMPT: |
+    Actúa como validador factual con búsqueda online.
+    Busca evidencias actuales en Internet cuando sea necesario.
+    Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
+    Devuelve exclusivamente JSON válido:
+    {
+      "resultado": "TRUE | FALSE | UNKNOWN",
+      "descripcion": "Justificación breve y objetiva",
+      "sources": [
+        {
+          "url": "string",
+          "title": "string",
+          "reason": "string"
+        }
+      ]
+    }
+
+  RAG_EVIDENCE_VALIDATION_PROMPT: |
+    Actúa como validador factual estricto.
+    Debes validar la aserción usando exclusivamente las evidencias proporcionadas.
+    No uses conocimiento interno salvo razonamiento lógico básico.
+    No inventes fuentes.
+    No accedas a URLs externas.
+    Si las evidencias no son suficientes, devuelve UNKNOWN o INSUFFICIENT.
+    Devuelve exclusivamente JSON válido:
+    {
+      "resultado": "TRUE | FALSE | UNKNOWN | SUPPORTED | REFUTED | INSUFFICIENT | CONFLICTED | PARTIAL",
+      "descripcion": "Justificación breve y objetiva",
+      "confidence": "HIGH | MEDIUM | LOW",
+      "evidence_used": [
+        {
+          "source_id": "string",
+          "url": "string",
+          "supports": true,
+          "reason": "string"
+        }
+      ]
+    }
+
   # Kafka (Namespace infra)
   KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
   TOPIC_RESPONSES: "fake_news_responses"
@@ -45,7 +100,7 @@ data:
 
   # Blockchain (Namespace blockchain)
   RPC_URL: "http://geth-rpc-endpoint.blockchain.svc.cluster.local:8555"
-  CONTRACT_ADDRESS: "0x928E691aF55fF3530127BcA7E06e35f3F9a77CF6"
+  CONTRACT_ADDRESS: "0xBf553F07d4d1985bac5f9351f4bbC85221EB413F"
   CONTRACT_ABI_PATH: "/app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json"
 
   # IPFS (Namespace apis)

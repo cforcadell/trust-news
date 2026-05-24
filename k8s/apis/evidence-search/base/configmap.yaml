@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evidence-search-config
+  namespace: apis
+data:
+  MONGO_DBNAME: "newsdb"
+  MONGO_EVIDENCES_COLLECTION: "assertion_evidences"
+  TAVILY_API_URL: "https://api.tavily.com/search"
+  TAVILY_SEARCH_DEPTH: "advanced"
+  TAVILY_INCLUDE_ANSWER: "false"
+  TAVILY_INCLUDE_RAW_CONTENT: "true"
+  TAVILY_MAX_RESULTS: "5"
+  TAVILY_TIMEOUT: "30"

@@ -4,7 +4,7 @@ scripts/create-namespaces.sh
 
 secrets/create-secrets.sh
 
-touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env news-handler.env mongodb.env
+touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env mongodb-app.env mongodb.env
 chmod 600 *.env
 
 kubectl create secret generic validator-secret-1 --from-env-file=worker-1.env -n apis
@@ -15,11 +15,10 @@ kubectl create secret generic api-keys --from-env-file=generate-asertions.env -n
 
 kubectl create secret generic news-chain-secrets --from-env-file=news-chain.env -n apis
 
-kubectl create secret generic news-handler-secrets --from-env-file=news-handler.env -n apis
+kubectl create secret generic mongodb-app-secret --from-env-file=mongodb-app.env -n apis
 
 kubectl create secret generic gate-config --from-env-file=gateway.env -n apis
 
-kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n apis
 
 kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
 

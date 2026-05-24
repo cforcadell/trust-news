@@ -1,6 +1,7 @@
-
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
+namespace: apis
 
 resources:
   - ../../configmap.yaml
@@ -9,11 +10,3 @@ resources:
 
 generatorOptions:
   disableNameSuffixHash: true
-  
-secretGenerator:
-
-- name: news-handler-secrets
-  namespace: apis
-  envs:
-    - news-handler.env
-namespace: apis

@@ -16,3 +16,11 @@ spec:
           value: "mistralai/mistral-small-24b-instruct-2501"
         - name: API_URL
           value: "https://openrouter.ai/api/v1/chat/completions"
+        - name: VALIDATOR_TYPE
+          value: "1"
+        - name: USE_EVIDENCE_SEARCH
+          value: "false"
+        - name: ONLINE_SEARCH_ENABLED
+          value: "false"
+        - name: EVIDENCE_SEARCH_URL
+          value: "http://evidence-search.apis.svc.cluster.local:8074"

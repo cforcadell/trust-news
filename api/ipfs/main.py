@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 from pydantic import ValidationError
 
 # Importar modelos comunes
-from common.async_models import UploadIpfsRequest, IpfsUploadedResponse, Metadata, Document 
+from common.models.async_models import UploadIpfsRequest, IpfsUploadedResponse, Metadata, Document
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_IPFS, DEFAULT_TOPIC_RESPONSES
 
 # -----------------------------
 # Configuración inicial
@@ -36,9 +37,9 @@ logger = logging.getLogger("ipfs-agent")
 # -----------------------------
 # Variables de configuración
 # -----------------------------
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
-REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "upload_ipfs") # Topic ajustado
-RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "ipfs_responses") # Topic ajustado
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP)
+REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", DEFAULT_TOPIC_REQUESTS_IPFS)
+RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES)
 MAX_RETRIES = 10
 RETRY_DELAY = 3
 

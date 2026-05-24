@@ -30,6 +30,23 @@ const CATEGORY_MAP = {
     10: "SOCIAL"
 };
 
+const VALIDATOR_TYPE_LABELS = {
+    1: "LLM memoria",
+    2: "LLM con búsqueda",
+    3: "RAG con evidencias",
+    4: "Determinista",
+    5: "Humano",
+    LLM_MEMORY_VALIDATION: "LLM memoria",
+    LLM_SEARCH_VALIDATION: "LLM con búsqueda",
+    RAG_EVIDENCE_VALIDATION: "RAG con evidencias",
+    DETERMINISTIC_VALIDATION: "Determinista",
+    HUMAN: "Humano",
+    General_AI: "LLM memoria",
+    Trained_AI: "LLM con búsqueda",
+    Dedicated_Agent: "RAG con evidencias",
+    Human: "Humano"
+};
+
 const keycloak = new Keycloak({
     url: '/auth',
     realm: 'TrustNews',
@@ -147,9 +164,9 @@ function shortHex(value) {
   if (!value || typeof value !== "string") return "";
   if (value.startsWith("0x") && value.length > 16) {
     const short = value.slice(0, 10) + "…" + value.slice(-6);
-    return `<span title="${value}">${short}</span>`;
+    return `<span title="${safeText(value)}">${safeText(short)}</span>`;
   }
-  return value;
+  return safeText(value);
 }
 
 function getSelectedValidationMode() {
@@ -379,9 +396,9 @@ function renderEditableAssertionsTable(container, assertions) {
             </thead>
             <tbody>
                 ${assertions.map(a => `
-                    <tr data-id="${a.idAssertion}">
-                        <td>${a.idAssertion}</td>
-                        <td contenteditable="true" class="editable-text">${a.text}</td>
+                    <tr data-id="${safeText(a.idAssertion)}">
+                        <td>${safeText(a.idAssertion)}</td>
+                        <td contenteditable="true" class="editable-text">${safeText(a.text)}</td>
                         <td>${renderCategorySelect(a.categoryId)}</td>
                         <td><button class="btn-delete-row">✖</button></td>
                     </tr>
@@ -597,7 +614,7 @@ async function loadOrderById(orderId, cleanup = true) {
     if (cleanup) tabs.innerHTML = '';
 
     if (cleanup) {
-        detailsContainer.innerHTML = `<div class="p-4 text-center text-gray-400">${t("messages.loadingOrder", { orderId })}</div>`;
+        detailsContainer.innerHTML = `<div class="p-4 text-center text-gray-400">${safeText(t("messages.loadingOrder", { orderId }))}</div>`;
     }
 
     try {
@@ -606,8 +623,8 @@ async function loadOrderById(orderId, cleanup = true) {
         if (!res.ok) {
             const errorText = await res.text();
             detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
-                Error ${res.status}: No se pudo encontrar la orden <strong>${orderId}</strong>.<br>
-                Mensaje: ${errorText || 'Error desconocido'}
+                Error ${res.status}: No se pudo encontrar la orden <strong>${safeText(orderId)}</strong>.<br>
+                Mensaje: ${safeText(errorText || 'Error desconocido')}
             </div>`;
             tabs.innerHTML = tabContent.innerHTML = '';
             alertMessage(t("messages.orderNotFound", { orderId }), 'error');
@@ -675,7 +692,7 @@ async function loadOrderById(orderId, cleanup = true) {
         renderDetails(detailsContainer, data, eventsData);
     } catch (error) {
         detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
-            Error de conexión o JSON inválido: ${error.message}
+            Error de conexión o JSON inválido: ${safeText(error.message)}
         </div>`;
         tabs.innerHTML = tabContent.innerHTML = '';
         console.error(error);
@@ -702,7 +719,7 @@ function renderTabContent(tabName, data, assertions=[], orderData=null) {
             `;
             break;
         case "validations":
-            renderValidationsTree(container, data, assertions);
+            renderValidationsTree(container, data, assertions, orderData);
             break;
         case "events":
             renderEventsTable(container, data);
@@ -711,7 +728,7 @@ function renderTabContent(tabName, data, assertions=[], orderData=null) {
             renderAssertions(container, data);
             break;
         default:
-            container.innerHTML = `<pre class="event-payload-pre">${JSON.stringify(data,null,2)}</pre>`;
+            container.innerHTML = `<pre class="event-payload-pre">${safeText(JSON.stringify(data,null,2))}</pre>`;
             break;
     }
 }
@@ -857,6 +874,7 @@ function getAssertionId(assertion, fallbackIndex) {
 }
 
 function buildVerificationSummary(order, events = []) {
+    const weightedResults = order.assertion_results || {};
     const validations = order.validations || {};
     const validationRequestCount = Object.values(order.validation_requests || {}).reduce((sum, items) => {
         return sum + (Array.isArray(items) ? items.length : 0);
@@ -878,6 +896,18 @@ function buildVerificationSummary(order, events = []) {
     let inconclusiveAssertions = 0;
 
     assertionIds.forEach(assertionId => {
+        const weighted = weightedResults[String(assertionId)];
+        if (weighted) {
+            const scores = weighted.scores || {};
+            validatorVotes.true += scores.TRUE || 0;
+            validatorVotes.false += scores.FALSE || 0;
+            validatorVotes.unknown += scores.UNKNOWN || 0;
+            if (weighted.winner === "TRUE") confirmedAssertions++;
+            else if (weighted.winner === "FALSE") contradictedAssertions++;
+            else inconclusiveAssertions++;
+            return;
+        }
+
         const validators = validations[assertionId] || {};
         let trueVotes = 0;
         let falseVotes = 0;
@@ -981,7 +1011,7 @@ function renderDetails(container, data, events = []) {
     const lightMode = isLightOrder(data);
     const formatDetailValue = value => {
         if (value === null || value === undefined) return "";
-        if (typeof value === "object") return `<pre class="event-payload-pre mt-0">${JSON.stringify(value, null, 2)}</pre>`;
+        if (typeof value === "object") return `<pre class="event-payload-pre mt-0">${safeText(JSON.stringify(value, null, 2))}</pre>`;
         return safeText(value);
     };
     // --- Contenido de las subpestañas
@@ -1017,7 +1047,7 @@ function renderDetails(container, data, events = []) {
                       v = safeText(v);
                   }
 
-                  return `<tr><th>${safeText(k)}</th><td>${v || ''}</td></tr>`;
+                  return `<tr><th>${safeText(k)}</th><td>` + (v || "") + `</td></tr>`;
               }).join('') +
         `</table>`;
 
@@ -1096,7 +1126,7 @@ function renderDetails(container, data, events = []) {
 // =========================================================
 // RENDER VALIDATIONS TREE OPTIMIZADO
 // =========================================================
-function renderValidationsTree(container, validations, assertions) {
+function renderValidationsTree(container, validations, assertions, orderData = null) {
     if (!validations || Object.keys(validations).length === 0) {
         container.innerHTML = "<p class='text-gray-400'>No hay validaciones disponibles para esta orden.</p>";
         return;
@@ -1133,10 +1163,10 @@ function renderValidationsTree(container, validations, assertions) {
             if (typeof desc === 'object') desc = JSON.stringify(desc, null, 2);
 
             tableRows += `<tr>
-                <td class="text-primary">${info.validator_alias || validator}</td>
+                <td class="text-primary">${safeText(info.validator_alias || validator)}</td>
                 <td class="${cls}"><b>${lit}</b></td>
-                <td><pre class="event-payload-pre mt-0">${desc}</pre></td>
-                <td>${info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${info.tx_hash}')">${shortHex(info.tx_hash)}</a>` : ""}</td>
+                <td><pre class="event-payload-pre mt-0">${safeText(desc)}</pre></td>
+                <td>${safeText(info.tx_hash || "")}</td>
             </tr>`;
         }
 
@@ -1148,7 +1178,7 @@ function renderValidationsTree(container, validations, assertions) {
 
         html += `<details class="p-3 bg-gray-700 rounded-lg mb-3">
             <summary class="cursor-pointer ${summaryClass}" style="font-weight:bold; font-size:1rem;">
-                ${assertionId}. ${assertionText} → <span style="font-size:0.9rem;">(${approvedCount} A / ${rejectedCount} R)</span>
+                ${safeText(assertionId)}. ${safeText(assertionText)} → <span style="font-size:0.9rem;">(${safeText(approvedCount)} A / ${safeText(rejectedCount)} R)</span>
             </summary>
             <div class="mt-3">
                 <table class="compact-table">
@@ -1213,7 +1243,7 @@ function renderTableData(container, data) {
 
     let html = `<table class="compact-table">
         <thead>
-            <tr>${keys.map(k => `<th class="uppercase text-xs">${k}</th>`).join("")}</tr>
+            <tr>${keys.map(k => `<th class="uppercase text-xs">${safeText(k)}</th>`).join("")}</tr>
         </thead>
         <tbody>`;
 
@@ -1242,13 +1272,13 @@ function renderTableData(container, data) {
 
             // links especiales
             if (k === "order_id" && val !== 'N/A') {
-                return `<td><a href="#" onclick="event.preventDefault(); navigateToOrderDetails('${val}')">${val}</a></td>`;
+                return `<td>${safeText(val)}</td>`;
             }
             if (k === "tx_hash" && val !== 'N/A') {
-                return `<td><a href="#" onclick="event.preventDefault(); navigateToTx('${val}')">${shortHex(val)}</a></td>`;
+                return `<td>${shortHex(val)}</td>`;
             }
 
-            return `<td>${val}</td>`;
+            return `<td>${safeText(val)}</td>`;
         }).join("")}</tr>`;
     }).join("");
 
@@ -1320,19 +1350,21 @@ function renderEventsTable(container, events) {
 
         const rows = pageData.map(e => {
             const payloadStr = JSON.stringify(e.payload, null, 2);
+            const safePayloadStr = safeText(payloadStr);
             const visibleSummary = payloadStr.substring(0, 80).trim() + (payloadStr.length > 80 ? '...' : '');
+            const safeVisibleSummary = safeText(visibleSummary);
             const icon = actionIcons[e.action] || "❓";
 
             return `
                 <tr>
                     <td class="col-icon text-center">${icon}</td>
-                    <td class="col-action">${e.action}</td>
-                    <td class="col-topic">${e.topic}</td>
-                    <td class="col-date">${e.timestamp}</td>
+                    <td class="col-action">${safeText(e.action)}</td>
+                    <td class="col-topic">${safeText(e.topic)}</td>
+                    <td class="col-date">${safeText(e.timestamp)}</td>
                     <td class="col-payload">
                         <details class="event-payload-details">
-                            <summary><span class="summary-text">${visibleSummary}</span></summary>
-                            <pre class="event-payload-pre">${payloadStr}</pre>
+                            <summary><span class="summary-text">${safeVisibleSummary}</span></summary>
+                            <pre class="event-payload-pre">${safePayloadStr}</pre>
                         </details>
                     </td>
                 </tr>
@@ -1405,9 +1437,9 @@ function renderAssertions(container, assertions) {
 
         html += `
             <tr>
-                <td class="id-col"><span>${a.idAssertion}</span></td>
-                <td class="text-col">${textValue || "-"}</td>
-                <td class="cat-col">${catDesc}</td>
+                <td class="id-col"><span>${safeText(a.idAssertion)}</span></td>
+                <td class="text-col">${safeText(textValue || "-")}</td>
+                <td class="cat-col">${safeText(catDesc)}</td>
             </tr>
         `;
     });
@@ -1531,7 +1563,7 @@ function renderTxTable(apiData) {
         [
             "blockNumber",
             data.blockNumber
-                ? `<a href="#" onclick="event.preventDefault(); navigateToBlock(${data.blockNumber})">${data.blockNumber}</a>`
+                ? `<a href="#" onclick="event.preventDefault(); navigateToBlock(${Number(data.blockNumber) || 0})">${safeText(data.blockNumber)}</a>`
                 : ""
         ],
         ["gas", data.gas],
@@ -1547,7 +1579,7 @@ function renderTxTable(apiData) {
 
     txTable.innerHTML = `
         <tr><th>Campo</th><th>Valor</th></tr>
-        ${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v ?? ""}</td></tr>`).join("")}
+        ${rows.map(([k, v]) => `<tr><td>${safeText(k)}</td><td>${k === "blockNumber" || k === "blockHash" ? (v ?? "") : safeText(v ?? "")}</td></tr>`).join("")}
     `;
 }
 
@@ -1688,8 +1720,8 @@ function renderBlockTable(data) {
     <tr><th>Campo</th><th>Valor</th></tr>
     ${blockRows.map(([k, v]) => `
       <tr>
-        <th>${k}</th>
-        <td>${v ?? ""}</td>
+        <th>${safeText(k)}</th>
+        <td>${safeText(v ?? "")}</td>
       </tr>
     `).join("")}
   `;
@@ -1717,14 +1749,14 @@ function renderBlockTable(data) {
       ${data.transactions.map(tx => `
         <tr>
           <td>
-            <a href="#" onclick="event.preventDefault(); navigateToTx('${tx.tx_hash}')">
+            <a href="#" onclick="event.preventDefault(); navigateToTx('${String(tx.tx_hash || "").replace(/'/g, "\\'")}')">
               ${shortHex(tx.tx_hash)}
             </a>
           </td>
-          <td>${tx.from}</td>
-          <td>${tx.to}</td>
-          <td>${tx.value}</td>
-          <td>${tx.gas}</td>
+          <td>${safeText(tx.from)}</td>
+          <td>${safeText(tx.to)}</td>
+          <td>${safeText(tx.value)}</td>
+          <td>${safeText(tx.gas)}</td>
         </tr>
       `).join("")}
     `;
@@ -1806,7 +1838,7 @@ function renderPost(post) {
             return `
                 <tr>
                     <th>${safeText(k)}</th>
-                    <td>${v ?? ""}</td>
+                    <td>${k === "document" ? (v ?? "") : safeText(v ?? "")}</td>
                 </tr>
             `;
         }).join("")}
@@ -1844,7 +1876,7 @@ function renderPost(post) {
             const assertionTable = document.createElement("table");
             assertionTable.className = "compact-table";
             assertionTable.innerHTML = `
-                <tr><th>Categoría</th><td>${a.categoryId}</td></tr>
+                <tr><th>Categoría</th><td>${safeText(a.categoryId)}</td></tr>
             `;
             content.appendChild(assertionTable);
 
@@ -1858,15 +1890,15 @@ function renderPost(post) {
                     const validationTable = document.createElement("table");
                     validationTable.className = "compact-table";
                     validationTable.innerHTML = `
-                        <tr><th>Validator</th><td>${v.validatorAddress}</td></tr>
-                        <tr><th>Dominio</th><td>${v.domain}</td></tr>
-                        <tr><th>Reputación</th><td>${v.reputation}</td></tr>
+                        <tr><th>Validator</th><td>${safeText(v.validatorAddress)}</td></tr>
+                        <tr><th>Dominio</th><td>${safeText(v.domain)}</td></tr>
+                        <tr><th>Reputación</th><td>${safeText(v.reputation)}</td></tr>
                         <tr><th>Veredicto</th><td>${mapVeredict(v.veredict)}</td></tr>
                         <tr><th>cid</th>
                             <td>
                                 ${v.cid
-                                    ? `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${v.cid}'); return false;">
-                                            ${v.cid}
+                                    ? `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${String(v.cid || "").replace(/'/g, "\\'")}'); return false;">
+                                            ${safeText(v.cid)}
                                     </a>`
                                     : ""
                                 }
@@ -1919,7 +1951,7 @@ async function checkOrderConsistency() {
     table.innerHTML = `
         <tr>
             <td colspan="5" class="loading">
-                Comprobando consistencia para Order ID: ${orderId}...
+                Comprobando consistencia para Order ID: ${safeText(orderId)}...
             </td>
         </tr>
     `;
@@ -1944,7 +1976,7 @@ async function checkOrderConsistency() {
             <tr>
                 <td colspan="5" class="error">
                     Error al conectar con el servicio local.<br>
-                    Detalle: ${error.message}
+                    Detalle: ${safeText(error.message)}
                 </td>
             </tr>`;
     }
@@ -1991,12 +2023,12 @@ function renderConsistencyTable(results) {
 
         html += `
             <tr>
-                <td>${item.test || ''}</td>
-                <td><pre>${String(item.toCompare || '')}</pre></td>
-                <td><pre>${String(item.compared || '')}</pre></td>
+                <td>${safeText(item.test || '')}</td>
+                <td><pre>${safeText(String(item.toCompare || ''))}</pre></td>
+                <td><pre>${safeText(String(item.compared || ''))}</pre></td>
                 <td>
                     <span class="${resultClass}">
-                        ${item.result || ''}
+                        ${safeText(item.result || '')}
                     </span>
                 </td>
             </tr>
@@ -2179,6 +2211,15 @@ function safeText(value) {
     if (value === null || value === undefined) return "";
     if (typeof value === "object") return escapeHTML(JSON.stringify(value));
     return escapeHTML(String(value));
+}
+
+function validatorTypeLabel(value) {
+    if (value === null || value === undefined || value === "") return "-";
+    const direct = VALIDATOR_TYPE_LABELS[value];
+    if (direct) return direct;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && VALIDATOR_TYPE_LABELS[numeric]) return VALIDATOR_TYPE_LABELS[numeric];
+    return String(value);
 }
 
 function syntaxHighlightJson(json) {
@@ -2395,6 +2436,56 @@ function renderTableData(container, data) {
 }
 
 // Árbol de validaciones más visual, con cards por validador y votos coloreados.
+
+function getAssertionResult(orderData, assertionId) {
+    return orderData?.assertion_results?.[String(assertionId)] || null;
+}
+
+function scorePercent(value) {
+    const n = Number(value || 0);
+    return `${Math.round(n * 1000) / 10}%`;
+}
+
+function renderScorePills(result) {
+    const scores = result?.scores || {TRUE: 0, FALSE: 0, UNKNOWN: 0};
+    return `
+        <div class="vote-pills score-pills">
+            <span class="vote-pill vote-true">TRUE ${scorePercent(scores.TRUE)}</span>
+            <span class="vote-pill vote-false">FALSE ${scorePercent(scores.FALSE)}</span>
+            <span class="vote-pill vote-unknown">UNKNOWN ${scorePercent(scores.UNKNOWN)}</span>
+        </div>
+    `;
+}
+
+function renderEvidenceLinks(info = {}) {
+    const sources = info.sources || info.payload?.sources || [];
+    const evidence = info.evidence_used || info.payload?.evidence_used || [];
+    const items = sources.length ? sources : evidence;
+    if (!items.length) return "";
+
+    const rows = items.slice(0, 6).map((src, index) => {
+        const url = src.url || "";
+        const title = src.title || src.source_id || url || `Evidencia ${index + 1}`;
+        const reason = src.reason || src.excerpt || src.content || src.description || "";
+        const confidence = src.reliability || src.source_type || src.supports;
+        return `
+            <li>
+                <div class="evidence-title">${url ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer">${safeText(title)}</a>` : safeText(title)}</div>
+                ${url ? `<div class="evidence-url">${safeText(url)}</div>` : ""}
+                ${reason ? `<div class="evidence-reason">${safeText(compactText(reason, 220))}</div>` : ""}
+                ${confidence !== undefined && confidence !== "" ? `<div class="evidence-meta">${safeText(confidence)}</div>` : ""}
+            </li>
+        `;
+    }).join("");
+
+    return `
+        <details class="validator-evidence-summary">
+            <summary>Ver evidencias (${items.length})</summary>
+            <ul>${rows}</ul>
+        </details>
+    `;
+}
+
 function renderValidatorProviderModelTitle(info = {}) {
     const config = info.validator_config?.config || info.config || info.validator_config || {};
     const provider = config.provider || info.provider;
@@ -2403,7 +2494,7 @@ function renderValidatorProviderModelTitle(info = {}) {
     return `title="${safeText(provider || "-")} | ${safeText(model || "-")}"`;
 }
 
-function renderValidationsTree(container, validations, assertions) {
+function renderValidationsTree(container, validations, assertions, orderData = null) {
     if (!validations || Object.keys(validations).length === 0) {
         container.innerHTML = "<p class='empty-state'>No hay validaciones disponibles para esta orden.</p>";
         return;
@@ -2415,13 +2506,16 @@ function renderValidationsTree(container, validations, assertions) {
         let assertionText = assertions.find(a => String(a.idAssertion) === String(assertionId))?.text || "(Aserción sin texto)";
         if (typeof assertionText === "object" && assertionText !== null && assertionText.text) assertionText = assertionText.text;
 
+        const assertionResult = getAssertionResult(orderData, assertionId);
         const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
         const approvedCount = literals.filter(v => v === "True").length;
         const rejectedCount = literals.filter(v => v === "False").length;
         const unknownCount = literals.filter(v => v === "Unknown").length;
 
         let status = "unknown";
-        if (approvedCount > rejectedCount) status = "true";
+        if (assertionResult?.winner === "TRUE") status = "true";
+        else if (assertionResult?.winner === "FALSE") status = "false";
+        else if (approvedCount > rejectedCount) status = "true";
         else if (rejectedCount > approvedCount) status = "false";
         else if (unknownCount > 0) status = "pending";
 
@@ -2433,13 +2527,20 @@ function renderValidationsTree(container, validations, assertions) {
             const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
             const responseTime = formatDurationSeconds(info.response_time_seconds);
             const validatorTooltip = renderValidatorProviderModelTitle(info);
+            const weightedDetail = assertionResult?.details?.find(d => String(d.validator).toLowerCase() === String(validator).toLowerCase());
+            const typeLabel = weightedDetail ? validatorTypeLabel(weightedDetail.validator_type) : validatorTypeLabel(info.validator_config?.config?.type || info.config?.type || info.validator_type);
+            const weightHtml = weightedDetail ? `<div class="validator-weights"><span>${safeText(typeLabel)}</span><span>peso ${safeText(weightedDetail.validator_type_weight)}</span><span>rep ${safeText(weightedDetail.reputation)}</span><span>efectivo ${safeText(Math.round(weightedDetail.effective_weight * 100) / 100)}</span></div>` : `<div class="validator-weights"><span>${safeText(typeLabel)}</span></div>`;
             return `
                 <div class="validator-card">
-                    <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${String(validator).replace(/'/g, "\'")}')">${safeText(info.validator_alias || validator)}</a></div>
+                    <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${safeText(info.validator_alias || validator)}</a></div>
                     <div class="validator-result ${litClass}">${lit}</div>
                     <div class="validator-desc">${safeText(desc)}</div>
-                    <div class="validator-response-time" title="Tiempo request-response">${safeText(responseTime)}</div>
-                    <div class="validator-tx">${tx}</div>
+                    <div class="validator-meta">
+                        ${weightHtml}
+                        <div class="validator-response-time" title="Tiempo request-response">${safeText(responseTime)}</div>
+                    </div>
+                    <div class="validator-tx" title="Transaction hash">${tx}</div>
+                    ${renderEvidenceLinks(info)}
                 </div>
             `;
         }).join("");
@@ -2447,12 +2548,12 @@ function renderValidationsTree(container, validations, assertions) {
         html += `
             <details class="validation-node">
                 <summary class="validation-summary">
-                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}</div>
-                    <div class="vote-pills">
+                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult ? ` → ${safeText(assertionResult.winner)}` : ""}</div>
+                    ${assertionResult ? renderScorePills(assertionResult) : `<div class="vote-pills">
                         ${renderVotePill(approvedCount, "True", "vote-true")}
                         ${renderVotePill(rejectedCount, "False", "vote-false")}
                         ${renderVotePill(unknownCount, "Unknown", "vote-unknown")}
-                    </div>
+                    </div>`}
                 </summary>
                 <div class="validator-grid">
                     ${validatorsHtml}
@@ -2502,7 +2603,7 @@ function renderValidatorValidationsByOrder(container, groupedOrders) {
     for (const [orderId, orderData] of Object.entries(groupedOrders)) {
         const targetId = `validator-order-${String(orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
         const target = document.getElementById(targetId);
-        if (target) renderValidationsTree(target, orderData.validations, orderData.assertions);
+        if (target) renderValidationsTree(target, orderData.validations, orderData.assertions, orderData);
     }
 }
 
@@ -2559,12 +2660,12 @@ function renderValidatorsTable(validators) {
                         <tr>
                             <td><a href="#" onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${shortValue(validator, 18)}</a></td>
                             <td>${safeText(cfg.name || "-")}</td>
-                            <td>${safeText(cfg.type || "-")}</td>
+                            <td>${safeText(validatorTypeLabel(cfg.type))}</td>
                             <td>${safeText(cfg.provider || "-")}</td>
                             <td>${safeText(cfg.model || "-")}</td>
                             <td>${renderValidatorCategories(v.categories)}</td>
                             <td>${safeText(cfg.status || "-")}</td>
-                            <td>${v.ipfs_hash ? `<a href="#" onclick="event.preventDefault(); showSection('ipfs', false); document.getElementById('ipfsHash').value='${safeText(v.ipfs_hash)}'; findIpfs();">${shortValue(v.ipfs_hash, 18)}</a>` : "-"}</td>
+                            <td>${v.ipfs_hash ? shortValue(v.ipfs_hash, 18) : "-"}</td>
                             <td><button class="btn-secondary btn-small" onclick="showValidatorValidations('${validatorHashForJs(validator)}')">Ver validaciones</button></td>
                         </tr>
                     `;
@@ -2623,7 +2724,7 @@ async function showValidatorDetail(validatorHash) {
                         <tr><th>Validator Hash</th><td>${safeText(data.validator || validatorHash)}</td></tr>
                         <tr><th>IPFS Config</th><td>${safeText(data.ipfs_hash || "-")}</td></tr>
                         <tr><th>Name</th><td>${safeText(cfg.name || "-")}</td></tr>
-                        <tr><th>Type</th><td>${safeText(cfg.type || "-")}</td></tr>
+                        <tr><th>Type</th><td>${safeText(validatorTypeLabel(cfg.type))}</td></tr>
                         <tr><th>Provider</th><td>${safeText(cfg.provider || "-")}</td></tr>
                         <tr><th>Model</th><td>${safeText(cfg.model || "-")}</td></tr>
                         <tr><th>Categories</th><td>${renderValidatorCategories(data.categories)}</td></tr>
@@ -2695,7 +2796,10 @@ async function showValidatorValidations(validatorHash) {
                 validator_alias: data.config?.name || validatorHash,
                 validator_config: { config: data.config || {} },
                 order_id: v.order_id,
-                response_time_seconds: v.response_time_seconds
+                response_time_seconds: v.response_time_seconds,
+                sources: v.sources || v.payload?.sources || [],
+                evidence_used: v.evidence_used || v.payload?.evidence_used || [],
+                payload: v.payload || {}
             };
         });
 

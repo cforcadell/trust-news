@@ -4,8 +4,6 @@ import uuid
 import hashlib
 import logging
 import asyncio
-import base58
-import requests
 import ast
 
 from typing import List, Optional, Dict, Any
@@ -17,15 +15,15 @@ from web3.middleware import geth_poa_middleware
 
 from aiokafka import AIOKafkaProducer
 
-from common.blockchain import send_signed_tx, wait_for_receipt_blocking
-from common.hash_utils import (
+from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking
+from common.utils.hash_utils import (
     safe_multihash_to_tuple,
     multihash_to_base58,
     multihash_to_base58_dict,
     hash_text_to_multihash,
     safe_hex,
 )
-from common.async_models import (
+from common.models.async_models import (
     Multihash,
     Assertion,
     RegisterBlockchainRequest,
@@ -37,8 +35,11 @@ from common.async_models import (
     ValidationCompletedResponse,
     ValidatorConfig,
     ValidatorConfigEvent,
-    ValidatorConfigEventPayload
+    ValidatorConfigEventPayload,
+    ValidatorType
 )
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN, DEFAULT_TOPIC_RESPONSES
+from common.utils.ipfs_client import get_ipfs_text, get_ipfs_json
 
 
 from aiokafka import AIOKafkaConsumer
@@ -56,9 +57,9 @@ ACCOUNT_ADDRESS = Web3.to_checksum_address(os.getenv("ACCOUNT_ADDRESS"))
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustNews.json")
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
-KAFKA_REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "request_validation")
-KAFKA_RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "validation_completed")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP)
+KAFKA_REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN)
+KAFKA_RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES)
 
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
 
@@ -97,58 +98,18 @@ except Exception as e:
 # Helpers
 # =========================================================
 def ipfs_get_text(cid: str) -> str:
-    """
-    Descarga texto desde IPFS vía tu gateway FastAPI.
-    Añade logging detallado para diagnóstico.
-    """
     try:
-        url = f"{IPFS_FASTAPI_URL}/ipfs/{cid}"
-        logger.info(f"🌍 IPFS GET → URL: {url}")
-
-        r = requests.get(url, timeout=10)
-
-        logger.info(
-            f"📡 IPFS response | status={r.status_code} "
-            f"content_length={len(r.content)} bytes"
-        )
-
-        # Si no es 200, logueamos body para diagnóstico
-        if r.status_code != 200:
-            logger.warning(
-                f"⚠️ IPFS error response body: {r.text[:500]}"
-            )
-
-        r.raise_for_status()
-
-        logger.info(
-            f"✅ IPFS OK | CID={cid} | first_100_chars={r.text[:100]}"
-        )
-
-        return r.text
-
-    except requests.exceptions.RequestException as e:
-        logger.exception(f"❌ Error HTTP accediendo a IPFS | cid={cid} | {e}")
-        return None
-
+        return get_ipfs_text(IPFS_FASTAPI_URL, cid)
     except Exception as e:
-        logger.exception(f"❌ Error inesperado en ipfs_get_text | cid={cid} | {e}")
+        logger.exception(f"❌ Error accediendo a IPFS | cid={cid} | {e}")
         return None
 
 
 
 
 def ipfs_get_json(cid: str) -> Optional[dict]:
-    raw = ipfs_get_text(cid)
-    if not raw:
-        return None
     try:
-        parsed = json.loads(raw)
-        content = parsed.get("content") if isinstance(parsed, dict) else None
-        if isinstance(content, str):
-            if content.startswith("b'") or content.startswith('b"'):
-                content = ast.literal_eval(content).decode("utf-8")
-            return json.loads(content)
-        return parsed
+        return get_ipfs_json(IPFS_FASTAPI_URL, cid)
     except Exception as e:
         logger.warning(f"No se pudo parsear JSON de IPFS | cid={cid}: {e}")
         return None
@@ -499,10 +460,13 @@ def get_validators_with_config(recover_ipfs: bool = Query(True)):
         for idx, address in enumerate(addresses):
             cid = multihash_to_base58(ipfs_configs[idx]) if idx < len(ipfs_configs) else None
             config = normalize_validator_config(cid) if recover_ipfs and cid else None
+            config_dump = config.model_dump(mode="json") if config else None
             validators.append({
                 "validator": safe_hex(address),
                 "ipfs_hash": cid,
-                "config": config.model_dump(mode="json") if config else None,
+                "validator_type": (config_dump or {}).get("type", int(ValidatorType.LLM_MEMORY_VALIDATION)),
+                "reputation": 1.0,
+                "config": config_dump,
                 "categories": get_validator_categories(address)
             })
         return {"result": True, "validators": validators}
@@ -522,14 +486,16 @@ def get_validator_config(validator_address: str, recover_ipfs: bool = Query(True
             raise HTTPException(status_code=404, detail="Validator not found")
         cid = multihash_to_base58(val_info[3]) if len(val_info) > 3 else None
         config = normalize_validator_config(cid) if recover_ipfs and cid else None
+        config_dump = config.model_dump(mode="json") if config else None
         return {
             "result": True,
             "validator": {
                 "validator": checksum,
                 "domain": val_info[0],
-                "reputation": val_info[1],
+                "reputation": 1.0,
+                "validator_type": (config_dump or {}).get("type", int(ValidatorType.LLM_MEMORY_VALIDATION)),
                 "ipfs_hash": cid,
-                "config": config.model_dump(mode="json") if config else None,
+                "config": config_dump,
                 "categories": get_validator_categories(checksum)
             }
         }

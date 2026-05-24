@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apis
+
+secretGenerator:
+- name: mongodb-app-secret
+  namespace: apis
+  envs:
+    - mongodb-app.env
+
+generatorOptions:
+  disableNameSuffixHash: true

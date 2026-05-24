@@ -3,7 +3,6 @@ import json
 import uuid
 import logging
 import asyncio
-import base58
 import time
 
 from typing import List, Tuple, Optional, Dict, Any
@@ -17,10 +16,13 @@ from dotenv import load_dotenv
 from web3 import Web3
 from abc import ABC, abstractmethod
 
-from common.blockchain import send_signed_tx, wait_for_receipt_blocking
-from common.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple
-from common.veredicto import Veredicto, Validacion
-from common.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationMode, ValidatorConfigEvent, ValidatorConfigEventPayload
+from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking, send_and_wait, receipt_succeeded, require_successful_receipt
+from common.utils.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple,cid_to_multihash_tuple
+from common.models.veredicto import Veredicto, Validacion
+from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationMode, ValidatorConfigEvent, ValidatorConfigEventPayload
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
+from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
+from common.utils.llm_json import strip_json_markdown
 from pydantic import BaseModel, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -70,23 +72,78 @@ CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustNews.json")
 
 API_URL = os.getenv("API_URL")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
-VALIDATION_PROMPT = os.getenv(
-    "VALIDATION_PROMPT",
-    "Validame la siguiente aserción. Devuelve dos tags: 'resultado' (TRUE, FALSE o UNKNOWN) y 'descripcion'."
-)
+DEFAULT_MEMORY_PROMPT = """Actúa como validador factual prudente.
+Valida la aserción usando tu conocimiento general y razonamiento lógico.
+No inventes información.
+Si no puedes verificarlo con suficiente seguridad, devuelve UNKNOWN.
+Devuelve exclusivamente JSON válido:
+{
+  "resultado": "TRUE | FALSE | UNKNOWN",
+  "descripcion": "Justificación breve y objetiva"
+}"""
+
+DEFAULT_SEARCH_PROMPT = """Actúa como validador factual con búsqueda online.
+Busca evidencias actuales en Internet cuando sea necesario.
+Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
+Devuelve exclusivamente JSON válido:
+{
+  "resultado": "TRUE | FALSE | UNKNOWN",
+  "descripcion": "Justificación breve y objetiva",
+  "sources": [
+    {
+      "url": "string",
+      "title": "string",
+      "reason": "string"
+    }
+  ]
+}"""
+
+DEFAULT_RAG_PROMPT = """Actúa como validador factual estricto.
+Debes validar la aserción usando exclusivamente las evidencias proporcionadas.
+No uses conocimiento interno salvo razonamiento lógico básico.
+No inventes fuentes.
+No accedas a URLs externas.
+Si las evidencias no son suficientes, devuelve UNKNOWN o INSUFFICIENT.
+Devuelve exclusivamente JSON válido:
+{
+  "resultado": "TRUE | FALSE | UNKNOWN | SUPPORTED | REFUTED | INSUFFICIENT | CONFLICTED | PARTIAL",
+  "descripcion": "Justificación breve y objetiva",
+  "confidence": "HIGH | MEDIUM | LOW",
+  "evidence_used": [
+    {
+      "source_id": "string",
+      "url": "string",
+      "supports": true,
+      "reason": "string"
+    }
+  ]
+}"""
+
+LEGACY_VALIDATION_PROMPT = os.getenv("VALIDATION_PROMPT")
+LLM_MEMORY_VALIDATION_PROMPT = os.getenv("LLM_MEMORY_VALIDATION_PROMPT", LEGACY_VALIDATION_PROMPT or DEFAULT_MEMORY_PROMPT)
+LLM_SEARCH_VALIDATION_PROMPT = os.getenv("LLM_SEARCH_VALIDATION_PROMPT", LEGACY_VALIDATION_PROMPT or DEFAULT_SEARCH_PROMPT)
+RAG_EVIDENCE_VALIDATION_PROMPT = os.getenv("RAG_EVIDENCE_VALIDATION_PROMPT", LEGACY_VALIDATION_PROMPT or DEFAULT_RAG_PROMPT)
 VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
-VALIDATOR_TYPE = int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.General_AI))))
+VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.LLM_MEMORY_VALIDATION)))))
+USE_EVIDENCE_SEARCH = os.getenv("USE_EVIDENCE_SEARCH", "false").lower() == "true"
+ONLINE_SEARCH_ENABLED = os.getenv("ONLINE_SEARCH_ENABLED", "false").lower() == "true"
+EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
+AUTOMATIC_VALIDATOR_TYPES = {
+    ValidatorType.LLM_MEMORY_VALIDATION,
+    ValidatorType.LLM_SEARCH_VALIDATION,
+    ValidatorType.RAG_EVIDENCE_VALIDATION,
+}
 VALIDATOR_ACTIVE_DATE = os.getenv("VALIDATOR_ACTIVE_DATE", datetime.now(timezone.utc).isoformat())
 VALIDATOR_UPDATED_DATE = os.getenv("VALIDATOR_UPDATED_DATE", VALIDATOR_ACTIVE_DATE)
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
 
-KAFKA_BROKER = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", "kafka:9092"))
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP))
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
 KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
 KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
 KAFKA_MECHANISM = os.getenv("KAFKA_MECHANISM", "PLAIN")
-TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", "trustnews.validation.requests")
-TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", os.getenv("KAFKA_RESPONSE_TOPIC", "fake_news_responses"))
+TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS)
+TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES))
 light_consumer: Optional[AIOKafkaConsumer] = None
 light_producer: Optional[AIOKafkaProducer] = None
 
@@ -119,8 +176,76 @@ class AdminConfigUpdate(BaseModel):
 # =========================================================
 class AIValidator(ABC):
     @abstractmethod
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
         pass
+
+
+def is_automatic_validator() -> bool:
+    return VALIDATOR_TYPE in AUTOMATIC_VALIDATOR_TYPES
+
+
+def selected_validation_prompt() -> str:
+    if VALIDATOR_TYPE == ValidatorType.LLM_SEARCH_VALIDATION:
+        return LLM_SEARCH_VALIDATION_PROMPT
+    if VALIDATOR_TYPE == ValidatorType.RAG_EVIDENCE_VALIDATION:
+        return RAG_EVIDENCE_VALIDATION_PROMPT
+    return LLM_MEMORY_VALIDATION_PROMPT
+
+
+def normalize_assertion_input(texto: Any, contexto: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    if isinstance(texto, dict):
+        metadata = texto.get("metadata") or {}
+        text_value = texto.get("text") or texto.get("assertion_text") or ""
+        return str(text_value), contexto or json.dumps(metadata, ensure_ascii=False)
+    return str(texto or ""), contexto
+
+
+def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> str:
+    if not evidences:
+        return "No hay evidencias disponibles."
+    lines = []
+    for source in evidences:
+        lines.append(
+            f"- source_id={source.get('source_id', '')} | url={source.get('url', '')} | "
+            f"title={source.get('title', '')} | excerpt={source.get('excerpt', '')}"
+        )
+    return "\n".join(lines)
+
+
+def build_prompt_content(texto: Any, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
+    assertion_text, context_text = normalize_assertion_input(texto, contexto)
+    parts = [selected_validation_prompt()]
+    if context_text:
+        parts.append(f"Contexto de la noticia:\n{context_text}")
+    if VALIDATOR_TYPE == ValidatorType.RAG_EVIDENCE_VALIDATION:
+        parts.append(f"Evidencias proporcionadas:\n{format_evidences_for_prompt(evidences)}")
+    parts.append(f"Aserción a validar:\n{assertion_text}")
+    return "\n\n".join(parts)
+
+
+def openrouter_model_for_current_type(model: str) -> str:
+    if VALIDATOR_TYPE == ValidatorType.LLM_SEARCH_VALIDATION and ONLINE_SEARCH_ENABLED and not model.endswith(":online"):
+        return f"{model}:online"
+    return model
+
+
+def fetch_evidences_for_assertion(assertion_text: str, contexto: Optional[str] = None, category: Optional[int] = None) -> List[Dict[str, Any]]:
+    if VALIDATOR_TYPE != ValidatorType.RAG_EVIDENCE_VALIDATION or not USE_EVIDENCE_SEARCH:
+        return []
+    payload = {
+        "order_id": None,
+        "assertion_text": assertion_text,
+        "temporal_context": contexto,
+        "category": str(category) if category is not None else None,
+        "max_sources": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
+    }
+    try:
+        resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidences", json=payload, timeout=30.0)
+        resp.raise_for_status()
+        return resp.json().get("sources", []) or []
+    except Exception as e:
+        logger.warning(f"⚠️ evidence-search failed; RAG validator will answer with no evidences: {e}")
+        return []
 
 class MistralValidator(AIValidator):
     def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
@@ -129,10 +254,10 @@ class MistralValidator(AIValidator):
         self.model = model
         self.temperature = temperature
 
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
         import requests
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
+        contenido = build_prompt_content(texto, contexto, evidences)
         data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
         resp = requests.post(self.api_url, headers=headers, json=data)
         if resp.status_code == 200:
@@ -146,8 +271,8 @@ class GeminiValidator(AIValidator):
         self.model = model
         self.temperature = temperature
 
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
-        prompt = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
+        prompt = build_prompt_content(texto, contexto, evidences)
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": self.temperature, "topK": 40, "topP": 0.8},
@@ -166,10 +291,10 @@ class OpenRouterValidator(AIValidator):
         self.model = model
         self.temperature = temperature
 
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
+        contenido = build_prompt_content(texto, contexto, evidences)
+        data = {"model": openrouter_model_for_current_type(self.model), "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
         resp = httpx.post(self.api_url, headers=headers, json=data)
         if resp.status_code == 200:
             return resp.json()["choices"][0]["message"]["content"]
@@ -183,9 +308,9 @@ class GrokValidator(AIValidator):
         self.model = model
         self.temperature = temperature
 
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None) -> str:
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        contenido = f"{VALIDATION_PROMPT}\n\nTexto a analizar:\n{texto}"
+        contenido = build_prompt_content(texto, contexto, evidences)
         data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
         
         # Usamos httpx igual que en OpenRouter
@@ -195,7 +320,12 @@ class GrokValidator(AIValidator):
             return resp.json()["choices"][0]["message"]["content"]
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     
-def build_ai_validator() -> AIValidator:
+def build_ai_validator() -> Optional[AIValidator]:
+    if not is_automatic_validator():
+        logger.info(f"Validator type {VALIDATOR_TYPE.name} only registers on-chain; AI client disabled")
+        return None
+    if AI_PROVIDER == "none":
+        raise RuntimeError("AI_PROVIDER must be different from 'none' for LLM validator types")
     if AI_PROVIDER == "mistral":
         return MistralValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "mistral-tiny"), TEMPERATURE)
     elif AI_PROVIDER == "gemini":
@@ -208,47 +338,37 @@ def build_ai_validator() -> AIValidator:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
 
 def clean_ai_response_text(text: str) -> str:
-    text = text.strip()
-    if text.startswith("```json"): text = text[7:].strip()
-    if text.endswith("```"): text = text[:-3].strip()
-    return text
+    return strip_json_markdown(text)
 
 ai_validator = build_ai_validator()
-logger.info(f"AI Validator inicializado: {AI_PROVIDER.upper()}")
+if ai_validator:
+    logger.info(f"AI Validator inicializado: {AI_PROVIDER.upper()}")
 
 
 def kafka_security_kwargs():
-    protocol = (KAFKA_SECURITY_PROTOCOL or "").upper()
-    mechanism = KAFKA_MECHANISM or ""
-
-    if "SASL" in protocol:
-        if not (KAFKA_USERNAME and KAFKA_PASSWORD):
-            logger.warning(
-                "⚠️ Kafka SASL requested but username/password are incomplete; "
-                "falling back to default PLAINTEXT client settings."
-            )
-            return {}
-        return {
-            "security_protocol": KAFKA_SECURITY_PROTOCOL,
-            "sasl_mechanism": mechanism,
-            "sasl_plain_username": KAFKA_USERNAME,
-            "sasl_plain_password": KAFKA_PASSWORD,
-        }
-
-    kwargs = {}
-    if KAFKA_SECURITY_PROTOCOL:
-        kwargs["security_protocol"] = KAFKA_SECURITY_PROTOCOL
-    return kwargs
+    return build_kafka_security_kwargs(
+        KAFKA_SECURITY_PROTOCOL,
+        KAFKA_MECHANISM,
+        KAFKA_USERNAME,
+        KAFKA_PASSWORD,
+        logger,
+    )
 
 
-def parse_validator_api_response(result_text: str) -> Tuple[Validacion, str]:
+def parse_validator_api_response(result_text: str) -> Tuple[Validacion, str, Dict[str, Any]]:
     parsed_result = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
     normalized = parsed_result.resultado.upper()
-    if normalized == "TRUE":
-        return Validacion.TRUE, parsed_result.descripcion
-    if normalized == "FALSE":
-        return Validacion.FALSE, parsed_result.descripcion
-    return Validacion.UNKNOWN, parsed_result.descripcion
+    extras = {
+        "resultado_raw": parsed_result.resultado,
+        "confidence": parsed_result.confidence,
+        "sources": parsed_result.sources or [],
+        "evidence_used": parsed_result.evidence_used or [],
+    }
+    if normalized in {"TRUE", "SUPPORTED"}:
+        return Validacion.TRUE, parsed_result.descripcion, extras
+    if normalized in {"FALSE", "REFUTED"}:
+        return Validacion.FALSE, parsed_result.descripcion, extras
+    return Validacion.UNKNOWN, parsed_result.descripcion, extras
 
 
 def validator_config_event_payload(
@@ -315,9 +435,19 @@ async def handle_light_validation_request(req: LightValidationRequest):
     verdict = Validacion.UNKNOWN
     description = ""
     error = None
+    extras = {}
     try:
-        result_text = await asyncio.to_thread(verificar_asercion, payload.assertion_text, payload.original_text)
-        verdict, description = parse_validator_api_response(result_text)
+        result_text, consulted_evidences = await asyncio.to_thread(
+            verificar_asercion_con_evidencias,
+            payload.assertion_text,
+            payload.original_text,
+            payload.category,
+        )
+        verdict, description, extras = parse_validator_api_response(result_text)
+        if consulted_evidences and not extras.get("sources"):
+            extras["sources"] = consulted_evidences
+        if consulted_evidences and not extras.get("evidence_used"):
+            extras["evidence_used"] = consulted_evidences
     except Exception as e:
         error = str(e)
         description = error
@@ -337,7 +467,9 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "category": payload.category,
             "verdict": verdict,
             "description": description,
-            "confidence": None,
+            "confidence": extras.get("confidence"),
+            "sources": extras.get("sources", []),
+            "evidence_used": extras.get("evidence_used", []),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "correlation_id": payload.correlation_id,
             "error": error
@@ -403,11 +535,15 @@ app = FastAPI(title="Validate Asertions API")
 # =========================================================
 # Funciones internas
 # =========================================================
-def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
+def verificar_asercion_con_evidencias(texto: Any, contexto: Optional[str] = None, category: Optional[int] = None) -> tuple[str, List[Dict[str, Any]]]:
+    if not is_automatic_validator() or ai_validator is None:
+        raise RuntimeError(f"Validator type {VALIDATOR_TYPE.name} does not execute automatic LLM validation")
+    assertion_text, normalized_context = normalize_assertion_input(texto, contexto)
+    evidences = fetch_evidences_for_assertion(assertion_text, normalized_context, category)
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            return ai_validator.verificar_asercion(texto, contexto)
+            return ai_validator.verificar_asercion(assertion_text, normalized_context, evidences), evidences
         except HTTPException as e:
             # Si es un error de Rate Limit (429), esperamos y reintentamos
             if e.status_code == 429:
@@ -420,58 +556,27 @@ def verificar_asercion(texto: str, contexto: Optional[str] = None) -> str:
             logger.error(f"❌ Error devuelto por la API de IA - HTTP {e.status_code}: {e.detail}")
             raise e
 
+
+def verificar_asercion(texto: Any, contexto: Optional[str] = None, category: Optional[int] = None) -> str:
+    result_text, _ = verificar_asercion_con_evidencias(texto, contexto, category)
+    return result_text
+
 async def upload_validation_to_ipfs(validation_doc_bytes: bytes) -> str:
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{ipfs_api_url}/ipfs/upload",
-            data={
-                "filename": f"validation-{uuid.uuid4()}.json",
-                "content_bytes": validation_doc_bytes
-            }
-        )
-
-    response.raise_for_status()
-    return response.json()["cid"]
+    return await upload_bytes_to_ipfs(ipfs_api_url, f"validation-{uuid.uuid4()}.json", validation_doc_bytes)
 
 
 async def upload_json_to_ipfs(filename: str, payload: dict) -> str:
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
-    content_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{ipfs_api_url}/ipfs/upload",
-            data={
-                "filename": filename,
-                "content_bytes": content_bytes
-            }
-        )
-    response.raise_for_status()
-    return response.json()["cid"]
-
-
-def cid_to_multihash_tuple(cid: str):
-    decoded = base58.b58decode(cid)
-    if len(decoded) != 34:
-        raise ValueError(f"CID inválido. Longitud inesperada: {len(decoded)} (esperado 34)")
-    hash_function = decoded[0:1]
-    hash_size = decoded[1:2]
-    digest = decoded[2:]
-    if hash_function != b"\x12":
-        raise ValueError("Solo se soporta SHA-256 (0x12)")
-    if hash_size != b"\x20":
-        raise ValueError("Solo se soporta digest de 32 bytes (0x20)")
-    if len(digest) != 32:
-        raise ValueError("Digest no es 32 bytes")
-    return (hash_function, hash_size, digest)
+    return await upload_json_payload_to_ipfs(ipfs_api_url, filename, payload)
 
 
 def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered, end_date: Optional[str] = None, updated_date: Optional[str] = None) -> ValidatorConfig:
     return ValidatorConfig(
         name=VALIDATOR_NAME,
-        type=ValidatorType(VALIDATOR_TYPE),
+        type=VALIDATOR_TYPE,
         provider=AI_PROVIDER,
-        model=ai_validator.model,
+        model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
         active_date=VALIDATOR_ACTIVE_DATE,
         updated_date=updated_date or VALIDATOR_UPDATED_DATE,
         end_date=end_date,
@@ -532,37 +637,10 @@ async def registrar_validacion_internal(
 
         logger.info(f"📦 Validación subida a IPFS: {validation_cid}")
 
-       # ------------------------------------------------
-        # Decodificar CIDv0 → Multihash
-        # ------------------------------------------------
-        decoded = base58.b58decode(validation_cid)
-
-        logger.info(f"CID decoded length: {len(decoded)} bytes")
-
-        if len(decoded) != 34:
-            raise ValueError(
-                f"CID inválido. Longitud inesperada: {len(decoded)} (esperado 34)"
-            )
-
-        hash_function = decoded[0:1]  # bytes1
-        hash_size = decoded[1:2]      # bytes1
-        digest = decoded[2:]          # bytes32
-
+        hash_function, hash_size, digest = cid_to_multihash_tuple(validation_cid)
         logger.info(f"hash_function: {hash_function.hex()}")
         logger.info(f"hash_size: {hash_size.hex()}")
         logger.info(f"digest length: {len(digest)}")
-
-        # ------------------------------------------------
-        # Validaciones estrictas (protección arquitectura)
-        # ------------------------------------------------
-        if hash_function != b"\x12":
-            raise ValueError("Solo se soporta SHA-256 (0x12)")
-
-        if hash_size != b"\x20":
-            raise ValueError("Solo se soporta digest de 32 bytes (0x20)")
-
-        if len(digest) != 32:
-            raise ValueError("Digest no es 32 bytes")
 
         # ------------------------------------------------
         # Construir llamada al contrato
@@ -607,19 +685,6 @@ def consultar_tx_status_internal(tx_hash: str) -> Dict[str, Any]:
         logger.debug(f"consultar_tx_status_internal: receipt aún no disponible o error: {e}")
         return {"status": "pending", "result": False, "tx_hash": tx_hash}
 
-
-def receipt_succeeded(receipt: Optional[Dict[str, Any]]) -> bool:
-    if not receipt:
-        return False
-    if isinstance(receipt, dict):
-        return receipt.get("status") == 1
-    return getattr(receipt, "status", None) == 1
-
-
-def require_successful_receipt(receipt: Optional[Dict[str, Any]], message: str):
-    if not receipt_succeeded(receipt):
-        raise HTTPException(status_code=500, detail=message)
-
 # =========================================================
 # Registrar validador (espera confirmación)
 # =========================================================
@@ -638,11 +703,8 @@ def registrar_validador_blockchain(name: str, categories: List[int], ipfs_config
         fn = contract.functions.registerValidator(name, categories, cid_to_multihash_tuple(ipfs_config_hash))
 
         # Enviar transacción
-        tx_hash = send_signed_tx(w3,fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
+        tx_hash, receipt = send_and_wait(w3, fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
         logger.info(f"Transacción enviada: {tx_hash}")
-
-        # Esperar a que se mine
-        receipt = wait_for_receipt_blocking(w3,tx_hash)
         logger.info(f"Receipt recibido: {receipt}")
 
         return tx_hash, receipt
@@ -665,9 +727,8 @@ def update_validator_config_blockchain(ipfs_config_hash: str) -> Tuple[Optional[
     try:
         logger.info(f"Inicio update_validator_config_blockchain -> ipfs_config_hash: {ipfs_config_hash}")
         fn = contract.functions.updateValidatorConfig(cid_to_multihash_tuple(ipfs_config_hash))
-        tx_hash = send_signed_tx(w3, fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
+        tx_hash, receipt = send_and_wait(w3, fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
         logger.info(f"Transacción enviada: {tx_hash}")
-        receipt = wait_for_receipt_blocking(w3, tx_hash)
         logger.info(f"Receipt recibido: {receipt}")
         return tx_hash, receipt
     except Exception as e:
@@ -691,11 +752,8 @@ def desregistrar_validador_blockchain() -> Tuple[Optional[str], Optional[Dict[st
         fn = contract.functions.unregisterValidator()
 
         # Enviar transacción
-        tx_hash = send_signed_tx(w3,fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
+        tx_hash, receipt = send_and_wait(w3, fn, ACCOUNT_ADDRESS, PRIVATE_KEY)
         logger.info(f"Transacción enviada: {tx_hash}")
-
-        # Esperar a que se mine
-        receipt = wait_for_receipt_blocking(w3,tx_hash)
         logger.info(f"Receipt recibido: {receipt}")
 
         return tx_hash, receipt
@@ -763,7 +821,7 @@ def get_admin_config():
     """Consulta la configuración actual del validador AI y sus categorías."""
     return AdminConfigResponse(
         provider=AI_PROVIDER,
-        model=ai_validator.model,
+        model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
         categories=VALIDATOR_CATEGORIES
     )
 
@@ -778,9 +836,9 @@ async def update_admin_config(config: AdminConfigUpdate):
 
     # 1. Gestión del Provider y Modelo de IA
     old_provider = AI_PROVIDER
-    old_model = ai_validator.model
+    old_model = ai_validator.model if ai_validator else os.getenv("MODEL", "none")
     new_provider = config.provider.lower() if config.provider else AI_PROVIDER
-    new_model = config.model if config.model else ai_validator.model
+    new_model = config.model if config.model else (ai_validator.model if ai_validator else os.getenv("MODEL", "none"))
     model_config_changed = new_provider != old_provider or new_model != old_model
     metrics_reset_at = datetime.now(timezone.utc).isoformat() if model_config_changed else None
 
@@ -838,7 +896,7 @@ async def update_admin_config(config: AdminConfigUpdate):
         "message": "Configuración actualizada correctamente.",
         "config": {
             "provider": AI_PROVIDER,
-            "model": ai_validator.model,
+            "model": ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
             "categories": VALIDATOR_CATEGORIES
         },
         "blockchain_updates": blockchain_receipts if blockchain_receipts else "Sin cambios en blockchain"
@@ -925,7 +983,7 @@ class BlockchainEventAgent:
                 "metadata": content_obj.get("metadata", {})
             }
             result_text = await asyncio.to_thread(verificar_asercion, document)
-            estado_enum, descripcion = parse_validator_api_response(result_text)
+            estado_enum, descripcion, _extras = parse_validator_api_response(result_text)
 
             veredicto = Veredicto(descripcion, estado_enum)
             tx_hash, receipt = await registrar_validacion_internal(post_id, assertion_index, veredicto)
@@ -942,11 +1000,14 @@ class BlockchainEventAgent:
 @app.on_event("startup")
 async def startup_event():
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
-    agent = BlockchainEventAgent(w3, contract, ACCOUNT_ADDRESS, ipfs_api_url)
-    asyncio.create_task(agent.start())
-    logger.info("🟢 Blockchain Event Agent iniciado")
-    asyncio.create_task(consume_light_validation_requests())
-    logger.info("[LIGHT] Kafka validation request listener started")
+    if is_automatic_validator():
+        agent = BlockchainEventAgent(w3, contract, ACCOUNT_ADDRESS, ipfs_api_url)
+        asyncio.create_task(agent.start())
+        logger.info("🟢 Blockchain Event Agent iniciado")
+        asyncio.create_task(consume_light_validation_requests())
+        logger.info("[LIGHT] Kafka validation request listener started")
+    else:
+        logger.info(f"Validator type {VALIDATOR_TYPE.name}; automatic blockchain/Kafka validation listeners disabled")
     
         # registrar validador en startup (si no está registrado)
 

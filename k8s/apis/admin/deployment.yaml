@@ -23,9 +23,5 @@ spec:
         envFrom:
         - configMapRef:
             name: admin-config
-        env:
-        - name: MONGO_URI
-          valueFrom:
-            secretKeyRef:
-              name: news-handler-secrets
-              key: MONGO_URI
+        - secretRef:
+            name: mongodb-app-secret

@@ -1,14 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
-from common.async_models import (
+from common.models.async_models import (
     LightValidationRequest,
     LightValidationResponse,
     PublishRequest,
     PublishWithAssertionsRequest,
     ValidationMode,
 )
-from common.veredicto import Validacion
+from common.models.veredicto import Validacion
 
 
 def test_publish_request_defaults_to_blockchain():

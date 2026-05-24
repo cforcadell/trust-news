@@ -21,9 +21,14 @@ data:
   # --- MongoDB ---
   MONGO_DBNAME: "newsdb"
   MONGO_COLLECTION: "news"
+  MONGO_EVENTS_COLLECTION: "events"
+  MONGO_VALIDATIONS_COLLECTION: "validations"
   
   # --- App Config ---
   MAX_WORKERS: "3"
+  IMPORT_URL_TIMEOUT_SECONDS: "10"
+  IMPORT_URL_MAX_REDIRECTS: "3"
+  IMPORT_URL_MAX_BYTES: "2097152"
 
   
   # --- URLs Internas ---

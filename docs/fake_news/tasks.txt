@@ -129,20 +129,42 @@ Act as an expert editor. Analyze the content I will provide below and apply the 
         - Every Pydantic model must be declared in the common module.
 
 Develop v0.0.11.
-- Afinar prompts 
-    temperatura y maximo de aserciones como parametros
-- afinar determinismo.
-- cambio de modelo en generate assertions ¿?
-- endpoints de recomendación de modelos apirouter economicos 
+
+- endpoints de recomendación de modelos apirouter economicos OK 
 - cambiar login  skin OK
 - cambiar resultado validacion con mejoras visuales OK
-- soporte multiidioma (castellano + ingles)
+- soporte multiidioma (castellano + ingles) OK
+- Nueva categorizacion de validadores:
+    LLM_MEMORY_VALIDATION = 1
+    LLM_SEARCH_VALIDATION = 2
+    RAG_EVIDENCE_VALIDATION = 3
+    DETERMINISTIC_VALIDATION = 4
+    HUMAN = 5
+
+    - Nuevos validadores RAG(RAG_EVIDENCE_VALIDATION):
+        - nuevo servicio evidence search basado en tavily-
+        - Cacheo de resultados
+        - Endpoints de gestión de dominios oficiales por categoria
+    - Nuevos validadores con búsqueda online (LLM_SEARCH_VALIDATION)
+    - Validadores AI, como hasta ahora, con entrenamiento adhoc
+- Nueva monitotizacion de mongodb +  Separacion de usuarios admin/user + uso de appuser en apis
+- Nueva monitotizacion de kakfa (kafdrop)
+- Refactorizaoin de modelos pydantic y funciones comunes
+- Afinar prompts 
+    temperatura y maximo de aserciones como parametros OK
+- afinar determinismo.
 
 
-Develop v0.0.12.
+
+Develop v0.0.12
+
+- Generalizacion de categorias
+- PReferred domains by localization
+
+Develop v0.0.13.
 - integración con X/Trhreads
 
-Develop v0.0.13.   Reputation policy
+Develop v0.0.14.   Reputation policy
     - consulta de reputaciones. Consulta de nombre, tipo y reputacion
     - gestión de reputaciones fuera de la cadena. 
         AI defecto reputacion media
@@ -153,10 +175,10 @@ Develop v0.0.13.   Reputation policy
 
 
 
-Develop v0.0.14.
+Develop v0.0.15.
 - integracion con llm dedicado de categoria concreta
 
-Develop v0.0.15.
+Develop v0.0.16.
 - loki persistente
 - Hardering frontend
 - restylish frontend

@@ -1,8 +1,40 @@
 
+**create/recreate cluster**
+```bash delete
+
+kubectl get pvc -A
+docker volume ls
+
+kind delete cluster --name trust-news
+
+docker system prune -a -f
+
+df -h /
+docker volume ls
+
+docker system prune -a -f
+sudo journalctl --vacuum-size=300M
+sudo apt clean
+sudo apt autoremove -y
+df -h /
+
+docker volume prune -f
+df -h /
+
+
+```
+```bash create
+
+kind create cluster --name trust-news --config kind-config.yaml
+```
+
+
+
 **Skaffold**
 
-```bash blockchain
-#./skaffold dev -p setup 
+```bash create namespaces
+cd ./scripts/k8s
+./create-namespaces.sh
 ```
 
 ```bash blockchain
@@ -145,6 +177,9 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.ge
 
 ./skaffold dev -p infra
 
+# Kafdrop queda expuesto por Skaffold en:
+# http://localhost:9000
+
 kubectl scale statefulset --all --replicas=0 -n infra
 kubectl scale statefulset --all --replicas=1 -n infra
 
@@ -159,11 +194,70 @@ kubectl get pvc -n infra
 kubectl delete pvc ipfs-storage-ipfs-0 -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
-
-
 ```
 
-```bash keycloak
+
+
+```bash apis + frontend
+
+./skaffold dev -p apis-frontend  # --cache-artifacts=true --cleanup=false
+
+
+kubectl get pods -n apis
+kubectl get pods -n frontend
+
+kubectl logs -n apis -f 
+
+Frontend:
+#si no se levanta el port forward
+kubectl port-forward svc/frontend-service -n frontend 7443:443
+#verify nginx config
+kubectl exec -it -n frontend frontend-web-5769696f49-dljlk -- cat /etc/nginx/conf.d/default.conf
+#realm console
+https://localhost:7443/auth/admin/master/console/
+
+
+#https://192.168.56.108:7443/
+#con mapeo de host a vm
+https://localhost:7443/
+
+grafana:
+http://localhost:3000/
+
+https://localhost:7443/backend/docs
+
+
+keycloak realm master 
+https://localhost:7443/auth/admin/master/console/
+
+#get token 
+curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxx"
+
+
+
+---
+
+
+
+get svc -n infra
+
+#Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
+
+Explore + Run query
+
+```
+```bash  get secret details 
+
+kubectl get secrets -n infra
+kubectl get mongodb-secret -n infra -o jsonpath='{.data}'
+
+
+kubectl get secrets -n apis
+kubectl get secret mongodb-app-secret -n apis -o jsonpath='{.data}'
+echo "x" | base64 --decode
+
+```
+```bash config keycloak
 keycloak (sin ir por nginx):
 
 #si no lo abre skaffold
@@ -205,10 +299,10 @@ Authentication Flow: Marca solo Service accounts roles (desmarca el resto).
 
 Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
 
-En realm settings (TrustNews)
-Frontend URL: https://localhost:7443/auth/
+#En realm settings (TrustNews)
+#Frontend URL: https://localhost:7443/auth/
 
-Craer usuario p federetad identity
+Crear usuario de aplicacion
 
 ```bash quota & users admin
 
@@ -228,94 +322,51 @@ Use admin/Clients to define user quota and create inside mondogb: user_<keycloak
     "status": "Active",
     "active_date": "2026-05-01T09:59:08.903000",
     "deactivate_date": null,
-    "client_id": "user_6b84b9c5-b0a0-4da9-9494-52fb9c9517d7"
+    "client_id": "user_6b84b9c5-b0a0-4da9-9494-52fb9c9517d7" 
   }
 
 http://127.0.0.1:8400/docs
 
+for admin users create realm role (trust-admin) ans assig
+
+
 API Users
 Create new keycloak client 
-Use admin/Clients to define user quota and create inside mondogb: <client-name>_<keycloak_client_hash_id> (see logs or admin console?)
+
+curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxxx"
+
+Decode token ang get keycloak_client_hash_id ("sub")
+
+Use admin/Clients to define user quota and create inside mondogb: <client-name>_<keycloak_client_hash_id> 
+
+  {
+    "name": "api_client_admin",
+    "limits": {
+      "news_generation": 99999999,
+      "blockchain_validation": 99999999
+    },
+    "consumed": {
+      "news_generation": 0,
+      "blockchain_validation": 0
+    },
+    "status": "Active",
+    "active_date": "2026-05-01T09:59:08.903000",
+    "deactivate_date": null,
+    "client_id": "TrustNewsApi_bca02884-1184-4e2f-94f5-6b6974a932ce" 
+  }
+
 http://127.0.0.1:8400/docs
 
-for admin users create realm role (trust-admin) ans assign 
 
 ```
-
-```bash apis + frontend
-
-./skaffold dev -p apis-frontend  # --cache-artifacts=true --cleanup=false
-
-
-kubectl get pods -n apis
-kubectl get pods -n frontend
-
-kubectl logs -n apis -f 
-
-Frontend:
-#si no se levanta el port forward
-kubectl port-forward svc/frontend-service -n frontend 7443:443
-#verify nginx config
-kubectl exec -it -n frontend frontend-web-5769696f49-dljlk -- cat /etc/nginx/conf.d/default.conf
-#realm console
-https://localhost:7443/auth/admin/master/console/
-
-
-#https://192.168.56.108:7443/
-#con mapeo de host a vm
-https://localhost:7443/
-
-grafana:
-http://localhost:3000/
-
-https://localhost:7443/backend/docs
-
-
-keycloak realm master 
-https://localhost:7443/auth/admin/master/console/
-
-#get token 
-curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxx"
-
-| Service | URL |
-|--------|-----|
-| Frontend | http://127.0.0.1:8000 |
-| Admin | http://127.0.0.1:8400 |
-| IPFS API | http://127.0.0.1:8060/docs |
-| News Handler | http://127.0.0.1:8072/docs |
-| Assertion Generator | http://127.0.0.1:8071/docs |
-| News Chain | http://127.0.0.1:8073/docs |
-| Validator Worker 1 | http://127.0.0.1:8070/docs |
-| Validator Worker 2 | http://127.0.0.1:8069/docs |
-
----
-
-
-
-get svc -n infra
-
-#Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
-
-Explore + Run query
+```bash  Ini search preferences
+./scripts/k8s/apis/init-evidence-search-domains.py 
 
 ```
-```bash  get secret details 
-
-kubectl get secrets -n infra
-kubectl get mongodb-secret -n infra -o jsonpath='{.data}'
-
-
-kubectl get secrets -n apis
-kubectl get secret news-handler-secrets -n apis -o jsonpath='{.data}'
-echo "x" | base64 --decode
-
-```
-
-
-```bash  get secret details 
+```bash  get mongodb data
 
 kubectl exec -it mongodb-0 -n infra -- mongo -u root -p cforcadellm --authenticationDatabase admin
-
+> use newsdb
 > show collections
 events
 news
@@ -331,3 +382,36 @@ validations
 > db.validations.deleteMany({})
 { "acknowledged" : true, "deletedCount" : 22 }
 ```
+
+**RESUMEN DE ENDPOINTS**
+| Servicio | URL | Perfil Skaffold | Descripción |
+|---|---|---|---|
+| Frontend | https://localhost:7443 | `apis-frontend` | Aplicación web principal |
+| Admin API Swagger | http://localhost:8400/docs | `apis-frontend` | API de administración |
+| Gateway Swagger | http://localhost:8500/docs | `apis-frontend` | API Gateway |
+| Evidence Search Swagger | http://localhost:8074/docs | `apis-frontend` | Servicio de búsqueda de evidencias |
+| News Handler Swagger | http://localhost:8072/docs | `apis-frontend` | Orquestador principal de noticias |
+| News Chain Swagger | http://localhost:8073/docs | `apis-frontend` | API de interacción con blockchain/IPFS |
+| IPFS FastAPI Swagger | http://localhost:8060/docs | `apis-frontend` | API propia para IPFS |
+| Assertion Generator Swagger | http://localhost:8071/docs | `apis-frontend` | Generador de aserciones |
+| Validator Worker 1 Swagger | http://localhost:8070/docs | `apis-frontend` | Validador IA worker 1 |
+| Validator Worker 2 Swagger | http://localhost:8069/docs | `apis-frontend` | Validador IA worker 2 |
+| Validator Worker 3 Swagger | http://localhost:8068/docs | `apis-frontend` | Validador IA worker 3 |
+| Grafana | http://localhost:3000 | `infra` | Dashboards y logs |
+| Mongo Express | http://localhost:8081 (18081 local) | `infra` | UI para MongoDB, requiere Basic Auth |
+| Kafdrop | http://localhost:9000 | `infra` | UI para Kafka, topics y mensajes |
+| Keycloak Admin | https://localhost:7443/auth/admin/master/console/ | `apis-frontend` | Consola de administración de Keycloak vía frontend/proxy |
+| Frontend Prod | https://localhost:10443 | `apis-frontend-prod` | Frontend en perfil prod |
+| Admin API Prod Swagger | http://localhost:8400/docs | `apis-frontend-prod` | Admin API en perfil prod |
+
+
+**RESUMEN DE COLECCIONES**
+| Base de datos | Colección | Servicio principal | Variable/config | Uso |
+|---|---|---|---|---|
+| `newsdb` | `news` | `news-handler` | `MONGO_COLLECTION=news` | Colección principal de órdenes/noticias. Guarda estado del flujo, documento, aserciones, validaciones, `postId`, hashes, CIDs, resultados y metadatos. |
+| `newsdb` | `news` | `admin` | `ORDERS_COLLECTION=news` | Consulta órdenes para resolver `client_id` y asociar consumo de cuotas a una orden o `postId`. |
+| `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Guarda eventos del flujo por `order_id`: acciones Kafka enviadas/recibidas, topic, timestamp y payload. La UI los recupera para pintar la pestaña de eventos de una orden. |
+| `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | Guarda registros normalizados de validaciones por orden/aserción/validador, incluyendo resultado, `tx_hash`, evidencia usada, config del validador y tiempos de respuesta. |
+| `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Guarda clientes y cuotas disponibles/consumidas por servicio, como generación de noticias o validaciones. |
+| `newsdb` | `assertion_evidences` | `evidence-search` | `MONGO_EVIDENCES_COLLECTION=assertion_evidences` | Cachea evidencias encontradas por aserción: fuentes, URLs, dominios, extractos, hashes, proveedor de búsqueda y timestamps. |
+| `newsdb` | `evidence_search_configs` | `evidence-search` / `admin` | `MONGO_EVIDENCE_CONFIG_COLLECTION=evidence_search_configs` | Configura búsqueda de evidencias por defecto o por categoría: dominios preferidos/oficiales, términos extra, `official_first` y estado habilitado. |

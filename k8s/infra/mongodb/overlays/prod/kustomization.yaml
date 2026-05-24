@@ -6,13 +6,19 @@ resources:
   - ../../service.yaml
   - ../../statefulset.yaml
 
-# Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
+# Production must provide mongodb-secret externally with root/admin and app-user keys.
 # secretGenerator:
 # - name: mongodb-secret
 #   namespace: infra
 #   envs:
-#     - prod-mongodb.env
+#     - prod-mongodb.env  # MONGO_INITDB_ROOT_*, MONGO_APP_USERNAME, MONGO_APP_PASSWORD, MONGO_APP_DATABASE
 patches:
   - path: patch-resources.yaml 
+configMapGenerator:
+- name: mongodb-init-scripts
+  namespace: infra
+  files:
+    - init-users.js=../../init-users.js
+
 generatorOptions:
   disableNameSuffixHash: true

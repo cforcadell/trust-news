@@ -3,7 +3,7 @@ import hashlib
 import uuid
 import base58
 import logging
-from common.async_models import Multihash
+from common.models.async_models import Multihash
 
 
 
@@ -105,3 +105,19 @@ def uuid_to_uint256(u: str) -> int:
 
 
 
+
+
+def cid_to_multihash_tuple(cid: str) -> tuple:
+    decoded = base58.b58decode(cid)
+    if len(decoded) != 34:
+        raise ValueError(f"CID inválido. Longitud inesperada: {len(decoded)} (esperado 34)")
+    hash_function = decoded[0:1]
+    hash_size = decoded[1:2]
+    digest = decoded[2:]
+    if hash_function != b"\x12":
+        raise ValueError("Solo se soporta SHA-256 (0x12)")
+    if hash_size != b"\x20":
+        raise ValueError("Solo se soporta digest de 32 bytes (0x20)")
+    if len(digest) != 32:
+        raise ValueError("Digest no es 32 bytes")
+    return (hash_function, hash_size, digest)

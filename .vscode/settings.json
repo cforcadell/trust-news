@@ -1,0 +1,69 @@
+{
+  "search.exclude": {
+    "**/.git": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/coverage": true,
+
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/.venv": true,
+    "**/venv": true,
+
+    "**/volumes": true,
+    "**/volumes/**": true,
+    "**/backup": true,
+    "**/backup/**": true,
+
+    "**/*.log": true,
+    "**/*.pem": true,
+    "**/*.key": true,
+    "**/*.crt": true,
+    "**/*.tar": true,
+    "**/*.zip": true,
+    "**/*.gz": true
+  },
+
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/coverage/**": true,
+
+    "**/__pycache__/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.mypy_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/.venv/**": true,
+    "**/venv/**": true,
+
+    "**/volumes/**": true,
+    "**/backup/**": true,
+
+    "**/*.log": true,
+    "**/*.pem": true,
+    "**/*.key": true,
+    "**/*.crt": true,
+    "**/*.tar": true,
+    "**/*.zip": true,
+    "**/*.gz": true
+  },
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/volumes": true,
+    "**/backup": true
+  },
+
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "javascript.suggest.autoImports": false,
+  "typescript.suggest.autoImports": false,
+  "typescript.tsserver.maxTsServerMemory": 1024
+}

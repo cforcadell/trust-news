@@ -398,7 +398,7 @@ validations
 | Validator Worker 2 Swagger | http://localhost:8069/docs | `apis-frontend` | Validador IA worker 2 |
 | Validator Worker 3 Swagger | http://localhost:8068/docs | `apis-frontend` | Validador IA worker 3 |
 | Grafana | http://localhost:3000 | `infra` | Dashboards y logs |
-| Mongo Express | http://localhost:8081 (18081 local) | `infra` | UI para MongoDB, requiere Basic Auth |
+| Mongo Express | http://localhost:8081 | `infra` | UI para MongoDB, requiere Basic Auth |
 | Kafdrop | http://localhost:9000 | `infra` | UI para Kafka, topics y mensajes |
 | Keycloak Admin | https://localhost:7443/auth/admin/master/console/ | `apis-frontend` | Consola de administración de Keycloak vía frontend/proxy |
 | Frontend Prod | https://localhost:10443 | `apis-frontend-prod` | Frontend en perfil prod |

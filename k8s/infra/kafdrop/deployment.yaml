@@ -13,17 +13,6 @@ spec:
       labels:
         app: kafdrop
     spec:
-      initContainers:
-        - name: wait-for-kafka
-          image: busybox:latest
-          command:
-            - /bin/sh
-            - -c
-            - |
-              until nc -z kafka.infra.svc.cluster.local 9092; do
-                echo "Waiting for kafka.infra.svc.cluster.local:9092..."
-                sleep 2
-              done
       containers:
         - name: kafdrop
           image: obsidiandynamics/kafdrop:4.0.2
@@ -33,18 +22,18 @@ spec:
               containerPort: 9000
           env:
             - name: KAFKA_BROKERCONNECT
-              value: "kafka.infra.svc.cluster.local:9092"
+              value: "kafka:9092"
             - name: JVM_OPTS
               value: "-Xms64m -Xmx256m"
           readinessProbe:
             tcpSocket:
               port: 9000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
               port: 9000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 20
           resources:
             limits:

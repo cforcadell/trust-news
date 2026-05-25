@@ -13,17 +13,6 @@ spec:
       labels:
         app: mongo-express
     spec:
-      initContainers:
-        - name: wait-for-mongodb
-          image: busybox:latest
-          command:
-            - /bin/sh
-            - -c
-            - |
-              until nc -z mongodb.infra.svc.cluster.local 27017; do
-                echo "Waiting for mongodb.infra.svc.cluster.local:27017..."
-                sleep 2
-              done
       containers:
         - name: mongo-express
           image: mongo-express:1.0.2-20
@@ -66,10 +55,10 @@ spec:
           readinessProbe:
             tcpSocket:
               port: 8081
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
               port: 8081
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 20

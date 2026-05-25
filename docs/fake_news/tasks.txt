@@ -186,3 +186,1321 @@ Develop v0.0.16.
 
 
 
+Necesito implementar una evolución del flujo de generación de aserciones, búsqueda de evidencias y validación contextual.
+
+Restricción principal:
+
+NO modificar el smart contract.
+NO cambiar eventos blockchain.
+NO cambiar estructuras on-chain.
+NO añadir nuevos parámetros al contrato.
+NO modificar el formato de los eventos ValidationRequested / ValidationSubmitted.
+
+Sí se puede cambiar el schema del documento JSON que se sube a IPFS.
+Sí se puede cambiar el schema de mensajes Kafka.
+Sí se puede cambiar el schema persistido en MongoDB.
+No es necesario mantener compatibilidad con el schema actual.
+Puedo borrar los datos actuales de Mongo/IPFS/local si hace falta.
+
+Objetivo:
+
+El sistema debe tener un único schema nuevo para las aserciones enriquecidas, usado tanto en modo BLOCKCHAIN como en modo LIGHT.
+
+La información contextual de cada aserción debe incluir:
+
+- categoría
+- subcategoría
+- localización
+- jurisdicción
+- entidades mencionadas
+- marco temporal
+- idioma
+- tipos de fuente preferente
+- keywords de búsqueda
+- queries sugeridas
+- confianza del contexto detectado
+
+Esta información NO debe ir a blockchain.
+Debe viajar en:
+
+- documento JSON subido a IPFS en modo BLOCKCHAIN
+- mensaje Kafka inline en modo LIGHT
+- MongoDB si aplica para trazabilidad y consulta
+
+El smart contract seguirá referenciando el CID del documento IPFS exactamente igual que ahora.
+
+====================================================================
+1. Principio arquitectónico
+====================================================================
+
+El contrato sigue siendo un ancla de trazabilidad e integridad.
+
+El contenido funcional de validación vive fuera de la blockchain:
+
+Modo BLOCKCHAIN:
+
+generate-asertions genera documento enriquecido
+  -> news-handler/news-chain sube documento enriquecido a IPFS
+  -> smart contract guarda/referencia el CID como hasta ahora
+  -> evento ValidationRequested se emite como hasta ahora
+  -> news-chain o el validador recupera el documento desde IPFS
+  -> se localiza la aserción correspondiente
+  -> se construye AssertionValidationPayload v2
+  -> validate-asertions recibe la misma estructura funcional que en LIGHT
+
+Modo LIGHT:
+
+generate-asertions genera documento enriquecido
+  -> news-handler NO sube a IPFS
+  -> news-handler NO llama a blockchain
+  -> news-handler construye AssertionValidationPayload v2 inline
+  -> lo envía por Kafka
+  -> validate-asertions recibe la misma estructura funcional que en BLOCKCHAIN
+
+Resultado deseado:
+
+validate-asertions debe consumir el mismo payload lógico en ambos modos.
+
+====================================================================
+2. Nuevo schema único de documento de aserciones
+====================================================================
+
+Definir un nuevo schema obligatorio para el documento de aserciones.
+
+No mantener compatibilidad con el schema anterior.
+
+Nombre recomendado:
+
+assertions-document-v2
+
+Ejemplo:
+
+{
+  "schema_version": "assertions-document-v2",
+  "post_id": 123,
+  "order_id": "7b7f4e2e-86b2-44fd-b0c8-111111111111",
+  "mode": "BLOCKCHAIN",
+  "original_text": "Texto original de la noticia...",
+  "generated_at": "2026-05-24T00:00:00Z",
+  "generator": {
+    "service": "generate-asertions",
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
+  },
+  "assertions": [
+    {
+      "assertion_id": 1,
+      "assertion_index": 0,
+      "text": "El paro en España bajó al 11,8% en 2024.",
+      "category": "ECONOMY",
+      "subcategory": "EMPLOYMENT",
+      "context": {
+        "locations": [
+          {
+            "name": "España",
+            "type": "country",
+            "country_code": "ES",
+            "region_code": null,
+            "province": null,
+            "city": null,
+            "origin": "explicit",
+            "confidence": 0.98
+          }
+        ],
+        "entities": [
+          {
+            "name": "INE",
+            "type": "statistics_institute",
+            "role": "potential_source",
+            "origin": "inferred",
+            "confidence": 0.75
+          }
+        ],
+        "temporal_context": [
+          {
+            "value": "2024",
+            "type": "year",
+            "origin": "explicit",
+            "confidence": 0.95
+          }
+        ],
+        "language": "es",
+        "jurisdiction": "national"
+      },
+      "search_hints": {
+        "preferred_source_types": [
+          "statistics",
+          "official"
+        ],
+        "search_keywords": [
+          "paro",
+          "España",
+          "2024",
+          "tasa de paro"
+        ],
+        "suggested_queries": [
+          "\"paro\" \"España\" \"2024\"",
+          "\"tasa de paro\" \"2024\""
+        ]
+      },
+      "context_confidence": {
+        "location": 0.98,
+        "entities": 0.75,
+        "temporal": 0.95
+      }
+    }
+  ]
+}
+
+Reglas:
+
+- Este schema será obligatorio.
+- No soportar schema anterior.
+- Si falta schema_version o no es assertions-document-v2, rechazar el documento con error claro.
+- Usar assertion_id como identificador funcional.
+- Usar assertion_index para mapear con el índice usado por blockchain si aplica.
+- Mantener el mapping assertion_index <-> evento ValidationRequested.
+- Los nombres de campos deben ser consistentes: usar snake_case.
+- Evitar mezclar idAssertion, id_assertion y assertion_id. Usar assertion_id.
+- Evitar mezclar postId y post_id. Usar post_id en documentos internos.
+- Si el contrato usa postId en eventos, mapearlo en la capa blockchain/off-chain, pero no contaminar el schema interno.
+
+====================================================================
+3. Nuevo schema único de payload de validación
+====================================================================
+
+Crear un schema común para lo que consume validate-asertions.
+
+Nombre recomendado:
+
+assertion-validation-payload-v2
+
+Ejemplo en modo BLOCKCHAIN:
+
+{
+  "schema_version": "assertion-validation-payload-v2",
+  "mode": "BLOCKCHAIN",
+  "post_id": 123,
+  "order_id": "7b7f4e2e-86b2-44fd-b0c8-111111111111",
+  "assertion": {
+    "assertion_id": 1,
+    "assertion_index": 0,
+    "text": "El paro en España bajó al 11,8% en 2024.",
+    "category": "ECONOMY",
+    "subcategory": "EMPLOYMENT",
+    "context": {
+      "locations": [],
+      "entities": [],
+      "temporal_context": [],
+      "language": "es",
+      "jurisdiction": "national"
+    },
+    "search_hints": {
+      "preferred_source_types": [],
+      "search_keywords": [],
+      "suggested_queries": []
+    },
+    "context_confidence": {
+      "location": 0.0,
+      "entities": 0.0,
+      "temporal": 0.0
+    }
+  },
+  "source_document": {
+    "storage": "ipfs",
+    "cid": "Qm...",
+    "schema_version": "assertions-document-v2"
+  }
+}
+
+Ejemplo en modo LIGHT:
+
+{
+  "schema_version": "assertion-validation-payload-v2",
+  "mode": "LIGHT",
+  "post_id": null,
+  "order_id": "7b7f4e2e-86b2-44fd-b0c8-111111111111",
+  "assertion": {
+    "assertion_id": 1,
+    "assertion_index": 0,
+    "text": "El paro en España bajó al 11,8% en 2024.",
+    "category": "ECONOMY",
+    "subcategory": "EMPLOYMENT",
+    "context": {
+      "locations": [],
+      "entities": [],
+      "temporal_context": [],
+      "language": "es",
+      "jurisdiction": "national"
+    },
+    "search_hints": {
+      "preferred_source_types": [],
+      "search_keywords": [],
+      "suggested_queries": []
+    },
+    "context_confidence": {
+      "location": 0.0,
+      "entities": 0.0,
+      "temporal": 0.0
+    }
+  },
+  "source_document": {
+    "storage": "inline",
+    "cid": null,
+    "schema_version": "assertions-document-v2"
+  }
+}
+
+Reglas:
+
+- validate-asertions debe consumir exclusivamente assertion-validation-payload-v2.
+- No soportar payloads legacy.
+- Si schema_version no es assertion-validation-payload-v2, rechazar con error claro.
+- El mismo modelo Pydantic debe validar payloads de modo LIGHT y BLOCKCHAIN.
+- La diferencia entre modos solo debe estar en source_document.storage y mode.
+- El contenido funcional assertion debe ser equivalente en ambos modos.
+
+====================================================================
+4. Cambios en generate-asertions
+====================================================================
+
+Modificar generate-asertions para devolver directamente assertions-document-v2.
+
+Cada aserción debe incluir obligatoriamente:
+
+- assertion_id
+- assertion_index
+- text
+- category
+- subcategory
+- context
+- search_hints
+- context_confidence
+
+Reglas de generación:
+
+- No inventar contexto si no está claro.
+- Si no hay contexto, usar listas vacías, null o "unknown".
+- origin debe ser explicit, inferred o unknown.
+- confidence debe estar entre 0 y 1.
+- Si hay contexto global de noticia que aplica a varias aserciones, propagarlo a cada aserción.
+- Normalizar idioma en ISO simple: es, ca, en, fr, etc.
+- Normalizar jurisdicción con uno de estos valores:
+  - local
+  - regional
+  - national
+  - european
+  - international
+  - corporate
+  - sports
+  - unknown
+- Normalizar source_types con valores conocidos:
+  - official
+  - public_registry
+  - statistics
+  - scientific
+  - academic
+  - international_organization
+  - reputable_media
+  - corporate
+  - sports_federation
+  - legal
+  - financial
+  - social_media
+  - unknown
+
+Actualizar el prompt del generador para pedir explícitamente el nuevo schema.
+
+No devolver formatos antiguos.
+
+====================================================================
+5. Cambios en news-handler
+====================================================================
+
+news-handler debe trabajar con assertions-document-v2 como contrato interno.
+
+En modo LIGHT:
+
+- Recibe assertions-document-v2 desde generate-asertions.
+- Persiste en Mongo si aplica.
+- No sube a IPFS.
+- No llama a news-chain.
+- Por cada aserción, construye assertion-validation-payload-v2 con source_document.storage = inline.
+- Publica en Kafka el payload v2 para los validadores.
+
+En modo BLOCKCHAIN:
+
+- Recibe assertions-document-v2 desde generate-asertions.
+- Persiste en Mongo si aplica.
+- Sube el documento completo enriquecido a IPFS.
+- Llama al flujo blockchain existente pasando el CID como hasta ahora.
+- No cambia smart contract.
+- No cambia eventos.
+- No cambia ABI.
+- Asegura que el documento IPFS contiene schema_version assertions-document-v2.
+- No construir payload incompleto: los validadores deben poder recuperar toda la info desde IPFS.
+
+====================================================================
+6. Cambios en news-chain
+====================================================================
+
+No modificar smart contract.
+
+No modificar ABI.
+
+No modificar eventos.
+
+No modificar parámetros on-chain.
+
+Solo adaptar lógica off-chain.
+
+Cuando news-chain procese eventos ValidationRequested:
+
+- Obtener el CID del documento IPFS como hasta ahora.
+- Descargar el documento JSON desde IPFS.
+- Validar que schema_version = assertions-document-v2.
+- Localizar la aserción usando assertion_index del evento.
+- Construir assertion-validation-payload-v2.
+- source_document.storage = ipfs.
+- source_document.cid = CID del documento.
+- Enviar al topic Kafka o al mecanismo existente para validate-asertions el payload v2 completo.
+
+Si el documento IPFS no es assertions-document-v2:
+
+- Fallar con log claro.
+- No intentar fallback legacy.
+
+====================================================================
+7. Cambios en validate-asertions
+====================================================================
+
+validate-asertions debe aceptar exclusivamente assertion-validation-payload-v2.
+
+Eliminar o dejar de usar parsing legacy si existe.
+
+Validar con Pydantic:
+
+- schema_version
+- mode
+- assertion
+- source_document
+
+Para cada tipo de validador:
+
+LLM_MEMORY_VALIDATION:
+- Usar assertion.text.
+- Usar assertion.context como apoyo semántico.
+- No buscar en internet.
+
+LLM_SEARCH_VALIDATION:
+- Usar assertion.text, context y search_hints.
+- Si el proveedor permite online search, activar online search.
+- Si no puede restringir dominios, añadir dominios preferentes o instrucciones al prompt solo como orientación.
+
+RAG_EVIDENCE_VALIDATION:
+- Llamar a evidence-search con assertion completa.
+- Usar las evidencias devueltas para validar.
+- No buscar directamente en internet desde validate-asertions.
+- El prompt debe indicar que solo puede razonar con las evidencias recibidas.
+
+DETERMINISTIC_VALIDATION:
+- Puede usar context para decidir fuente estructurada o dataset si existe.
+
+HUMAN:
+- Debe poder presentar assertion, context, search_hints y evidences si existen.
+
+====================================================================
+8. Cambios en evidence-search
+====================================================================
+
+Implementar domain routing contextual dentro de evidence-search.
+
+El endpoint principal debe recibir la aserción enriquecida o un wrapper equivalente.
+
+Endpoint recomendado:
+
+POST /search/evidence
+
+Request:
+
+{
+  "schema_version": "evidence-search-request-v2",
+  "assertion": {
+    "assertion_id": 1,
+    "assertion_index": 0,
+    "text": "El paro en España bajó al 11,8% en 2024.",
+    "category": "ECONOMY",
+    "subcategory": "EMPLOYMENT",
+    "context": {
+      "locations": [],
+      "entities": [],
+      "temporal_context": [],
+      "language": "es",
+      "jurisdiction": "national"
+    },
+    "search_hints": {
+      "preferred_source_types": ["statistics", "official"],
+      "search_keywords": ["paro", "España", "2024"],
+      "suggested_queries": []
+    },
+    "context_confidence": {
+      "location": 0.95,
+      "entities": 0.80,
+      "temporal": 0.95
+    }
+  },
+  "search_policy": {
+    "mode": "official_first",
+    "max_domains": 8,
+    "max_results": 10,
+    "max_queries_per_domain": 2,
+    "fallback_to_general_search": true
+  }
+}
+
+Response:
+
+{
+  "schema_version": "evidence-search-response-v2",
+  "assertion_id": 1,
+  "domain_resolution": {
+    "selected_profiles": [
+      "category_ECONOMY",
+      "country_ES",
+      "entity_INE"
+    ],
+    "preferred_domains": [
+      {
+        "domain": "ine.es",
+        "source_type": "statistics",
+        "weight": 1.0,
+        "trust_score": 0.95,
+        "reason": "Matched category ECONOMY, country ES and entity INE"
+      }
+    ],
+    "fallback_used": false
+  },
+  "queries_executed": [
+    "site:ine.es \"paro\" \"España\" \"2024\""
+  ],
+  "evidences": [
+    {
+      "title": "...",
+      "url": "...",
+      "domain": "ine.es",
+      "source_type": "statistics",
+      "snippet": "...",
+      "rank": 1,
+      "trust_score": 0.95,
+      "retrieved_at": "2026-05-24T00:00:00Z",
+      "why_selected": "Matched category ECONOMY, country ES and preferred source type statistics",
+      "matched_profiles": [
+        "category_ECONOMY",
+        "country_ES",
+        "entity_INE"
+      ]
+    }
+  ]
+}
+
+Reglas:
+
+- evidence-search debe rechazar requests que no sean evidence-search-request-v2.
+- No soportar requests antiguos.
+- Si context está vacío, puede usar category como fallback dentro del nuevo schema.
+- Crear profiles.yaml configurable para:
+  - category
+  - country
+  - region
+  - city
+  - entity
+  - source_type
+- No hardcodear dominios en código Python salvo defaults mínimos.
+
+====================================================================
+9. Domain router
+====================================================================
+
+Crear módulo:
+
+evidence-search/
+  app/
+    domain_router/
+      profiles.yaml
+      profiles_loader.py
+      resolver.py
+      scoring.py
+
+El resolver debe combinar:
+
+- dominios por category
+- dominios por country
+- dominios por region
+- dominios por city
+- dominios por entity
+- preferred_source_types
+
+Scoring sugerido:
+
+ENTITY_MATCH = 1.00
+CITY_MATCH = 0.90
+REGION_MATCH = 0.75
+COUNTRY_MATCH = 0.60
+CATEGORY_MATCH = 0.45
+SOURCE_TYPE_MATCH_BONUS = 0.20
+
+Reglas:
+
+- entity pesa más que city.
+- city pesa más que region.
+- region pesa más que country.
+- country pesa más que category.
+- category es fallback general.
+- preferred_source_types aumenta score.
+- context_confidence reduce pesos si location/entities/temporal tiene confianza baja.
+- Fusionar duplicados por dominio.
+- Ordenar por score descendente.
+- Limitar por max_domains.
+- Incluir reason y matched_profiles.
+
+====================================================================
+10. profiles.yaml inicial
+====================================================================
+
+Crear un profiles.yaml inicial con al menos estos perfiles:
+
+source_types:
+  official:
+    default_trust_score: 1.0
+  public_registry:
+    default_trust_score: 0.95
+  statistics:
+    default_trust_score: 0.95
+  academic:
+    default_trust_score: 0.90
+  scientific:
+    default_trust_score: 0.90
+  international_organization:
+    default_trust_score: 0.90
+  reputable_media:
+    default_trust_score: 0.70
+  corporate:
+    default_trust_score: 0.65
+  sports_federation:
+    default_trust_score: 0.85
+  legal:
+    default_trust_score: 0.90
+  financial:
+    default_trust_score: 0.85
+  social_media:
+    default_trust_score: 0.35
+
+categories:
+  ECONOMY:
+    preferred_domains:
+      - domain: ine.es
+        source_type: statistics
+        weight: 0.90
+        reason: "Spanish official statistics source"
+      - domain: bde.es
+        source_type: official
+        weight: 0.85
+        reason: "Spanish central bank"
+      - domain: eurostat.ec.europa.eu
+        source_type: statistics
+        weight: 0.80
+        reason: "European statistical source"
+
+  HEALTH:
+    preferred_domains:
+      - domain: who.int
+        source_type: international_organization
+        weight: 0.95
+        reason: "World Health Organization"
+      - domain: sanidad.gob.es
+        source_type: official
+        weight: 0.90
+        reason: "Spanish Ministry of Health"
+      - domain: ema.europa.eu
+        source_type: official
+        weight: 0.85
+        reason: "European Medicines Agency"
+
+  PUBLIC_ADMINISTRATION:
+    preferred_domains:
+      - domain: boe.es
+        source_type: public_registry
+        weight: 0.85
+        reason: "Spanish official gazette"
+      - domain: lamoncloa.gob.es
+        source_type: official
+        weight: 0.75
+        reason: "Spanish Government"
+
+countries:
+  ES:
+    preferred_domains:
+      - domain: boe.es
+        source_type: public_registry
+        weight: 0.95
+        reason: "Spanish official gazette"
+      - domain: lamoncloa.gob.es
+        source_type: official
+        weight: 0.80
+        reason: "Spanish Government"
+      - domain: datos.gob.es
+        source_type: public_registry
+        weight: 0.75
+        reason: "Spanish public data portal"
+
+  EU:
+    preferred_domains:
+      - domain: europa.eu
+        source_type: official
+        weight: 0.90
+        reason: "European Union official portal"
+      - domain: eur-lex.europa.eu
+        source_type: legal
+        weight: 0.95
+        reason: "EU legal acts"
+      - domain: eurostat.ec.europa.eu
+        source_type: statistics
+        weight: 0.90
+        reason: "EU statistics"
+
+regions:
+  ES-CAT:
+    preferred_domains:
+      - domain: gencat.cat
+        source_type: official
+        weight: 0.95
+        reason: "Catalan Government"
+      - domain: dogc.gencat.cat
+        source_type: public_registry
+        weight: 0.95
+        reason: "Catalan official gazette"
+      - domain: idescat.cat
+        source_type: statistics
+        weight: 0.90
+        reason: "Catalan statistics institute"
+
+cities:
+  ES-CAT-Barcelona:
+    preferred_domains:
+      - domain: barcelona.cat
+        source_type: official
+        weight: 1.00
+        reason: "Barcelona city council"
+      - domain: seu.barcelona.cat
+        source_type: public_registry
+        weight: 1.00
+        reason: "Barcelona electronic public office"
+      - domain: bop.diba.cat
+        source_type: public_registry
+        weight: 0.95
+        reason: "Barcelona provincial official gazette"
+
+entities:
+  "Ayuntamiento de Barcelona":
+    preferred_domains:
+      - domain: barcelona.cat
+        source_type: official
+        weight: 1.00
+        reason: "Official source for Barcelona city council"
+      - domain: seu.barcelona.cat
+        source_type: public_registry
+        weight: 1.00
+        reason: "Official municipal registry"
+
+  "Generalitat de Catalunya":
+    preferred_domains:
+      - domain: gencat.cat
+        source_type: official
+        weight: 1.00
+        reason: "Official Catalan Government source"
+      - domain: dogc.gencat.cat
+        source_type: public_registry
+        weight: 0.95
+        reason: "Catalan official gazette"
+
+  "INE":
+    preferred_domains:
+      - domain: ine.es
+        source_type: statistics
+        weight: 1.00
+        reason: "Spanish official statistics institute"
+
+  "Banco de España":
+    preferred_domains:
+      - domain: bde.es
+        source_type: official
+        weight: 1.00
+        reason: "Spanish central bank"
+
+  "FC Barcelona":
+    preferred_domains:
+      - domain: fcbarcelona.com
+        source_type: corporate
+        weight: 0.80
+        reason: "Official club source"
+      - domain: laliga.com
+        source_type: sports_federation
+        weight: 0.90
+        reason: "Official competition source"
+      - domain: rfef.es
+        source_type: sports_federation
+        weight: 0.85
+        reason: "Spanish football federation"
+
+====================================================================
+11. Query builder
+====================================================================
+
+Crear o adaptar query_builder.
+
+Debe generar queries usando:
+
+- assertion.text
+- search_hints.search_keywords
+- search_hints.suggested_queries
+- context.temporal_context
+- context.entities
+- context.locations
+- dominios resueltos por domain_router
+
+Reglas:
+
+- Usar suggested_queries si existen.
+- Si no existen, construir queries desde assertion.text + search_keywords.
+- Añadir site:domain para dominios preferentes.
+- Limitar queries por dominio según max_queries_per_domain.
+- Permitir fallback general si search_policy.fallback_to_general_search = true.
+- Guardar queries_executed en la respuesta.
+- No inventar traducciones complejas, pero usar las queries sugeridas si el generador ya las proporciona.
+
+====================================================================
+12. MongoDB
+====================================================================
+
+Se puede cambiar el schema de Mongo.
+
+Guardar el documento enriquecido assertions-document-v2 o estructuras derivadas.
+
+Colecciones sugeridas:
+
+news:
+- order_id
+- post_id
+- mode
+- original_text
+- assertions_document
+- assertions_document_cid si modo BLOCKCHAIN
+- created_at
+- status
+
+validations:
+- order_id
+- post_id
+- assertion_id
+- assertion_index
+- validator_id
+- validator_type
+- assertion_validation_payload
+- evidence_search_response si aplica
+- result
+- description
+- created_at
+
+events:
+- mantener lo necesario para trazabilidad
+
+No es necesario migrar datos antiguos.
+Si existen datos antiguos, pueden borrarse.
+
+====================================================================
+13. Frontend
+====================================================================
+
+Actualizar el frontend solo si es necesario para no romper.
+
+Si se muestran detalles de una aserción, mostrar opcionalmente:
+
+- category
+- subcategory
+- jurisdiction
+- locations
+- entities
+- temporal_context
+- preferred_source_types
+- search_keywords
+- dominios priorizados si hay evidence_search_response
+- evidencias encontradas
+
+En modo LIGHT no debe mostrarse pestaña IPFS/blockchain si no aplica.
+
+En modo BLOCKCHAIN sí puede mostrarse el CID del documento enriquecido.
+
+====================================================================
+14. Logging
+====================================================================
+
+Añadir logs claros.
+
+generate-asertions:
+
+[generate-asertions] generated assertions-document-v2 order_id=... assertions=3
+[generate-asertions] assertion_id=1 category=ECONOMY subcategory=EMPLOYMENT location=ES entities=["INE"] temporal=["2024"]
+
+news-handler:
+
+[news-handler] mode=LIGHT publishing assertion-validation-payload-v2 assertion_id=1
+[news-handler] mode=BLOCKCHAIN uploading assertions-document-v2 to IPFS order_id=...
+[news-handler] mode=BLOCKCHAIN ipfs_cid=...
+
+news-chain:
+
+[news-chain] ValidationRequested postId=123 assertion_index=0
+[news-chain] loaded assertions-document-v2 from IPFS cid=...
+[news-chain] built assertion-validation-payload-v2 assertion_id=1
+
+validate-asertions:
+
+[validate-asertions] received assertion-validation-payload-v2 mode=BLOCKCHAIN assertion_id=1
+[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling evidence-search
+
+evidence-search:
+
+[domain-router] assertion_id=1 selected_profiles=["category_ECONOMY","country_ES","entity_INE"]
+[evidence-search] preferred_domains=["ine.es","bde.es","eurostat.ec.europa.eu"]
+[evidence-search] query='site:ine.es "paro" "España" "2024"'
+
+====================================================================
+15. Tests
+====================================================================
+
+Añadir tests para:
+
+1. generate-asertions devuelve assertions-document-v2.
+2. assertions-document-v2 contiene context, search_hints y context_confidence en cada aserción.
+3. modo LIGHT construye assertion-validation-payload-v2 inline.
+4. modo BLOCKCHAIN sube assertions-document-v2 a IPFS sin cambiar smart contract.
+5. news-chain recupera assertions-document-v2 desde IPFS y construye assertion-validation-payload-v2.
+6. validate-asertions rechaza payloads que no sean assertion-validation-payload-v2.
+7. evidence-search rechaza requests que no sean evidence-search-request-v2.
+8. evidence-search prioriza dominios por entidad/localización.
+9. evidence-search usa categoría como fallback si context está vacío.
+10. RAG_EVIDENCE_VALIDATION llama a evidence-search con la aserción enriquecida.
+11. No hay cambios en smart contract, ABI ni eventos.
+12. El payload funcional recibido por validate-asertions es equivalente en LIGHT y BLOCKCHAIN.
+
+====================================================================
+16. Criterios de aceptación
+====================================================================
+
+La tarea estará completada si:
+
+- No se modifica smart contract.
+- No se modifica ABI.
+- No se modifican eventos blockchain.
+- Se define assertions-document-v2 como único schema de documento de aserciones.
+- El documento IPFS en modo BLOCKCHAIN incluye toda la información contextual.
+- El modo LIGHT envía la misma información funcional por Kafka.
+- validate-asertions consume assertion-validation-payload-v2 en ambos modos.
+- evidence-search implementa domain routing contextual.
+- Los dominios preferentes se resuelven por category, country, region, city, entity y source_type.
+- Las evidencias incluyen trazabilidad: source_type, trust_score, why_selected y matched_profiles.
+- No se mantiene compatibilidad con schema antiguo.
+- Los datos antiguos pueden ser eliminados.
+- Hay tests que cubren la equivalencia entre LIGHT y BLOCKCHAIN.
+
+====================================================================
+17. Comandos/manual de limpieza opcional
+====================================================================
+
+Añadir en documentación una sección opcional para limpiar datos locales de desarrollo si el nuevo schema rompe datos anteriores.
+
+Ejemplos orientativos:
+
+MongoDB:
+- borrar collections news, validations, events si procede.
+
+IPFS local:
+- no es obligatorio borrar todo IPFS, pero los documentos antiguos no serán compatibles.
+- si se desea limpiar entorno local, documentar el procedimiento usado actualmente en el proyecto.
+
+Kubernetes:
+- si hay ConfigMaps o deployments relacionados con prompts/configs, actualizarlos.
+- reiniciar deployments afectados.
+
+No ejecutar limpieza automáticamente en código de aplicación.
+Solo documentarla. ====================================================================
+17. Limpieza de datos actuales y refresco de configuración
+====================================================================
+
+Como no es necesario mantener compatibilidad con el schema anterior, añadir una tarea explícita de limpieza de datos actuales.
+
+Objetivo:
+
+- Borrar el contenido de las colecciones actuales de MongoDB relacionadas con noticias, eventos y validaciones.
+- NO borrar la colección de cuotas/clientes.
+- Refrescar la configuración de dominios preferentes de aserciones usando el script existente.
+- Adaptar el script existente init-evidence-search-domains.py para el nuevo modelo contextual de dominios.
+
+Colecciones MongoDB:
+
+Borrar el contenido de estas colecciones, si existen:
+
+- news
+- validations
+- events
+
+No borrar:
+
+- clients_quotas
+
+Reglas:
+
+- No eliminar la base de datos completa.
+- No eliminar la colección clients_quotas.
+- No perder datos de cuotas ni límites de clientes.
+- La limpieza debe estar documentada y, si se implementa como script, debe requerir confirmación explícita o parámetro tipo --confirm.
+- No ejecutar la limpieza automáticamente al arrancar los servicios.
+- Solo debe ejecutarse manualmente en entorno de desarrollo o cuando se indique expresamente.
+
+Comandos orientativos para MongoDB shell:
+
+use newsdb
+
+db.news.deleteMany({})
+db.validations.deleteMany({})
+db.events.deleteMany({})
+
+db.clients_quotas.countDocuments()
+
+Si se crea un script Python de limpieza, debe aceptar algo similar a:
+
+python scripts/mongodb/clear-runtime-data.py --confirm
+
+y debe hacer únicamente:
+
+- deleteMany({}) sobre news
+- deleteMany({}) sobre validations
+- deleteMany({}) sobre events
+
+No debe hacer dropDatabase().
+No debe borrar clients_quotas.
+
+====================================================================
+18. Refresco de dominios preferentes
+====================================================================
+
+Actualmente ya existe un script para insertar dominios preferentes:
+
+scripts/k8s/apis/init-evidence-search-domains.py
+
+Modificar este script para adaptarlo al nuevo modelo de domain routing contextual.
+
+Nota: si el nombre real del script es ligeramente distinto, localizar el script existente equivalente y modificarlo. El usuario lo ha mencionado como ini-evidence-search-domanis.py, pero probablemente el nombre correcto sea init-evidence-search-domains.py.
+
+Objetivo del cambio:
+
+El script ya no debe cargar únicamente dominios por categoría de aserción.
+
+Debe poder cargar/refrescar perfiles de dominios preferentes para:
+
+- source_types
+- categories
+- countries
+- regions
+- cities
+- entities
+
+Debe usar el nuevo schema de configuración usado por evidence-search/domain_router/profiles.yaml o por la colección Mongo correspondiente si el proyecto ya guarda esta configuración en Mongo.
+
+La configuración final debe soportar este modelo:
+
+{
+  "source_types": {
+    "official": {
+      "default_trust_score": 1.0
+    },
+    "public_registry": {
+      "default_trust_score": 0.95
+    },
+    "statistics": {
+      "default_trust_score": 0.95
+    }
+  },
+  "categories": {
+    "ECONOMY": {
+      "preferred_domains": [
+        {
+          "domain": "ine.es",
+          "source_type": "statistics",
+          "weight": 0.90,
+          "reason": "Spanish official statistics source"
+        }
+      ]
+    }
+  },
+  "countries": {
+    "ES": {
+      "preferred_domains": [
+        {
+          "domain": "boe.es",
+          "source_type": "public_registry",
+          "weight": 0.95,
+          "reason": "Spanish official gazette"
+        }
+      ]
+    }
+  },
+  "regions": {
+    "ES-CAT": {
+      "preferred_domains": [
+        {
+          "domain": "gencat.cat",
+          "source_type": "official",
+          "weight": 0.95,
+          "reason": "Catalan Government"
+        }
+      ]
+    }
+  },
+  "cities": {
+    "ES-CAT-Barcelona": {
+      "preferred_domains": [
+        {
+          "domain": "barcelona.cat",
+          "source_type": "official",
+          "weight": 1.00,
+          "reason": "Barcelona city council"
+        }
+      ]
+    }
+  },
+  "entities": {
+    "INE": {
+      "preferred_domains": [
+        {
+          "domain": "ine.es",
+          "source_type": "statistics",
+          "weight": 1.00,
+          "reason": "Spanish official statistics institute"
+        }
+      ]
+    }
+  }
+}
+
+====================================================================
+19. Comportamiento esperado del script init-evidence-search-domains.py
+====================================================================
+
+Modificar el script para que soporte:
+
+1. --dry-run
+
+Debe mostrar qué cambios aplicaría, pero sin modificar datos.
+
+Ejemplo:
+
+python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
+
+2. --refresh
+
+Debe refrescar la configuración de dominios preferentes.
+
+Comportamiento recomendado:
+
+- borrar o reemplazar únicamente la configuración de dominios preferentes
+- no tocar news
+- no tocar validations
+- no tocar events
+- no tocar clients_quotas
+
+Ejemplo:
+
+python scripts/k8s/apis/init-evidence-search-domains.py --refresh
+
+3. --confirm
+
+Debe ser obligatorio para operaciones destructivas o de reemplazo real.
+
+Ejemplo:
+
+python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
+
+4. --source
+
+Permitir indicar si se carga desde YAML o desde defaults internos.
+
+Ejemplos:
+
+python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --dry-run
+
+python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --refresh --confirm
+
+5. Idempotencia
+
+El script debe ser idempotente.
+
+Ejecutarlo varias veces con la misma configuración no debe duplicar dominios ni generar registros repetidos.
+
+6. Validación
+
+Antes de insertar/refrescar, validar:
+
+- que cada domain tenga formato válido
+- que cada source_type exista en source_types
+- que weight esté entre 0 y 1
+- que default_trust_score esté entre 0 y 1
+- que cada preferred_domain tenga domain, source_type, weight y reason
+- que no existan dominios duplicados dentro del mismo perfil
+
+7. Logs
+
+El script debe mostrar resumen:
+
+- número de source_types cargados
+- número de categorías cargadas
+- número de países cargados
+- número de regiones cargadas
+- número de ciudades cargadas
+- número de entidades cargadas
+- número total de dominios preferentes
+- si se ha ejecutado en dry-run o real
+- colección o backend donde se ha guardado
+
+Ejemplo de salida:
+
+[evidence-domains] source_types=12
+[evidence-domains] categories=4
+[evidence-domains] countries=2
+[evidence-domains] regions=1
+[evidence-domains] cities=1
+[evidence-domains] entities=5
+[evidence-domains] preferred_domains=27
+[evidence-domains] dry_run=true
+[evidence-domains] no changes applied
+
+====================================================================
+20. Backend de configuración de dominios
+====================================================================
+
+Revisar cómo está actualmente implementada la configuración de dominios preferentes.
+
+Si actualmente se guarda en MongoDB:
+
+- adaptar la colección existente al nuevo modelo
+- o crear una colección nueva clara, por ejemplo evidence_domain_profiles
+- el script init-evidence-search-domains.py debe cargar ahí la configuración
+- evidence-search debe leer de esa colección o cargarla en memoria al arrancar
+
+Si actualmente se guarda en ConfigMap/YAML:
+
+- adaptar profiles.yaml
+- adaptar el script para generar/cargar la configuración coherentemente
+- evidence-search debe leer profiles.yaml al arrancar
+
+Si existen ambos mecanismos:
+
+- definir una prioridad clara:
+  1. MongoDB si está habilitado por variable de entorno
+  2. profiles.yaml como fallback local
+
+Variables de entorno sugeridas:
+
+EVIDENCE_DOMAIN_CONFIG_BACKEND=mongo|yaml
+EVIDENCE_DOMAIN_CONFIG_PATH=/app/domain_router/profiles.yaml
+EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles
+
+====================================================================
+21. Configuración inicial mínima de dominios
+====================================================================
+
+Al refrescar la configuración, incluir como mínimo perfiles para:
+
+source_types:
+- official
+- public_registry
+- statistics
+- academic
+- scientific
+- international_organization
+- reputable_media
+- corporate
+- sports_federation
+- legal
+- financial
+- social_media
+- unknown
+
+categories:
+- ECONOMY
+- HEALTH
+- PUBLIC_ADMINISTRATION
+- SPORTS
+- TECHNOLOGY
+- LEGAL
+- SCIENCE
+- SECURITY
+- ENVIRONMENT
+- INTERNATIONAL
+
+countries:
+- ES
+- EU
+
+regions:
+- ES-CAT
+
+cities:
+- ES-CAT-Barcelona
+
+entities:
+- INE
+- Banco de España
+- Generalitat de Catalunya
+- Ayuntamiento de Barcelona
+- FC Barcelona
+- OMS
+- WHO
+- European Commission
+- European Parliament
+- BOE
+
+====================================================================
+22. Actualización de documentación
+====================================================================
+
+Actualizar la documentación técnica con una sección:
+
+"Reset de datos de desarrollo y recarga de dominios preferentes"
+
+Debe incluir:
+
+1. Borrado de datos runtime:
+
+Mongo shell:
+
+use newsdb
+db.news.deleteMany({})
+db.validations.deleteMany({})
+db.events.deleteMany({})
+db.clients_quotas.countDocuments()
+
+2. Recarga de dominios en dry-run:
+
+python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --dry-run
+
+3. Recarga real:
+
+python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --refresh --confirm
+
+4. Verificación:
+
+- comprobar que clients_quotas sigue teniendo datos
+- comprobar que evidence-search arranca y carga los perfiles
+- probar una búsqueda con city=Barcelona y entity=Ayuntamiento de Barcelona
+- verificar que prioriza barcelona.cat, seu.barcelona.cat y bop.diba.cat

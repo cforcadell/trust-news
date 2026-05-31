@@ -5,7 +5,9 @@ metadata:
   namespace: apis
 data:
   MONGO_DBNAME: "newsdb"
-  MONGO_EVIDENCES_COLLECTION: "assertion_evidences"
+  EVIDENCE_DOMAIN_CONFIG_COLLECTION: "evidence_domain_profiles"
+  EVIDENCE_SEARCH_CACHE_COLLECTION: "evidence_search_cache"
+  EVIDENCE_SEARCH_CACHE_TTL_SECONDS: "86400"
   TAVILY_API_URL: "https://api.tavily.com/search"
   TAVILY_SEARCH_DEPTH: "advanced"
   TAVILY_INCLUDE_ANSWER: "false"

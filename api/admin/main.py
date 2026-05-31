@@ -17,9 +17,7 @@ from typing import Optional, List, Dict, Any
 # (Asegúrate de que la ruta 'common.async_models' es correcta en tu entorno)
 # =========================================================
 from common.utils.kafka_contracts import ACTION_TO_QUOTA_MODEL, BILLABLE_SERVICES, DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_RESPONSES
-from common.utils.domain_utils import normalize_domains
 from common.models.quota_models import ClientCreate, ClientResponse, ClientStatus, ClientUpdate, QuotaDetail
-from common.models.evidence_models import EvidenceSearchConfigBase, EvidenceSearchConfigResponse, EvidenceSearchConfigUpsert
 from common.utils.mongo import build_mongo_uri_from_env
 
 # =========================================================
@@ -63,8 +61,6 @@ MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
 ORDERS_COLLECTION_NAME = os.getenv("ORDERS_COLLECTION", "news")
 QUOTAS_COLLECTION_NAME = os.getenv("QUOTAS_COLLECTION_NAME", "clients_quotas")
-EVIDENCE_CONFIG_DBNAME = os.getenv("EVIDENCE_CONFIG_DBNAME", MONGO_DBNAME)
-EVIDENCE_CONFIG_COLLECTION_NAME = os.getenv("MONGO_EVIDENCE_CONFIG_COLLECTION", "evidence_search_configs")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", DEFAULT_KAFKA_BOOTSTRAP)
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", DEFAULT_TOPIC_RESPONSES)
@@ -85,31 +81,12 @@ mongo_client = None
 db = None
 orders_collection = None
 quotas_collection = None
-evidence_config_db = None
-evidence_configs_collection = None
 consumer = None
 
 
 # =========================================================
 # Lógica de Base de Datos
 # =========================================================
-def evidence_config_key(config_id: str) -> str:
-    value = str(config_id or "").strip().lower()
-    if not value:
-        raise HTTPException(status_code=400, detail="config_id no puede estar vacio.")
-    return value
-
-
-def clean_evidence_config_payload(config_id: str, payload: EvidenceSearchConfigUpsert) -> dict:
-    now = datetime.now(timezone.utc)
-    data = payload.model_dump()
-    data["config_id"] = evidence_config_key(config_id)
-    data["preferred_domains"] = normalize_domains(data.get("preferred_domains", []))
-    data["official_domains"] = normalize_domains(data.get("official_domains", []))
-    data["query_terms"] = [str(term).strip() for term in data.get("query_terms", []) if str(term).strip()]
-    data["updated_at"] = now
-    return data
-
 
 async def resolve_client_id(order_id: str = None, post_id: str = None) -> str:
     """
@@ -551,84 +528,22 @@ async def delete_client(client_id: str):
     logger.info(f"🗑️ Client {client_id} deleted from the database.")
     return {"status": "success", "message": f"Cliente {client_id} eliminado correctamente."}
 
-# =========================================================
-# Configuracion evidence-search
-# =========================================================
-@app.get("/evidence-search/configs", response_model=List[EvidenceSearchConfigResponse])
-async def list_evidence_search_configs(enabled: Optional[bool] = Query(None)):
-    query = {}
-    if enabled is not None:
-        query["enabled"] = enabled
-    cursor = evidence_configs_collection.find(query, {"_id": 0}).sort([("category_id", 1), ("config_id", 1)])
-    return await cursor.to_list(length=200)
-
-
-@app.get("/evidence-search/configs/{config_id}", response_model=EvidenceSearchConfigResponse)
-async def get_evidence_search_config(config_id: str):
-    key = evidence_config_key(config_id)
-    doc = await evidence_configs_collection.find_one({"config_id": key}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Configuracion no encontrada.")
-    return doc
-
-
-@app.put("/evidence-search/configs/{config_id}", response_model=EvidenceSearchConfigResponse)
-async def upsert_evidence_search_config(config_id: str, payload: EvidenceSearchConfigUpsert):
-    key = evidence_config_key(config_id)
-    data = clean_evidence_config_payload(key, payload)
-    existing = await evidence_configs_collection.find_one({"config_id": key}, {"created_at": 1})
-    if existing and existing.get("created_at"):
-        data["created_at"] = existing["created_at"]
-    else:
-        data["created_at"] = data["updated_at"]
-    await evidence_configs_collection.update_one({"config_id": key}, {"$set": data}, upsert=True)
-    doc = await evidence_configs_collection.find_one({"config_id": key}, {"_id": 0})
-    logger.info(f"Evidence search config upserted: {key}")
-    return doc
-
-
-@app.patch("/evidence-search/configs/{config_id}", response_model=EvidenceSearchConfigResponse)
-async def patch_evidence_search_config(config_id: str, payload: EvidenceSearchConfigUpsert):
-    key = evidence_config_key(config_id)
-    existing = await evidence_configs_collection.find_one({"config_id": key})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Configuracion no encontrada.")
-    merged = {**existing, **payload.model_dump(exclude_unset=True)}
-    clean = clean_evidence_config_payload(key, EvidenceSearchConfigUpsert(**merged))
-    clean["created_at"] = existing.get("created_at", clean["updated_at"])
-    await evidence_configs_collection.update_one({"config_id": key}, {"$set": clean})
-    doc = await evidence_configs_collection.find_one({"config_id": key}, {"_id": 0})
-    return doc
-
-
-@app.delete("/evidence-search/configs/{config_id}", response_model=dict)
-async def delete_evidence_search_config(config_id: str):
-    key = evidence_config_key(config_id)
-    result = await evidence_configs_collection.delete_one({"config_id": key})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Configuracion no encontrada.")
-    return {"status": "success", "message": f"Configuracion {key} eliminada."}
-
 
 # =========================================================
 # Ciclo de vida de FastAPI
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
-    global mongo_client, db, orders_collection, quotas_collection, evidence_config_db, evidence_configs_collection
+    global mongo_client, db, orders_collection, quotas_collection
 
     mongo_client = AsyncIOMotorClient(MONGO_URI)
     db = mongo_client[MONGO_DBNAME]
     orders_collection = db[ORDERS_COLLECTION_NAME]
     quotas_collection = db[QUOTAS_COLLECTION_NAME]
-    evidence_config_db = mongo_client[EVIDENCE_CONFIG_DBNAME]
-    evidence_configs_collection = evidence_config_db[EVIDENCE_CONFIG_COLLECTION_NAME]
     
     await quotas_collection.create_index("client_id", unique=True)
     await orders_collection.create_index("order_id")
     await orders_collection.create_index("postId")
-    await evidence_configs_collection.create_index("config_id", unique=True)
-    await evidence_configs_collection.create_index("category_id")
     
     logger.info("💽 Connected to MongoDB (Orders & Quotas)")
     asyncio.create_task(consume_responses_for_quotas())

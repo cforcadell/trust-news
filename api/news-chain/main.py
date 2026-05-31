@@ -40,6 +40,13 @@ from common.models.async_models import (
 )
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN, DEFAULT_TOPIC_RESPONSES
 from common.utils.ipfs_client import get_ipfs_text, get_ipfs_json
+from common.models.protocol_models import (
+    AssertionsDocumentV2,
+    SourceDocumentStorage,
+    ValidationMode,
+    build_assertions_document_v2,
+    build_assertion_validation_payload_v2,
+)
 
 
 from aiokafka import AIOKafkaConsumer
@@ -631,52 +638,49 @@ async def blockchain_event_listener():
 
                                 post_json = json.loads(ipfs_content)
                                 logger.info("🧩 JSON parseado correctamente desde IPFS")
-                                
-                                content_obj = json.loads(post_json.get("content", "{}"))
+                                if isinstance(post_json, dict) and post_json.get("schema_version") == "assertions-document-v2":
+                                    content_obj = post_json
+                                elif isinstance(post_json, dict) and "assertions" in post_json and "text" in post_json:
+                                    content_obj = post_json
+                                else:
+                                    content_obj = json.loads(post_json.get("content", "{}"))
 
-                                # ------------------------------------------------
-                                # Buscar assertion correspondiente
-                                # ------------------------------------------------
-                                assertions = content_obj.get("assertions", [])
-                                logger.info(f"🔍 Total assertions encontradas en documento: {len(assertions)}")
-
-                                assertion = next(
-                                    (
-                                        a for a in assertions
-                                        if int(a.get("idAssertion", 0)) == assertion_index
-                                    ),
-                                    None,
-                                )
-
-                                if not assertion:
-                                    logger.warning(
-                                        f"⚠️ Assertion no encontrada en documento | "
-                                        f"post={post_id} assertion={assertion_index}"
+                                if isinstance(content_obj, dict) and "assertions" in content_obj and "post" not in content_obj:
+                                    logger.info(f"[news-chain] detected minimal document shape from IPFS cid={cid_post}, reconstructing AssertionsDocumentV2")
+                                    assertions_document = build_assertions_document_v2(
+                                        text=content_obj.get("text", ""),
+                                        assertions=content_obj.get("assertions", []),
+                                        mode=ValidationMode.BLOCKCHAIN,
+                                        provider="news-handler",
                                     )
+                                else:
+                                    assertions_document = AssertionsDocumentV2(**content_obj)
+                                logger.info(f"[news-chain] loaded assertions-document-v2 from IPFS cid={cid_post}")
+
+                                assertion = next((item for item in assertions_document.assertions if int(item.assertion_index) == int(assertion_index - 1)), None)
+                                if assertion is None:
+                                    logger.warning(f"⚠️ Assertion no encontrada en documento | post={post_id} assertion_index={assertion_index - 1}")
                                     continue
 
-                                logger.info(f"✅ Assertion localizada correctamente | assertion={assertion_index}")
-
-                                text = assertion.get("text", "")
-                                if not text:
-                                    logger.warning(
-                                        f"⚠️ Assertion sin texto | "
-                                        f"post={post_id} assertion={assertion_index}"
-                                    )
-                                    continue
-
-                                logger.info(
-                                    f"📝 Texto assertion obtenido ({len(text)} chars) | "
-                                    f"assertion={assertion_index}"
+                                payload_v2 = build_assertion_validation_payload_v2(
+                                    mode="BLOCKCHAIN",
+                                    assertion=assertion,
+                                    storage=SourceDocumentStorage.IPFS,
+                                    post_id=post_id,
+                                    cid=cid_post,
+                                    order_id=None,
                                 )
+                                logger.info(f"[news-chain] built assertion-validation-payload-v2 assertion_id={assertion.assertion_id}")
 
                                 msg = RequestValidationRequest(
                                     order_id="",
                                     payload=RequestValidationPayload(
                                         postId=post_id,
                                         idValidator=validator,
-                                        idAssertion=str(assertion_index),
-                                        text=text,
+                                        idAssertion=str(assertion.assertion_id),
+                                        text=assertion.text,
+                                        assertion_validation_payload=payload_v2,
+                                        source_document_cid=cid_post,
                                     ),
                                 )
                                 
@@ -691,9 +695,7 @@ async def blockchain_event_listener():
                                 )
                                 
                                 logger.info(
-                                    f"🚀 Mensaje enviado a Kafka correctamente | "
-                                    f"topic={KAFKA_RESPONSE_TOPIC} "
-                                    f"post={post_id} assertion={assertion_index}"
+                                    f"[news-chain] forwarding blockchain event to Kafka post_id={post_id} assertion_index={assertion_index - 1}"
                                 )
                                 continue  # Si se procesó como ValidationRequested, no intentamos ValidationSubmitted
 
@@ -753,6 +755,9 @@ async def blockchain_event_listener():
                                         validator_alias=validation_json.get(
                                             "validator_alias", ""
                                         ),
+                                        sources=validation_json.get("sources") or [],
+                                        evidence_used=validation_json.get("evidence_used") or [],
+                                        evidence_search_response=validation_json.get("evidence_search_response"),
                                     ),
                                 )
 

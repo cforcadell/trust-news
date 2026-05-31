@@ -1,48 +1,121 @@
+# TrustNews async flows
+
+## BLOCKCHAIN mode sequence
+
+```mermaid
 sequenceDiagram
-  autonumber
+    autonumber
+    participant C as Client / Frontend
+    participant H as news-handler
+    participant A as admin
+    participant K as Kafka
+    participant G as generate-asertions
+    participant I as ipfs-fastapi
+    participant P as IPFS
+    participant N as news-chain
+    participant S as Smart contract
+    participant V as validate-asertions
+    participant E as evidence-search
+    participant M as MongoDB
 
-  participant NH as api/news-handler
-  participant K as Kafka
-  participant GA as api/generate-asertions
-  participant IPFS as ipfs-fastapi
-  participant NC as api/news-chain
-  participant VA as api/validate-asertions
-  participant ADM as api/admin
+    C->>H: POST /publishNew validation_mode=BLOCKCHAIN
+    H->>A: Check news_generation quota
+    A-->>H: Quota status
+    H->>M: Create order status=CREATED
+    H->>K: generate_assertions
+    K-->>G: Consume generate_assertions
+    G->>G: Build prompt and parse Assertion list
+    G-->>K: assertions_generated with assertions-document-v2
+    K-->>H: Consume assertions_generated
+    H->>A: Check/increment quotas
+    H->>M: Store assertions_document status=DOCUMENT_CREATED
+    H->>K: upload_ipfs(document)
+    K-->>I: Consume upload_ipfs
+    I->>P: Store assertions-document-v2
+    P-->>I: CID
+    I-->>K: ipfs_uploaded
+    K-->>H: Consume ipfs_uploaded
+    H->>M: Store CID status=IPFS_UPLOADED
+    H->>K: register_blockchain(text, cid, chain_assertions)
+    K-->>N: Consume register_blockchain
+    N->>S: registerNew(cid, categoryIds)
+    S-->>N: RegisterNewResult(postId, validatorAddressesByAsertion)
+    N-->>K: blockchain_registered
+    K-->>H: Consume blockchain_registered
+    H->>M: Store postId, validators, validators_pending
+    S-->>V: ValidationRequested(postId, assertionIndex, cid)
+    V->>I: GET /ipfs/{cid}
+    I->>P: Read document
+    P-->>I: assertions-document-v2
+    I-->>V: assertions-document-v2
+    V->>V: Build assertion-validation-payload-v2
+    opt Validator type is RAG_EVIDENCE_VALIDATION
+        V->>E: POST /search/evidence
+        E->>M: Read/write evidence cache and domain profiles
+        opt Cache miss and Tavily configured
+            E->>E: Resolve domains from category/subcategory/context
+            E->>E: Query Tavily
+        end
+        E-->>V: evidence-search-response-v2
+    end
+    V->>V: Call LLM and parse ValidatorAPIResponse
+    V->>S: Register validation transaction
+    S-->>N: Validation event / chain read
+    N-->>K: validation_completed
+    K-->>H: Consume validation_completed
+    H->>M: Store validation, decrement pending, recalculate results
+    H-->>C: GET order returns status/assertion_results
+```
 
-  NH->>K: produce fake_news_requests_generate<br/>generate_assertions
-  K-->>GA: consume generate_assertions
+## LIGHT mode sequence
 
-  alt assertions generated
-    GA->>K: produce fake_news_responses<br/>assertions_generated
-    K-->>NH: consume assertions_generated
-  else assertions not generated
-    GA->>K: produce fake_news_responses<br/>assertions_not_generated
-    K-->>NH: consume assertions_not_generated
-    NH->>NH: status = ASSERTIONS_NOT_AVAILABLE
-  end
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client / Frontend
+    participant H as news-handler
+    participant A as admin
+    participant K as Kafka
+    participant G as generate-asertions
+    participant N as news-chain
+    participant V as validate-asertions
+    participant E as evidence-search
+    participant M as MongoDB
 
-  NH->>ADM: HTTP check/update quotas
-  NH->>K: produce fake_news_requests_ipfs<br/>upload_ipfs
-  K-->>IPFS: consume upload_ipfs
-  IPFS->>K: produce fake_news_responses<br/>ipfs_uploaded
-  K-->>NH: consume ipfs_uploaded
-
-  NH->>K: produce fake_news_requests_blockchain<br/>register_blockchain
-  K-->>NC: consume register_blockchain
-  NC->>K: produce fake_news_responses<br/>blockchain_registered
-  K-->>NH: consume blockchain_registered
-
-  NC->>K: produce fake_news_responses<br/>request_validation
-  K-->>NH: consume request_validation
-  NH->>K: produce fake_news_requests_validate<br/>request_validation
-  K-->>VA: consume request_validation
-
-  VA->>NC: blockchain transaction<br/>addValidation
-  NC->>K: produce fake_news_responses<br/>validation_completed
-  K-->>NH: consume validation_completed
-
-  opt validator config updated
-    NC->>K: produce fake_news_responses<br/>new_validator_config
-    K-->>NH: consume new_validator_config
-  end
-
+    C->>H: POST /publishNew validation_mode=LIGHT
+    H->>A: Check news_generation quota
+    A-->>H: Quota status
+    H->>M: Create order status=CREATED
+    H->>K: generate_assertions
+    K-->>G: Consume generate_assertions
+    G->>G: Build prompt and parse Assertion list
+    G-->>K: assertions_generated with assertions-document-v2
+    K-->>H: Consume assertions_generated
+    H->>M: Store local assertions_document status=DOCUMENT_CREATED
+    H->>N: GET /blockchain/validators?recover_ipfs=true on startup/cache refresh
+    N-->>H: Validators with categories, type, config, status
+    loop For each assertion
+        H->>H: category_id_for_chain(category)
+        H->>H: Select active automatic validators for category
+        loop For each selected validator
+            H->>K: light_validation_request with assertion-validation-payload-v2
+        end
+    end
+    H->>M: Store validators, validators_pending
+    K-->>V: Consume light_validation_request
+    V->>V: Process only if validator_id == ACCOUNT_ADDRESS
+    opt Validator type is RAG_EVIDENCE_VALIDATION
+        V->>E: POST /search/evidence
+        E->>M: Read/write evidence cache and domain profiles
+        opt Cache miss and Tavily configured
+            E->>E: Resolve domains from category/subcategory/context
+            E->>E: Query Tavily
+        end
+        E-->>V: evidence-search-response-v2
+    end
+    V->>V: Call LLM and parse ValidatorAPIResponse
+    V-->>K: light_validation_completed
+    K-->>H: Consume light_validation_completed
+    H->>M: Store validation, decrement pending, recalculate results
+    H-->>C: GET order returns status/assertion_results
+```

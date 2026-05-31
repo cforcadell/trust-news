@@ -154,16 +154,48 @@ data:
 
     Usa la categoría más específica posible según el contenido principal de la aserción.
 
-    Devuelve solo un array JSON válido, sin markdown, sin explicaciones y sin texto adicional.
+    Devuelve solo JSON válido, sin markdown, sin explicaciones y sin texto adicional.
 
-    Formato obligatorio:
+    IMPORTANTE SOBRE context:
+    - context.locations debe ser una lista de objetos, nunca strings. Ejemplo: {"name":"Catalunya","type":"region","country_code":"ES","region_code":"ES-CT","origin":"explicit","confidence":0.9}.
+    - context.temporal_context debe ser una lista de objetos, nunca strings. Ejemplo: {"value":"2026","type":"year","origin":"explicit","confidence":0.9}.
+    - context.entities debe ser una lista de objetos, nunca strings. Ejemplo: {"name":"Unión Europea","type":"international_organization","role":"mentioned_entity","origin":"explicit","confidence":0.9}.
 
-    [
-      {
-        "idAssertion": 1,
-        "text": "Aserción factual, autocontenida y verificable.",
-        "categoryId": 3
-      }
-    ]
+    Formato obligatorio: un objeto con clave "assertions". Cada aserción debe seguir el schema enriquecido v2:
+
+    {
+      "assertions": [
+        {
+          "assertion_id": 1,
+          "assertion_index": 0,
+          "idAssertion": "1",
+          "text": "Aserción factual, autocontenida y verificable.",
+          "category": "ECONOMY",
+          "categoryId": 1,
+          "subcategory": "EMPLOYMENT",
+          "context": {
+            "locations": [],
+            "entities": [],
+            "temporal_context": [],
+            "language": "es",
+            "jurisdiction": "unknown"
+          },
+          "search_hints": {
+            "preferred_source_types": ["official", "statistics"],
+            "search_keywords": [],
+            "suggested_queries": []
+          },
+          "context_confidence": {
+            "location": 0.0,
+            "entities": 0.0,
+            "temporal": 0.0
+          }
+        }
+      ]
+    }
+
+    No inventes contexto. Si no está claro, usa listas vacías, null o "unknown".
+    origin debe ser explicit, inferred o unknown. confidence debe estar entre 0 y 1.
+    categoryId se conserva solo para mapear con la categoría on-chain existente; el documento protocolar usa category/subcategory/context/search_hints.
 
   ADMIN_URL: "http://admin-service.apis.svc.cluster.local:8400"

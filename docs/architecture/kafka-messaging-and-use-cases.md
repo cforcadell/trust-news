@@ -70,7 +70,11 @@ Respuesta esperada:
       }
     ],
     "publisher": "generate-asertions",
-    "validation_mode": "BLOCKCHAIN | LIGHT"
+    "validation_mode": "BLOCKCHAIN | LIGHT",
+    "assertions_document": {
+      "schema_version": "assertions-document-v2",
+      "assertions": []
+    }
   }
 }
 
@@ -87,7 +91,7 @@ Flujo:
 3. news-handler publica generate_assertions en fake_news_requests_generate.
 4. generate-asertions consume, genera aserciones y publica assertions_generated en fake_news_responses.
 5. news-handler consume assertions_generated.
-6. Si validation_mode=BLOCKCHAIN, construye documento y publica upload_ipfs en fake_news_requests_ipfs.
+6. Si validation_mode=BLOCKCHAIN, valida/normaliza assertions-document-v2 y publica upload_ipfs en fake_news_requests_ipfs.
 7. ipfs-fastapi sube documento a IPFS y responde ipfs_uploaded.
 8. news-handler consume ipfs_uploaded, guarda cid y publica register_blockchain en fake_news_requests_blockchain.
 9. news-chain registra el post en el contrato. El contrato selecciona validadores por categoria.
@@ -111,9 +115,9 @@ Flujo:
 2. Se generan aserciones igual que en el flujo normal.
 3. news-handler detecta validation_mode=LIGHT al recibir assertions_generated.
 4. No envia a IPFS ni blockchain.
-5. Crea documento local y calcula validadores activos desde validators_cache por categoria.
+5. Crea documento local y calcula validadores activos desde validators_cache por categoria on-chain.
 6. Filtra validadores no automaticos: excluye DETERMINISTIC_VALIDATION y HUMAN.
-7. Publica un mensaje por asercion/validador en fake_news_requests_light_validation con action=light_validation_request.
+7. Publica un mensaje por asercion/validador en fake_news_requests_light_validation con action=light_validation_request y assertion-validation-payload-v2 inline.
 8. Cada worker validate-asertions consume el topic, pero solo procesa mensajes cuyo validator_id coincide con su ACCOUNT_ADDRESS.
 9. El worker valida segun VALIDATOR_TYPE y publica light_validation_completed en fake_news_responses.
 10. news-handler guarda la validacion en la orden y en la coleccion validations.
@@ -170,10 +174,10 @@ Configuracion del worker:
 Flujo:
 
 1. El worker recibe una solicitud de validacion por blockchain event o Kafka light.
-2. Antes de llamar al LLM, ejecuta POST /search/evidences en evidence-search.
-3. evidence-search busca en cache por assertion_hash.
-4. Si hay cache hit, no llama a Tavily, actualiza last_query y anade order_id/assertion_id si no estaban.
-5. Si hay cache miss, llama a Tavily, normaliza fuentes, calcula content_hash, clasifica fuente/fiabilidad y guarda documento en assertion_evidences.
+2. Antes de llamar al LLM, ejecuta POST /search/evidence en evidence-search con evidence-search-request-v2.
+3. evidence-search carga perfiles desde Mongo `evidence_domain_profiles` o usa fallback minimo en codigo.
+4. domain_router resuelve dominios por category, subcategory, ubicaciones, entidades y preferred_source_types.
+5. Si Tavily esta configurado, consulta dominios preferentes y busqueda general de fallback; si no, devuelve dominios simulados para trazabilidad.
 6. El worker inyecta sources en el prompt RAG.
 7. El LLM debe responder usando exclusivamente esas evidencias.
 8. La respuesta puede incluir confidence y evidence_used.

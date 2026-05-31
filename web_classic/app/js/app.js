@@ -395,14 +395,16 @@ function renderEditableAssertionsTable(container, assertions) {
                 </tr>
             </thead>
             <tbody>
-                ${assertions.map(a => `
-                    <tr data-id="${safeText(a.idAssertion)}">
-                        <td>${safeText(a.idAssertion)}</td>
-                        <td contenteditable="true" class="editable-text">${safeText(a.text)}</td>
-                        <td>${renderCategorySelect(a.categoryId)}</td>
+                ${assertions.map((a, index) => {
+                    const assertionId = getAssertionId(a, index + 1);
+                    return `
+                    <tr data-id="${safeText(assertionId)}">
+                        <td>${safeText(assertionId)}</td>
+                        <td contenteditable="true" class="editable-text">${safeText(extractAssertionText(a))}</td>
+                        <td>${renderCategorySelect(getAssertionCategory(a) || 1)}</td>
                         <td><button class="btn-delete-row">✖</button></td>
-                    </tr>
-                `).join("")}
+                    </tr>`;
+                }).join("")}
             </tbody>
         </table>
 
@@ -651,8 +653,9 @@ async function loadOrderById(orderId, cleanup = true) {
             currentOrderEvents = eventsData;
 
             const lightMode = isLightOrder(data);
+            const orderAssertions = collectOrderAssertions(data.assertions, data);
             const sections = [
-                {key: "assertions", name: t("tabs.assertions"), data: data.assertions || []},
+                {key: "assertions", name: t("tabs.assertions"), data: orderAssertions},
                 {key: "document", name: t("tabs.document"), data: data.document || null, disabled: lightMode},
                 {key: "validations", name: t("tabs.validations"), data: data.validations || {}},
                 {key: "events", name: t("tabs.events"), data: eventsData}
@@ -674,17 +677,17 @@ async function loadOrderById(orderId, cleanup = true) {
                         if (s.disabled) return;
                         document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
                         btn.classList.add("activeTab");
-                        renderTabContent(s.key, s.data, data.assertions, data);
+                        renderTabContent(s.key, s.data, orderAssertions, data);
                     };
                     if(i===0) btn.classList.add("activeTab");
                     tabs.appendChild(btn);
-                    if(i===0) renderTabContent(s.key, s.data, data.assertions, data);
+                    if(i===0) renderTabContent(s.key, s.data, orderAssertions, data);
                 });
             } else {
                 const activeTab = tabs.querySelector('.activeTab');
                 if (activeTab) {
                     const sec = sections.find(s => s.key === activeTab.dataset.tabKey);
-                    if (sec && !sec.disabled) renderTabContent(sec.key, sec.data, data.assertions, data);
+                    if (sec && !sec.disabled) renderTabContent(sec.key, sec.data, orderAssertions, data);
                 }
             }
         }
@@ -873,6 +876,91 @@ function getAssertionId(assertion, fallbackIndex) {
     return String(assertion.idAssertion ?? assertion.id ?? assertion.assertion_id ?? fallbackIndex);
 }
 
+function collectOrderAssertions(assertions = [], orderData = null) {
+    const sources = [
+        assertions,
+        orderData?.assertions,
+        orderData?.assertions_document?.assertions,
+        orderData?.document?.assertions,
+        orderData?.document?.assertions_document?.assertions
+    ];
+    const collected = [];
+    const seen = new Set();
+
+    sources.forEach(source => {
+        if (!Array.isArray(source)) return;
+        source.forEach((assertion, index) => {
+            if (!assertion || typeof assertion !== "object") return;
+            const key = `${getAssertionId(assertion, index)}:${assertion.assertion_index ?? ""}:${extractAssertionText(assertion)}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            collected.push(assertion);
+        });
+    });
+
+    return collected;
+}
+
+function extractAssertionText(assertion) {
+    if (!assertion) return "";
+    if (typeof assertion === "string") return assertion;
+
+    const candidates = [
+        assertion.text,
+        assertion.assertion_text,
+        assertion.statement,
+        assertion.claim,
+        assertion.content,
+        assertion.assertion?.text,
+        assertion.payload?.assertion?.text,
+        assertion.payload?.assertion_text
+    ];
+
+    for (const candidate of candidates) {
+        if (candidate === null || candidate === undefined) continue;
+        if (typeof candidate === "object" && candidate.text) return String(candidate.text).trim();
+        const text = String(candidate).trim();
+        if (text) return text;
+    }
+
+    return "";
+}
+
+function assertionMatchesId(assertion, assertionId, fallbackIndex) {
+    if (!assertion || typeof assertion !== "object") return false;
+    const expected = String(assertionId);
+    const candidates = [
+        assertion.idAssertion,
+        assertion.id,
+        assertion.assertion_id,
+        assertion.assertion_index,
+        Number.isFinite(Number(assertion.assertion_index)) ? Number(assertion.assertion_index) + 1 : null,
+        fallbackIndex,
+        Number.isFinite(Number(fallbackIndex)) ? Number(fallbackIndex) + 1 : null
+    ];
+    return candidates.some(candidate => candidate !== null && candidate !== undefined && String(candidate) === expected);
+}
+
+function findAssertionById(assertions = [], assertionId) {
+    return (assertions || []).find((assertion, index) => assertionMatchesId(assertion, assertionId, index));
+}
+
+function resolveAssertionText(assertionId, assertions = [], orderData = null, validatorsObj = null) {
+    const allAssertions = collectOrderAssertions(assertions, orderData);
+    const assertion = findAssertionById(allAssertions, assertionId);
+    const assertionText = extractAssertionText(assertion);
+    if (assertionText) return assertionText;
+
+    const validationText = Object.values(validatorsObj || {})
+        .map(info => extractAssertionText(info?.payload?.assertion) || info?.assertion_text || info?.payload?.assertion_text)
+        .find(Boolean);
+    return validationText || "(Aserción sin texto)";
+}
+
+function getAssertionCategory(assertion) {
+    return assertion?.categoryId ?? assertion?.category ?? assertion?.category_id;
+}
+
 function buildVerificationSummary(order, events = []) {
     const weightedResults = order.assertion_results || {};
     const validations = order.validations || {};
@@ -888,7 +976,7 @@ function buildVerificationSummary(order, events = []) {
     const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - completedValidations, 0);
 
     const assertionIds = new Set(Object.keys(validations).map(String));
-    (order.assertions || []).forEach((assertion, index) => assertionIds.add(getAssertionId(assertion, index)));
+    collectOrderAssertions(order.assertions, order).forEach((assertion, index) => assertionIds.add(getAssertionId(assertion, index + 1)));
 
     const validatorVotes = { true: 0, false: 0, unknown: 0 };
     let confirmedAssertions = 0;
@@ -1135,10 +1223,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
     let html = "";
 
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
-        let assertionText = assertions.find(a => String(a.idAssertion) === String(assertionId))?.text || "(Aserción sin texto)";
-        if (typeof assertionText === 'object' && assertionText !== null && assertionText.text) {
-            assertionText = assertionText.text;
-        }
+        const assertionText = resolveAssertionText(assertionId, assertions, orderData, validatorsObj);
 
         const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
         const known = literals.filter(v => v !== "Unknown");
@@ -1431,13 +1516,14 @@ function renderAssertions(container, assertions) {
             <tbody>
     `;
 
-    assertions.forEach(a => {
-        const catDesc = CATEGORY_MAP[a.categoryId] || `(${a.categoryId})`;
-        const textValue = (typeof a.text === 'object' && a.text?.text) ? a.text.text : a.text;
+    assertions.forEach((a, index) => {
+        const category = getAssertionCategory(a);
+        const catDesc = CATEGORY_MAP[category] || (category ? `(${category})` : "-");
+        const textValue = extractAssertionText(a);
 
         html += `
             <tr>
-                <td class="id-col"><span>${safeText(a.idAssertion)}</span></td>
+                <td class="id-col"><span>${safeText(getAssertionId(a, index + 1))}</span></td>
                 <td class="text-col">${safeText(textValue || "-")}</td>
                 <td class="cat-col">${safeText(catDesc)}</td>
             </tr>
@@ -2457,23 +2543,39 @@ function renderScorePills(result) {
     `;
 }
 
+function validationEvidenceItems(info = {}) {
+    const candidates = [
+        info.sources,
+        info.evidence_used,
+        info.evidence_search_response?.evidences,
+        info.payload?.sources,
+        info.payload?.evidence_used,
+        info.payload?.evidence_search_response?.evidences
+    ];
+    return candidates.find(items => Array.isArray(items) && items.length) || [];
+}
+
 function renderEvidenceLinks(info = {}) {
-    const sources = info.sources || info.payload?.sources || [];
-    const evidence = info.evidence_used || info.payload?.evidence_used || [];
-    const items = sources.length ? sources : evidence;
+    const items = validationEvidenceItems(info);
     if (!items.length) return "";
 
     const rows = items.slice(0, 6).map((src, index) => {
-        const url = src.url || "";
-        const title = src.title || src.source_id || url || `Evidencia ${index + 1}`;
-        const reason = src.reason || src.excerpt || src.content || src.description || "";
-        const confidence = src.reliability || src.source_type || src.supports;
+        const url = src.url || src.source_url || "";
+        const title = src.title || src.source_id || src.domain || src.source_domain || url || `Evidencia ${index + 1}`;
+        const reason = src.why_selected || src.reason || src.snippet || src.excerpt || src.content || src.description || "";
+        const meta = [
+            src.source_type,
+            src.reliability,
+            src.supports,
+            src.trust_score !== undefined && src.trust_score !== "" ? `trust ${src.trust_score}` : "",
+            Array.isArray(src.matched_profiles) && src.matched_profiles.length ? src.matched_profiles.join(", ") : ""
+        ].filter(Boolean).join(" · ");
         return `
             <li>
                 <div class="evidence-title">${url ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer">${safeText(title)}</a>` : safeText(title)}</div>
                 ${url ? `<div class="evidence-url">${safeText(url)}</div>` : ""}
                 ${reason ? `<div class="evidence-reason">${safeText(compactText(reason, 220))}</div>` : ""}
-                ${confidence !== undefined && confidence !== "" ? `<div class="evidence-meta">${safeText(confidence)}</div>` : ""}
+                ${meta ? `<div class="evidence-meta">${safeText(meta)}</div>` : ""}
             </li>
         `;
     }).join("");
@@ -2503,8 +2605,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
     let html = `<div class="validation-tree">`;
 
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
-        let assertionText = assertions.find(a => String(a.idAssertion) === String(assertionId))?.text || "(Aserción sin texto)";
-        if (typeof assertionText === "object" && assertionText !== null && assertionText.text) assertionText = assertionText.text;
+        const assertionText = resolveAssertionText(assertionId, assertions, orderData, validatorsObj);
 
         const assertionResult = getAssertionResult(orderData, assertionId);
         const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
@@ -2799,6 +2900,7 @@ async function showValidatorValidations(validatorHash) {
                 response_time_seconds: v.response_time_seconds,
                 sources: v.sources || v.payload?.sources || [],
                 evidence_used: v.evidence_used || v.payload?.evidence_used || [],
+                evidence_search_response: v.evidence_search_response || v.payload?.evidence_search_response || null,
                 payload: v.payload || {}
             };
         });

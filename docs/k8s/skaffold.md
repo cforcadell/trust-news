@@ -39,7 +39,7 @@ cd ./scripts/k8s
 
 ```bash blockchain
 
-./skaffold dev -p blockchain --namespace blockchain 
+./skaffold dev -p blockchain --namespace blockchain
 # ./skaffold dev -p blockchain --namespace blockchain --cleanup=false
 
 
@@ -62,7 +62,7 @@ kubectl exec geth-miner-0 -n blockchain -- ps aux | grep geth
  kubectl describe pod geth-rpc-endpoint-0 -n blockchain
  kubectl describe pod geth-miner-0 -n blockchain
 
-#connect rpc node 
+#connect rpc node
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
 
 > admin.peers
@@ -74,12 +74,12 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.pe
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "admin.peers"
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "eth.blockNumber"
 
-#connect boot node 
+#connect boot node
 kubectl exec -it geth-bootnode-0 -n blockchain -- ps aux
 #get enode
 kubectl exec -it geth-bootnode-0 -n blockchain -- geth --exec "admin.nodeInfo.enode" attach ipc:/root/.ethereum/geth.ipc
 
-#connect miner node 
+#connect miner node
 kubectl exec -it geth-miner-0 -n blockchain -- geth attach
 > admin.peers
 > net.peerCount
@@ -175,7 +175,8 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.ge
 
 ```bash infra
 
-./skaffold dev -p infra
+./skaffold dev -p infra 
+./skaffold dev -p infra-basic
 
 # Kafdrop queda expuesto por Skaffold en:
 # http://localhost:9000
@@ -206,7 +207,7 @@ kubectl delete pvc mongodb-storage-mongodb-0 -n infra
 kubectl get pods -n apis
 kubectl get pods -n frontend
 
-kubectl logs -n apis -f 
+kubectl logs -n apis -f
 
 Frontend:
 #si no se levanta el port forward
@@ -227,10 +228,10 @@ http://localhost:3000/
 https://localhost:7443/backend/docs
 
 
-keycloak realm master 
+keycloak realm master
 https://localhost:7443/auth/admin/master/console/
 
-#get token 
+#get token
 curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxx"
 
 
@@ -246,7 +247,7 @@ get svc -n infra
 Explore + Run query
 
 ```
-```bash  get secret details 
+```bash  get secret details
 
 kubectl get secrets -n infra
 kubectl get mongodb-secret -n infra -o jsonpath='{.data}'
@@ -295,7 +296,7 @@ Client Authentication: Ponlo en ON.
 
 Authorization: Ponlo en OFF.
 
-Authentication Flow: Marca solo Service accounts roles (desmarca el resto). 
+Authentication Flow: Marca solo Service accounts roles (desmarca el resto).
 
 Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
 
@@ -310,7 +311,7 @@ FE Users
 Create new keycloak user
 Use admin/Clients to define user quota and create inside mondogb: user_<keycloak_user_id>
   {
-    "name": "xxxxxxxxxxxxxxxxxx",
+    "name": "cforcadellm",
     "limits": {
       "news_generation": 99999999,
       "blockchain_validation": 99999999
@@ -322,7 +323,7 @@ Use admin/Clients to define user quota and create inside mondogb: user_<keycloak
     "status": "Active",
     "active_date": "2026-05-01T09:59:08.903000",
     "deactivate_date": null,
-    "client_id": "user_6b84b9c5-b0a0-4da9-9494-52fb9c9517d7" 
+    "client_id": "user_966b234d-adf3-430f-a98e-2f98dfe877a3"
   }
 
 http://127.0.0.1:8400/docs
@@ -331,13 +332,14 @@ for admin users create realm role (trust-admin) ans assig
 
 
 API Users
-Create new keycloak client 
+Create new keycloak client
 
 curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxxx"
 
 Decode token ang get keycloak_client_hash_id ("sub")
 
-Use admin/Clients to define user quota and create inside mondogb: <client-name>_<keycloak_client_hash_id> 
+Use admin/Clients to define user quota and create inside mondogb: <client-name>_<keycloak_client_hash_id>
+Ej: TrustNewsWeb_617597c5-fcc6-4ed5-9cf3-ae124ad3570c
 
   {
     "name": "api_client_admin",
@@ -352,7 +354,7 @@ Use admin/Clients to define user quota and create inside mondogb: <client-name>_
     "status": "Active",
     "active_date": "2026-05-01T09:59:08.903000",
     "deactivate_date": null,
-    "client_id": "TrustNewsApi_bca02884-1184-4e2f-94f5-6b6974a932ce" 
+    "client_id": "TrustNewsApi_bca02884-1184-4e2f-94f5-6b6974a932ce"
   }
 
 http://127.0.0.1:8400/docs
@@ -360,7 +362,7 @@ http://127.0.0.1:8400/docs
 
 ```
 ```bash  Ini search preferences
-./scripts/k8s/apis/init-evidence-search-domains.py 
+./scripts/k8s/apis/init-evidence-search-domains.py
 
 ```
 ```bash  get mongodb data
@@ -413,5 +415,53 @@ validations
 | `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Guarda eventos del flujo por `order_id`: acciones Kafka enviadas/recibidas, topic, timestamp y payload. La UI los recupera para pintar la pestaña de eventos de una orden. |
 | `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | Guarda registros normalizados de validaciones por orden/aserción/validador, incluyendo resultado, `tx_hash`, evidencia usada, config del validador y tiempos de respuesta. |
 | `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Guarda clientes y cuotas disponibles/consumidas por servicio, como generación de noticias o validaciones. |
-| `newsdb` | `assertion_evidences` | `evidence-search` | `MONGO_EVIDENCES_COLLECTION=assertion_evidences` | Cachea evidencias encontradas por aserción: fuentes, URLs, dominios, extractos, hashes, proveedor de búsqueda y timestamps. |
-| `newsdb` | `evidence_search_configs` | `evidence-search` / `admin` | `MONGO_EVIDENCE_CONFIG_COLLECTION=evidence_search_configs` | Configura búsqueda de evidencias por defecto o por categoría: dominios preferidos/oficiales, términos extra, `official_first` y estado habilitado. |
+| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | Configura el enrutado contextual v2 de dominios por categoría, subcategoría, país, región, ciudad y entidad. Si no hay documento en Mongo, `evidence-search` usa un fallback mínimo en código. |
+| `newsdb` | `evidence_search_cache` | `evidence-search` | `EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache` | Cache v2 de respuestas de `/search/evidence` por aserción normalizada, política de búsqueda y versión de perfiles. Expira por TTL (`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`). |
+
+**Reset de datos de desarrollo y recarga de dominios preferentes**
+
+El schema `assertions-document-v2` no mantiene compatibilidad con documentos antiguos. Si en un entorno local se quiere limpiar solo datos runtime, hacerlo manualmente y sin borrar cuotas/clientes:
+
+```javascript
+use newsdb
+db.news.deleteMany({})
+db.validations.deleteMany({})
+db.events.deleteMany({})
+db.clients_quotas.countDocuments()
+```
+
+La configuración contextual de dominios preferentes vive en MongoDB, colección `evidence_domain_profiles`. El seed versionado está en `api/evidence-search/config/evidence-domain-profiles.yaml`. Dry-run del cargador destructivo controlado:
+
+```bash
+api/evidence-search/config/load-evidence-domain-profiles.py --dry-run
+```
+
+Recarga real a demanda. El cargador borra primero `evidence_domain_profiles`, carga el perfil `default` y borra `evidence_search_cache` salvo que se pase `--keep-cache`:
+
+```bash
+api/evidence-search/config/load-evidence-domain-profiles.py --confirm
+```
+
+También se puede cargar otro fichero explícito:
+
+```bash
+api/evidence-search/config/load-evidence-domain-profiles.py \
+  --source /path/to/profiles.yaml \
+  --confirm
+```
+
+Verificación recomendada:
+
+```bash
+kubectl rollout restart deployment/evidence-search -n apis
+kubectl logs deployment/evidence-search -n apis
+```
+
+Después de recargar, una búsqueda con `city=Barcelona` y `entity=Ayuntamiento de Barcelona` debe priorizar `barcelona.cat`, `seu.barcelona.cat` y `bop.diba.cat`.
+
+```bash limpiar imagenes no usadas dento de los nodos de kind
+for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
+  echo "==== Limpiando $node ===="
+  docker exec "$node" crictl rmi --prune || true
+done
+```

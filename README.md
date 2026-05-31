@@ -197,40 +197,35 @@ For detailed commands, see:
 
 ---
 
-## 🔎 Evidence Search Configuration
+## Evidence Search Configuration
 
-RAG validators can call `evidence-search`, which queries Tavily and caches sources in MongoDB. Search preference is configurable in MongoDB collection:
-
-```text
-newsdb.evidence_search_configs
-```
-
-The Admin API exposes CRUD endpoints:
+RAG validators call `evidence-search` through the v2 endpoint:
 
 ```http
-GET    /evidence-search/configs
-GET    /evidence-search/configs/{config_id}
-PUT    /evidence-search/configs/{config_id}
-PATCH  /evidence-search/configs/{config_id}
-DELETE /evidence-search/configs/{config_id}
+POST /search/evidence
 ```
 
-Example for category `1`:
+The service resolves preferred domains from MongoDB collection:
+
+```text
+newsdb.evidence_domain_profiles
+```
+
+Search responses are cached separately in:
+
+```text
+newsdb.evidence_search_cache
+```
+
+The cache key includes normalized assertion text, the v2 search policy and the domain profile version, and expires with `EVIDENCE_SEARCH_CACHE_TTL_SECONDS`.
+
+Domain profiles are contextual: category, subcategory, country, region, city and entity profiles can all contribute preferred domains. To seed or refresh them, use:
 
 ```bash
-curl -X PUT http://localhost:8400/evidence-search/configs/1 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "category_id": 1,
-    "category_name": "ECONOMÍA",
-    "preferred_domains": ["ine.es", "idescat.cat", "gencat.cat", "eurostat.ec.europa.eu"],
-    "query_terms": ["estadística oficial", "fuente oficial"],
-    "official_first": true,
-    "enabled": true
-  }'
+python scripts/k8s/apis/init-evidence-search-domains.py \
+  --source /path/to/profiles.yaml \
+  --refresh --confirm
 ```
-
-`evidence-search` first searches preferred domains with Tavily `include_domains`, then falls back to a general search when needed. Cached evidence stores the config version, so changing a config can refresh stale evidence.
 
 ---
 

@@ -708,7 +708,7 @@ Reglas:
 - evidence-search debe rechazar requests que no sean evidence-search-request-v2.
 - No soportar requests antiguos.
 - Si context está vacío, puede usar category como fallback dentro del nuevo schema.
-- Crear profiles.yaml configurable para:
+- Crear configuración Mongo `evidence_domain_profiles` para:
   - category
   - country
   - region
@@ -726,7 +726,7 @@ Crear módulo:
 evidence-search/
   app/
     domain_router/
-      profiles.yaml
+      perfiles de dominio en Mongo
       profiles_loader.py
       resolver.py
       scoring.py
@@ -764,10 +764,10 @@ Reglas:
 - Incluir reason y matched_profiles.
 
 ====================================================================
-10. profiles.yaml inicial
+10. Perfil inicial de dominios
 ====================================================================
 
-Crear un profiles.yaml inicial con al menos estos perfiles:
+Crear un perfil inicial de dominios con al menos estos perfiles:
 
 source_types:
   official:
@@ -1215,7 +1215,7 @@ Debe poder cargar/refrescar perfiles de dominios preferentes para:
 - cities
 - entities
 
-Debe usar el nuevo schema de configuración usado por evidence-search/domain_router/profiles.yaml o por la colección Mongo correspondiente si el proyecto ya guarda esta configuración en Mongo.
+Debe usar el nuevo schema de configuración usado por la colección Mongo `evidence_domain_profiles` o por la colección Mongo correspondiente si el proyecto ya guarda esta configuración en Mongo.
 
 La configuración final debe soportar este modelo:
 
@@ -1337,9 +1337,9 @@ Permitir indicar si se carga desde YAML o desde defaults internos.
 
 Ejemplos:
 
-python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --dry-run
+python scripts/k8s/apis/init-evidence-search-domains.py --source /path/to/profiles.yaml --dry-run
 
-python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --refresh --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py --source /path/to/profiles.yaml --refresh --confirm
 
 5. Idempotencia
 
@@ -1399,20 +1399,20 @@ Si actualmente se guarda en MongoDB:
 
 Si actualmente se guarda en ConfigMap/YAML:
 
-- adaptar profiles.yaml
+- adaptar perfiles de dominio en Mongo
 - adaptar el script para generar/cargar la configuración coherentemente
-- evidence-search debe leer profiles.yaml al arrancar
+- evidence-search debe leer perfiles de dominio desde Mongo al arrancar
 
 Si existen ambos mecanismos:
 
 - definir una prioridad clara:
   1. MongoDB si está habilitado por variable de entorno
-  2. profiles.yaml como fallback local
+  2. fallback mínimo en código si Mongo no tiene perfiles
 
 Variables de entorno sugeridas:
 
 EVIDENCE_DOMAIN_CONFIG_BACKEND=mongo|yaml
-EVIDENCE_DOMAIN_CONFIG_PATH=/app/domain_router/profiles.yaml
+EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles
 EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles
 
 ====================================================================
@@ -1492,11 +1492,11 @@ db.clients_quotas.countDocuments()
 
 2. Recarga de dominios en dry-run:
 
-python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --dry-run
+python scripts/k8s/apis/init-evidence-search-domains.py --source /path/to/profiles.yaml --dry-run
 
 3. Recarga real:
 
-python scripts/k8s/apis/init-evidence-search-domains.py --source evidence-search/app/domain_router/profiles.yaml --refresh --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py --source /path/to/profiles.yaml --refresh --confirm
 
 4. Verificación:
 

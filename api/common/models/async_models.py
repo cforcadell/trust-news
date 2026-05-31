@@ -2,6 +2,17 @@ from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional, Dict, Any
 from enum import Enum, IntEnum
 from common.models.veredicto import Validacion
+from common.models.protocol_models import (
+    AssertionContext,
+    AssertionsDocumentV2,
+    AssertionValidationPayloadV2,
+    ContextConfidence,
+    EnrichedAssertion,
+    SearchHints,
+    SourceDocumentStorage,
+    build_assertions_document_v2,
+    build_assertion_validation_payload_v2,
+)
 
 
 # ============================================================
@@ -22,10 +33,51 @@ class ValidatorAddress(BaseModel):
 
 
 class Assertion(BaseModel):
-    """Represents a single assertion extracted from text."""
-    idAssertion: str
+    """Represents one enriched assertion while preserving chain-edge aliases.
+
+    idAssertion/categoryId are retained only for adapters that call the current
+    Solidity contract. New protocol documents use assertion_id/category.
+    """
+    idAssertion: Optional[str] = None
     text: str
-    categoryId: int
+    categoryId: Optional[int] = None
+    assertion_id: Optional[int | str] = None
+    assertion_index: Optional[int] = None
+    category: Optional[str | int] = None
+    subcategory: str = "unknown"
+    context: AssertionContext = Field(default_factory=AssertionContext)
+    search_hints: SearchHints = Field(default_factory=SearchHints)
+    context_confidence: ContextConfidence = Field(default_factory=ContextConfidence)
+
+    def model_post_init(self, __context):
+        if self.assertion_id is None and self.idAssertion is not None:
+            self.assertion_id = self.idAssertion
+        if self.idAssertion is None and self.assertion_id is not None:
+            self.idAssertion = str(self.assertion_id)
+        if self.assertion_index is None:
+            try:
+                self.assertion_index = max(0, int(self.assertion_id or self.idAssertion or 1) - 1)
+            except Exception:
+                self.assertion_index = 0
+        if self.category is None and self.categoryId is not None:
+            self.category = self.categoryId
+        if self.categoryId is None and self.category is not None:
+            try:
+                self.categoryId = int(self.category)
+            except Exception:
+                self.categoryId = 0
+
+    def to_enriched(self) -> EnrichedAssertion:
+        return EnrichedAssertion(
+            assertion_id=self.assertion_id or self.idAssertion or 1,
+            assertion_index=self.assertion_index or 0,
+            text=self.text,
+            category=self.category if self.category is not None else (self.categoryId or 0),
+            subcategory=self.subcategory,
+            context=self.context,
+            search_hints=self.search_hints,
+            context_confidence=self.context_confidence,
+        )
 
 
 class AssertionExtended(Assertion):
@@ -207,6 +259,7 @@ class AssertionGeneratedPayload(BaseModel):
     assertions: List[Assertion]
     publisher: str
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    assertions_document: Optional[AssertionsDocumentV2] = None
 
 
 class AssertionsGeneratedResponse(BaseModel):
@@ -245,7 +298,7 @@ class PublishWithAssertionsRequest(BaseModel):
 # ============================================================
 
 class UploadIpfsPayload(BaseModel):
-    document: Document
+    document: Dict[str, Any] | Document | AssertionsDocumentV2
 
 
 class UploadIpfsRequest(BaseModel):
@@ -309,6 +362,8 @@ class RequestValidationPayload(BaseModel):
     text: str
     context: Optional[str] = None
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    assertion_validation_payload: Optional[AssertionValidationPayloadV2] = None
+    source_document_cid: Optional[str] = None
 
 
 class RequestValidationRequest(BaseModel):
@@ -333,6 +388,9 @@ class ValidationCompletedPayload(BaseModel):
     tx_hash: str
     validator_alias: str
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    sources: Optional[List[Dict[str, Any]]] = None
+    evidence_used: Optional[List[Dict[str, Any]]] = None
+    evidence_search_response: Optional[Dict[str, Any]] = None
 
 
 class ValidationCompletedResponse(BaseModel):
@@ -360,6 +418,7 @@ class LightValidationRequestPayload(BaseModel):
     client_id: Optional[str] = None
     correlation_id: str
     timestamp: str
+    assertion_validation_payload: Optional[AssertionValidationPayloadV2] = None
 
 
 class LightValidationRequest(BaseModel):
@@ -380,6 +439,8 @@ class LightValidationResponsePayload(BaseModel):
     confidence: Optional[float | str] = None
     sources: Optional[List[Dict[str, Any]]] = None
     evidence_used: Optional[List[Dict[str, Any]]] = None
+    assertion_validation_payload: Optional[Dict[str, Any]] = None
+    evidence_search_response: Optional[Dict[str, Any]] = None
     timestamp: str
     correlation_id: str
     error: Optional[str] = None

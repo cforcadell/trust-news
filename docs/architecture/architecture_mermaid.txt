@@ -1,37 +1,65 @@
-graph TD
-  subgraph Frontend
-    A[Web UI / Frontend]
-  end
+# TrustNews architecture diagrams
 
-  subgraph API_Services
-    B[api/news-handler]
-    C[api/news-chain]
-    D[api/admin]
-    E[api/generate-asertions]
-    F[api/validate-asertions]
-    G[ipfs-fastapi]
-  end
+## Component view
 
-  subgraph Infrastructure
-    H[Kafka Cluster]
-    I[MongoDB]
-    J[Blockchain / Ethereum]
-  end
+```mermaid
+flowchart LR
+    Client[Client / Frontend] --> Gateway[gateway]
+    Gateway --> Handler[news-handler]
+    Handler <--> Mongo[(MongoDB<br/>news, events, validations)]
+    Handler --> Admin[admin<br/>quotas]
 
-  A -->|HTTP REST| B
-  A -->|HTTP REST| D
-  B -->|Kafka Prod: fake_news_requests_generate| E
-  B -->|Kafka Prod: fake_news_requests_ipfs| G
-  B -->|Kafka Prod: fake_news_requests_blockchain| C
-  B -->|Kafka Prod: fake_news_requests_validate| F
-  E -->|Kafka Resp: fake_news_responses| B
-  G -->|Kafka Resp: fake_news_responses| B
-  C -->|Kafka Resp: fake_news_responses| B
-  F -->|Kafka Resp: fake_news_responses| B
-  C -->|Blockchain calls| J
-  B -->|MongoDB writes/reads| I
-  D -->|MongoDB reads| I
-  D -->|Kafka consumes: fake_news_responses| H
-  B -->|Internal HTTP| G
-  B -->|Internal HTTP| C
-  B -->|Internal HTTP| D
+    Handler -- generate_assertions --> Kafka[(Kafka)]
+    Kafka --> Generate[generate-asertions]
+    Generate -- assertions_generated / assertions_not_generated --> Kafka
+    Kafka --> Handler
+
+    Handler -- upload_ipfs --> Kafka
+    Kafka --> IPFS[ipfs-fastapi]
+    IPFS --> IPFSStore[(IPFS)]
+    IPFS -- ipfs_uploaded --> Kafka
+
+    Handler -- register_blockchain --> Kafka
+    Kafka --> Chain[news-chain]
+    Chain <--> Contract[(Smart contract)]
+    Chain -- blockchain_registered / validation_completed --> Kafka
+
+    Contract -- ValidationRequested event --> Validate[validate-asertions workers]
+    Validate --> IPFS
+    Validate -- register validation tx --> Contract
+
+    Handler -- light_validation_request --> Kafka
+    Kafka --> Validate
+    Validate -- light_validation_completed --> Kafka
+
+    Validate -- RAG only<br/>POST /search/evidence --> Evidence[evidence-search]
+    Evidence <--> Mongo
+    Evidence --> Tavily[Tavily API]
+```
+
+## Data contracts
+
+```mermaid
+flowchart TD
+    A[GenerateAssertionsRequest] --> B[assertions_generated]
+    B --> C[assertions-document-v2]
+    C --> D[EnrichedAssertion<br/>category + subcategory + context + search_hints]
+    D --> E[to_chain_assertion]
+    E --> F[Contract assertion<br/>idAssertion + text + categoryId]
+
+    D --> G[assertion-validation-payload-v2]
+    G --> H[validate-asertions]
+    H --> I[ValidatorAPIResponse]
+    H --> J[LightValidationResponse]
+```
+
+## Category boundary
+
+```mermaid
+flowchart LR
+    OffChain[Off-chain protocol category<br/>string or int] --> Mapper[category_id_for_chain]
+    Mapper --> ChainCat[On-chain categoryId<br/>1..10]
+    ChainCat --> ContractSelection[Validator selection by category]
+    OffChain --> DomainRouter[Domain router<br/>category/subcategory/context]
+    DomainRouter --> EvidenceDomains[Preferred evidence domains]
+```

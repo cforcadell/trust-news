@@ -1,56 +1,41 @@
 {
-  "search.exclude": {
-    "**/.git": true,
-    "**/node_modules": true,
-    "**/dist": true,
-    "**/build": true,
-    "**/coverage": true,
-
-    "**/__pycache__": true,
-    "**/.pytest_cache": true,
-    "**/.mypy_cache": true,
-    "**/.ruff_cache": true,
-    "**/.venv": true,
-    "**/venv": true,
-
-    "**/volumes": true,
-    "**/volumes/**": true,
-    "**/backup": true,
-    "**/backup/**": true,
-
-    "**/*.log": true,
-    "**/*.pem": true,
-    "**/*.key": true,
-    "**/*.crt": true,
-    "**/*.tar": true,
-    "**/*.zip": true,
-    "**/*.gz": true
-  },
-
   "files.watcherExclude": {
-    "**/.git/**": true,
-    "**/node_modules/**": true,
-    "**/dist/**": true,
-    "**/build/**": true,
-    "**/coverage/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.git/index.lock": true,
 
+    "**/node_modules/**": true,
+    "**/.venv/**": true,
+    "**/venv/**": true,
     "**/__pycache__/**": true,
     "**/.pytest_cache/**": true,
     "**/.mypy_cache/**": true,
     "**/.ruff_cache/**": true,
+
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/target/**": true,
+    "**/.terraform/**": true,
+
+    "**/coverage/**": true,
+    "**/logs/**": true,
+    "**/*.log": true
+  },
+
+  "search.exclude": {
+    "**/node_modules/**": true,
     "**/.venv/**": true,
     "**/venv/**": true,
-
-    "**/volumes/**": true,
-    "**/backup/**": true,
-
-    "**/*.log": true,
-    "**/*.pem": true,
-    "**/*.key": true,
-    "**/*.crt": true,
-    "**/*.tar": true,
-    "**/*.zip": true,
-    "**/*.gz": true
+    "**/__pycache__/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.mypy_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/target/**": true,
+    "**/coverage/**": true,
+    "**/logs/**": true,
+    "**/*.log": true
   },
 
   "files.exclude": {
@@ -58,12 +43,29 @@
     "**/.pytest_cache": true,
     "**/.mypy_cache": true,
     "**/.ruff_cache": true,
-    "**/volumes": true,
-    "**/backup": true
+    "**/*.pyc": true
   },
 
-  "typescript.disableAutomaticTypeAcquisition": true,
-  "javascript.suggest.autoImports": false,
-  "typescript.suggest.autoImports": false,
-  "typescript.tsserver.maxTsServerMemory": 1024
+  "git.autorefresh": false,
+  "git.autoRepositoryDetection": "openEditors",
+  "git.detectSubmodules": false,
+  "git.scanRepositories": [],
+
+  "typescript.tsserver.maxTsServerMemory": 1024,
+  "npm.autoDetect": "off",
+
+  "python.analysis.exclude": [
+    "**/node_modules",
+    "**/.venv",
+    "**/venv",
+    "**/__pycache__",
+    "**/dist",
+    "**/build",
+    "**/coverage",
+    "**/logs"
+  ],
+  "python.analysis.indexing": true,
+  "python.analysis.diagnosticMode": "openFilesOnly",
+
+  "extensions.ignoreRecommendations": true
 }

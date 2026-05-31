@@ -20,6 +20,13 @@ from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking, s
 from common.utils.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple,cid_to_multihash_tuple
 from common.models.veredicto import Veredicto, Validacion
 from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationMode, ValidatorConfigEvent, ValidatorConfigEventPayload
+from common.models.protocol_models import (
+    AssertionsDocumentV2,
+    AssertionValidationPayloadV2,
+    SourceDocumentStorage,
+    build_assertion_validation_payload_v2,
+    build_assertions_document_v2,
+)
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
 from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
 from common.utils.llm_json import strip_json_markdown
@@ -223,29 +230,62 @@ def build_prompt_content(texto: Any, contexto: Optional[str] = None, evidences: 
     return "\n\n".join(parts)
 
 
+
+def payload_context_for_prompt(payload_v2: AssertionValidationPayloadV2) -> str:
+    return json.dumps({
+        "mode": payload_v2.mode,
+        "post_id": payload_v2.post_id,
+        "assertion": payload_v2.assertion.model_dump(mode="json"),
+        "source_document": payload_v2.source_document.model_dump(mode="json"),
+    }, ensure_ascii=False)
+
+
+def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Validacion, str, Dict[str, Any], Optional[Dict[str, Any]]]:
+    if not is_automatic_validator() or ai_validator is None:
+        raise RuntimeError(f"Validator type {VALIDATOR_TYPE.name} does not execute automatic LLM validation")
+    logger.info(f"[validate-asertions] received assertion-validation-payload-v2 mode={payload_v2.mode} assertion_id={payload_v2.assertion.assertion_id}")
+    evidences, evidence_response = fetch_evidences_for_payload(payload_v2)
+    result_text = ai_validator.verificar_asercion(
+        payload_v2.assertion.text,
+        payload_context_for_prompt(payload_v2),
+        evidences,
+    )
+    verdict, description, extras = parse_validator_api_response(result_text)
+    if evidences and not extras.get("sources"):
+        extras["sources"] = evidences
+    if evidences and not extras.get("evidence_used"):
+        extras["evidence_used"] = evidences
+    return verdict, description, extras, evidence_response
+
 def openrouter_model_for_current_type(model: str) -> str:
     if VALIDATOR_TYPE == ValidatorType.LLM_SEARCH_VALIDATION and ONLINE_SEARCH_ENABLED and not model.endswith(":online"):
         return f"{model}:online"
     return model
 
 
-def fetch_evidences_for_assertion(assertion_text: str, contexto: Optional[str] = None, category: Optional[int] = None) -> List[Dict[str, Any]]:
+def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if VALIDATOR_TYPE != ValidatorType.RAG_EVIDENCE_VALIDATION or not USE_EVIDENCE_SEARCH:
-        return []
-    payload = {
-        "order_id": None,
-        "assertion_text": assertion_text,
-        "temporal_context": contexto,
-        "category": str(category) if category is not None else None,
-        "max_sources": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
+        return [], None
+    request_payload = {
+        "schema_version": "evidence-search-request-v2",
+        "assertion": payload_v2.assertion.model_dump(mode="json"),
+        "search_policy": {
+            "mode": "official_first",
+            "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
+            "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
+            "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
+            "fallback_to_general_search": True,
+        },
     }
     try:
-        resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidences", json=payload, timeout=30.0)
+        logger.info(f"[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling evidence-search")
+        resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, timeout=30.0)
         resp.raise_for_status()
-        return resp.json().get("sources", []) or []
+        response = resp.json()
+        return response.get("evidences", []) or response.get("sources", []) or [], response
     except Exception as e:
         logger.warning(f"⚠️ evidence-search failed; RAG validator will answer with no evidences: {e}")
-        return []
+        return [], None
 
 class MistralValidator(AIValidator):
     def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
@@ -437,17 +477,12 @@ async def handle_light_validation_request(req: LightValidationRequest):
     error = None
     extras = {}
     try:
-        result_text, consulted_evidences = await asyncio.to_thread(
-            verificar_asercion_con_evidencias,
-            payload.assertion_text,
-            payload.original_text,
-            payload.category,
+        if payload.assertion_validation_payload is None:
+            raise ValueError("Missing assertion-validation-payload-v2 in LIGHT request")
+        verdict, description, extras, evidence_response = await asyncio.to_thread(
+            validate_payload_v2,
+            payload.assertion_validation_payload,
         )
-        verdict, description, extras = parse_validator_api_response(result_text)
-        if consulted_evidences and not extras.get("sources"):
-            extras["sources"] = consulted_evidences
-        if consulted_evidences and not extras.get("evidence_used"):
-            extras["evidence_used"] = consulted_evidences
     except Exception as e:
         error = str(e)
         description = error
@@ -470,6 +505,8 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "confidence": extras.get("confidence"),
             "sources": extras.get("sources", []),
             "evidence_used": extras.get("evidence_used", []),
+            "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
+            "evidence_search_response": evidence_response if 'evidence_response' in locals() else None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "correlation_id": payload.correlation_id,
             "error": error
@@ -536,25 +573,11 @@ app = FastAPI(title="Validate Asertions API")
 # Funciones internas
 # =========================================================
 def verificar_asercion_con_evidencias(texto: Any, contexto: Optional[str] = None, category: Optional[int] = None) -> tuple[str, List[Dict[str, Any]]]:
-    if not is_automatic_validator() or ai_validator is None:
-        raise RuntimeError(f"Validator type {VALIDATOR_TYPE.name} does not execute automatic LLM validation")
-    assertion_text, normalized_context = normalize_assertion_input(texto, contexto)
-    evidences = fetch_evidences_for_assertion(assertion_text, normalized_context, category)
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            return ai_validator.verificar_asercion(assertion_text, normalized_context, evidences), evidences
-        except HTTPException as e:
-            # Si es un error de Rate Limit (429), esperamos y reintentamos
-            if e.status_code == 429:
-                if attempt < max_retries - 1:
-                    wait_time = 10 ** attempt  # Espera 1s, luego 2s...
-                    logger.warning(f"⚠️ API Rate Limit (429). Reintentando en {wait_time}s (Intento {attempt + 1}/{max_retries})...")
-                    time.sleep(wait_time)
-                    continue
-            # Si es otro error o ya superamos los intentos, lanzamos la excepción
-            logger.error(f"❌ Error devuelto por la API de IA - HTTP {e.status_code}: {e.detail}")
-            raise e
+    if isinstance(texto, dict) and texto.get("schema_version") == "assertion-validation-payload-v2":
+        payload_v2 = AssertionValidationPayloadV2(**texto)
+        verdict, description, extras, _evidence_response = validate_payload_v2(payload_v2)
+        return json.dumps({"resultado": verdict.name, "descripcion": description, **extras}, ensure_ascii=False), extras.get("sources", []) or extras.get("evidence_used", []) or []
+    raise ValueError("validate-asertions accepts assertion-validation-payload-v2 for automatic validation flows")
 
 
 def verificar_asercion(texto: Any, contexto: Optional[str] = None, category: Optional[int] = None) -> str:
@@ -605,7 +628,9 @@ def validator_config_ipfs_hash_from_chain() -> Optional[str]:
 async def registrar_validacion_internal(
     postId: Any,
     assertion_id: Any,
-    veredicto: Veredicto
+    veredicto: Veredicto,
+    extras: Optional[Dict[str, Any]] = None,
+    evidence_response: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
     Sube primero el documento de validación a IPFS
@@ -616,12 +641,16 @@ async def registrar_validacion_internal(
         # -----------------------------------------
         # 1. Documento de validación
         # -----------------------------------------
+        extras = extras or {}
         validation_doc = {
             "postId": str(postId),
             "assertionIndex": assertion_id+1,
             "validator": ACCOUNT_ADDRESS,
             "estado": int(veredicto.estado),
-            "descripcion": veredicto.texto
+            "descripcion": veredicto.texto,
+            "sources": extras.get("sources", []),
+            "evidence_used": extras.get("evidence_used", []),
+            "evidence_search_response": evidence_response,
         }
 
         validation_doc_bytes = json.dumps(
@@ -943,50 +972,44 @@ class BlockchainEventAgent:
             post_json = json.loads(resp.text)
             logger.info("🧩 JSON parseado correctamente desde IPFS")
             
-            content_obj = json.loads(post_json.get("content", "{}"))
+            if isinstance(post_json, dict) and post_json.get("schema_version") == "assertions-document-v2":
+                content_obj = post_json
+            elif isinstance(post_json, dict) and "assertions" in post_json and "text" in post_json:
+                content_obj = post_json
+            else:
+                content_obj = json.loads(post_json.get("content", "{}"))
 
-            # ------------------------------------------------
-            # Buscar assertion correspondiente
-            # ------------------------------------------------
-            assertions = content_obj.get("assertions", [])
-            logger.info(f"🔍 Total assertions encontradas en documento: {len(assertions)}")
-
-            if assertion_index < 0 or assertion_index >= len(assertions):
-                logger.warning(
-                    f"⚠️ Assertion index fuera de rango | "
-                    f"post={post_id} assertion={assertion_index}"
+            if isinstance(content_obj, dict) and "assertions" in content_obj and "post" not in content_obj:
+                logger.info(f"[validate-asertions] detected minimal document shape from IPFS cid={cid}, reconstructing AssertionsDocumentV2")
+                assertions_document = build_assertions_document_v2(
+                    text=content_obj.get("text", ""),
+                    assertions=content_obj.get("assertions", []),
+                    mode=ValidationMode.BLOCKCHAIN,
+                    provider="news-handler",
                 )
+            else:
+                assertions_document = AssertionsDocumentV2(**content_obj)
+            logger.info(f"[validate-asertions] loaded assertions-document-v2 from IPFS cid={cid}")
+
+            assertion = next((item for item in assertions_document.assertions if int(item.assertion_index) == int(assertion_index)), None)
+            if assertion is None:
+                logger.warning(f"⚠️ Assertion index fuera de rango | post={post_id} assertion={assertion_index}")
                 return
 
-            assertion = assertions[assertion_index]
-
-            logger.info(f"✅ Assertion localizada correctamente | assertion={assertion_index}")
-
-            text = assertion.get("text", "")
-            if not text:
-                logger.warning(
-                    f"⚠️ Assertion sin texto | "
-                    f"post={post_id} assertion={assertion_index}"
-                )
-                return
-
-
-            logger.info(
-                f"📝 Texto assertion obtenido ({len(text)} chars) | "
-                f"assertion={assertion_index}"
+            payload_v2 = build_assertion_validation_payload_v2(
+                mode=ValidationMode.BLOCKCHAIN,
+                assertion=assertion,
+                storage=SourceDocumentStorage.IPFS,
+                post_id=post_id,
+                cid=cid,
+                order_id=None,
             )
-            
 
         try:
-            document = {
-                "text": text,
-                "metadata": content_obj.get("metadata", {})
-            }
-            result_text = await asyncio.to_thread(verificar_asercion, document)
-            estado_enum, descripcion, _extras = parse_validator_api_response(result_text)
+            estado_enum, descripcion, extras, evidence_response = await asyncio.to_thread(validate_payload_v2, payload_v2)
 
             veredicto = Veredicto(descripcion, estado_enum)
-            tx_hash, receipt = await registrar_validacion_internal(post_id, assertion_index, veredicto)
+            tx_hash, receipt = await registrar_validacion_internal(post_id, assertion_index, veredicto, extras, evidence_response)
             if receipt and receipt.get("status") == 1:
                 logger.info(f"✅ Validación registrada en blockchain: {tx_hash}")
             else:

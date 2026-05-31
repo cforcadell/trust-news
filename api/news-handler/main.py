@@ -74,6 +74,13 @@ from common.utils.ipfs_client import get_ipfs_text
 from common.utils.scoring import calculate_order_assertion_results as calculate_order_assertion_results_common
 from common.utils.validator_registry import light_validators_for_category
 from common.utils.mongo import build_mongo_uri_from_env
+from common.models.protocol_models import (
+    AssertionsDocumentV2,
+    EnrichedAssertion,
+    SourceDocumentStorage,
+    build_assertions_document_v2,
+    build_assertion_validation_payload_v2,
+)
 
 # =========================================================
 # Cargar .env
@@ -136,6 +143,67 @@ orders_collection = None
 events_collection = None
 validations_collection = None
 
+
+
+def assertion_to_enriched(assertion: Any, index: int = 0) -> EnrichedAssertion:
+    raw = assertion.model_dump() if hasattr(assertion, "model_dump") else dict(assertion or {})
+    raw["assertion_id"] = raw["idAssertion"]
+    raw["assertion_index"] = int(raw["idAssertion"]) - 1
+    if "category" not in raw and "categoryId" in raw:
+        raw["category"] = raw["categoryId"]
+    return EnrichedAssertion(**raw)
+
+
+def assertion_dump_for_news(assertion: EnrichedAssertion) -> dict:
+    item = assertion.model_dump(mode="json")
+    item["idAssertion"] = str(assertion.assertion_id)
+    item.pop("assertion_id", None)
+    item.pop("assertion_index", None)
+    return item
+
+
+def assertions_document_from_generation(parsed_payload: Any, text: str, mode: ValidationMode) -> AssertionsDocumentV2:
+    generated_doc = getattr(parsed_payload, "assertions_document", None)
+    if generated_doc:
+        return generated_doc if isinstance(generated_doc, AssertionsDocumentV2) else AssertionsDocumentV2(**generated_doc)
+    assertions = getattr(parsed_payload, "assertions", []) or []
+    return build_assertions_document_v2(
+        text=text,
+        assertions=[assertion_to_enriched(a, i) for i, a in enumerate(assertions)],
+        mode=mode,
+        provider=getattr(parsed_payload, "publisher", "generate-asertions"),
+    )
+
+
+def assert_no_order_id_in_protocol_document(document: AssertionsDocumentV2) -> None:
+    dumped = document.model_dump(mode="json", exclude_none=True)
+    if "order_id" in json.dumps(dumped, ensure_ascii=False):
+        raise ValueError("assertions-document-v2 for IPFS must not contain order_id")
+
+
+def protocol_assertions_for_mongo(document: AssertionsDocumentV2) -> list:
+    return [assertion_dump_for_news(a) for a in document.assertions]
+
+
+def chain_assertions_for_contract(document: AssertionsDocumentV2) -> list:
+    return [a.to_chain_assertion() for a in document.assertions]
+
+
+def minimal_document_for_order(text: str, assertions: list) -> dict:
+    return {
+        "text": text,
+        "assertions": assertions,
+    }
+
+
+def build_assertions_document_from_order(order_doc: dict) -> AssertionsDocumentV2:
+    return build_assertions_document_v2(
+        text=order_doc.get("text", ""),
+        assertions=order_doc.get("assertions", []) or [],
+        mode=normalize_validation_mode(order_doc.get("validation_mode", ValidationMode.BLOCKCHAIN)),
+        provider="news-handler",
+    )
+
 # =========================================================
 # Helpers DB & Kafka security
 # =========================================================
@@ -159,21 +227,35 @@ async def update_order(order_id: str, update: dict):
     if "$push" in update:
         mongo_update["$push"] = update.pop("$push")
 
+    if "$unset" in update:
+        mongo_update["$unset"] = update.pop("$unset")
+
     if "$set" in update:
         mongo_update["$set"] = update.pop("$set")
     elif update:
         mongo_update["$set"] = update
 
+    # 🔍 DEBUG: Log update operation
+    if "$set" in mongo_update and "post_id" in mongo_update["$set"]:
+        post_id = mongo_update["$set"]["post_id"]
+        logger.debug(f"🔄 Updating order {order_id} with post_id={post_id} (type={type(post_id).__name__})")
+    
     result = await orders_collection.update_one({"order_id": order_id}, mongo_update)
+    
     if result.matched_count == 0:
-        logger.error(f"Order {order_id} not found in MongoDB")
+        logger.error(f"❌ Order {order_id} not found in MongoDB - update FAILED")
+    elif result.modified_count > 0:
+        logger.debug(f"✅ Order {order_id} updated successfully (modified_count={result.modified_count})")
+    else:
+        logger.debug(f"⚠️ Order {order_id} matched but not modified (modified_count=0)")
 
 async def get_order_doc(order_id: str) -> Optional[dict]:
     doc = await orders_collection.find_one({"order_id": order_id})
     return doc
 
 async def get_order_id_by_post_id(post_id: str) -> Optional[str]:
-    doc = await orders_collection.find_one({"postId": post_id})
+    query_post_id = int(post_id) if str(post_id).isdigit() else post_id
+    doc = await orders_collection.find_one({"post_id": query_post_id})
     return doc["order_id"] if doc else None
 
 
@@ -280,7 +362,6 @@ def datetime_to_event_ms(value: Optional[datetime]) -> Optional[int]:
 
 
 async def find_validation_request_timestamp_ms(order_id: str, id_assertion: str, id_validator: str) -> Optional[int]:
-    validator_lc = str(id_validator or "").lower()
     assertion_id = str(id_assertion or "")
     query = {
         "order_id": order_id,
@@ -289,13 +370,7 @@ async def find_validation_request_timestamp_ms(order_id: str, id_assertion: str,
             {"payload.idValidator": {"$regex": f"^{re.escape(str(id_validator or ''))}$", "$options": "i"}},
             {"payload.validator_id": {"$regex": f"^{re.escape(str(id_validator or ''))}$", "$options": "i"}},
         ],
-        "$and": [{
-            "$or": [
-                {"payload.idAssertion": assertion_id},
-                {"payload.assertion_id": assertion_id},
-                {"payload.assertion_index": assertion_id},
-            ]
-        }]
+        "payload.idAssertion": assertion_id
     }
     event = await events_collection.find_one(query, {"timestamp": 1}, sort=[("timestamp", 1)])
     timestamp = (event or {}).get("timestamp")
@@ -398,32 +473,22 @@ def calculate_order_assertion_results(order: dict) -> dict:
     return calculate_order_assertion_results_common(order, get_cached_validator_config)
 
 
-def light_document_for_order(order_id: str, text: str, assertions: list) -> dict:
-    return {
-        "order_id": order_id,
-        "text": text,
-        "assertions": assertions,
-        "metadata": {
-            "generated_by": "news-handler",
-            "timestamp": asyncio.get_event_loop().time(),
-            "validation_mode": ValidationMode.LIGHT.value,
-            "ipfs": "not_available",
-            "blockchain": "not_available"
-        }
-    }
+def light_document_for_order(order_id: str, assertions_document: AssertionsDocumentV2) -> dict:
+    assertions_list = protocol_assertions_for_mongo(assertions_document)
+    return minimal_document_for_order(assertions_document.post.original_text, assertions_list)
 
 
 
-async def dispatch_light_validation_requests(order_id: str, text: str, assertions_list: list, client_id: Optional[str] = None):
+async def dispatch_light_validation_requests(order_id: str, text: str, assertions_document: AssertionsDocumentV2, client_id: Optional[str] = None):
     validators_info = []
     validation_requests = {}
     no_validator_assertions = []
     total_pending = 0
 
-    for index, assertion in enumerate(assertions_list):
-        assertion_id = str(assertion.get("idAssertion", index))
-        category_id = int(assertion.get("categoryId", 0) or 0)
-        assertion_text = assertion.get("text", "")
+    for index, assertion in enumerate(assertions_document.assertions):
+        assertion_id = str(assertion.assertion_id)
+        category_id = assertion.category_id_for_chain()
+        assertion_text = assertion.text
         validators = get_light_validators_for_category(category_id)
         validator_ids = [str(v.get("validator")) for v in validators]
 
@@ -431,7 +496,10 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
             "idAssertion": assertion_id,
             "validatorAddresses": validator_ids,
             "text": assertion_text,
-            "categoryId": category_id
+            "categoryId": category_id,
+            "category": assertion.category,
+            "subcategory": assertion.subcategory,
+            "reputation": {str(v.get("validator")): float(v.get("reputation", 1.0) or 1.0) for v in validators},
         })
         validation_requests[assertion_id] = validator_ids
 
@@ -442,13 +510,21 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
 
         for validator_id in validator_ids:
             correlation_id = f"{order_id}:{assertion_id}:{validator_id}"
+            payload_v2 = build_assertion_validation_payload_v2(
+                mode=ValidationMode.LIGHT,
+                assertion=assertion,
+                storage=SourceDocumentStorage.INLINE,
+                post_id=None,
+                cid=None,
+                order_id=order_id,
+            )
             msg = LightValidationRequest(
                 order_id=order_id,
                 payload={
                     "order_id": order_id,
                     "postId": None,
                     "validation_mode": ValidationMode.LIGHT,
-                    "assertion_index": index,
+                    "assertion_index": assertion.assertion_index,
                     "idAssertion": assertion_id,
                     "assertion_text": assertion_text,
                     "category": category_id,
@@ -456,12 +532,13 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
                     "original_text": text,
                     "client_id": client_id,
                     "correlation_id": correlation_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "assertion_validation_payload": payload_v2,
                 }
             )
             await producer.send_and_wait(TOPIC_LIGHT_VALIDATION_REQUESTS, msg.model_dump_json().encode("utf-8"))
-            await log_event(order_id, msg.action, TOPIC_LIGHT_VALIDATION_REQUESTS, msg.payload.model_dump())
-            logger.info(f"[LIGHT] Dispatching validation request to Kafka | order_id={order_id} assertion={assertion_id} validator={validator_id}")
+            await log_event(order_id, msg.action, TOPIC_LIGHT_VALIDATION_REQUESTS, msg.payload.model_dump(mode="json"))
+            logger.info(f"[news-handler] mode=LIGHT publishing assertion-validation-payload-v2 assertion_id={assertion_id}")
             total_pending += 1
 
     status = "VALIDATION_PENDING" if total_pending else "NO_VALIDATORS_AVAILABLE"
@@ -478,25 +555,31 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
     return total_pending
 
 
-async def start_light_flow(order_id: str, text: str, assertions_list: list, client_id: Optional[str] = None):
+async def start_light_flow(order_id: str, text: str, assertions_document: AssertionsDocumentV2, client_id: Optional[str] = None):
     logger.info(f"[LIGHT] Starting lightweight validation flow | order_id={order_id}")
     logger.info(f"[LIGHT] Skipping IPFS and blockchain publication | order_id={order_id}")
-    document = light_document_for_order(order_id, text, assertions_list)
+    assertions_list = protocol_assertions_for_mongo(assertions_document)
+    document = minimal_document_for_order(text, assertions_list)
     await update_order(order_id, {
         "$set": {
             "validation_mode": ValidationMode.LIGHT.value,
             "assertions": assertions_list,
             "document": document,
             "cid": None,
-            "postId": None,
             "tx_hash": None,
             "hash_text": hash_text_to_multihash(text).digest,
             "status": "DOCUMENT_CREATED",
+            "validations": {},
+            "validation_requests": {},
+            "validators": [],
+            "validators_pending": 0,
             "updated_at": datetime.now(timezone.utc).isoformat()
-        }
+        },
+        "$unset": {"assertions_document_cid": ""}
     })
-    logger.info(f"[LIGHT] Generated assertions | order_id={order_id} count={len(assertions_list)}")
-    await dispatch_light_validation_requests(order_id, text, assertions_list, client_id)
+    logger.info(f"[LIGHT] Generated assertions-document-v2 | order_id={order_id} count={len(assertions_list)}")
+    await dispatch_light_validation_requests(order_id, text, assertions_document, client_id)
+
 # ===========================
 # Helpers para hashes
 # ===========================
@@ -687,13 +770,14 @@ async def process_kafka_message(data: dict):
             if not doc:
                 return
 
-            assertions = parsed.payload.assertions or []
-            assertions_list = [a.model_dump() if isinstance(a, Assertion) else a for a in assertions]
-            num_assertions = len(assertions_list)
             validation_mode = normalize_validation_mode(doc.get("validation_mode", getattr(parsed.payload, "validation_mode", ValidationMode.BLOCKCHAIN)))
+            assertions_document = assertions_document_from_generation(parsed.payload, doc.get("text", ""), validation_mode)
+            assertions_list = protocol_assertions_for_mongo(assertions_document)
+            chain_assertions = chain_assertions_for_contract(assertions_document)
+            num_assertions = len(assertions_list)
 
             if validation_mode == ValidationMode.LIGHT:
-                await start_light_flow(order_id, doc.get("text", ""), assertions_list, doc.get("client_id"))
+                await start_light_flow(order_id, doc.get("text", ""), assertions_document, doc.get("client_id"))
                 return
 
             logger.info(f"[BLOCKCHAIN] Using existing blockchain validation flow | order_id={order_id}")
@@ -726,32 +810,22 @@ async def process_kafka_message(data: dict):
                     logger.error(f"[{order_id}] ❌ Error validando cuotas desde el worker: {e}")
                     return
 
-            # Crear documento tipado (usamos DocModel/MetadataModel para validar si quieres)
-            try:
-                metadata = MetadataModel(generated_by="news-handler", timestamp=asyncio.get_event_loop().time())
-                document_model = DocModel(
-                    order_id=order_id,
-                    text=doc.get("text", ""),
-                    assertions=assertions_list,
-                    metadata=metadata
-                )
-                document = document_model.model_dump()
-            except ValidationError as e:
-                logger.exception(f"[{order_id}] Error validando Document model: {e}")
-                # Caemos de forma tolerante: construimos document crudo
-                document = {
-                    "order_id": order_id,
-                    "text": doc.get("text", ""),
-                    "assertions": assertions_list,
-                    "metadata": {"generated_by": "news-handler", "timestamp": asyncio.get_event_loop().time()}
-                }
-
+            assert_no_order_id_in_protocol_document(assertions_document)
+            document = minimal_document_for_order(doc.get("text", ""), assertions_list)
             await update_order(order_id, {
-                "assertions": assertions_list,
-                "document": document,
-                "status": "DOCUMENT_CREATED"
+                "$set": {
+                    "assertions": assertions_list,
+                    "document": document,
+                    "status": "DOCUMENT_CREATED",
+                    "validations": {},
+                    "validation_requests": {},
+                    "validators": [],
+                    "validators_pending": 0,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             })
-            logger.info(f"[{order_id}] 📄 Documento y aserciones guardadas en MongoDB.")
+            logger.info(f"[news-handler] mode=BLOCKCHAIN uploading minimal document to IPFS")
+            logger.info(f"[news-handler] verified IPFS document does not contain order_id")
 
             # Enviar upload_ipfs request usando UploadIpfsRequest
             try:
@@ -804,15 +878,23 @@ async def process_kafka_message(data: dict):
                 logger.warning(f"[{order_id}] ⚠️ Documento no encontrado para IPFS update.")
                 return
 
+            if not doc or "assertions" not in doc:
+                logger.error(f"[{order_id}] ❌ Documento incompleto para IPFS update.")
+                return
+
             await update_order(order_id, {
-                "cid": cid,
-                "status": "IPFS_UPLOADED"
+                "$set": {
+                    "cid": cid,
+                    "status": "IPFS_UPLOADED"
+                },
+                "$unset": {"assertions_document_cid": ""}
             })
             logger.info(f"[{order_id}] ✅ IPFS subido con CID={cid}")
+            logger.info(f"[news-handler] mode=BLOCKCHAIN ipfs_cid={cid}")
 
-            # Generar request a blockchain (emulado o real)
-            await handle_blockchain_request(order_id, doc.get("text", ""), cid, doc.get("assertions", []))
-            await update_order(order_id, {"status": "BLOCKCHAIN_PENDING"})
+            chain_assertions = chain_assertions_for_contract(build_assertions_document_from_order(doc))
+            await handle_blockchain_request(order_id, doc.get("text", ""), cid, chain_assertions)
+            await update_order(order_id, {"$set": {"status": "BLOCKCHAIN_PENDING"}})
             logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain enviada (emulada o real según configuración).")
 
         # ================================================================
@@ -821,13 +903,20 @@ async def process_kafka_message(data: dict):
         elif action == "blockchain_registered":
             payload = parsed.payload.model_dump()
             raw_post_id = payload.get("postId")
-            postId = str(raw_post_id).strip() if raw_post_id is not None else None
+            # 🔍 CRITICAL: Convert postId to int immediately to avoid type mismatch
+            try:
+                postId = int(raw_post_id) if raw_post_id is not None else None
+                logger.debug(f"[{order_id}] 📊 blockchain_registered received postId={postId} (type={type(postId).__name__})")
+            except (ValueError, TypeError) as e:
+                logger.error(f"[{order_id}] ❌ Failed to convert postId to int: {raw_post_id} - {e}")
+                postId = None
+            
             tx_hash = payload.get("tx_hash")
             hash_text = payload.get("hash_text")
             assertions_payload = payload.get("assertions", [])
 
-            if not postId:
-                logger.error(f"[{order_id}] ❌ blockchain_registered payload missing postId, aborting update.")
+            if postId is None:
+                logger.error(f"[{order_id}] ❌ blockchain_registered payload missing postId or invalid type, aborting update.")
                 return
 
             if not assertions_payload:
@@ -868,16 +957,23 @@ async def process_kafka_message(data: dict):
                     "categoryId": category_id
                 })
 
-            await update_order(order_id, {
-                "validators": validators_info,
-                "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
-                "status": "VALIDATION_PENDING",
-                "postId": postId,
-                "tx_hash": tx_hash,
-                "hash_text": hash_text
-            })
-
-            logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones).")
+            # 🔍 DEBUG: Log before update
+            update_payload = {
+                "$set": {
+                    "validators": validators_info,
+                    "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
+                    "status": "VALIDATION_PENDING",
+                    "post_id": postId,
+                    "tx_hash": tx_hash,
+                    "hash_text": hash_text
+                },
+                "$unset": {"assertions_document_cid": ""}
+            }
+            logger.debug(f"[{order_id}] 📤 Updating order with post_id={postId} (type={type(postId).__name__}), status=VALIDATION_PENDING")
+            
+            await update_order(order_id, update_payload)
+            
+            logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones). post_id={postId} type={type(postId).__name__}")
 
         # ================================================================
         # 4 request_validation  
@@ -989,7 +1085,6 @@ async def process_kafka_message(data: dict):
             status_val = Validacion(approval_raw)
             description = payload.get("description", "")
             category = payload.get("category")
-            assertion_index = payload.get("assertion_index")
             correlation_id = payload.get("correlation_id")
             error = payload.get("error")
 
@@ -1027,7 +1122,6 @@ async def process_kafka_message(data: dict):
                     "validator_config": validator_config_snapshot,
                     "validation_mode": ValidationMode.LIGHT.value,
                     "category": category,
-                    "assertion_index": assertion_index,
                     "correlation_id": correlation_id,
                     "sources": payload.get("sources", []),
                     "evidence_used": payload.get("evidence_used", []),
@@ -1036,7 +1130,9 @@ async def process_kafka_message(data: dict):
                     "response_time_seconds": response_time_seconds
                 }
                 await update_order(order_id, {"$set": {"validations": validations, "updated_at": datetime.now(timezone.utc).isoformat()}})
-                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, {**payload, "validator_config": validator_config_snapshot}, response_time_seconds)
+                validation_payload = {**payload, "validator_config": validator_config_snapshot}
+                validation_payload.pop("assertion_index", None)
+                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, validation_payload, response_time_seconds)
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
@@ -1109,6 +1205,9 @@ async def process_kafka_message(data: dict):
                     "tx_hash": tx_hash,
                     "validator_alias": validator_alias,
                     "validator_config": validator_config_snapshot,
+                    "sources": payload.get("sources", []),
+                    "evidence_used": payload.get("evidence_used", []),
+                    "evidence_search_response": payload.get("evidence_search_response"),
                     "response_time_seconds": response_time_seconds
                 }
 

@@ -80,7 +80,7 @@ Ejemplo: openai/gpt-5-mini pasa a openai/gpt-5-mini:online.
 
 ### Integracion RAG con evidence-search
 
-Para RAG_EVIDENCE_VALIDATION, si USE_EVIDENCE_SEARCH=true, el worker llama a POST {EVIDENCE_SEARCH_URL}/search/evidences.
+Para RAG_EVIDENCE_VALIDATION, si USE_EVIDENCE_SEARCH=true, el worker llama a POST {EVIDENCE_SEARCH_URL}/search/evidence usando evidence-search-request-v2.
 
 El resultado sources se inyecta en el prompt RAG como evidencias. Si el servicio falla, el validador continua con evidencias vacias y el prompt debe devolver UNKNOWN o INSUFFICIENT.
 
@@ -94,7 +94,7 @@ ValidatorAPIResponse y LightValidationResponsePayload soportan ahora:
 
 Esto permite conservar fuentes online y evidencias RAG hasta el frontend.
 
-## 3. Nuevo microservicio evidence-search
+## 3. Microservicio evidence-search
 
 Directorio: api/evidence-search/
 
@@ -108,26 +108,12 @@ Ficheros creados:
 Endpoints:
 
 - GET /health
-- POST /search/evidences
+- POST /search/evidence, flujo unico usado por validadores RAG. Recibe una asercion enriquecida, aplica domain_router y devuelve evidence-search-response-v2.
 
-Responsabilidad: normaliza la asercion, calcula hash SHA-256, busca en MongoDB por assertion_hash y solo llama a Tavily en cache miss.
+Responsabilidad: seleccionar dominios preferentes desde perfiles Mongo (`evidence_domain_profiles`) usando category, subcategory, entidades, ubicacion y tipos de fuente preferidos; construir queries; consultar Tavily si esta configurado; devolver evidencias normalizadas. Si Mongo no tiene perfiles, usa un fallback minimo en codigo.
 
-Coleccion MongoDB: assertion_evidences.
+Coleccion MongoDB de configuracion contextual: evidence_domain_profiles.
 
-Indices:
-
-- assertion_hash unico
-- last_query descendente
-- inserted_at descendente
-- search_provider
-
-Flujo interno:
-
-1. Normaliza assertion_text.
-2. Calcula assertion_hash.
-3. Busca documento cacheado.
-4. Si existe, no llama a Tavily, actualiza last_query y anade order_id/assertion_id con addToSet.
-5. Si no existe, llama a Tavily, normaliza fuentes, clasifica tipo/fiabilidad, guarda documento y devuelve JSON estructurado.
 
 Variables principales:
 

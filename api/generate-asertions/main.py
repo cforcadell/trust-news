@@ -30,6 +30,7 @@ from common.models.async_models import (
     Assertion,
     AssertionGeneratedPayload,
     TextoEntrada,
+    build_assertions_document_v2,
 )
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
@@ -74,7 +75,17 @@ MAX_ASSERTIONS = int(os.getenv("MAX_ASSERTIONS", "20"))
 def build_assertions_prompt(text: str) -> str:
     return (
         f"{PROMPT}\n\nTexto a analizar:\n{text}\n\n"
-        f" IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones ."
+        f"IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones.\n"
+        "Devuelve exclusivamente JSON válido con una clave assertions. "
+        "Cada elemento debe usar el schema assertions-document-v2 para una aserción enriquecida: "
+        "assertion_id, assertion_index, text, category, subcategory, context, search_hints y context_confidence. "
+        "No inventes contexto: usa listas vacías, null o unknown cuando no esté claro. "
+        "origin debe ser explicit, inferred o unknown; confidence siempre entre 0 y 1. "
+        "Usa snake_case en los campos nuevos. "
+        "En context.locations usa objetos como {name, type, country_code, region_code, city, origin, confidence}; no strings. "
+        "En context.temporal_context usa objetos como {value, type, origin, confidence}; no strings. "
+        "En context.entities usa objetos como {name, type, role, origin, confidence}; no strings. "
+        "Mantén idAssertion/categoryId solo si necesitas compatibilidad con la categoría on-chain."
     )
 
 # Timeouts / retries
@@ -93,7 +104,7 @@ app = FastAPI(title="Generate Assertions Worker (Typed)")
 # ============================================================
 
 def get_assertions_schema() -> dict:
-    """Genera el JSON Schema para List[Assertion] que los LLM deben seguir."""
+    """Genera el JSON Schema para List[Assertion] enriquecidas que los LLM deben seguir."""
     assertion_schema = Assertion.model_json_schema(by_alias=True)
     return {"type": "array", "items": assertion_schema}
 
@@ -317,6 +328,21 @@ async def publish_assertions_not_generated(
     logger.info(f"[{order_id}] Publicado assertions_not_generated en topic {OUTPUT_TOPIC}")
 
 
+
+
+def build_generated_document(text: str, assertions: List[Assertion], validation_mode) :
+    return build_assertions_document_v2(
+        text=text,
+        assertions=[a.to_enriched() if hasattr(a, "to_enriched") else a for a in assertions],
+        mode=validation_mode,
+        provider=AI_PROVIDER,
+        model={
+            "mistral": MISTRAL_MODEL,
+            "gemini": GEMINI_MODEL,
+            "openrouter": OPENROUTER_MODEL,
+        }.get(AI_PROVIDER),
+    )
+
 # ============================================================
 # Procesar mensaje Kafka entrante
 # ============================================================
@@ -370,9 +396,14 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
 
     # Construir respuesta tipada (AssertionsGeneratedResponse)
     try:
+        assertions_document = build_generated_document(req.payload.text, assertion_objs, req.payload.validation_mode)
+        logger.info(f"[generate-asertions] generated assertions-document-v2 assertions={len(assertions_document.assertions)}")
+        for assertion in assertions_document.assertions:
+            logger.info(f"[generate-asertions] assertion_id={assertion.assertion_id} category={assertion.category} subcategory={assertion.subcategory} location={[loc.country_code or loc.name for loc in assertion.context.locations]} entities={[ent.name for ent in assertion.context.entities]} temporal={[item.value for item in assertion.context.temporal_context]}")
         payload = AssertionGeneratedPayload(
             text=req.payload.text,
-            assertions=assertion_objs, # Se usa directamente la lista de modelos
+            assertions=assertion_objs,
+            assertions_document=assertions_document,
             publisher=AI_PROVIDER,
             validation_mode=req.payload.validation_mode
         )
@@ -483,7 +514,8 @@ async def extraer_texto(
         # No bloqueamos el return aunque falle la actualización, para no perjudicar al usuario si la BBDD de cuotas falla puntualmente.
 
     try:
-        payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, publisher=AI_PROVIDER)
+        assertions_document = build_generated_document(text, assertion_objs, "BLOCKCHAIN")
+        payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, assertions_document=assertions_document, publisher=AI_PROVIDER)
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=order_id, payload=payload)
         return response
     except ValidationError as e:

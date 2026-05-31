@@ -16,7 +16,7 @@ from common.utils.domain_utils import normalize_domain
 from common.utils.mongo import build_mongo_uri_from_env
 
 sys.path.append(os.path.dirname(__file__))
-from app.domain_router.profiles_loader import minimal_default_profiles
+from app.domain_router.profiles_loader import PROFILE_INDEX_DOC_TYPE, PROFILE_SUBSET_DOC_TYPE, load_profiles_from_mongo
 from app.domain_router.resolver import resolve_domains
 
 load_dotenv()
@@ -118,15 +118,6 @@ def normalized_assertion_for_cache(assertion: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def profile_version_from_doc(doc: Optional[Dict[str, Any]]) -> str:
-    if not doc:
-        return "minimal-default"
-    raw = doc.get("updated_at") or doc.get("version") or doc.get("profile_id") or "default"
-    if isinstance(raw, datetime):
-        return iso(raw)
-    return str(raw)
-
-
 def policy_for_cache(policy: Any) -> Dict[str, Any]:
     if hasattr(policy, "model_dump"):
         return policy.model_dump(mode="json")
@@ -146,12 +137,19 @@ def evidence_cache_key(assertion: Dict[str, Any], policy: Any, profile_version: 
 
 
 async def load_profile_bundle() -> tuple[Dict[str, Any], str]:
-    if domain_profile_collection is None:
-        return minimal_default_profiles(), "minimal-default"
-    doc = await domain_profile_collection.find_one({"profile_id": "default"}, {"_id": 0})
-    if not doc:
-        return minimal_default_profiles(), "minimal-default"
-    return doc.get("profiles") or doc, profile_version_from_doc(doc)
+    try:
+        return await load_profiles_from_mongo(domain_profile_collection)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def empty_domain_resolution() -> Dict[str, Any]:
+    return {
+        "selected_profiles": [],
+        "preferred_domains": [],
+        "fallback_used": True,
+        "reason": "preferred_domains_disabled",
+    }
 
 
 
@@ -202,7 +200,19 @@ def merge_tavily_results(*result_groups: List[Dict[str, Any]], max_sources: int)
 
 async def ensure_indexes():
     if domain_profile_collection is not None:
-        await domain_profile_collection.create_index("profile_id", unique=True)
+        await domain_profile_collection.create_index([("doc_type", 1), ("profile_id", 1)], name="idx_profile_docs")
+        await domain_profile_collection.create_index(
+            [("doc_type", 1), ("profile_id", 1)],
+            name="uniq_profile_index",
+            unique=True,
+            partialFilterExpression={"doc_type": PROFILE_INDEX_DOC_TYPE},
+        )
+        await domain_profile_collection.create_index(
+            [("doc_type", 1), ("profile_id", 1), ("subset", 1)],
+            name="uniq_profile_subset",
+            unique=True,
+            partialFilterExpression={"doc_type": PROFILE_SUBSET_DOC_TYPE},
+        )
     if cache_collection is not None:
         await cache_collection.create_index("cache_key", unique=True)
         await cache_collection.create_index("assertion_hash")
@@ -239,7 +249,11 @@ async def search_evidence(req: EvidenceSearchRequestV2):
     if not text:
         raise HTTPException(status_code=400, detail="assertion.text is required")
 
-    profiles, profile_version = await load_profile_bundle()
+    use_preferred_domains = bool(req.search_policy.use_preferred_domains)
+    if use_preferred_domains:
+        profiles, profile_version = await load_profile_bundle()
+    else:
+        profiles, profile_version = {}, "preferred-domains-disabled"
     cache_key = evidence_cache_key(assertion, req.search_policy, profile_version)
     now = utc_now()
 
@@ -252,9 +266,12 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             print(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
             return response
 
-    domain_resolution = resolve_domains(assertion, profiles, max_domains=req.search_policy.max_domains)
+    if use_preferred_domains:
+        domain_resolution = resolve_domains(assertion, profiles, max_domains=req.search_policy.max_domains)
+    else:
+        domain_resolution = empty_domain_resolution()
     logger_prefix = f"[domain-router] assertion_id={assertion.get('assertion_id')}"
-    print(f"{logger_prefix} selected_profiles={domain_resolution.get('selected_profiles')}")
+    print(f"{logger_prefix} use_preferred_domains={use_preferred_domains} selected_profiles={domain_resolution.get('selected_profiles')}")
 
     queries = build_queries_v2(assertion, domain_resolution, req.search_policy)
     for query in queries:

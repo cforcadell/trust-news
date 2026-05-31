@@ -271,6 +271,7 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
         "assertion": payload_v2.assertion.model_dump(mode="json"),
         "search_policy": {
             "mode": "official_first",
+            "use_preferred_domains": os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
             "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
             "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
             "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),

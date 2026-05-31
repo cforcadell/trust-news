@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class EvidenceSearchPolicy(BaseModel):
     mode: str = "official_first"
+    use_preferred_domains: bool = False
     max_domains: int = Field(default=8, ge=1, le=50)
     max_results: int = Field(default=10, ge=1, le=50)
     max_queries_per_domain: int = Field(default=2, ge=1, le=10)

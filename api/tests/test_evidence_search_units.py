@@ -50,6 +50,17 @@ def test_build_queries_v2_uses_preferred_domains_and_general_fallback():
     assert queries[-1].startswith("El paro")
 
 
+def test_build_queries_v2_skips_site_queries_when_preferred_domains_disabled():
+    policy = SimpleNamespace(max_queries_per_domain=2, fallback_to_general_search=True)
+    domain_resolution = evidence.empty_domain_resolution()
+
+    queries = evidence.build_queries_v2(enriched_assertion(), domain_resolution, policy)
+
+    assert queries
+    assert all(not query.startswith("site:") for query in queries)
+    assert queries[0].startswith("El paro")
+
+
 def test_evidence_from_source_v2_preserves_domain_resolution_metadata():
     domain_resolution = {
         "preferred_domains": [

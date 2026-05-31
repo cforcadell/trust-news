@@ -18,14 +18,12 @@ import importlib.util
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SOURCE = Path(__file__).resolve().with_name("evidence-domain-profiles.yaml")
 INIT_SCRIPT = REPO_ROOT / "scripts" / "k8s" / "apis" / "init-evidence-search-domains.py"
-PROFILE_ID = "default"
 DEFAULT_CACHE_COLLECTION = "evidence_search_cache"
 
 spec = importlib.util.spec_from_file_location("init_evidence_search_domains", INIT_SCRIPT)
@@ -55,25 +53,20 @@ def load_and_validate(source: Path) -> dict[str, Any]:
     return profiles
 
 
+def build_docs(profiles: dict[str, Any], args: argparse.Namespace) -> list[dict[str, Any]]:
+    return init_domains.build_profile_documents(profiles, source=Path(args.source))
+
+
 def print_summary(profiles: dict[str, Any], args: argparse.Namespace) -> None:
     summary = init_domains.summarize(profiles)
     for key, value in summary.items():
         print(f"[evidence-domains] {key}={value}")
+    print(f"[evidence-domains] profile_id={init_domains.PROFILE_ID}")
+    print(f"[evidence-domains] schema_version={init_domains.PROFILE_VERSION}")
     print(f"[evidence-domains] source={Path(args.source)}")
     print(f"[evidence-domains] dry_run={str(args.dry_run).lower()}")
     print(f"[evidence-domains] target={args.db}.{args.collection}")
     print(f"[evidence-domains] drop_cache={str(not args.keep_cache).lower()} collection={args.db}.{args.cache_collection}")
-
-
-def profile_doc(profiles: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    now = datetime.now(timezone.utc).isoformat()
-    return {
-        "profile_id": PROFILE_ID,
-        "version": f"contextual-v2-seed-{now}",
-        "updated_at": now,
-        "source": str(Path(args.source)),
-        "profiles": profiles,
-    }
 
 
 def reset_and_load_with_pymongo(profiles: dict[str, Any], args: argparse.Namespace) -> None:
@@ -83,6 +76,7 @@ def reset_and_load_with_pymongo(profiles: dict[str, Any], args: argparse.Namespa
     database = client[args.db]
     collection = database[args.collection]
     cache_collection = database[args.cache_collection]
+    docs = build_docs(profiles, args)
 
     existing_profile_docs = collection.count_documents({})
     existing_cache_docs = cache_collection.count_documents({}) if not args.keep_cache else 0
@@ -97,9 +91,10 @@ def reset_and_load_with_pymongo(profiles: dict[str, Any], args: argparse.Namespa
         print(f"[evidence-domains] dropping_collection={args.db}.{args.cache_collection}")
         cache_collection.drop()
 
-    collection.insert_one(profile_doc(profiles, args))
-    collection.create_index("profile_id", unique=True)
-    print("[evidence-domains] inserted_profile_id=default")
+    collection.insert_many(docs)
+    init_domains.create_profile_indexes(collection)
+    print(f"[evidence-domains] inserted_profile_id={init_domains.PROFILE_ID}")
+    print(f"[evidence-domains] inserted_profile_docs={len(docs)}")
     print("[evidence-domains] changes_applied=true result=reset-loaded")
 
 
@@ -119,9 +114,9 @@ def print_relevant_output(output: str) -> None:
             print(line)
 
 
-
 def reset_and_load_with_kubectl(profiles: dict[str, Any], args: argparse.Namespace) -> None:
-    doc_json_array = json.dumps([profile_doc(profiles, args)], ensure_ascii=False)
+    docs = build_docs(profiles, args)
+    doc_json_array = json.dumps(docs, ensure_ascii=False)
 
     print("[evidence-domains] backend=kubectl")
     preflight_js = """
@@ -176,10 +171,21 @@ if (!keepCache) {
         raise SystemExit(f"kubectl mongoimport failed with exit code {imported.returncode}")
 
     index_js = """
-db.getCollection(__TARGET_COLLECTION__).createIndex({profile_id: 1}, {unique: true});
+const col = db.getCollection(__TARGET_COLLECTION__);
+col.createIndex({doc_type: 1, profile_id: 1}, {name: "idx_profile_docs"});
+col.createIndex(
+  {doc_type: 1, profile_id: 1},
+  {name: "uniq_profile_index", unique: true, partialFilterExpression: {doc_type: "profile_index"}}
+);
+col.createIndex(
+  {doc_type: 1, profile_id: 1, subset: 1},
+  {name: "uniq_profile_subset", unique: true, partialFilterExpression: {doc_type: "profile_subset"}}
+);
 print("[evidence-domains] inserted_profile_id=default");
+print("[evidence-domains] inserted_profile_docs=" + __DOC_COUNT__);
 print("[evidence-domains] changes_applied=true result=reset-loaded");
 """.replace("__TARGET_COLLECTION__", json.dumps(args.collection))
+    index_js = index_js.replace("__DOC_COUNT__", str(len(docs)))
     indexed = run_command(mongo_cmd, index_js)
     print_relevant_output(indexed.stdout)
     if indexed.returncode != 0:

@@ -76,16 +76,6 @@ def build_assertions_prompt(text: str) -> str:
     return (
         f"{PROMPT}\n\nTexto a analizar:\n{text}\n\n"
         f"IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones.\n"
-        "Devuelve exclusivamente JSON válido con una clave assertions. "
-        "Cada elemento debe usar el schema assertions-document-v2 para una aserción enriquecida: "
-        "assertion_id, assertion_index, text, category, subcategory, context, search_hints y context_confidence. "
-        "No inventes contexto: usa listas vacías, null o unknown cuando no esté claro. "
-        "origin debe ser explicit, inferred o unknown; confidence siempre entre 0 y 1. "
-        "Usa snake_case en los campos nuevos. "
-        "En context.locations usa objetos como {name, type, country_code, region_code, city, origin, confidence}; no strings. "
-        "En context.temporal_context usa objetos como {value, type, origin, confidence}; no strings. "
-        "En context.entities usa objetos como {name, type, role, origin, confidence}; no strings. "
-        "Mantén idAssertion/categoryId solo si necesitas compatibilidad con la categoría on-chain."
     )
 
 # Timeouts / retries

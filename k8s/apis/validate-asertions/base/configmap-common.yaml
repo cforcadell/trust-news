@@ -8,40 +8,13 @@ data:
   # MODEL: "arcee-ai/trinity-large-preview:free"
   # API_URL: "https://openrouter.ai/api/v1/chat/completions"
 
-  VALIDATION_PROMPT: |
-    Actúa como un validador factual objetivo y prudente.
-
-    Valida únicamente la aserción proporcionada usando conocimiento factual ampliamente aceptado, información pública conocida y razonamiento lógico.
-
-    Devuelve exclusivamente un JSON válido con esta estructura exacta:
-
-    {
-      "resultado": "TRUE | FALSE | UNKNOWN",
-      "descripcion": "Justificación clara y objetiva del resultado"
-    }
-
-    Criterios:
-    - Usa "TRUE" solo si la aserción es claramente factual y correcta.
-    - Usa "FALSE" solo si la aserción es claramente incorrecta o contradice hechos conocidos.
-    - Usa "UNKNOWN" si falta evidencia suficiente, la aserción es ambigua, incompleta, opinable, subjetiva, demasiado genérica, depende de información reciente/cambiante o no puede verificarse con certeza.
-    - Ante cualquier duda razonable, usa "UNKNOWN".
-    - No uses TRUE por plausibilidad ni FALSE por falta de evidencia.
-    - IMPORTANTE: Si falta contexto temporal pero la aserción puede evaluarse con conocimiento actual, interprétala a día de hoy e indícalo en "descripcion".
-    - Si contiene varias afirmaciones y alguna no es verificable, usa "UNKNOWN", salvo contradicción clara que justifique "FALSE".
-    - No inventes fuentes, enlaces, citas ni datos concretos.
-
-    Restricciones:
-    - No incluyas texto fuera del JSON.
-    - No añadas campos adicionales.
-    - No uses markdown ni bloques de código.
-    - No uses comillas simples.
-    - El valor de "resultado" debe ser exactamente "TRUE", "FALSE" o "UNKNOWN".
-    - El idioma de la respuesta debe ser el mismo que el de la aserción validada.
+  
 
   VALIDATOR_TYPE: "1"
   USE_EVIDENCE_SEARCH: "false"
   ONLINE_SEARCH_ENABLED: "false"
   EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
+  EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN: "1"
   EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS: "false"
 
   LLM_MEMORY_VALIDATION_PROMPT: |
@@ -49,6 +22,7 @@ data:
     Valida la aserción usando tu conocimiento general y razonamiento lógico.
     No inventes información.
     Si no puedes verificarlo con suficiente seguridad, devuelve UNKNOWN.
+    Explica porque has tomado su decision de forma breve y objetiva.
     Devuelve exclusivamente JSON válido:
     {
       "resultado": "TRUE | FALSE | UNKNOWN",
@@ -59,6 +33,7 @@ data:
     Actúa como validador factual con búsqueda online.
     Busca evidencias actuales en Internet cuando sea necesario.
     Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
+    Explica porque has tomado su decision de forma breve y objetiva citando las fuentes.
     Devuelve exclusivamente JSON válido:
     {
       "resultado": "TRUE | FALSE | UNKNOWN",
@@ -78,10 +53,11 @@ data:
     No uses conocimiento interno salvo razonamiento lógico básico.
     No inventes fuentes.
     No accedas a URLs externas.
-    Si las evidencias no son suficientes, devuelve UNKNOWN o INSUFFICIENT.
+    Si las evidencias no son suficientes, devuelve UNKNOWN.
+    Explica porque has tomado su decision de forma breve y objetiva citando las fuentes.
     Devuelve exclusivamente JSON válido:
     {
-      "resultado": "TRUE | FALSE | UNKNOWN | SUPPORTED | REFUTED | INSUFFICIENT | CONFLICTED | PARTIAL",
+      "resultado": "TRUE | FALSE | UNKNOWN",
       "descripcion": "Justificación breve y objetiva",
       "confidence": "HIGH | MEDIUM | LOW",
       "evidence_used": [

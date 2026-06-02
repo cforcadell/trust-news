@@ -172,7 +172,7 @@ if (!keepCache) {
 
     index_js = """
 const col = db.getCollection(__TARGET_COLLECTION__);
-col.createIndex({doc_type: 1, profile_id: 1}, {name: "idx_profile_docs"});
+try { col.dropIndex("idx_profile_docs"); } catch (e) { print("[evidence-domains] legacy_idx_profile_docs_absent=true"); }
 col.createIndex(
   {doc_type: 1, profile_id: 1},
   {name: "uniq_profile_index", unique: true, partialFilterExpression: {doc_type: "profile_index"}}

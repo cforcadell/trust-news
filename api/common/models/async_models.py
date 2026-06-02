@@ -141,11 +141,7 @@ class ValidatorType(IntEnum):
     RAG_EVIDENCE_VALIDATION = 3
     DETERMINISTIC_VALIDATION = 4
     HUMAN = 5
-    # Backward-compatible aliases for existing cached/IPFS configs.
-    General_AI = 1
-    Trained_AI = 2
-    Dedicated_Agent = 3
-    Human = 5
+
 
 
 VALIDATOR_TYPE_WEIGHTS = {
@@ -177,9 +173,9 @@ def normalize_validation_result(result: Any) -> str:
             return "FALSE"
         return "UNKNOWN"
     value = str(raw or "").upper()
-    if value in {"TRUE", "SUPPORTED"}:
+    if value in {"TRUE"}:
         return "TRUE"
-    if value in {"FALSE", "REFUTED"}:
+    if value in {"FALSE"}:
         return "FALSE"
     return "UNKNOWN"
 
@@ -192,7 +188,7 @@ class ValidatorStatus(IntEnum):
 
 class ValidatorConfig(BaseModel):
     name: str
-    type: ValidatorType = ValidatorType.General_AI
+    type: ValidatorType = ValidatorType.LLM_MEMORY_VALIDATION
     provider: str
     model: str
     active_date: str

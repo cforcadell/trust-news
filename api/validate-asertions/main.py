@@ -110,10 +110,10 @@ Debes validar la aserción usando exclusivamente las evidencias proporcionadas.
 No uses conocimiento interno salvo razonamiento lógico básico.
 No inventes fuentes.
 No accedas a URLs externas.
-Si las evidencias no son suficientes, devuelve UNKNOWN o INSUFFICIENT.
+Si las evidencias no son suficientes, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
-  "resultado": "TRUE | FALSE | UNKNOWN | SUPPORTED | REFUTED | INSUFFICIENT | CONFLICTED | PARTIAL",
+  "resultado": "TRUE | FALSE | UNKNOWN",
   "descripcion": "Justificación breve y objetiva",
   "confidence": "HIGH | MEDIUM | LOW",
   "evidence_used": [
@@ -126,15 +126,16 @@ Devuelve exclusivamente JSON válido:
   ]
 }"""
 
-LEGACY_VALIDATION_PROMPT = os.getenv("VALIDATION_PROMPT")
-LLM_MEMORY_VALIDATION_PROMPT = os.getenv("LLM_MEMORY_VALIDATION_PROMPT", LEGACY_VALIDATION_PROMPT or DEFAULT_MEMORY_PROMPT)
-LLM_SEARCH_VALIDATION_PROMPT = os.getenv("LLM_SEARCH_VALIDATION_PROMPT", LEGACY_VALIDATION_PROMPT or DEFAULT_SEARCH_PROMPT)
-RAG_EVIDENCE_VALIDATION_PROMPT = os.getenv("RAG_EVIDENCE_VALIDATION_PROMPT", LEGACY_VALIDATION_PROMPT or DEFAULT_RAG_PROMPT)
+
+LLM_MEMORY_VALIDATION_PROMPT = os.getenv("LLM_MEMORY_VALIDATION_PROMPT", "")
+LLM_SEARCH_VALIDATION_PROMPT = os.getenv("LLM_SEARCH_VALIDATION_PROMPT", "")
+RAG_EVIDENCE_VALIDATION_PROMPT = os.getenv("RAG_EVIDENCE_VALIDATION_PROMPT", "")
 VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.LLM_MEMORY_VALIDATION)))))
 USE_EVIDENCE_SEARCH = os.getenv("USE_EVIDENCE_SEARCH", "false").lower() == "true"
 ONLINE_SEARCH_ENABLED = os.getenv("ONLINE_SEARCH_ENABLED", "false").lower() == "true"
 EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
+EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN = int(os.getenv("EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN", "1"))
 AUTOMATIC_VALIDATOR_TYPES = {
     ValidatorType.LLM_MEMORY_VALIDATION,
     ValidatorType.LLM_SEARCH_VALIDATION,
@@ -274,6 +275,7 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
             "use_preferred_domains": os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
             "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
             "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
+            "max_results_per_domain": EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN,
             "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
             "fallback_to_general_search": True,
         },
@@ -405,9 +407,9 @@ def parse_validator_api_response(result_text: str) -> Tuple[Validacion, str, Dic
         "sources": parsed_result.sources or [],
         "evidence_used": parsed_result.evidence_used or [],
     }
-    if normalized in {"TRUE", "SUPPORTED"}:
+    if normalized in {"TRUE"}:
         return Validacion.TRUE, parsed_result.descripcion, extras
-    if normalized in {"FALSE", "REFUTED"}:
+    if normalized in {"FALSE"}:
         return Validacion.FALSE, parsed_result.descripcion, extras
     return Validacion.UNKNOWN, parsed_result.descripcion, extras
 

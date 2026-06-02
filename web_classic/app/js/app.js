@@ -40,11 +40,7 @@ const VALIDATOR_TYPE_LABELS = {
     LLM_SEARCH_VALIDATION: "LLM con búsqueda",
     RAG_EVIDENCE_VALIDATION: "RAG con evidencias",
     DETERMINISTIC_VALIDATION: "Determinista",
-    HUMAN: "Humano",
-    General_AI: "LLM memoria",
-    Trained_AI: "LLM con búsqueda",
-    Dedicated_Agent: "RAG con evidencias",
-    Human: "Humano"
+    HUMAN: "Humano"
 };
 
 const keycloak = new Keycloak({
@@ -1105,7 +1101,7 @@ function renderDetails(container, data, events = []) {
     // --- Contenido de las subpestañas
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
-              .filter(([k, v]) => !["_id", "document", "assertions", "text", "status", "validators_pending", "validation_requests", "validators", "validations"].includes(k))
+              .filter(([k, v]) => !["_id", "document", "assertions", "text", "status", "validators_pending", "validation_requests", "validators", "validations", "assertion_results"].includes(k))
               .map(([k, v]) => {
                   if (k === "text" && typeof v === "object" && v?.text) v = v.text;
 
@@ -2441,7 +2437,7 @@ function renderTableData(container, data) {
         const existing = new Set();
         data.forEach(row => Object.keys(row).forEach(k => existing.add(k)));
         keys = preferred.filter(k => existing.has(k));
-        [...existing].forEach(k => { if (!keys.includes(k) && !["_id", "document", "assertions", "validations", "validators", "text"].includes(k)) keys.push(k); });
+        [...existing].forEach(k => { if (!keys.includes(k) && !["_id", "document", "assertions", "validations", "validators", "assertion_results", "text"].includes(k)) keys.push(k); });
     } else {
         const keysSet = new Set();
         data.forEach(row => Object.keys(row).forEach(k => keysSet.add(k)));

@@ -5,6 +5,11 @@ from common.models.async_models import (
 )
 
 
+def test_validator_type_has_no_legacy_aliases():
+    for legacy_name in ("General_AI", "Trained_AI", "Dedicated_Agent", "Human"):
+        assert legacy_name not in ValidatorType.__members__
+
+
 def test_validator_type_weights():
     assert get_validator_type_weight(ValidatorType.LLM_MEMORY_VALIDATION) == 0.25
     assert get_validator_type_weight(ValidatorType.LLM_SEARCH_VALIDATION) == 0.5
@@ -14,8 +19,8 @@ def test_validator_type_weights():
 
 
 def test_result_normalization():
-    assert normalize_validation_result("SUPPORTED") == "TRUE"
-    assert normalize_validation_result("REFUTED") == "FALSE"
+    assert normalize_validation_result("SUPPORTED") == "UNKNOWN"
+    assert normalize_validation_result("REFUTED") == "UNKNOWN"
     assert normalize_validation_result("INSUFFICIENT") == "UNKNOWN"
     assert normalize_validation_result(1) == "TRUE"
     assert normalize_validation_result(2) == "FALSE"

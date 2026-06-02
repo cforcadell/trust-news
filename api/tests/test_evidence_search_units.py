@@ -99,3 +99,20 @@ def test_evidence_cache_key_normalizes_text_and_uses_profile_version():
     assert key_a == key_b
     assert key_a != key_c
     assert len(key_a) == 64
+
+
+def test_merge_tavily_results_limits_same_domain():
+    results_a = [
+        {"url": "https://ine.es/doc1", "title": "Doc1", "content": "Text1"},
+        {"url": "https://ine.es/doc2", "title": "Doc2", "content": "Text2"},
+    ]
+    results_b = [
+        {"url": "https://sepe.es/doc", "title": "Doc3", "content": "Text3"},
+        {"url": "https://ine.es/doc3", "title": "Doc4", "content": "Text4"},
+    ]
+
+    merged = evidence.merge_tavily_results(results_a, results_b, max_sources=10, max_results_per_domain=1)
+
+    assert len(merged) == 2
+    assert sum(1 for item in merged if "ine.es" in item["url"]) == 1
+    assert sum(1 for item in merged if "sepe.es" in item["url"]) == 1

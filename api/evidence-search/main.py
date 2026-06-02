@@ -181,16 +181,21 @@ async def call_tavily(query: str, max_sources: int, include_domains: Optional[Li
         return resp.json()
 
 
-def merge_tavily_results(*result_groups: List[Dict[str, Any]], max_sources: int) -> List[Dict[str, Any]]:
+def merge_tavily_results(*result_groups: List[Dict[str, Any]], max_sources: int, max_results_per_domain: int) -> List[Dict[str, Any]]:
     merged = []
     seen_urls = set()
+    domain_counts: Dict[str, int] = {}
     for results in result_groups:
         for result in results or []:
             url = result.get("url") or ""
             dedupe_key = url or f"{result.get('title', '')}:{result.get('content', '')}"
             if dedupe_key in seen_urls:
                 continue
+            domain = normalize_domain(urlparse(url).netloc)
+            if domain_counts.get(domain, 0) >= max_results_per_domain:
+                continue
             seen_urls.add(dedupe_key)
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
             merged.append(result)
             if len(merged) >= max_sources:
                 return merged
@@ -200,7 +205,9 @@ def merge_tavily_results(*result_groups: List[Dict[str, Any]], max_sources: int)
 
 async def ensure_indexes():
     if domain_profile_collection is not None:
-        await domain_profile_collection.create_index([("doc_type", 1), ("profile_id", 1)], name="idx_profile_docs")
+        index_names = [idx.get("name") async for idx in domain_profile_collection.list_indexes()]
+        if "idx_profile_docs" in index_names:
+            await domain_profile_collection.drop_index("idx_profile_docs")
         await domain_profile_collection.create_index(
             [("doc_type", 1), ("profile_id", 1)],
             name="uniq_profile_index",
@@ -285,7 +292,12 @@ async def search_evidence(req: EvidenceSearchRequestV2):
                 include_domains = [query.split()[0].replace("site:", "")]
             try:
                 tavily = await call_tavily(query, req.search_policy.max_results, include_domains=include_domains or None)
-                raw_results = merge_tavily_results(raw_results, tavily.get("results", []) or [], max_sources=req.search_policy.max_results)
+                raw_results = merge_tavily_results(
+                    raw_results,
+                    tavily.get("results", []) or [],
+                    max_sources=req.search_policy.max_results,
+                    max_results_per_domain=req.search_policy.max_results_per_domain,
+                )
                 if len(raw_results) >= req.search_policy.max_results:
                     break
             except Exception as e:

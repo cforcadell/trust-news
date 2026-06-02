@@ -577,6 +577,8 @@ kubectl logs deployment/evidence-search -n apis
 
 Verificacion esperada: una busqueda con `city=Barcelona` y `entity=Ayuntamiento de Barcelona` debe priorizar `barcelona.cat`, `seu.barcelona.cat` y `bop.diba.cat` cuando `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true`.
 
+Nota: evidence-search aplica un límite por dominio (`max_results_per_domain`) para fomentar diversidad de fuentes; el valor por defecto es `1`.
+
 ---
 
 ## 10. MongoDB: Consultas Y Limpieza De Datos
@@ -662,6 +664,8 @@ db.clients_quotas.countDocuments()
 ### 13.1 Limpiar Imagenes No Usadas Dentro De Nodos Kind
 
 ```bash
+docker system df
+
 for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
   echo "==== Limpiando $node ===="
   docker exec "$node" crictl rmi --prune || true

@@ -761,19 +761,11 @@ function renderProcessingFlow(currentStatus, validatorsPending = 0, totalValidat
 
     const currentIndex = steps.indexOf(currentStatus);
     const isValidated = currentStatus === "VALIDATED";
-    const validationLabel = totalValidations > 0
-        ? `${validatorsPending}/${totalValidations}`
-        : validatorsPending > 0 ? `${validatorsPending}` : "";
-
     return `
         <div class="process-flow">
             ${steps.map((step, i) => {
                 let cls = "process-step";
                 let label = "";
-
-                if (step === "VALIDATION_PENDING") {
-                    label = validationLabel;
-                }
 
                 if (isValidated) {
                     cls += " done";
@@ -792,6 +784,12 @@ function renderProcessingFlow(currentStatus, validatorsPending = 0, totalValidat
 
 function pluralizeEs(count, singular, plural) {
     return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatMaxTwoDecimals(value) {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return "0";
+    return (Math.round(n * 100) / 100).toFixed(2).replace(/\.?0+$/, "");
 }
 
 function parseEventTimestamp(value) {
@@ -1160,9 +1158,9 @@ function renderDetails(container, data, events = []) {
                 </div>
                 <div class="validator-votes" aria-label="Votos de validadores">
                     <span class="summary-kicker">${t("summary.validatorVotes")}</span>
-                    <span class="summary-chip chip-confirmed">✅ ${summary.validatorVotes.true} True</span>
-                    <span class="summary-chip chip-contradicted">❌ ${summary.validatorVotes.false} False</span>
-                    <span class="summary-chip chip-inconclusive">❔ ${summary.validatorVotes.unknown} Unknown</span>
+                    ${renderSummaryVoteChip(summary.validatorVotes.true, "True", "chip-confirmed")}
+                    ${renderSummaryVoteChip(summary.validatorVotes.false, "False", "chip-contradicted")}
+                    ${renderSummaryVoteChip(summary.validatorVotes.unknown, "Unknown", "chip-inconclusive")}
                 </div>
             </div>
         </div>
@@ -2408,6 +2406,11 @@ function renderVotePill(count, label, className) {
     return `<span class="vote-pill ${className}${zeroClass}">${safeText(count)} ${safeText(label)}</span>`;
 }
 
+function renderSummaryVoteChip(value, label, className) {
+    const zeroClass = Number(value || 0) === 0 ? " summary-chip-zero" : "";
+    return `<span class="summary-chip ${className}${zeroClass}">${formatMaxTwoDecimals(value)} ${safeText(label)}</span>`;
+}
+
 function compactText(value, size = 90) {
     if (!value) return "";
     const text = String(value).replace(/\s+/g, " ").trim();
@@ -2525,18 +2528,86 @@ function getAssertionResult(orderData, assertionId) {
 
 function scorePercent(value) {
     const n = Number(value || 0);
-    return `${Math.round(n * 1000) / 10}%`;
+    return `${formatMaxTwoDecimals(n * 100)}%`;
+}
+
+function renderScorePill(value, label, className) {
+    const roundedPercent = Number(formatMaxTwoDecimals(Number(value || 0) * 100));
+    const zeroClass = roundedPercent === 0 ? " vote-pill-zero" : "";
+    return `<span class="vote-pill ${className}${zeroClass}">${safeText(label)} ${scorePercent(value)}</span>`;
 }
 
 function renderScorePills(result) {
     const scores = result?.scores || {TRUE: 0, FALSE: 0, UNKNOWN: 0};
     return `
         <div class="vote-pills score-pills">
-            <span class="vote-pill vote-true">TRUE ${scorePercent(scores.TRUE)}</span>
-            <span class="vote-pill vote-false">FALSE ${scorePercent(scores.FALSE)}</span>
-            <span class="vote-pill vote-unknown">UNKNOWN ${scorePercent(scores.UNKNOWN)}</span>
+            ${renderScorePill(scores.TRUE, "TRUE", "vote-true")}
+            ${renderScorePill(scores.FALSE, "FALSE", "vote-false")}
+            ${renderScorePill(scores.UNKNOWN, "UNKNOWN", "vote-unknown")}
         </div>
     `;
+}
+
+function preferredDomainsStatusFromPolicy(usePreferredDomains) {
+    if (usePreferredDomains === true) {
+        return { enabled: true, label: "Sí", title: "EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true", className: "preferred-domains-on" };
+    }
+    if (usePreferredDomains === false) {
+        return { enabled: false, label: "No", title: "EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=false", className: "preferred-domains-off" };
+    }
+    return null;
+}
+
+function normalizeBooleanFlag(value) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (["true", "1", "yes", "si", "sí"].includes(normalized)) return true;
+        if (["false", "0", "no"].includes(normalized)) return false;
+    }
+    return null;
+}
+
+function preferredDomainsStatusFromEvidenceResponse(response) {
+    if (!response || typeof response !== "object") return null;
+
+    const explicitPolicy = normalizeBooleanFlag(response.search_policy?.use_preferred_domains);
+    const fromPolicy = preferredDomainsStatusFromPolicy(explicitPolicy);
+    if (fromPolicy) return fromPolicy;
+
+    const resolution = response.domain_resolution || {};
+    const preferredDomains = Array.isArray(resolution.preferred_domains) ? resolution.preferred_domains : [];
+    const queries = Array.isArray(response.queries_executed) ? response.queries_executed : [];
+    const hasSiteQueries = queries.some(query => String(query || "").trim().startsWith("site:"));
+
+    if (preferredDomains.length || hasSiteQueries) {
+        return {
+            enabled: true,
+            label: preferredDomains.length ? `Sí (${preferredDomains.length})` : "Sí",
+            title: preferredDomains.map(item => item.domain).filter(Boolean).join(", "),
+            className: "preferred-domains-on"
+        };
+    }
+
+    return null;
+}
+
+function preferredDomainsInfoForValidation(info = {}) {
+    const config = info.validator_config?.config || info.config || info.validator_config || {};
+    const explicitPolicy = normalizeBooleanFlag(
+        info.search_policy?.use_preferred_domains
+        ?? info.payload?.search_policy?.use_preferred_domains
+        ?? config.evidence_search_use_preferred_domains
+    );
+    return preferredDomainsStatusFromPolicy(explicitPolicy)
+        || preferredDomainsStatusFromEvidenceResponse(info.evidence_search_response || info.payload?.evidence_search_response)
+        || { enabled: null, label: "No consta", title: "Sin política explícita en esta validación", className: "preferred-domains-unknown" };
+}
+
+function renderPreferredDomainsBadge(info) {
+    if (!info) return "";
+    const title = info.title ? ` title="${safeText(info.title)}"` : "";
+    return `<span class="preferred-domains-badge ${info.className}"${title}>preferred domains: ${safeText(info.label)}</span>`;
 }
 
 function validationEvidenceItems(info = {}) {
@@ -2626,7 +2697,9 @@ function renderValidationsTree(container, validations, assertions, orderData = n
             const validatorTooltip = renderValidatorProviderModelTitle(info);
             const weightedDetail = assertionResult?.details?.find(d => String(d.validator).toLowerCase() === String(validator).toLowerCase());
             const typeLabel = weightedDetail ? validatorTypeLabel(weightedDetail.validator_type) : validatorTypeLabel(info.validator_config?.config?.type || info.config?.type || info.validator_type);
-            const weightHtml = weightedDetail ? `<div class="validator-weights"><span>${safeText(typeLabel)}</span><span>peso ${safeText(weightedDetail.validator_type_weight)}</span><span>rep ${safeText(weightedDetail.reputation)}</span><span>efectivo ${safeText(Math.round(weightedDetail.effective_weight * 100) / 100)}</span></div>` : `<div class="validator-weights"><span>${safeText(typeLabel)}</span></div>`;
+            const preferredDomainsBadge = renderPreferredDomainsBadge(preferredDomainsInfoForValidation(info));
+            const reputationHtml = weightedDetail ? `<span>rep ${safeText(formatMaxTwoDecimals(weightedDetail.reputation))}</span>` : "";
+            const weightHtml = `<div class="validator-weights"><span>${safeText(typeLabel)}</span>${reputationHtml}${preferredDomainsBadge}</div>`;
             return `
                 <div class="validator-card">
                     <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${safeText(info.validator_alias || validator)}</a></div>
@@ -2634,7 +2707,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
                     <div class="validator-desc">${safeText(desc)}</div>
                     <div class="validator-meta">
                         ${weightHtml}
-                        <div class="validator-response-time" title="Tiempo request-response">${safeText(responseTime)}</div>
+                        <div class="validator-response-time" title="Tiempo request-response"><span class="clock-icon" aria-hidden="true"></span>${safeText(responseTime)}</div>
                     </div>
                     <div class="validator-tx" title="Transaction hash">${tx}</div>
                     ${renderEvidenceLinks(info)}
@@ -2897,6 +2970,7 @@ async function showValidatorValidations(validatorHash) {
                 sources: v.sources || v.payload?.sources || [],
                 evidence_used: v.evidence_used || v.payload?.evidence_used || [],
                 evidence_search_response: v.evidence_search_response || v.payload?.evidence_search_response || null,
+                search_policy: v.search_policy || v.payload?.search_policy || null,
                 payload: v.payload || {}
             };
         });

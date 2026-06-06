@@ -264,27 +264,33 @@ def openrouter_model_for_current_type(model: str) -> str:
     return model
 
 
+def current_evidence_search_policy() -> Dict[str, Any]:
+    return {
+        "mode": "official_first",
+        "use_preferred_domains": os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
+        "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
+        "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
+        "max_results_per_domain": EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN,
+        "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
+        "fallback_to_general_search": True,
+    }
+
+
 def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if VALIDATOR_TYPE != ValidatorType.RAG_EVIDENCE_VALIDATION or not USE_EVIDENCE_SEARCH:
         return [], None
+    search_policy = current_evidence_search_policy()
     request_payload = {
         "schema_version": "evidence-search-request-v2",
         "assertion": payload_v2.assertion.model_dump(mode="json"),
-        "search_policy": {
-            "mode": "official_first",
-            "use_preferred_domains": os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
-            "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
-            "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
-            "max_results_per_domain": EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN,
-            "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
-            "fallback_to_general_search": True,
-        },
+        "search_policy": search_policy,
     }
     try:
         logger.info(f"[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling evidence-search")
         resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, timeout=30.0)
         resp.raise_for_status()
         response = resp.json()
+        response.setdefault("search_policy", search_policy)
         return response.get("evidences", []) or response.get("sources", []) or [], response
     except Exception as e:
         logger.warning(f"⚠️ evidence-search failed; RAG validator will answer with no evidences: {e}")
@@ -510,6 +516,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "evidence_used": extras.get("evidence_used", []),
             "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
             "evidence_search_response": evidence_response if 'evidence_response' in locals() else None,
+            "search_policy": current_evidence_search_policy() if USE_EVIDENCE_SEARCH else None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "correlation_id": payload.correlation_id,
             "error": error
@@ -607,6 +614,8 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         updated_date=updated_date or VALIDATOR_UPDATED_DATE,
         end_date=end_date,
         status=status,
+        use_evidence_search=USE_EVIDENCE_SEARCH,
+        evidence_search_use_preferred_domains=os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
     )
 
 
@@ -654,6 +663,7 @@ async def registrar_validacion_internal(
             "sources": extras.get("sources", []),
             "evidence_used": extras.get("evidence_used", []),
             "evidence_search_response": evidence_response,
+            "search_policy": current_evidence_search_policy() if USE_EVIDENCE_SEARCH else None,
         }
 
         validation_doc_bytes = json.dumps(

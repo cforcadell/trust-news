@@ -1125,6 +1125,8 @@ async def process_kafka_message(data: dict):
                     "correlation_id": correlation_id,
                     "sources": payload.get("sources", []),
                     "evidence_used": payload.get("evidence_used", []),
+                    "evidence_search_response": payload.get("evidence_search_response"),
+                    "search_policy": payload.get("search_policy"),
                     "confidence": payload.get("confidence"),
                     "error": error,
                     "response_time_seconds": response_time_seconds
@@ -1208,6 +1210,7 @@ async def process_kafka_message(data: dict):
                     "sources": payload.get("sources", []),
                     "evidence_used": payload.get("evidence_used", []),
                     "evidence_search_response": payload.get("evidence_search_response"),
+                    "search_policy": payload.get("search_policy"),
                     "response_time_seconds": response_time_seconds
                 }
 

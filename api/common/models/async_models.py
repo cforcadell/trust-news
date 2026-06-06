@@ -195,6 +195,8 @@ class ValidatorConfig(BaseModel):
     updated_date: str
     end_date: Optional[str] = None
     status: ValidatorStatus = ValidatorStatus.Registered
+    use_evidence_search: Optional[bool] = None
+    evidence_search_use_preferred_domains: Optional[bool] = None
 
 
 class ValidatorConfigOnChain(BaseModel):
@@ -437,6 +439,7 @@ class LightValidationResponsePayload(BaseModel):
     evidence_used: Optional[List[Dict[str, Any]]] = None
     assertion_validation_payload: Optional[Dict[str, Any]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
+    search_policy: Optional[Dict[str, Any]] = None
     timestamp: str
     correlation_id: str
     error: Optional[str] = None

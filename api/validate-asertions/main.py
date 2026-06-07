@@ -135,7 +135,7 @@ VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(Validator
 USE_EVIDENCE_SEARCH = os.getenv("USE_EVIDENCE_SEARCH", "false").lower() == "true"
 ONLINE_SEARCH_ENABLED = os.getenv("ONLINE_SEARCH_ENABLED", "false").lower() == "true"
 EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
-EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN = int(os.getenv("EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN", "1"))
+EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", "default")
 AUTOMATIC_VALIDATOR_TYPES = {
     ValidatorType.LLM_MEMORY_VALIDATION,
     ValidatorType.LLM_SEARCH_VALIDATION,
@@ -198,6 +198,10 @@ def selected_validation_prompt() -> str:
     if VALIDATOR_TYPE == ValidatorType.RAG_EVIDENCE_VALIDATION:
         return RAG_EVIDENCE_VALIDATION_PROMPT
     return LLM_MEMORY_VALIDATION_PROMPT
+
+
+def current_evidence_search_preferred_profile_id() -> str:
+    return str(os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID) or "").strip() or "default"
 
 
 def normalize_assertion_input(texto: Any, contexto: Optional[str] = None) -> Tuple[str, Optional[str]]:
@@ -265,15 +269,18 @@ def openrouter_model_for_current_type(model: str) -> str:
 
 
 def current_evidence_search_policy() -> Dict[str, Any]:
-    return {
+    use_preferred_domains = os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true"
+    policy = {
         "mode": "official_first",
-        "use_preferred_domains": os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
+        "use_preferred_domains": use_preferred_domains,
         "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
         "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
-        "max_results_per_domain": EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN,
         "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
         "fallback_to_general_search": True,
     }
+    if use_preferred_domains:
+        policy["preferred_profile_id"] = current_evidence_search_preferred_profile_id()
+    return policy
 
 
 def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -616,6 +623,7 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         status=status,
         use_evidence_search=USE_EVIDENCE_SEARCH,
         evidence_search_use_preferred_domains=os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
+        evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
     )
 
 

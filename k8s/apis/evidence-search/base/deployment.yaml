@@ -23,7 +23,7 @@ spec:
         - configMapRef:
             name: evidence-search-config
         - secretRef:
-            name: tavily-secret
+            name: search-secret
         - secretRef:
             name: mongodb-app-secret
         readinessProbe:

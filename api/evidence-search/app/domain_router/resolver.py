@@ -92,7 +92,11 @@ def resolve_domains(assertion: Dict[str, Any], profiles: Dict[str, Any], max_dom
                     "matched_profiles": [matched_profile],
                 }
 
-    preferred_domains = sorted(merged.values(), key=lambda item: (item["weight"], item["trust_score"]), reverse=True)[:max_domains]
+    preferred_domains = sorted(
+        merged.values(),
+        key=lambda item: (item["weight"], len(item.get("matched_profiles", [])), item["trust_score"]),
+        reverse=True,
+    )[:max_domains]
     return {
         "selected_profiles": list(dict.fromkeys(selected_profiles)),
         "preferred_domains": preferred_domains,

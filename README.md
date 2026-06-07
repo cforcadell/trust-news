@@ -219,8 +219,6 @@ newsdb.evidence_search_cache
 
 The cache key includes normalized assertion text, the v2 search policy and the domain profile version, and expires with `EVIDENCE_SEARCH_CACHE_TTL_SECONDS`.
 
-Evidence-search also enforces per-domain diversity in merged results via the search policy field `max_results_per_domain`, which defaults to `1` to avoid returning too many hits from the same domain.
-
 Domain profiles are contextual: category, subcategory, country, region, city and entity profiles can all contribute preferred domains. To seed or refresh them, use:
 
 ```bash

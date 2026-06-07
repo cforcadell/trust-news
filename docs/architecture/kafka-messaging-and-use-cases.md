@@ -170,7 +170,6 @@ Configuracion del worker:
 - VALIDATOR_TYPE: "3"
 - USE_EVIDENCE_SEARCH: "true"
 - EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
-- EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN: "1"
 
 Flujo:
 
@@ -178,8 +177,7 @@ Flujo:
 2. Antes de llamar al LLM, ejecuta POST /search/evidence en evidence-search con evidence-search-request-v2.
 3. evidence-search carga perfiles desde Mongo `evidence_domain_profiles` o usa fallback minimo en codigo.
 4. domain_router resuelve dominios por category, subcategory, ubicaciones, entidades y preferred_source_types.
-5. Si Tavily esta configurado, consulta dominios preferentes y busqueda general de fallback; si no, devuelve dominios simulados para trazabilidad.
-   - El servicio limita el número de evidencias devueltas por dominio usando `max_results_per_domain`, por defecto `1`, para fomentar diversidad de fuentes.
+5. Si hay un proveedor de busqueda configurado, consulta dominios preferentes y busqueda general de fallback; si no, devuelve dominios simulados para trazabilidad.
 6. El worker inyecta sources en el prompt RAG.
 7. El LLM debe responder usando exclusivamente esas evidencias.
 8. La respuesta puede incluir confidence y evidence_used.

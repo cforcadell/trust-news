@@ -7,9 +7,9 @@ generatorOptions:
   disableNameSuffixHash: true
 
 secretGenerator:
-  - name: tavily-secret
+  - name: search-secret
     namespace: apis
     envs:
-      - tavily.env
+      - search.env
 
 namespace: apis

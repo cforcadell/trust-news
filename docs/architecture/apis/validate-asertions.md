@@ -41,7 +41,7 @@ Durante la carga del módulo configura Web3, contrato, proveedor LLM, prompts, c
 - `USE_EVIDENCE_SEARCH`: activa integración RAG/evidence-search.
 - `ONLINE_SEARCH_ENABLED`: activa comportamiento de búsqueda online en el prompt/proveedor.
 - `EVIDENCE_SEARCH_URL`: URL del servicio evidence-search.
-- `EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `EVIDENCE_SEARCH_MAX_DOMAINS`, `EVIDENCE_SEARCH_MAX_SOURCES`, `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN`: política de búsqueda de evidencias.
+- `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `EVIDENCE_SEARCH_MAX_DOMAINS`, `EVIDENCE_SEARCH_MAX_SOURCES`, `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN`: política de búsqueda de evidencias.
 - `TEMPERATURE`: temperatura del modelo.
 - `KAFKA_BROKER` o `KAFKA_BOOTSTRAP`: bootstrap Kafka.
 - `KAFKA_USERNAME`, `KAFKA_PASSWORD`, `KAFKA_SECURITY_PROTOCOL`, `KAFKA_MECHANISM`: seguridad Kafka.

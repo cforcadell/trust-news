@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -16,8 +15,9 @@ from common.utils.domain_utils import normalize_domain
 from common.utils.mongo import build_mongo_uri_from_env
 
 sys.path.append(os.path.dirname(__file__))
-from app.domain_router.profiles_loader import PROFILE_INDEX_DOC_TYPE, PROFILE_SUBSET_DOC_TYPE, load_profiles_from_mongo
+from app.domain_router.profiles_loader import PROFILE_ID, PROFILE_INDEX_DOC_TYPE, PROFILE_SUBSET_DOC_TYPE, load_profiles_from_mongo
 from app.domain_router.resolver import resolve_domains
+from app.search.providers import search_with_provider
 
 load_dotenv()
 
@@ -27,13 +27,8 @@ MONGO_DOMAIN_PROFILE_COLLECTION = os.getenv("EVIDENCE_DOMAIN_CONFIG_COLLECTION",
 MONGO_CACHE_COLLECTION = os.getenv("EVIDENCE_SEARCH_CACHE_COLLECTION", "evidence_search_cache")
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_CACHE_TTL_SECONDS", "86400"))
 
-TAVILY_API_URL = os.getenv("TAVILY_API_URL", "https://api.tavily.com/search")
-TAVILY_SEARCH_DEPTH = os.getenv("TAVILY_SEARCH_DEPTH", "advanced")
-TAVILY_INCLUDE_ANSWER = os.getenv("TAVILY_INCLUDE_ANSWER", "false").lower() == "true"
-TAVILY_INCLUDE_RAW_CONTENT = os.getenv("TAVILY_INCLUDE_RAW_CONTENT", "true").lower() == "true"
-TAVILY_MAX_RESULTS = int(os.getenv("TAVILY_MAX_RESULTS", "5"))
-TAVILY_TIMEOUT = float(os.getenv("TAVILY_TIMEOUT", "30"))
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "").lower() or None
+API_KEY_PROVIDER = os.getenv("API_KEY_PROVIDER", "")
 
 
 app = FastAPI(title="TrustNews Evidence Search")
@@ -44,7 +39,7 @@ cache_collection = None
 
 
 
-def build_queries_v2(assertion: Dict[str, Any], domain_resolution: Dict[str, Any], policy) -> List[str]:
+def base_queries_for_assertion(assertion: Dict[str, Any]) -> List[str]:
     hints = assertion.get("search_hints") or {}
     context = assertion.get("context") or {}
     base_queries = [str(q).strip() for q in hints.get("suggested_queries") or [] if str(q).strip()]
@@ -55,15 +50,54 @@ def build_queries_v2(assertion: Dict[str, Any], domain_resolution: Dict[str, Any
         terms.extend(item.get("name", "") for item in context.get("locations") or [] if item.get("name"))
         base = " ".join(str(t).strip() for t in terms if str(t).strip())
         base_queries = [base] if base else [assertion.get("text", "")]
+    return [q for q in base_queries if q]
 
-    queries: List[str] = []
+
+def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str, Any], policy) -> Dict[str, Any]:
+    base_queries = base_queries_for_assertion(assertion)
+    query_limit = max(1, int(getattr(policy, "max_queries_per_domain", 1) or 1))
+    base_queries = base_queries[:query_limit]
+
+    grouped: Dict[str, List[str]] = {}
     for domain_cfg in domain_resolution.get("preferred_domains") or []:
-        domain = domain_cfg.get("domain")
-        for query in base_queries[: policy.max_queries_per_domain]:
-            queries.append(f"site:{domain} {query}".strip())
-    if policy.fallback_to_general_search:
-        queries.extend(q for q in base_queries if q not in queries)
+        domain = str(domain_cfg.get("domain") or "").strip()
+        if not domain:
+            continue
+        for query in base_queries:
+            grouped.setdefault(query, [])
+            if domain not in grouped[query]:
+                grouped[query].append(domain)
+
+    requests = []
+    for query in base_queries:
+        domains = grouped.get(query, [])
+        if domains:
+            requests.append({"query": query, "include_domains": domains, "mode": "preferred_domains"})
+
+    if getattr(policy, "fallback_to_general_search", False):
+        for query in base_queries:
+            requests.append({"query": query, "include_domains": None, "mode": "general_fallback"})
+
+    return {"base_queries": base_queries, "requests": requests}
+
+
+def build_queries_v2(assertion: Dict[str, Any], domain_resolution: Dict[str, Any], policy) -> List[str]:
+    plan = _search_request_plan(assertion, domain_resolution, policy)
+    queries: List[str] = []
+
+    for request in plan["requests"]:
+        query = request["query"]
+        if request["mode"] == "preferred_domains":
+            for domain in request.get("include_domains") or []:
+                queries.append(f"site:{domain} {query}".strip())
+        else:
+            queries.append(query)
+
     return queries
+
+
+def build_search_requests(assertion: Dict[str, Any], domain_resolution: Dict[str, Any], policy) -> List[Dict[str, Any]]:
+    return _search_request_plan(assertion, domain_resolution, policy)["requests"]
 
 
 def evidence_from_source_v2(source: Dict[str, Any], rank: int, domain_resolution: Dict[str, Any]) -> Dict[str, Any]:
@@ -136,9 +170,18 @@ def evidence_cache_key(assertion: Dict[str, Any], policy: Any, profile_version: 
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
 
-async def load_profile_bundle() -> tuple[Dict[str, Any], str]:
+def preferred_profile_id_for_policy(policy: Any) -> str:
+    if isinstance(policy, dict):
+        raw_profile_id = policy.get("preferred_profile_id")
+    else:
+        raw_profile_id = getattr(policy, "preferred_profile_id", "")
+    profile_id = str(raw_profile_id or "").strip()
+    return profile_id or PROFILE_ID
+
+
+async def load_profile_bundle(profile_id: str = PROFILE_ID) -> tuple[Dict[str, Any], str]:
     try:
-        return await load_profiles_from_mongo(domain_profile_collection)
+        return await load_profiles_from_mongo(domain_profile_collection, profile_id=profile_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -161,41 +204,20 @@ def useful_excerpt(result: Dict[str, Any]) -> str:
 
 
 
-async def call_tavily(query: str, max_sources: int, include_domains: Optional[List[str]] = None) -> Dict[str, Any]:
-    if not TAVILY_API_KEY:
-        raise HTTPException(status_code=500, detail="TAVILY_API_KEY is not configured")
-    payload = {
-        "api_key": TAVILY_API_KEY,
-        "query": query,
-        "search_depth": TAVILY_SEARCH_DEPTH,
-        "include_answer": TAVILY_INCLUDE_ANSWER,
-        "include_raw_content": TAVILY_INCLUDE_RAW_CONTENT,
-        "max_results": min(max_sources, TAVILY_MAX_RESULTS),
-    }
-    if include_domains:
-        # Tavily supports include_domains to restrict a search pass to selected domains.
-        payload["include_domains"] = include_domains
-    async with httpx.AsyncClient(timeout=TAVILY_TIMEOUT) as client:
-        resp = await client.post(TAVILY_API_URL, json=payload)
-        resp.raise_for_status()
-        return resp.json()
+async def call_search_provider(query: str, max_sources: int, include_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    return await search_with_provider(SEARCH_PROVIDER, query, max_sources, include_domains=include_domains)
 
 
-def merge_tavily_results(*result_groups: List[Dict[str, Any]], max_sources: int, max_results_per_domain: int) -> List[Dict[str, Any]]:
+def merge_search_results(*result_groups: List[Dict[str, Any]], max_sources: int) -> List[Dict[str, Any]]:
     merged = []
     seen_urls = set()
-    domain_counts: Dict[str, int] = {}
     for results in result_groups:
         for result in results or []:
             url = result.get("url") or ""
             dedupe_key = url or f"{result.get('title', '')}:{result.get('content', '')}"
             if dedupe_key in seen_urls:
                 continue
-            domain = normalize_domain(urlparse(url).netloc)
-            if domain_counts.get(domain, 0) >= max_results_per_domain:
-                continue
             seen_urls.add(dedupe_key)
-            domain_counts[domain] = domain_counts.get(domain, 0) + 1
             merged.append(result)
             if len(merged) >= max_sources:
                 return merged
@@ -257,10 +279,12 @@ async def search_evidence(req: EvidenceSearchRequestV2):
         raise HTTPException(status_code=400, detail="assertion.text is required")
 
     use_preferred_domains = bool(req.search_policy.use_preferred_domains)
+    preferred_profile_id = preferred_profile_id_for_policy(req.search_policy)
     if use_preferred_domains:
-        profiles, profile_version = await load_profile_bundle()
+        profiles, profile_version = await load_profile_bundle(preferred_profile_id)
     else:
         profiles, profile_version = {}, "preferred-domains-disabled"
+
     cache_key = evidence_cache_key(assertion, req.search_policy, profile_version)
     now = utc_now()
 
@@ -272,42 +296,56 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             response["cache_key"] = cache_key
             print(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
             return response
-
     if use_preferred_domains:
         domain_resolution = resolve_domains(assertion, profiles, max_domains=req.search_policy.max_domains)
     else:
         domain_resolution = empty_domain_resolution()
+    domain_resolution["profile_id"] = preferred_profile_id if use_preferred_domains else None
+    domain_resolution["profile_version"] = profile_version
     logger_prefix = f"[domain-router] assertion_id={assertion.get('assertion_id')}"
-    print(f"{logger_prefix} use_preferred_domains={use_preferred_domains} selected_profiles={domain_resolution.get('selected_profiles')}")
+    print(
+        f"{logger_prefix} use_preferred_domains={use_preferred_domains} "
+        f"preferred_profile_id={preferred_profile_id if use_preferred_domains else None} "
+        f"selected_profiles={domain_resolution.get('selected_profiles')}"
+    )
 
     queries = build_queries_v2(assertion, domain_resolution, req.search_policy)
     for query in queries:
         print(f"[evidence-search] query='{query}'")
 
+    search_requests = build_search_requests(assertion, domain_resolution, req.search_policy)
+    for search_request in search_requests:
+        print(
+            "[evidence-search] search_request "
+            f"provider='{SEARCH_PROVIDER}' "
+            f"query='{search_request['query']}' "
+            f"include_domains={search_request.get('include_domains')} "
+            f"mode={search_request.get('mode')}"
+        )
+
     raw_results: List[Dict[str, Any]] = []
-    if TAVILY_API_KEY:
-        for query in queries:
-            include_domains = []
-            if query.startswith("site:"):
-                include_domains = [query.split()[0].replace("site:", "")]
+    provider_name = SEARCH_PROVIDER
+    if API_KEY_PROVIDER:
+        for search_request in search_requests:
+            query = search_request["query"]
+            include_domains = search_request.get("include_domains")
             try:
-                tavily = await call_tavily(query, req.search_policy.max_results, include_domains=include_domains or None)
-                raw_results = merge_tavily_results(
+                search_results = await search_with_provider(provider_name, query, req.search_policy.max_results, include_domains=include_domains or None)
+                raw_results = merge_search_results(
                     raw_results,
-                    tavily.get("results", []) or [],
+                    search_results.get("results", []) or [],
                     max_sources=req.search_policy.max_results,
-                    max_results_per_domain=req.search_policy.max_results_per_domain,
                 )
                 if len(raw_results) >= req.search_policy.max_results:
                     break
             except Exception as e:
-                print(f"[evidence-search] search provider failed query='{query}': {e}")
+                print(f"[evidence-search] search provider failed provider='{provider_name}' query='{query}': {e}")
     else:
         for idx, domain_cfg in enumerate(domain_resolution.get("preferred_domains") or [], start=1):
             raw_results.append({
                 "url": f"https://{domain_cfg['domain']}/",
                 "title": domain_cfg.get("reason") or domain_cfg["domain"],
-                "content": "Domain selected by contextual routing; configure TAVILY_API_KEY for live snippets.",
+                "content": "Domain selected by contextual routing; configure API_KEY_PROVIDER for live snippets.",
                 "score": domain_cfg.get("weight", 0.0),
             })
 
@@ -316,7 +354,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
         "schema_version": "evidence-search-response-v2",
         "assertion_id": assertion.get("assertion_id"),
         "domain_resolution": domain_resolution,
-        "queries_executed": queries,
+        "queries_executed": search_requests,
         "evidences": evidences,
         "cached": False,
         "cache_key": cache_key,

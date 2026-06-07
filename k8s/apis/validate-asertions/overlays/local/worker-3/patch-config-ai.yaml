@@ -25,4 +25,6 @@ spec:
         - name: EVIDENCE_SEARCH_URL
           value: "http://evidence-search.apis.svc.cluster.local:8074"
         - name: EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
-          value: "true"  
+          value: "true"
+        - name: EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
+          value: "default"

@@ -1,8 +1,17 @@
 import importlib.util
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "evidence-search" / "main.py"
+import pytest
+
+EVIDENCE_SEARCH_ROOT = Path(__file__).resolve().parents[1] / "evidence-search"
+if str(EVIDENCE_SEARCH_ROOT) not in sys.path:
+    sys.path.insert(0, str(EVIDENCE_SEARCH_ROOT))
+
+from app.search import providers as search_providers
+
+MODULE_PATH = EVIDENCE_SEARCH_ROOT / "main.py"
 spec = importlib.util.spec_from_file_location("evidence_search_main", MODULE_PATH)
 evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
@@ -101,18 +110,116 @@ def test_evidence_cache_key_normalizes_text_and_uses_profile_version():
     assert len(key_a) == 64
 
 
-def test_merge_tavily_results_limits_same_domain():
+def test_build_search_requests_groups_same_query_by_domain():
+    policy = SimpleNamespace(max_queries_per_domain=2, fallback_to_general_search=True)
+    domain_resolution = {
+        "preferred_domains": [
+            {"domain": "ine.es"},
+            {"domain": "sepe.es"},
+        ]
+    }
+
+    requests = evidence.build_search_requests(enriched_assertion(), domain_resolution, policy)
+
+    assert len(requests) == 2
+    assert requests[0]["mode"] == "preferred_domains"
+    assert set(requests[0]["include_domains"]) == {"ine.es", "sepe.es"}
+    assert requests[0]["query"].startswith("El paro en Barcelona bajo en 2024.")
+    assert requests[1]["mode"] == "general_fallback"
+    assert requests[1]["include_domains"] is None
+    assert requests[1]["query"] == requests[0]["query"]
+
+
+@pytest.mark.asyncio
+async def test_search_evidence_logs_final_search_calls(monkeypatch, capsys):
+    original_provider = evidence.SEARCH_PROVIDER
+    original_api_key = evidence.API_KEY_PROVIDER
+    evidence.SEARCH_PROVIDER = "exa"
+    evidence.API_KEY_PROVIDER = "fake-key"
+
+    calls = []
+
+    async def fake_search_with_provider(provider_name, query, max_sources, include_domains=None):
+        calls.append({"provider": provider_name, "query": query, "include_domains": include_domains})
+        return {"results": []}
+
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search_with_provider)
+    async def fake_load_profile_bundle(profile_id="default"):
+        calls.append({"profile_id": profile_id})
+        return {}, "v1"
+
+    monkeypatch.setattr(evidence, "load_profile_bundle", fake_load_profile_bundle)
+    monkeypatch.setattr(
+        evidence,
+        "resolve_domains",
+        lambda assertion, profiles, max_domains=None: {
+            "selected_profiles": ["p1"],
+            "preferred_domains": [{"domain": "ine.es"}, {"domain": "sepe.es"}],
+            "fallback_used": False,
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(evidence, "cache_collection", None)
+
+    req = SimpleNamespace(
+        assertion=enriched_assertion(),
+        search_policy=SimpleNamespace(
+            use_preferred_domains=True,
+            preferred_profile_id="custom-profile",
+            max_domains=3,
+            max_results=3,
+            max_queries_per_domain=2,
+            fallback_to_general_search=True,
+        ),
+    )
+
+    try:
+        await evidence.search_evidence(req)
+    finally:
+        evidence.SEARCH_PROVIDER = original_provider
+        evidence.API_KEY_PROVIDER = original_api_key
+
+    captured = capsys.readouterr().out
+    assert "search_request" in captured
+    assert "preferred_profile_id=custom-profile" in captured
+    assert "include_domains=['ine.es', 'sepe.es']" in captured or "include_domains=['sepe.es', 'ine.es']" in captured
+    assert calls[0] == {"profile_id": "custom-profile"}
+    assert len([call for call in calls if "provider" in call]) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_provider_registry_can_switch_to_exa(monkeypatch):
+    calls = []
+
+    class FakeExaProvider(search_providers.SearchProvider):
+        name = "exa"
+
+        async def search(self, query, max_sources, include_domains=None):
+            calls.append((query, max_sources, include_domains))
+            return {"results": []}
+
+    monkeypatch.setattr(search_providers, "registry", search_providers.SearchProviderRegistry())
+    search_providers.registry.register("exa", FakeExaProvider())
+
+    result = await search_providers.search_with_provider("exa", "foo", 5, include_domains=["one.es"])
+
+    assert result == {"results": []}
+    assert calls == [("foo", 5, ["one.es"])]
+
+
+def test_merge_search_results_keeps_same_domain_results_and_dedupes_urls():
     results_a = [
         {"url": "https://ine.es/doc1", "title": "Doc1", "content": "Text1"},
         {"url": "https://ine.es/doc2", "title": "Doc2", "content": "Text2"},
     ]
     results_b = [
         {"url": "https://sepe.es/doc", "title": "Doc3", "content": "Text3"},
+        {"url": "https://ine.es/doc1", "title": "Doc1 duplicate", "content": "Duplicate"},
         {"url": "https://ine.es/doc3", "title": "Doc4", "content": "Text4"},
     ]
 
-    merged = evidence.merge_tavily_results(results_a, results_b, max_sources=10, max_results_per_domain=1)
+    merged = evidence.merge_search_results(results_a, results_b, max_sources=10)
 
-    assert len(merged) == 2
-    assert sum(1 for item in merged if "ine.es" in item["url"]) == 1
+    assert len(merged) == 4
+    assert sum(1 for item in merged if "ine.es" in item["url"]) == 3
     assert sum(1 for item in merged if "sepe.es" in item["url"]) == 1

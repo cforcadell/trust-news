@@ -142,7 +142,7 @@ profiles:
           - k8s/apis/generate-asertions/overlays/local
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
-          - k8s/apis/validate-asertions/overlays/local/worker-3
+          # - k8s/apis/validate-asertions/overlays/local/worker-3
           - k8s/apis/evidence-search/overlays/local
           - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain/overlays/local
@@ -153,7 +153,7 @@ profiles:
       - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
       - {resourceType: service, resourceName: validate-service-1, namespace: apis, port: 8070, localPort: 8070}
       - {resourceType: service, resourceName: validate-service-2, namespace: apis, port: 8070, localPort: 8069}
-      - {resourceType: service, resourceName: validate-service-3, namespace: apis, port: 8070, localPort: 8068}
+      # - {resourceType: service, resourceName: validate-service-3, namespace: apis, port: 8070, localPort: 8068}
       - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
       - {resourceType: service, resourceName: evidence-search, namespace: apis, port: 8074, localPort: 8074}
       - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}

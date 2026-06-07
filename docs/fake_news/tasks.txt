@@ -98,9 +98,9 @@ Develop v0.0.11.
 
 - Nuevos validadores RAG(RAG_EVIDENCE_VALIDATION):
         - nuevo servicio evidence search basado en tavily.  
-            - Abstraer proveedor de busqueda e incorporar Brave
+            - Abstraer proveedor de busqueda e incorporar exa
             - Endpoints de gestión de dominios oficiales por categoria 
-            - Soporte a multiples perfiles de predefined domains
+            - Soporte a multiples perfiles de predefined domains OK
             - Cacheo de resultados OK
 
         - Nueva Configuracion de validadores 

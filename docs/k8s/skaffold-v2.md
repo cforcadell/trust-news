@@ -535,10 +535,16 @@ Dry-run:
 api/evidence-search/config/load-evidence-domain-profiles.py --dry-run
 ```
 
-Carga real destructiva de configuracion:
+Carga real del perfil `default` sin borrar otros perfiles de la coleccion:
 
 ```bash
 api/evidence-search/config/load-evidence-domain-profiles.py --confirm
+```
+
+Carga de otro `profile_id`:
+
+```bash
+api/evidence-search/config/load-evidence-domain-profiles.py --profile-id custom --confirm
 ```
 
 Carga de otro fichero:
@@ -549,17 +555,17 @@ api/evidence-search/config/load-evidence-domain-profiles.py \
   --confirm
 ```
 
-El loader crea documentos separados:
+El loader reemplaza solo los documentos del `profile_id` indicado y crea documentos separados:
 
 ```text
-profile_index/default
-profile_subset/default/source_types
-profile_subset/default/categories
-profile_subset/default/subcategories
-profile_subset/default/countries
-profile_subset/default/regions
-profile_subset/default/cities
-profile_subset/default/entities
+profile_index/<profile_id>
+profile_subset/<profile_id>/source_types
+profile_subset/<profile_id>/categories
+profile_subset/<profile_id>/subcategories
+profile_subset/<profile_id>/countries
+profile_subset/<profile_id>/regions
+profile_subset/<profile_id>/cities
+profile_subset/<profile_id>/entities
 ```
 
 Por defecto tambien borra `evidence_search_cache`. Para conservar cache:
@@ -576,8 +582,6 @@ kubectl logs deployment/evidence-search -n apis
 ```
 
 Verificacion esperada: una busqueda con `city=Barcelona` y `entity=Ayuntamiento de Barcelona` debe priorizar `barcelona.cat`, `seu.barcelona.cat` y `bop.diba.cat` cuando `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true`.
-
-Nota: evidence-search aplica un límite por dominio (`max_results_per_domain`) para fomentar diversidad de fuentes; el valor por defecto es `1`.
 
 ---
 

@@ -4,15 +4,15 @@ resources:
   - ../../base
 
 # En prod el secreto se crea fuera del repo, por ejemplo:
-# kubectl create secret generic tavily-secret \
+# kubectl create secret generic search-secret \
 #   --namespace apis \
-#   --from-env-file=tavily.env
+#   --from-env-file=search.env
 #
 # Si se prefiere generarlo con Kustomize desde un fichero local no versionado:
 # secretGenerator:
-#   - name: tavily-secret
+#   - name: search-secret
 #     namespace: apis
 #     envs:
-#       - prod-tavily.env
+#       - prod-search.env
 
 namespace: apis

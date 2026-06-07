@@ -103,7 +103,7 @@ El worker llama a `evidence-search` cuando `USE_EVIDENCE_SEARCH=true`. Ese servi
 
 El prompt RAG exige validar solo con las evidencias proporcionadas. Si no hay evidencias suficientes, el comportamiento esperado es `UNKNOWN` o insuficiencia equivalente.
 
-**Variables clave:** `VALIDATOR_TYPE=3`, `USE_EVIDENCE_SEARCH=true`, `EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_MAX_RESULTS_PER_DOMAIN`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `RAG_EVIDENCE_VALIDATION_PROMPT`.
+**Variables clave:** `VALIDATOR_TYPE=3`, `USE_EVIDENCE_SEARCH=true`, `EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `RAG_EVIDENCE_VALIDATION_PROMPT`.
 
 **Subcomportamientos RAG:**
 

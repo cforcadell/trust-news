@@ -196,6 +196,8 @@ class ValidatorConfig(BaseModel):
     end_date: Optional[str] = None
     status: ValidatorStatus = ValidatorStatus.Registered
     use_evidence_search: Optional[bool] = None
+    online_search_enabled: Optional[bool] = None
+    evidence_search_url: Optional[str] = None
     evidence_search_use_preferred_domains: Optional[bool] = None
     evidence_search_preferred_profile_id: Optional[str] = None
 

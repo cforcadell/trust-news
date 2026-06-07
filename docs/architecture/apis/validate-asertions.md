@@ -10,8 +10,8 @@
 - `GET /tx/status/{tx_hash}`: consulta el estado de una transacción en blockchain.
 - `POST /registrar_validador`: sube la configuración del validador a IPFS, registra el validador en el contrato y publica evento de configuración.
 - `POST /desregistrar_validador`: marca configuración como baja, actualiza blockchain, desregistra el validador y publica evento.
-- `GET /admin/config`: devuelve proveedor, modelo y categorías actuales del validador.
-- `PUT /admin/config`: actualiza proveedor/modelo/categorías, refresca configuración IPFS y actualiza blockchain si cambia el hash.
+- `GET /admin/config`: devuelve proveedor, modelo, categorías y configuración runtime del validador. `private_key` y `api_key` se devuelven ofuscados como `********`.
+- `PUT /admin/config`: actualiza proveedor/modelo/categorías y permite cambiar `api_url`, `validator_type`, `use_evidence_search`, `online_search_enabled`, `evidence_search_url`, `evidence_search_use_preferred_domains`, `evidence_search_preferred_profile_id`, `private_key`, `account_address` y `api_key`. Si se envía `private_key` o `api_key` como solo asteriscos, se conserva el valor actual. Refresca configuración IPFS y actualiza blockchain cuando cambia el hash público de configuración.
 
 ## Daemons
 
@@ -41,7 +41,7 @@ Durante la carga del módulo configura Web3, contrato, proveedor LLM, prompts, c
 - `USE_EVIDENCE_SEARCH`: activa integración RAG/evidence-search.
 - `ONLINE_SEARCH_ENABLED`: activa comportamiento de búsqueda online en el prompt/proveedor.
 - `EVIDENCE_SEARCH_URL`: URL del servicio evidence-search.
-- `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `EVIDENCE_SEARCH_MAX_DOMAINS`, `EVIDENCE_SEARCH_MAX_SOURCES`, `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN`: política de búsqueda de evidencias.
+- `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID`, `EVIDENCE_SEARCH_MAX_DOMAINS`, `EVIDENCE_SEARCH_MAX_SOURCES`, `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN`: política de búsqueda de evidencias.
 - `TEMPERATURE`: temperatura del modelo.
 - `KAFKA_BROKER` o `KAFKA_BOOTSTRAP`: bootstrap Kafka.
 - `KAFKA_USERNAME`, `KAFKA_PASSWORD`, `KAFKA_SECURITY_PROTOCOL`, `KAFKA_MECHANISM`: seguridad Kafka.

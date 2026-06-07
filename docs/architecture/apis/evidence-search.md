@@ -8,6 +8,7 @@
 
 - `GET /health`: devuelve estado básico del servicio.
 - `POST /search/evidence`: recibe una aserción y una política de búsqueda, resuelve dominios preferentes, genera queries, consulta Tavily o devuelve dominios seleccionados como fallback, normaliza evidencias y cachea la respuesta.
+- `DELETE /admin/cache`: vacía la colección de cache de búsquedas y devuelve el número de documentos eliminados. No elimina perfiles de dominios ni recrea índices.
 
 ## Daemons
 

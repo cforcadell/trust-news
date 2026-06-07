@@ -97,15 +97,16 @@ Develop v0.0.11.
     HUMAN = 5
 
 - Nuevos validadores RAG(RAG_EVIDENCE_VALIDATION):
-        - nuevo servicio evidence search basado en tavily.  
-            - Abstraer proveedor de busqueda e incorporar exa
-            - Endpoints de gestión de dominios oficiales por categoria 
+        - nuevo servicio evidence search basado en buscador externo.  
+            - Abstraer proveedor de busqueda e incorporar exa OK
+            - Cargador de config de preferred domains OK 
             - Soporte a multiples perfiles de predefined domains OK
             - Cacheo de resultados OK
 
         - Nueva Configuracion de validadores 
             - levantar 1 validador RAG_EVIDENCE_VALIDATION escuchando a todas las categoria con preferred domains bien configurado. Modelos LLM simples  RAG_EVIDENCE_VALIDATION 
-            - 2  validadores RAG_EVIDENCE_VALIDATION registrado a todas las categorias sin preferred domains. Modelos LLM simples diferentes que validen las mismas evidencias
+                - Configurar un profile con muchas más url configuradas
+            - 2  validadores RAG_EVIDENCE_VALIDATION registrado a todas las categorias sin preferred domains. Modelos LLM simples diferentes que validen las mismas evidencias OK
             
 
 

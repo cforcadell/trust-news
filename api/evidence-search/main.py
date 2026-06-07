@@ -270,6 +270,18 @@ async def health():
     return {"status": "ok", "service": "evidence-search"}
 
 
+@app.delete("/admin/cache")
+async def clear_cache():
+    if cache_collection is None:
+        raise HTTPException(status_code=503, detail="Evidence search cache is not initialized")
+    result = await cache_collection.delete_many({})
+    print(f"[evidence-search] cache_clear=true deleted_count={result.deleted_count}")
+    return {
+        "status": "ok",
+        "cache_collection": MONGO_CACHE_COLLECTION,
+        "deleted_count": result.deleted_count,
+    }
+
 
 @app.post("/search/evidence")
 async def search_evidence(req: EvidenceSearchRequestV2):

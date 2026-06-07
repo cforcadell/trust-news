@@ -78,6 +78,7 @@ CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustNews.json")
 
 API_URL = os.getenv("API_URL")
+API_KEY = os.getenv("API_KEY")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 DEFAULT_MEMORY_PROMPT = """Actúa como validador factual prudente.
 Valida la aserción usando tu conocimiento general y razonamiento lógico.
@@ -173,11 +174,31 @@ class AdminConfigResponse(BaseModel):
     provider: str
     model: str
     categories: List[int]
+    api_url: Optional[str] = None
+    validator_type: int
+    use_evidence_search: bool
+    online_search_enabled: bool
+    evidence_search_url: str
+    evidence_search_use_preferred_domains: bool
+    evidence_search_preferred_profile_id: str
+    private_key: Optional[str] = None
+    account_address: str
+    api_key: Optional[str] = None
 
 class AdminConfigUpdate(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     categories: Optional[List[int]] = None
+    api_url: Optional[str] = None
+    validator_type: Optional[int] = None
+    use_evidence_search: Optional[bool] = None
+    online_search_enabled: Optional[bool] = None
+    evidence_search_url: Optional[str] = None
+    evidence_search_use_preferred_domains: Optional[bool] = None
+    evidence_search_preferred_profile_id: Optional[str] = None
+    private_key: Optional[str] = None
+    account_address: Optional[str] = None
+    api_key: Optional[str] = None
 
 # =========================================================
 # AI Validators
@@ -202,6 +223,69 @@ def selected_validation_prompt() -> str:
 
 def current_evidence_search_preferred_profile_id() -> str:
     return str(os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID) or "").strip() or "default"
+
+
+def current_evidence_search_use_preferred_domains() -> bool:
+    return os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true"
+
+
+def mask_secret(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    return "*" * 8
+
+
+def is_masked_secret(value: Optional[str]) -> bool:
+    return bool(value) and set(str(value)) == {"*"}
+
+
+def set_runtime_env(name: str, value: Any) -> None:
+    if value is None:
+        return
+    os.environ[name] = str(value)
+
+
+def normalize_validator_type(value: int) -> ValidatorType:
+    try:
+        return ValidatorType(int(value))
+    except Exception:
+        allowed = ", ".join(f"{int(v)}={v.name}" for v in ValidatorType)
+        raise HTTPException(status_code=400, detail=f"VALIDATOR_TYPE inválido: {value}. Valores permitidos: {allowed}")
+
+
+def reload_blockchain_client() -> None:
+    global w3, contract
+    w3 = Web3(Web3.HTTPProvider(RPC_URL))
+    with open(CONTRACT_ABI_PATH, "r", encoding="utf-8") as fh:
+        artifact = json.load(fh)
+    abi = artifact.get("abi", artifact)
+    contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=abi)
+    logger.info(f"Conectado a blockchain: {w3.is_connected()} - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
+
+
+def normalize_account_address(value: str) -> str:
+    try:
+        return Web3.to_checksum_address(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ACCOUNT_ADDRESS inválido.")
+
+
+def normalize_admin_config_response() -> AdminConfigResponse:
+    return AdminConfigResponse(
+        provider=AI_PROVIDER,
+        model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+        categories=VALIDATOR_CATEGORIES,
+        api_url=API_URL,
+        validator_type=int(VALIDATOR_TYPE),
+        use_evidence_search=USE_EVIDENCE_SEARCH,
+        online_search_enabled=ONLINE_SEARCH_ENABLED,
+        evidence_search_url=EVIDENCE_SEARCH_URL,
+        evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
+        evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
+        private_key=mask_secret(PRIVATE_KEY),
+        account_address=ACCOUNT_ADDRESS,
+        api_key=mask_secret(API_KEY),
+    )
 
 
 def normalize_assertion_input(texto: Any, contexto: Optional[str] = None) -> Tuple[str, Optional[str]]:
@@ -269,7 +353,7 @@ def openrouter_model_for_current_type(model: str) -> str:
 
 
 def current_evidence_search_policy() -> Dict[str, Any]:
-    use_preferred_domains = os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true"
+    use_preferred_domains = current_evidence_search_use_preferred_domains()
     policy = {
         "mode": "official_first",
         "use_preferred_domains": use_preferred_domains,
@@ -383,13 +467,13 @@ def build_ai_validator() -> Optional[AIValidator]:
     if AI_PROVIDER == "none":
         raise RuntimeError("AI_PROVIDER must be different from 'none' for LLM validator types")
     if AI_PROVIDER == "mistral":
-        return MistralValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "mistral-tiny"), TEMPERATURE)
+        return MistralValidator(API_URL, API_KEY, os.getenv("MODEL", "mistral-tiny"), TEMPERATURE)
     elif AI_PROVIDER == "gemini":
-        return GeminiValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gemini-1.5-flash"), TEMPERATURE)
+        return GeminiValidator(API_URL, API_KEY, os.getenv("MODEL", "gemini-1.5-flash"), TEMPERATURE)
     elif AI_PROVIDER == "openrouter":
-        return OpenRouterValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "gpt-4o-mini"), TEMPERATURE)
+        return OpenRouterValidator(API_URL, API_KEY, os.getenv("MODEL", "gpt-4o-mini"), TEMPERATURE)
     elif AI_PROVIDER == "grok":
-        return GrokValidator(API_URL, os.getenv("API_KEY"), os.getenv("MODEL", "grok-beta"), TEMPERATURE)
+        return GrokValidator(API_URL, API_KEY, os.getenv("MODEL", "grok-beta"), TEMPERATURE)
     else:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
 
@@ -573,13 +657,7 @@ async def consume_light_validation_requests():
 # =========================================================
 # Web3 + contrato
 # =========================================================
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
-with open(CONTRACT_ABI_PATH, "r", encoding="utf-8") as fh:
-    artifact = json.load(fh)
-abi = artifact.get("abi", artifact)
-contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=abi)
-
-logger.info(f"Conectado a blockchain: {w3.is_connected()} - Account: {ACCOUNT_ADDRESS} - Contract: {CONTRACT_ADDRESS}")
+reload_blockchain_client()
 
 # =========================================================
 # FastAPI app
@@ -622,8 +700,10 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         end_date=end_date,
         status=status,
         use_evidence_search=USE_EVIDENCE_SEARCH,
-        evidence_search_use_preferred_domains=os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true",
+        evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
         evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
+        online_search_enabled=ONLINE_SEARCH_ENABLED,
+        evidence_search_url=EVIDENCE_SEARCH_URL,
     )
 
 
@@ -869,60 +949,126 @@ async def endpoint_desregistrar_validador():
 @app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"])
 def get_admin_config():
     """Consulta la configuración actual del validador AI y sus categorías."""
-    return AdminConfigResponse(
-        provider=AI_PROVIDER,
-        model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
-        categories=VALIDATOR_CATEGORIES
-    )
+    return normalize_admin_config_response()
 
 @app.put("/admin/config", tags=["Admin"])
 async def update_admin_config(config: AdminConfigUpdate):
     """
-    Modifica provider, modelo y/o categorías. 
-    Si las categorías cambian, realiza la re-inscripción en la blockchain.
+    Modifica la configuración runtime del validador.
+    Refresca la configuración IPFS/blockchain cuando cambian los campos públicos del validador.
     """
-    # Usamos global para modificar el estado de la app en memoria
-    global AI_PROVIDER, ai_validator, VALIDATOR_CATEGORIES
+    global AI_PROVIDER, API_URL, API_KEY, PRIVATE_KEY, ACCOUNT_ADDRESS, VALIDATOR_TYPE
+    global USE_EVIDENCE_SEARCH, ONLINE_SEARCH_ENABLED, EVIDENCE_SEARCH_URL, EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
+    global ai_validator, VALIDATOR_CATEGORIES
 
-    # 1. Gestión del Provider y Modelo de IA
     old_provider = AI_PROVIDER
     old_model = ai_validator.model if ai_validator else os.getenv("MODEL", "none")
+    old_validator_type = VALIDATOR_TYPE
+    old_use_evidence_search = USE_EVIDENCE_SEARCH
+    old_online_search_enabled = ONLINE_SEARCH_ENABLED
+    old_evidence_search_url = EVIDENCE_SEARCH_URL
+    old_use_preferred_domains = current_evidence_search_use_preferred_domains()
+    old_preferred_profile_id = current_evidence_search_preferred_profile_id()
+    old_categories = list(VALIDATOR_CATEGORIES)
+
     new_provider = config.provider.lower() if config.provider else AI_PROVIDER
-    new_model = config.model if config.model else (ai_validator.model if ai_validator else os.getenv("MODEL", "none"))
-    model_config_changed = new_provider != old_provider or new_model != old_model
-    metrics_reset_at = datetime.now(timezone.utc).isoformat() if model_config_changed else None
+    new_model = config.model if config.model else old_model
+    new_validator_type = normalize_validator_type(config.validator_type) if config.validator_type is not None else VALIDATOR_TYPE
+    new_api_url = config.api_url if config.api_url is not None else API_URL
+    new_api_key = API_KEY if config.api_key is None or is_masked_secret(config.api_key) else config.api_key
 
-    # Si se solicitó un cambio en la IA, instanciamos de nuevo el objeto
-    if config.provider or config.model:
-        api_key = os.getenv("API_KEY") 
-        api_url = API_URL
-        
-        try:
-            if new_provider == "mistral":
-                ai_validator = MistralValidator(api_url, api_key, new_model)
-            elif new_provider == "gemini":
-                ai_validator = GeminiValidator(api_url, api_key, new_model)
-            elif new_provider == "openrouter":
-                ai_validator = OpenRouterValidator(api_url, api_key, new_model)
-            elif new_provider == "grok":
-                ai_validator = GrokValidator(api_url, api_key, new_model)
-            else:
-                raise HTTPException(status_code=400, detail=f"Provider desconocido: {new_provider}")
-            
-            AI_PROVIDER = new_provider
-            logger.info(f"🔄 AI Validator actualizado en memoria: {AI_PROVIDER.upper()} - Modelo: {new_model}")
-        except Exception as e:
-            logger.exception("Error al instanciar el nuevo AI Validator")
-            raise HTTPException(status_code=500, detail="Error al cambiar el provider/modelo de IA.")
+    allowed_providers = {"mistral", "gemini", "openrouter", "grok"}
+    if new_validator_type in AUTOMATIC_VALIDATOR_TYPES and new_provider not in allowed_providers:
+        raise HTTPException(status_code=400, detail=f"Provider desconocido: {new_provider}")
 
-    # 2. Gestión de Categorías y Blockchain
+    ai_client_changed = any([
+        new_provider != old_provider,
+        new_model != old_model,
+        new_validator_type != old_validator_type,
+        new_api_url != API_URL,
+        new_api_key != API_KEY,
+    ])
+
+    if config.account_address is not None:
+        ACCOUNT_ADDRESS = normalize_account_address(config.account_address)
+        set_runtime_env("ACCOUNT_ADDRESS", ACCOUNT_ADDRESS)
+
+    if config.private_key is not None and not is_masked_secret(config.private_key):
+        PRIVATE_KEY = config.private_key
+        set_runtime_env("PRIVATE_KEY", PRIVATE_KEY)
+
+    if config.api_url is not None:
+        API_URL = new_api_url
+        set_runtime_env("API_URL", API_URL or "")
+
+    if config.api_key is not None and not is_masked_secret(config.api_key):
+        API_KEY = new_api_key
+        set_runtime_env("API_KEY", API_KEY or "")
+
+    if config.validator_type is not None:
+        VALIDATOR_TYPE = new_validator_type
+        set_runtime_env("VALIDATOR_TYPE", int(VALIDATOR_TYPE))
+
+    if config.use_evidence_search is not None:
+        USE_EVIDENCE_SEARCH = config.use_evidence_search
+        set_runtime_env("USE_EVIDENCE_SEARCH", str(USE_EVIDENCE_SEARCH).lower())
+
+    if config.online_search_enabled is not None:
+        ONLINE_SEARCH_ENABLED = config.online_search_enabled
+        set_runtime_env("ONLINE_SEARCH_ENABLED", str(ONLINE_SEARCH_ENABLED).lower())
+
+    if config.evidence_search_url is not None:
+        EVIDENCE_SEARCH_URL = config.evidence_search_url
+        set_runtime_env("EVIDENCE_SEARCH_URL", EVIDENCE_SEARCH_URL)
+
+    if config.evidence_search_use_preferred_domains is not None:
+        set_runtime_env("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", str(config.evidence_search_use_preferred_domains).lower())
+
+    if config.evidence_search_preferred_profile_id is not None:
+        EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = config.evidence_search_preferred_profile_id
+        set_runtime_env("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID)
+
+    if config.provider is not None:
+        AI_PROVIDER = new_provider
+        set_runtime_env("AI_PROVIDER", AI_PROVIDER)
+
+    if config.model is not None:
+        set_runtime_env("MODEL", new_model)
+
+    if config.categories is not None:
+        VALIDATOR_CATEGORIES = [int(category) for category in config.categories]
+        set_runtime_env("VALIDATOR_CATEGORIES", json.dumps(VALIDATOR_CATEGORIES))
+
+    try:
+        if ai_client_changed:
+            ai_validator = build_ai_validator()
+            logger.info(
+                f"🔄 AI Validator actualizado en memoria: "
+                f"type={VALIDATOR_TYPE.name} provider={AI_PROVIDER.upper()} model={new_model}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error al instanciar el nuevo AI Validator")
+        raise HTTPException(status_code=500, detail=f"Error al cambiar la configuración de IA: {e}")
+
+    reload_blockchain_client()
+
+    public_config_changed = any([
+        new_provider != old_provider,
+        new_model != old_model,
+        VALIDATOR_CATEGORIES != old_categories,
+        VALIDATOR_TYPE != old_validator_type,
+        USE_EVIDENCE_SEARCH != old_use_evidence_search,
+        ONLINE_SEARCH_ENABLED != old_online_search_enabled,
+        EVIDENCE_SEARCH_URL != old_evidence_search_url,
+        current_evidence_search_use_preferred_domains() != old_use_preferred_domains,
+        current_evidence_search_preferred_profile_id() != old_preferred_profile_id,
+    ])
+    metrics_reset_at = datetime.now(timezone.utc).isoformat() if public_config_changed else None
     blockchain_receipts = {}
 
-    if config.categories is not None and config.categories != VALIDATOR_CATEGORIES:
-        logger.info(f"🔄 Cambio de categorías detectado: {VALIDATOR_CATEGORIES} -> {config.categories}. Se actualizará la configuración IPFS en blockchain.")
-        VALIDATOR_CATEGORIES = config.categories
-
-    if config.provider or config.model or config.categories is not None:
+    if public_config_changed:
         updated_date = datetime.now(timezone.utc).isoformat()
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered, updated_date=updated_date)
         current_ipfs_hash = validator_config_ipfs_hash_from_chain()
@@ -938,17 +1084,13 @@ async def update_admin_config(config: AdminConfigUpdate):
             blockchain_receipts["ipfs_config_hash"] = ipfs_config_hash
             logger.info("✅ Configuración IPFS ya registrada en blockchain; no se actualiza.")
 
-    event_ipfs_hash = blockchain_receipts.get("ipfs_config_hash") if isinstance(blockchain_receipts, dict) else validator_config_ipfs_hash_from_chain()
+    event_ipfs_hash = blockchain_receipts.get("ipfs_config_hash") if blockchain_receipts else validator_config_ipfs_hash_from_chain()
     await publish_validator_config_event(event_ipfs_hash, source="admin_config", metrics_reset_at=metrics_reset_at)
 
     return {
         "status": "ok",
         "message": "Configuración actualizada correctamente.",
-        "config": {
-            "provider": AI_PROVIDER,
-            "model": ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
-            "categories": VALIDATOR_CATEGORIES
-        },
+        "config": normalize_admin_config_response().model_dump(mode="json"),
         "blockchain_updates": blockchain_receipts if blockchain_receipts else "Sin cambios en blockchain"
     }
     

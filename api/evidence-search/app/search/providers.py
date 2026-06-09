@@ -5,6 +5,85 @@ import httpx
 from fastapi import HTTPException
 
 
+def provider_text(value: Any) -> str:
+    """Convert provider text fields into a compact string for evidence snippets."""
+    # Providers may return text as a string, a list of highlights, or a missing/null value.
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, list):
+        return " ".join(provider_text(item) for item in value if provider_text(item)).strip()
+    return ""
+
+
+def first_provider_text(*values: Any) -> str:
+    """Return the first non-empty provider text candidate."""
+    # Keep provider-specific fallback chains readable in the adapters below.
+    for value in values:
+        text = provider_text(value)
+        if text:
+            return text
+    return ""
+
+
+def tavily_include_raw_content_value() -> Any:
+    """Parse Tavily raw-content configuration into the API-supported value."""
+    # Tavily accepts booleans and string modes such as text/markdown; preserve both forms.
+    raw = os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true").strip().lower()
+    if raw in {"true", "1", "yes"}:
+        return True
+    if raw in {"false", "0", "no"}:
+        return False
+    return raw
+
+
+def normalize_tavily_result(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one Tavily result into the shared provider result shape."""
+    # Tavily documents results[].content as the primary snippet field.
+    content = first_provider_text(item.get("content"), item.get("snippet"), item.get("description"), item.get("raw_content"))
+
+    # Preserve raw_content separately so evidence-search can use it for longer excerpts if needed.
+    normalized = {
+        "url": item.get("url") or item.get("link") or "",
+        "title": item.get("title") or item.get("name") or "",
+        "content": content,
+        "score": item.get("score"),
+    }
+    raw_content = provider_text(item.get("raw_content"))
+    if raw_content:
+        normalized["raw_content"] = raw_content
+    return normalized
+
+
+def normalize_exa_result(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one Exa result into the shared provider result shape."""
+    # Exa content is requested through contents and may arrive as highlights, text, or summary.
+    content = first_provider_text(
+        item.get("highlights"),
+        item.get("text"),
+        item.get("summary"),
+        item.get("snippet"),
+        item.get("description"),
+    )
+
+    # Keep full text as raw_content when it is different from the selected snippet/highlights.
+    normalized = {
+        "url": item.get("url") or item.get("link") or "",
+        "title": item.get("title") or item.get("name") or "",
+        "content": content,
+        "score": item.get("score"),
+    }
+    raw_content = provider_text(item.get("text"))
+    if raw_content and raw_content != content:
+        normalized["raw_content"] = raw_content
+    highlights = item.get("highlights")
+    if isinstance(highlights, list):
+        normalized["highlights"] = [provider_text(highlight) for highlight in highlights if provider_text(highlight)]
+    summary = provider_text(item.get("summary"))
+    if summary:
+        normalized["summary"] = summary
+    return normalized
+
+
 class SearchProvider:
     """Base interface implemented by concrete external search providers."""
 
@@ -34,7 +113,7 @@ class TavilySearchProvider(SearchProvider):
             "query": query,
             "search_depth": os.getenv("SEARCH_DEPTH", "advanced"),
             "include_answer": os.getenv("SEARCH_INCLUDE_ANSWER", "false").lower() == "true",
-            "include_raw_content": os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true").lower() == "true",
+            "include_raw_content": tavily_include_raw_content_value(),
             "max_results": min(max_sources, int(os.getenv("SEARCH_MAX_RESULTS", "5"))),
         }
         if include_domains:
@@ -48,7 +127,12 @@ class TavilySearchProvider(SearchProvider):
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(api_url, json=payload)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+
+        # Normalize results so evidence-search receives the same content field as Exa.
+        results = data.get("results") or []
+        data["results"] = [normalize_tavily_result(item) for item in results]
+        return data
 
 
 class ExaSearchProvider(SearchProvider):
@@ -67,6 +151,10 @@ class ExaSearchProvider(SearchProvider):
         payload = {
             "query": query,
             "numResults": min(max_sources, int(os.getenv("SEARCH_MAX_RESULTS", "5"))),
+            "contents": {
+                "highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true").lower() == "true",
+                "text": os.getenv("EXA_INCLUDE_TEXT", "true").lower() == "true",
+            },
         }
         if include_domains:
             payload["includeDomains"] = include_domains
@@ -83,15 +171,7 @@ class ExaSearchProvider(SearchProvider):
 
         # Normalize Exa result field names to url/title/content/score for the service layer.
         results = data.get("results") or data.get("data") or []
-        adapted = []
-        for item in results:
-            adapted.append({
-                "url": item.get("url") or item.get("link") or "",
-                "title": item.get("title") or item.get("name") or "",
-                "content": item.get("snippet") or item.get("text") or item.get("description") or "",
-                "score": item.get("score"),
-            })
-        return {"results": adapted}
+        return {"results": [normalize_exa_result(item) for item in results]}
 
 
 class SearchProviderRegistry:

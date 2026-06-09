@@ -98,6 +98,36 @@ def test_evidence_from_source_v2_preserves_domain_resolution_metadata():
     assert result["matched_profiles"] == ["entity_INE"]
 
 
+def test_exa_result_normalization_uses_highlights_and_preserves_text():
+    result = search_providers.normalize_exa_result({
+        "url": "https://idescat.cat/demo",
+        "title": "Idescat demo",
+        "highlights": ["  Population reached 8 million.  ", " Official estimate. "],
+        "text": "Longer page text with the full statistical context.",
+        "summary": "Short summary",
+        "score": 0.9,
+    })
+
+    assert result["url"] == "https://idescat.cat/demo"
+    assert result["title"] == "Idescat demo"
+    assert result["content"] == "Population reached 8 million. Official estimate."
+    assert result["raw_content"] == "Longer page text with the full statistical context."
+    assert result["summary"] == "Short summary"
+
+
+def test_tavily_result_normalization_uses_content_and_preserves_raw_content():
+    result = search_providers.normalize_tavily_result({
+        "url": "https://tavily.example/demo",
+        "title": "Tavily demo",
+        "content": "  Search snippet from Tavily.  ",
+        "raw_content": "  Longer extracted Tavily page text.  ",
+        "score": 0.8,
+    })
+
+    assert result["content"] == "Search snippet from Tavily."
+    assert result["raw_content"] == "Longer extracted Tavily page text."
+
+
 def test_evidence_cache_key_normalizes_text_and_uses_profile_version():
     policy = SimpleNamespace(max_domains=8, max_results=5, max_queries_per_domain=2, fallback_to_general_search=True)
     assertion_a = {**enriched_assertion(), "text": "  El   Paro en Barcelona bajo en 2024. "}
@@ -110,6 +140,18 @@ def test_evidence_cache_key_normalizes_text_and_uses_profile_version():
     assert key_a == key_b
     assert key_a != key_c
     assert len(key_a) == 64
+
+
+def test_evidence_cache_key_changes_with_search_provider(monkeypatch):
+    policy = SimpleNamespace(max_domains=8, max_results=5, max_queries_per_domain=2, fallback_to_general_search=True)
+
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
+    exa_key = evidence.evidence_cache_key(enriched_assertion(), policy, "v1")
+
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "tavily")
+    tavily_key = evidence.evidence_cache_key(enriched_assertion(), policy, "v1")
+
+    assert exa_key != tavily_key
 
 
 def test_build_search_requests_groups_same_query_by_domain():

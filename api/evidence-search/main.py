@@ -203,14 +203,27 @@ def policy_for_cache(policy: Any) -> Dict[str, Any]:
     return vars(policy)
 
 
+def search_backend_for_cache() -> Dict[str, Any]:
+    """Return search-provider settings that affect evidence content shape."""
+    # Provider and content extraction flags must partition cache entries when operators switch backends.
+    return {
+        "provider": SEARCH_PROVIDER or os.getenv("SEARCH_PROVIDER", "tavily"),
+        "search_max_results": os.getenv("SEARCH_MAX_RESULTS", "5"),
+        "search_include_raw_content": os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true"),
+        "exa_include_highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true"),
+        "exa_include_text": os.getenv("EXA_INCLUDE_TEXT", "true"),
+    }
+
+
 def evidence_cache_key(assertion: Dict[str, Any], policy: Any, profile_version: str) -> str:
-    """Build the cache key for an assertion, policy, and profile version."""
+    """Build the cache key for an assertion, policy, profile version, and search backend."""
     # Include every input that can change the evidence search result.
     payload = {
         "schema_version": "evidence-search-request-v2",
         "assertion": normalized_assertion_for_cache(assertion),
         "search_policy": policy_for_cache(policy),
         "profile_version": profile_version,
+        "search_backend": search_backend_for_cache(),
     }
 
     # Hash the canonical payload so Mongo stores a compact, index-friendly key.
@@ -478,6 +491,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
                     "cache_key": cache_key,
                     "assertion_hash": assertion_hash,
                     "profile_version": profile_version,
+                    "search_backend": search_backend_for_cache(),
                     "created_at": now,
                     "expires_at": now + timedelta(seconds=EVIDENCE_SEARCH_CACHE_TTL_SECONDS),
                     "request": {

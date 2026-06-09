@@ -35,6 +35,8 @@ spec.loader.exec_module(init_domains)
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for profile loading and backend selection."""
+    # Define source, target, cache, and backend flags in one place.
     parser = argparse.ArgumentParser(description="Load evidence domain profiles in MongoDB")
     parser.add_argument("--source", default=str(DEFAULT_SOURCE), help="YAML or JSON profile file")
     parser.add_argument("--dry-run", action="store_true", help="Validate and print what would be replaced without writing")
@@ -51,19 +53,27 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_and_validate(source: Path) -> dict[str, Any]:
+    """Load a profile file and validate its schema before writing."""
+    # Reuse the shared initialization script so CLI and Kubernetes bootstrap agree.
     profiles = init_domains.load_profiles(source)
     init_domains.validate_profiles(profiles)
     return profiles
 
 
 def build_docs(profiles: dict[str, Any], args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Build Mongo documents for the selected profile id and source file."""
+    # Delegate document shape construction to the shared initialization module.
     return init_domains.build_profile_documents(profiles, source=Path(args.source), profile_id=args.profile_id)
 
 
 def print_summary(profiles: dict[str, Any], args: argparse.Namespace) -> None:
+    """Print the profile load summary and target collections."""
+    # Summarize profile content first so operators can inspect what will be written.
     summary = init_domains.summarize(profiles)
     for key, value in summary.items():
         print(f"[evidence-domains] {key}={value}")
+
+    # Print execution settings that affect replacement and cache invalidation.
     print(f"[evidence-domains] profile_id={args.profile_id}")
     print(f"[evidence-domains] schema_version={init_domains.PROFILE_VERSION}")
     print(f"[evidence-domains] source={Path(args.source)}")
@@ -73,28 +83,35 @@ def print_summary(profiles: dict[str, Any], args: argparse.Namespace) -> None:
 
 
 def reset_and_load_with_pymongo(profiles: dict[str, Any], args: argparse.Namespace) -> None:
+    """Replace the selected profile documents using a direct pymongo connection."""
+    # Import lazily so the kubectl backend can work without pymongo installed.
     from pymongo import MongoClient
 
+    # Connect to the configured database and prepare profile/cache collections.
     client = MongoClient(init_domains.mongo_uri_from_env())
     database = client[args.db]
     collection = database[args.collection]
     cache_collection = database[args.cache_collection]
     docs = build_docs(profiles, args)
 
+    # Capture pre-change counts for operator logs.
     existing_profile_docs = collection.count_documents({"profile_id": args.profile_id})
     existing_cache_docs = cache_collection.count_documents({}) if not args.keep_cache else 0
 
+    # Replace only the selected profile id, preserving other profile configurations.
     print("[evidence-domains] backend=pymongo")
     print(f"[evidence-domains] existing_profile_docs={existing_profile_docs}")
     print(f"[evidence-domains] replacing_profile_id={args.profile_id} collection={args.db}.{args.collection}")
     deleted = collection.delete_many({"profile_id": args.profile_id})
     print(f"[evidence-domains] deleted_profile_docs={deleted.deleted_count}")
 
+    # Drop evidence cache unless explicitly preserved, because profile versions changed.
     if not args.keep_cache:
         print(f"[evidence-domains] existing_cache_docs={existing_cache_docs}")
         print(f"[evidence-domains] dropping_collection={args.db}.{args.cache_collection}")
         cache_collection.drop()
 
+    # Insert the new profile documents and recreate indexes required by the API.
     collection.insert_many(docs)
     init_domains.create_profile_indexes(collection)
     print(f"[evidence-domains] inserted_profile_id={args.profile_id}")
@@ -103,7 +120,11 @@ def reset_and_load_with_pymongo(profiles: dict[str, Any], args: argparse.Namespa
 
 
 def run_command(cmd: list[str], input_text: str) -> subprocess.CompletedProcess[str]:
+    """Run an external command with stdin and return the completed process."""
+    # Capture output so callers can filter noisy kubectl/mongo logs.
     completed = subprocess.run(cmd, input=input_text, text=True, capture_output=True, check=False)
+
+    # Echo failures immediately to help operators diagnose backend issues.
     if completed.returncode != 0:
         if completed.stdout:
             print(completed.stdout, end="")
@@ -113,15 +134,20 @@ def run_command(cmd: list[str], input_text: str) -> subprocess.CompletedProcess[
 
 
 def print_relevant_output(output: str) -> None:
+    """Print only evidence-domain status lines from command output."""
+    # The mongo shell can be noisy; keep the operator-facing output focused.
     for line in (output or "").splitlines():
         if line.startswith("[evidence-domains]"):
             print(line)
 
 
 def reset_and_load_with_kubectl(profiles: dict[str, Any], args: argparse.Namespace) -> None:
+    """Replace the selected profile documents through kubectl and mongo shell."""
+    # Build documents locally and embed them into the mongo shell script.
     docs = build_docs(profiles, args)
     doc_json_array = json.dumps(docs, ensure_ascii=False)
 
+    # Run a preflight script to report existing profile/cache state before mutation.
     print("[evidence-domains] backend=kubectl")
     preflight_js = """
 const targetCollection = __TARGET_COLLECTION__;
@@ -141,6 +167,7 @@ if (!keepCache) {
     preflight_js = preflight_js.replace("__KEEP_CACHE__", json.dumps(bool(args.keep_cache)))
     preflight_js = preflight_js.replace("__PROFILE_ID__", json.dumps(args.profile_id))
 
+    # Build the kubectl exec command used for both preflight and load scripts.
     mongo_cmd = [
         "kubectl",
         "exec",
@@ -158,6 +185,7 @@ if (!keepCache) {
     if preflight.returncode != 0:
         raise SystemExit(f"kubectl mongo preflight failed with exit code {preflight.returncode}")
 
+    # Build the mutation script that replaces profile docs and recreates required indexes.
     print(f"[evidence-domains] replacing_profile_id={args.profile_id} collection={args.db}.{args.collection}")
     load_js = """
 const col = db.getCollection(__TARGET_COLLECTION__);
@@ -184,6 +212,8 @@ print("[evidence-domains] changes_applied=true result=profile-loaded");
     load_js = load_js.replace("__DOCS__", doc_json_array)
     load_js = load_js.replace("__PROFILE_ID__", json.dumps(args.profile_id))
     load_js = load_js.replace("__DOC_COUNT__", str(len(docs)))
+
+    # Execute the mutation and fail loudly if mongo reports an error.
     loaded = run_command(mongo_cmd, load_js)
     print_relevant_output(loaded.stdout)
     if loaded.returncode != 0:
@@ -191,6 +221,8 @@ print("[evidence-domains] changes_applied=true result=profile-loaded");
 
 
 def reset_and_load(profiles: dict[str, Any], args: argparse.Namespace) -> None:
+    """Choose a backend and replace the selected profile documents."""
+    # Prefer pymongo for direct writes unless the user forces kubectl or pymongo is unavailable.
     if args.backend in {"auto", "pymongo"}:
         try:
             reset_and_load_with_pymongo(profiles, args)
@@ -204,21 +236,28 @@ def reset_and_load(profiles: dict[str, Any], args: argparse.Namespace) -> None:
                 raise
             print("[evidence-domains] pymongo backend failed; falling back to kubectl", file=sys.stderr)
 
+    # Use kubectl as the fallback backend for cluster-local Mongo access.
     reset_and_load_with_kubectl(profiles, args)
 
 
 def main() -> int:
+    """Validate arguments, optionally dry-run, and load profile documents."""
+    # Parse and validate profile data before considering any destructive operation.
     args = parse_args()
     profiles = load_and_validate(Path(args.source))
     print_summary(profiles, args)
 
+    # Dry runs stop after validation and summary output.
     if args.dry_run:
         print("[evidence-domains] no changes applied")
         return 0
+
+    # Require an explicit confirmation flag before writing to MongoDB.
     if not args.confirm:
         print("[evidence-domains] --confirm is required for real writes", file=sys.stderr)
         return 2
 
+    # Execute the replacement through the selected backend.
     reset_and_load(profiles, args)
     return 0
 

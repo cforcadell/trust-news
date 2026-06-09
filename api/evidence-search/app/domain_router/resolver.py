@@ -27,6 +27,8 @@ except ImportError:
 
 
 def _profiles_for_assertion(assertion: Dict[str, Any]) -> list[tuple[str, str, float, str]]:
+    """Extract candidate profile lookups from an enriched assertion."""
+    # Category and subcategory matches provide broad topical routing signals.
     profiles: list[tuple[str, str, float, str]] = []
     category = assertion.get("category")
     if category not in (None, ""):
@@ -36,6 +38,7 @@ def _profiles_for_assertion(assertion: Dict[str, Any]) -> list[tuple[str, str, f
         key = f"{str(category).upper()}.{str(subcategory).upper()}"
         profiles.append(("subcategories", key, SUBCATEGORY_MATCH, f"subcategory_{key.replace('.', '_')}"))
 
+    # Location matches become more specific from country to region to city.
     context = assertion.get("context") or {}
     for loc in context.get("locations") or []:
         country = loc.get("country_code")
@@ -48,6 +51,8 @@ def _profiles_for_assertion(assertion: Dict[str, Any]) -> list[tuple[str, str, f
         if region and city:
             key = f"{str(region).upper()}-{city}"
             profiles.append(("cities", key, CITY_MATCH * confidence_factor("location", assertion), f"city_{key}"))
+
+    # Entity matches are the strongest signal because they often map to official sources.
     for ent in context.get("entities") or []:
         name = ent.get("name")
         if name:
@@ -56,16 +61,21 @@ def _profiles_for_assertion(assertion: Dict[str, Any]) -> list[tuple[str, str, f
 
 
 def resolve_domains(assertion: Dict[str, Any], profiles: Dict[str, Any], max_domains: int = 8) -> Dict[str, Any]:
+    """Resolve preferred evidence domains for an assertion from profile matches."""
+    # Prepare accumulators for matched profile names and per-domain scoring.
     selected_profiles: list[str] = []
     merged: dict[str, dict[str, Any]] = {}
     preferred_source_types = set((assertion.get("search_hints") or {}).get("preferred_source_types") or [])
     source_types = profiles.get("source_types") or {}
 
+    # Evaluate every candidate profile lookup derived from the assertion.
     for section, key, base_score, profile_name in _profiles_for_assertion(assertion):
         profile = (profiles.get(section) or {}).get(key)
         if not profile:
             continue
         selected_profiles.append(profile_name)
+
+        # Score and merge each preferred domain exposed by the matched profile.
         for domain_cfg in profile.get("preferred_domains") or []:
             domain = str(domain_cfg.get("domain", "")).lower().strip()
             if not domain:
@@ -77,6 +87,8 @@ def resolve_domains(assertion: Dict[str, Any], profiles: Dict[str, Any], max_dom
             trust_score = float((source_types.get(source_type) or {}).get("default_trust_score", 0.3) or 0.3)
             existing = merged.get(domain)
             matched_profile = profile_name
+
+            # If multiple profiles point to the same domain, keep the strongest metadata.
             if existing:
                 existing["weight"] = max(existing["weight"], score)
                 existing["trust_score"] = max(existing["trust_score"], trust_score)
@@ -92,11 +104,14 @@ def resolve_domains(assertion: Dict[str, Any], profiles: Dict[str, Any], max_dom
                     "matched_profiles": [matched_profile],
                 }
 
+    # Rank by contextual score, number of matched profiles, and trust score.
     preferred_domains = sorted(
         merged.values(),
         key=lambda item: (item["weight"], len(item.get("matched_profiles", [])), item["trust_score"]),
         reverse=True,
     )[:max_domains]
+
+    # Return router metadata that can be logged, cached, and attached to evidence.
     return {
         "selected_profiles": list(dict.fromkeys(selected_profiles)),
         "preferred_domains": preferred_domains,

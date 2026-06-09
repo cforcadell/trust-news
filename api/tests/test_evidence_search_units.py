@@ -90,6 +90,8 @@ def test_evidence_from_source_v2_preserves_domain_resolution_metadata():
     )
 
     assert result["domain"] == "ine.es"
+    assert result["source_id"] == "source-1"
+    assert result["snippet"] == "Evidence text"
     assert result["source_type"] == "statistics"
     assert result["trust_score"] == 0.95
     assert result["why_selected"] == "entity"

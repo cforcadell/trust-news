@@ -25,6 +25,8 @@ spec:
           value: "arcee-ai/trinity-large-preview:free"
         - name: API_URL
           value: "https://openrouter.ai/api/v1/chat/completions"
+        - name: VALIDATOR_SERVICE_URL
+          value: "http://validate-service-1.apis.svc.cluster.local:8070"
         resources:
             requests:
               cpu: "100m"

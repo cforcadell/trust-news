@@ -191,6 +191,7 @@ class ValidatorConfig(BaseModel):
     type: ValidatorType = ValidatorType.LLM_MEMORY_VALIDATION
     provider: str
     model: str
+    service_url: Optional[str] = None
     active_date: str
     updated_date: str
     end_date: Optional[str] = None

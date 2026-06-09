@@ -106,6 +106,7 @@ TOPIC_REQUESTS_VALIDATE = os.getenv("TOPIC_REQUESTS_VALIDATE", DEFAULT_TOPIC_REQ
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", DEFAULT_TOPIC_RESPONSES)
 TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS)
 TOPIC_LIGHT_VALIDATION_RESPONSES = os.getenv("TOPIC_LIGHT_VALIDATION_RESPONSES", DEFAULT_TOPIC_RESPONSES)
+LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS = float(os.getenv("LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS", "2.0"))
 
 MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
@@ -478,18 +479,75 @@ def light_document_for_order(order_id: str, assertions_document: AssertionsDocum
     return minimal_document_for_order(assertions_document.post.original_text, assertions_list)
 
 
+def validator_healthcheck_url(validator: dict) -> Optional[str]:
+    config = validator.get("config") or {}
+    explicit_health_url = (
+        validator.get("healthcheck_url")
+        or validator.get("health_url")
+        or config.get("healthcheck_url")
+        or config.get("health_url")
+    )
+    if explicit_health_url:
+        return str(explicit_health_url)
+
+    service_url = (
+        validator.get("service_url")
+        or validator.get("validator_service_url")
+        or config.get("service_url")
+        or config.get("validator_service_url")
+    )
+    if not service_url:
+        return None
+    return f"{str(service_url).rstrip('/')}/health"
+
+
+async def light_validator_is_healthy(validator: dict, health_cache: Dict[str, bool]) -> bool:
+    validator_id = str(validator.get("validator") or "")
+    cache_key = validator_id.lower()
+    if cache_key in health_cache:
+        return health_cache[cache_key]
+
+    health_url = validator_healthcheck_url(validator)
+    if not health_url:
+        logger.warning(f"[LIGHT] Validator has no service_url/healthcheck_url; skipping validator={validator_id}")
+        health_cache[cache_key] = False
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS) as client:
+            resp = await client.get(health_url)
+        is_healthy = 200 <= resp.status_code < 300
+    except Exception as e:
+        logger.warning(f"[LIGHT] Validator healthcheck failed; skipping validator={validator_id} url={health_url} error={e}")
+        health_cache[cache_key] = False
+        return False
+
+    if not is_healthy:
+        logger.warning(
+            f"[LIGHT] Validator healthcheck not OK; skipping validator={validator_id} "
+            f"url={health_url} status={resp.status_code}"
+        )
+    health_cache[cache_key] = is_healthy
+    return is_healthy
+
 
 async def dispatch_light_validation_requests(order_id: str, text: str, assertions_document: AssertionsDocumentV2, client_id: Optional[str] = None):
     validators_info = []
     validation_requests = {}
     no_validator_assertions = []
     total_pending = 0
+    validator_health_cache: Dict[str, bool] = {}
 
     for index, assertion in enumerate(assertions_document.assertions):
         assertion_id = str(assertion.assertion_id)
         category_id = assertion.category_id_for_chain()
         assertion_text = assertion.text
-        validators = get_light_validators_for_category(category_id)
+        candidate_validators = get_light_validators_for_category(category_id)
+        validators = [
+            validator
+            for validator in candidate_validators
+            if await light_validator_is_healthy(validator, validator_health_cache)
+        ]
         validator_ids = [str(v.get("validator")) for v in validators]
 
         validators_info.append({

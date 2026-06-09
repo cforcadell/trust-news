@@ -25,6 +25,8 @@ spec:
           value: "gemini-2.5-flash"
         - name: API_URL
           value: "https://generativelanguage.googleapis.com/v1beta"
+        - name: VALIDATOR_SERVICE_URL
+          value: "http://validate-service-3.apis.svc.cluster.local:8070"
         resources:
             requests:
               cpu: "100m"

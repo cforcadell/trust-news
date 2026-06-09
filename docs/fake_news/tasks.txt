@@ -102,6 +102,7 @@ Develop v0.0.11.
             - Cargador de config de preferred domains OK 
             - Soporte a multiples perfiles de predefined domains OK
             - Cacheo de resultados OK
+            - en lugar de guardar snippet hacer download y guardar chunks que se inyectan al validador 
 
         - Nueva Configuracion de validadores 
             - levantar 1 validador RAG_EVIDENCE_VALIDATION escuchando a todas las categoria con preferred domains bien configurado. Modelos LLM simples  RAG_EVIDENCE_VALIDATION 
@@ -111,8 +112,22 @@ Develop v0.0.11.
 
 
     - Nuevos validadores con búsqueda online (LLM_SEARCH_VALIDATION) OK
+    - en modo light no enviar validacion si los validadores no responden a health chechk Pte Test
+
     
 
+Hecho. Añadí el healthcheck y el filtro previo en modo light.
+
+Cambios principales:
+
+validate-asertions ahora expone GET /health en main.py (line 959).
+La config pública del validador incluye service_url, publicada en IPFS/Kafka desde async_models.py (line 194) y main.py (line 702).
+dispatch_light_validation_requests ahora hace healthcheck por validador una sola vez por proceso/orden de validación y cachea el resultado en memoria local de esa ejecución. Si falla, no envía validaciones a ese validador para ninguna aserción: main.py (line 482).
+Añadí VALIDATOR_SERVICE_URL a los overlays local/prod de los workers para apuntar a validate-service-{n}.apis.svc.cluster.local:8070.
+Verificación:
+
+Pasó python3 -m py_compile api/news-handler/main.py api/validate-asertions/main.py api/common/models/async_models.py.
+Nota: tras desplegar, los validators deben publicar/refrescar su config para que news-handler reciba service_url; el startup existente ya publica config cuando arranca el worker.
     
 
 

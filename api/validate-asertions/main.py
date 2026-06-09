@@ -80,6 +80,7 @@ CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustNews.json")
 API_URL = os.getenv("API_URL")
 API_KEY = os.getenv("API_KEY")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
+VALIDATOR_SERVICE_URL = os.getenv("VALIDATOR_SERVICE_URL", "")
 DEFAULT_MEMORY_PROMPT = """Actúa como validador factual prudente.
 Valida la aserción usando tu conocimiento general y razonamiento lógico.
 No inventes información.
@@ -175,6 +176,7 @@ class AdminConfigResponse(BaseModel):
     model: str
     categories: List[int]
     api_url: Optional[str] = None
+    service_url: Optional[str] = None
     validator_type: int
     use_evidence_search: bool
     online_search_enabled: bool
@@ -190,6 +192,7 @@ class AdminConfigUpdate(BaseModel):
     model: Optional[str] = None
     categories: Optional[List[int]] = None
     api_url: Optional[str] = None
+    service_url: Optional[str] = None
     validator_type: Optional[int] = None
     use_evidence_search: Optional[bool] = None
     online_search_enabled: Optional[bool] = None
@@ -276,6 +279,7 @@ def normalize_admin_config_response() -> AdminConfigResponse:
         model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
         categories=VALIDATOR_CATEGORIES,
         api_url=API_URL,
+        service_url=VALIDATOR_SERVICE_URL or None,
         validator_type=int(VALIDATOR_TYPE),
         use_evidence_search=USE_EVIDENCE_SEARCH,
         online_search_enabled=ONLINE_SEARCH_ENABLED,
@@ -301,9 +305,10 @@ def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> st
         return "No hay evidencias disponibles."
     lines = []
     for source in evidences:
+        snippet = source.get("snippet") or source.get("excerpt") or source.get("content") or ""
         lines.append(
             f"- source_id={source.get('source_id', '')} | url={source.get('url', '')} | "
-            f"title={source.get('title', '')} | excerpt={source.get('excerpt', '')}"
+            f"title={source.get('title', '')} | snippet={snippet}"
         )
     return "\n".join(lines)
 
@@ -695,6 +700,7 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         type=VALIDATOR_TYPE,
         provider=AI_PROVIDER,
         model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+        service_url=VALIDATOR_SERVICE_URL or None,
         active_date=VALIDATOR_ACTIVE_DATE,
         updated_date=updated_date or VALIDATOR_UPDATED_DATE,
         end_date=end_date,
@@ -951,19 +957,35 @@ def get_admin_config():
     """Consulta la configuración actual del validador AI y sus categorías."""
     return normalize_admin_config_response()
 
+@app.get("/health", tags=["Health"])
+async def health():
+    automatic = is_automatic_validator()
+    ai_ready = ai_validator is not None
+    if automatic and not ai_ready:
+        raise HTTPException(status_code=503, detail="Automatic validator is not ready")
+    return {
+        "status": "ok",
+        "validator": ACCOUNT_ADDRESS,
+        "validator_type": int(VALIDATOR_TYPE),
+        "automatic": automatic,
+        "ai_ready": ai_ready,
+        "categories": VALIDATOR_CATEGORIES,
+    }
+
 @app.put("/admin/config", tags=["Admin"])
 async def update_admin_config(config: AdminConfigUpdate):
     """
     Modifica la configuración runtime del validador.
     Refresca la configuración IPFS/blockchain cuando cambian los campos públicos del validador.
     """
-    global AI_PROVIDER, API_URL, API_KEY, PRIVATE_KEY, ACCOUNT_ADDRESS, VALIDATOR_TYPE
+    global AI_PROVIDER, API_URL, API_KEY, PRIVATE_KEY, ACCOUNT_ADDRESS, VALIDATOR_TYPE, VALIDATOR_SERVICE_URL
     global USE_EVIDENCE_SEARCH, ONLINE_SEARCH_ENABLED, EVIDENCE_SEARCH_URL, EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
     global ai_validator, VALIDATOR_CATEGORIES
 
     old_provider = AI_PROVIDER
     old_model = ai_validator.model if ai_validator else os.getenv("MODEL", "none")
     old_validator_type = VALIDATOR_TYPE
+    old_service_url = VALIDATOR_SERVICE_URL
     old_use_evidence_search = USE_EVIDENCE_SEARCH
     old_online_search_enabled = ONLINE_SEARCH_ENABLED
     old_evidence_search_url = EVIDENCE_SEARCH_URL
@@ -975,6 +997,7 @@ async def update_admin_config(config: AdminConfigUpdate):
     new_model = config.model if config.model else old_model
     new_validator_type = normalize_validator_type(config.validator_type) if config.validator_type is not None else VALIDATOR_TYPE
     new_api_url = config.api_url if config.api_url is not None else API_URL
+    new_service_url = config.service_url if config.service_url is not None else VALIDATOR_SERVICE_URL
     new_api_key = API_KEY if config.api_key is None or is_masked_secret(config.api_key) else config.api_key
 
     allowed_providers = {"mistral", "gemini", "openrouter", "grok"}
@@ -1000,6 +1023,10 @@ async def update_admin_config(config: AdminConfigUpdate):
     if config.api_url is not None:
         API_URL = new_api_url
         set_runtime_env("API_URL", API_URL or "")
+
+    if config.service_url is not None:
+        VALIDATOR_SERVICE_URL = new_service_url
+        set_runtime_env("VALIDATOR_SERVICE_URL", VALIDATOR_SERVICE_URL or "")
 
     if config.api_key is not None and not is_masked_secret(config.api_key):
         API_KEY = new_api_key
@@ -1059,6 +1086,7 @@ async def update_admin_config(config: AdminConfigUpdate):
         new_model != old_model,
         VALIDATOR_CATEGORIES != old_categories,
         VALIDATOR_TYPE != old_validator_type,
+        VALIDATOR_SERVICE_URL != old_service_url,
         USE_EVIDENCE_SEARCH != old_use_evidence_search,
         ONLINE_SEARCH_ENABLED != old_online_search_enabled,
         EVIDENCE_SEARCH_URL != old_evidence_search_url,

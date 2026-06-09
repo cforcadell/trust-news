@@ -16,6 +16,8 @@ spec:
           value: "llama-3.1-8b-instant"
         - name: API_URL
           value: "https://api.groq.com/openai/v1/chat/completions"
+        - name: VALIDATOR_SERVICE_URL
+          value: "http://validate-service-2.apis.svc.cluster.local:8070"
         - name: VALIDATOR_TYPE
           value: "3"
         - name: USE_EVIDENCE_SEARCH

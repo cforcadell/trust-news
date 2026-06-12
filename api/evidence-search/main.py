@@ -16,6 +16,9 @@ from common.utils.mongo import build_mongo_uri_from_env
 
 sys.path.append(os.path.dirname(__file__))
 from app.domain_router.profiles_loader import PROFILE_ID, PROFILE_INDEX_DOC_TYPE, PROFILE_SUBSET_DOC_TYPE, load_profiles_from_mongo
+from app.chunk_ranker import rank_chunks
+from app.chunker import build_context_windows, chunk_text
+from app.document_fetcher import fetch_main_text
 from app.domain_router.resolver import resolve_domains
 from app.search.providers import search_with_provider
 
@@ -29,6 +32,16 @@ EVIDENCE_SEARCH_CACHE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_CACHE_TTL_SEC
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "").lower() or None
 API_KEY_PROVIDER = os.getenv("API_KEY_PROVIDER", "")
+EVIDENCE_FETCH_FULL_TEXT = os.getenv("EVIDENCE_FETCH_FULL_TEXT", "false").lower() == "true"
+EVIDENCE_MAX_CONTEXTS_PER_SOURCE = int(os.getenv("EVIDENCE_MAX_CONTEXTS_PER_SOURCE", "2"))
+EVIDENCE_MAX_CONTEXTS_TOTAL = int(os.getenv("EVIDENCE_MAX_CONTEXTS_TOTAL", "8"))
+EVIDENCE_CHUNK_SIZE_CHARS = int(os.getenv("EVIDENCE_CHUNK_SIZE_CHARS", "1200"))
+EVIDENCE_CHUNK_OVERLAP_CHARS = int(os.getenv("EVIDENCE_CHUNK_OVERLAP_CHARS", "200"))
+EVIDENCE_CONTEXT_WINDOW_BEFORE = int(os.getenv("EVIDENCE_CONTEXT_WINDOW_BEFORE", "1"))
+EVIDENCE_CONTEXT_WINDOW_AFTER = int(os.getenv("EVIDENCE_CONTEXT_WINDOW_AFTER", "1"))
+EVIDENCE_HTTP_TIMEOUT = float(os.getenv("EVIDENCE_HTTP_TIMEOUT", "10"))
+EVIDENCE_MIN_CONTEXT_CHARS = int(os.getenv("EVIDENCE_MIN_CONTEXT_CHARS", "120"))
+EVIDENCE_USER_AGENT = os.getenv("EVIDENCE_USER_AGENT", "TrustNewsEvidenceBot/1.0")
 
 
 app = FastAPI(title="TrustNews Evidence Search")
@@ -212,6 +225,13 @@ def search_backend_for_cache() -> Dict[str, Any]:
         "search_include_raw_content": os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true"),
         "exa_include_highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true"),
         "exa_include_text": os.getenv("EXA_INCLUDE_TEXT", "true"),
+        "evidence_fetch_full_text": EVIDENCE_FETCH_FULL_TEXT,
+        "evidence_max_contexts_per_source": EVIDENCE_MAX_CONTEXTS_PER_SOURCE,
+        "evidence_max_contexts_total": EVIDENCE_MAX_CONTEXTS_TOTAL,
+        "evidence_chunk_size_chars": EVIDENCE_CHUNK_SIZE_CHARS,
+        "evidence_chunk_overlap_chars": EVIDENCE_CHUNK_OVERLAP_CHARS,
+        "evidence_context_window_before": EVIDENCE_CONTEXT_WINDOW_BEFORE,
+        "evidence_context_window_after": EVIDENCE_CONTEXT_WINDOW_AFTER,
     }
 
 
@@ -273,6 +293,129 @@ def useful_excerpt(result: Dict[str, Any]) -> str:
     # Compact whitespace and cap length so prompts and cache entries stay bounded.
     text = re.sub(r"\s+", " ", raw or content).strip()
     return text[:900]
+
+
+def snippet_context_for_evidence(evidence: Dict[str, Any], score: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Build a traceable context from the provider snippet for compatibility/fallback."""
+    snippet = re.sub(r"\s+", " ", evidence.get("snippet") or "").strip()
+    if not snippet:
+        return None
+    return {
+        "context_id": f"{evidence.get('source_id')}-context-1",
+        "selected_chunk_id": None,
+        "included_chunk_ids": [],
+        "text": snippet,
+        "score": score,
+        "origin": "search_snippet",
+        "char_length": len(snippet),
+    }
+
+
+def attach_snippet_fallback(evidence: Dict[str, Any], fetch_status: str) -> Dict[str, Any]:
+    """Attach snippet context metadata without replacing the normalized evidence fields."""
+    context = snippet_context_for_evidence(evidence)
+    evidence["contexts"] = [context] if context else []
+    evidence["fetch_status"] = fetch_status
+    if fetch_status != "not_requested":
+        print(f"[evidence-search] fallback_to_snippet=true source_id={evidence.get('source_id')} fetch_status={fetch_status}")
+    return evidence
+
+
+def chunks_metadata(ranked_chunks: List[Dict[str, Any]], selected_contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Expose rank metadata while keeping non-selected chunk text out of the response."""
+    selected_ids = {context.get("selected_chunk_id") for context in selected_contexts}
+    return [
+        {
+            "chunk_id": chunk.get("chunk_id"),
+            "score": chunk.get("score"),
+            "selected": chunk.get("chunk_id") in selected_ids,
+            "char_length": chunk.get("char_length"),
+            "ranking_reason": chunk.get("ranking_reason"),
+            "matched_signals": chunk.get("matched_signals", []),
+        }
+        for chunk in ranked_chunks
+    ]
+
+
+async def build_evidences_with_optional_contexts(
+    assertion: Dict[str, Any],
+    raw_results: List[Dict[str, Any]],
+    domain_resolution: Dict[str, Any],
+    max_results: int,
+) -> List[Dict[str, Any]]:
+    """Normalize search results and optionally enrich them with selected document contexts."""
+    evidences: List[Dict[str, Any]] = []
+    total_contexts = 0
+
+    if EVIDENCE_FETCH_FULL_TEXT:
+        print(f"[evidence-search] full_text_enrichment_start=true assertion_id={assertion.get('assertion_id')}")
+
+    for idx, source in enumerate(raw_results[:max_results], start=1):
+        evidence = evidence_from_source_v2(source, idx, domain_resolution)
+        source_id = evidence["source_id"]
+
+        if not EVIDENCE_FETCH_FULL_TEXT:
+            attach_snippet_fallback(evidence, "not_requested")
+            if evidence.get("contexts"):
+                total_contexts += 1
+            evidences.append(evidence)
+            continue
+
+        if total_contexts >= EVIDENCE_MAX_CONTEXTS_TOTAL:
+            attach_snippet_fallback(evidence, "not_requested")
+            evidences.append(evidence)
+            continue
+
+        url = evidence.get("url") or ""
+        print(f"[evidence-search] downloading_url source_id={source_id} url={url}")
+        fetch_result = await fetch_main_text(url, timeout=EVIDENCE_HTTP_TIMEOUT, user_agent=EVIDENCE_USER_AGENT)
+        evidence["fetch_status"] = fetch_result.status
+        print(f"[evidence-search] fetch_status source_id={source_id} status={fetch_result.status} error={fetch_result.error}")
+
+        if fetch_result.status != "ok":
+            attach_snippet_fallback(evidence, fetch_result.status)
+            evidence["contexts_total"] = len(evidence.get("contexts") or [])
+            if evidence.get("contexts"):
+                total_contexts += 1
+            evidences.append(evidence)
+            continue
+
+        document_length = fetch_result.document_length_chars
+        chunks = chunk_text(source_id, fetch_result.text, EVIDENCE_CHUNK_SIZE_CHARS, EVIDENCE_CHUNK_OVERLAP_CHARS)
+        ranked = rank_chunks(assertion, chunks)
+        remaining_contexts = max(0, EVIDENCE_MAX_CONTEXTS_TOTAL - total_contexts)
+        contexts = build_context_windows(
+            source_id,
+            chunks,
+            ranked,
+            max_contexts=min(EVIDENCE_MAX_CONTEXTS_PER_SOURCE, remaining_contexts),
+            before=EVIDENCE_CONTEXT_WINDOW_BEFORE,
+            after=EVIDENCE_CONTEXT_WINDOW_AFTER,
+            min_context_chars=EVIDENCE_MIN_CONTEXT_CHARS,
+        )
+
+        evidence["document_length_chars"] = document_length
+        evidence["chunks_total"] = len(chunks)
+        evidence["contexts_total"] = len(contexts)
+        print(f"[evidence-search] document_length_chars source_id={source_id} value={document_length}")
+        print(f"[evidence-search] chunks_total source_id={source_id} value={len(chunks)}")
+        print(f"[evidence-search] contexts_selected source_id={source_id} value={len(contexts)}")
+
+        if not chunks or not contexts:
+            attach_snippet_fallback(evidence, "no_ranked_chunks")
+            evidence["contexts_total"] = len(evidence.get("contexts") or [])
+            if evidence.get("contexts"):
+                total_contexts += 1
+            evidences.append(evidence)
+            continue
+
+        evidence["contexts"] = contexts
+        evidence["chunks_metadata"] = chunks_metadata(ranked, contexts)
+        total_contexts += len(contexts)
+        evidences.append(evidence)
+
+    print(f"[evidence-search] total_contexts_returned={total_contexts}")
+    return evidences
 
 
 
@@ -470,7 +613,12 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             })
 
     # Normalize raw provider results into the public evidence response contract.
-    evidences = [evidence_from_source_v2(source, idx, domain_resolution) for idx, source in enumerate(raw_results[: req.search_policy.max_results], start=1)]
+    evidences = await build_evidences_with_optional_contexts(
+        assertion,
+        raw_results,
+        domain_resolution,
+        max_results=req.search_policy.max_results,
+    )
     response = {
         "schema_version": "evidence-search-response-v2",
         "assertion_id": assertion.get("assertion_id"),

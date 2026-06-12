@@ -32,6 +32,7 @@ from common.models.async_models import (
     TextoEntrada,
     build_assertions_document_v2,
 )
+from common.models.protocol_models import ACCEPTED_CATEGORY_PROMPT
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
 from common.utils.llm_json import extract_chat_content, parse_model_list
@@ -74,7 +75,13 @@ MAX_ASSERTIONS = int(os.getenv("MAX_ASSERTIONS", "20"))
 
 def build_assertions_prompt(text: str) -> str:
     return (
-        f"{PROMPT}\n\nTexto a analizar:\n{text}\n\n"
+        f"{PROMPT}\n\n"
+        "CATEGORÍAS CANÓNICAS OBLIGATORIAS ALINEADAS CON BLOCKCHAIN:\n"
+        f"{ACCEPTED_CATEGORY_PROMPT}\n\n"
+        "El campo category DEBE ser exactamente una de esas etiquetas, respetando acentos y espacios. "
+        "No traduzcas las categorías, no uses sinónimos y no inventes categorías nuevas. "
+        "El campo categoryId DEBE ser el id numérico correspondiente a category.\n\n"
+        f"Texto a analizar:\n{text}\n\n"
         f"IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones.\n"
     )
 

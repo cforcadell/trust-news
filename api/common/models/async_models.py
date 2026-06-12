@@ -12,6 +12,8 @@ from common.models.protocol_models import (
     SourceDocumentStorage,
     build_assertions_document_v2,
     build_assertion_validation_payload_v2,
+    canonical_category,
+    category_id_for_value,
 )
 
 
@@ -61,11 +63,9 @@ class Assertion(BaseModel):
                 self.assertion_index = 0
         if self.category is None and self.categoryId is not None:
             self.category = self.categoryId
-        if self.categoryId is None and self.category is not None:
-            try:
-                self.categoryId = int(self.category)
-            except Exception:
-                self.categoryId = 0
+        if self.category is not None:
+            self.category = canonical_category(self.category)
+            self.categoryId = category_id_for_value(self.category)
 
     def to_enriched(self) -> EnrichedAssertion:
         return EnrichedAssertion(

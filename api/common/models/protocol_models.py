@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
+import unicodedata
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -55,6 +56,71 @@ SOURCE_TYPES = {
     "social_media",
     "unknown",
 }
+
+
+CHAIN_CATEGORIES: Dict[int, str] = {
+    1: "ECONOMÍA",
+    2: "DEPORTES",
+    3: "POLÍTICA",
+    4: "TECNOLOGÍA",
+    5: "SALUD",
+    6: "ENTRETENIMIENTO",
+    7: "CIENCIA",
+    8: "CULTURA",
+    9: "MEDIO AMBIENTE",
+    10: "SOCIAL",
+}
+
+
+def _category_key(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.replace("-", " ").replace("_", " ")
+
+
+CATEGORY_ALIASES: Dict[str, int] = {
+    _category_key(name): category_id for category_id, name in CHAIN_CATEGORIES.items()
+}
+CATEGORY_ALIASES.update({
+    "ECONOMY": 1,
+    "ECONOMIA": 1,
+    "SPORT": 2,
+    "SPORTS": 2,
+    "DEPORTE": 2,
+    "POLITICS": 3,
+    "POLITICA": 3,
+    "PUBLIC ADMINISTRATION": 3,
+    "TECHNOLOGY": 4,
+    "TECNOLOGIA": 4,
+    "HEALTH": 5,
+    "ENTERTAINMENT": 6,
+    "SCIENCE": 7,
+    "CULTURE": 8,
+    "ENVIRONMENT": 9,
+    "ENVIRONMENTAL": 9,
+    "MEDIOAMBIENTE": 9,
+    "SOCIAL": 10,
+})
+
+ACCEPTED_CATEGORY_PROMPT = "\n".join(f"{category_id} {name}" for category_id, name in CHAIN_CATEGORIES.items())
+
+
+def category_id_for_value(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("Invalid category: booleans are not valid category ids")
+    try:
+        category_id = int(value)
+    except Exception:
+        category_id = CATEGORY_ALIASES.get(_category_key(value), 0)
+    if category_id not in CHAIN_CATEGORIES:
+        accepted = ", ".join(CHAIN_CATEGORIES.values())
+        raise ValueError(f"Invalid category {value!r}. Accepted categories: {accepted}")
+    return category_id
+
+
+def canonical_category(value: Any) -> str:
+    return CHAIN_CATEGORIES[category_id_for_value(value)]
 
 
 def utc_now_iso() -> str:
@@ -177,26 +243,13 @@ class EnrichedAssertion(BaseModel):
     search_hints: SearchHints = Field(default_factory=SearchHints)
     context_confidence: ContextConfidence = Field(default_factory=ContextConfidence)
 
+    @field_validator("category")
+    @classmethod
+    def normalize_category(cls, value: str | int) -> str:
+        return canonical_category(value)
 
     def category_id_for_chain(self) -> int:
-        raw = self.category
-        try:
-            return int(raw)
-        except Exception:
-            lookup = {
-                "ECONOMY": 1,
-                "SPORTS": 2,
-                "POLITICS": 3,
-                "PUBLIC_ADMINISTRATION": 3,
-                "TECHNOLOGY": 4,
-                "HEALTH": 5,
-                "ENTERTAINMENT": 6,
-                "SCIENCE": 7,
-                "CULTURE": 8,
-                "ENVIRONMENT": 9,
-                "SOCIAL": 10,
-            }
-            return lookup.get(str(raw).upper(), 0)
+        return category_id_for_value(self.category)
 
     def to_chain_assertion(self) -> Dict[str, Any]:
         return {

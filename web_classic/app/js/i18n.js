@@ -168,14 +168,18 @@
             disproved: "Desmentidas",
             notConclusive: "No concluyentes",
             of: "de",
-            completedValidations: "Validaciones completadas · {consensus}",
-            completedValidationsWithDuration: "Validaciones completadas · {consensus} · Tiempo total: {duration}",
+            completedValidations: "Validaciones completadas · {completed}/{total} recibidas/emitidas · {consensus}",
+            completedValidationsWithDuration: "Validaciones completadas · {completed}/{total} recibidas/emitidas · {consensus} · Tiempo total: {duration}",
             fullConsensus: "Consenso completo",
             partialConsensus: "Consenso parcial",
             validatorVotes: "Votos de validadores",
             orderId: "ID de Orden",
             progress: "Progreso",
             newsSummary: "Noticia (Resumen)",
+            showMore: "Mostrar más",
+            showLess: "Mostrar menos",
+            expandNewsSummaryHint: "Ampliar el resumen completo",
+            collapseNewsSummaryHint: "Contraer el resumen a cinco líneas",
             validationTotalTime: "Tiempo total de validación",
             pendingValidations: "Validaciones pendientes",
             totalValidations: "Validaciones totales",
@@ -207,7 +211,8 @@
             criticalOrderError: "Error crítico al cargar la orden.",
             listingOrders: "Listando todas las órdenes...",
             ordersLoaded: "Órdenes cargadas: {count}",
-            listOrdersError: "Error al listar órdenes. Ver consola."
+            listOrdersError: "Error al listar órdenes. Ver consola.",
+            noValidationsRegistered: "Sin validaciones registradas."
         }
     });
 
@@ -302,14 +307,18 @@
             disproved: "Disproved",
             notConclusive: "Inconclusive",
             of: "of",
-            completedValidations: "Validations completed · {consensus}",
-            completedValidationsWithDuration: "Validations completed · {consensus} · Total time: {duration}",
+            completedValidations: "Validations completed · {completed}/{total} received/issued · {consensus}",
+            completedValidationsWithDuration: "Validations completed · {completed}/{total} received/issued · {consensus} · Total time: {duration}",
             fullConsensus: "Full consensus",
             partialConsensus: "Partial consensus",
             validatorVotes: "Validator votes",
             orderId: "Order ID",
             progress: "Progress",
             newsSummary: "News (Summary)",
+            showMore: "Show more",
+            showLess: "Show less",
+            expandNewsSummaryHint: "Expand the full summary",
+            collapseNewsSummaryHint: "Collapse the summary to five lines",
             validationTotalTime: "Total validation time",
             pendingValidations: "Pending validations",
             totalValidations: "Total validations",
@@ -341,7 +350,8 @@
             criticalOrderError: "Critical error loading the order.",
             listingOrders: "Listing all orders...",
             ordersLoaded: "Orders loaded: {count}",
-            listOrdersError: "Error listing orders. See console."
+            listOrdersError: "Error listing orders. See console.",
+            noValidationsRegistered: "No validations registered."
         }
     });
 

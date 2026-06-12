@@ -152,7 +152,7 @@ data:
     9 MEDIO AMBIENTE
     10 SOCIAL
 
-    Usa la categoría más específica posible según el contenido principal de la aserción.
+    Usa exactamente una de esas etiquetas en el campo category, respetando acentos y espacios. No traduzcas las categorías, no uses sinónimos y no inventes categorías nuevas. categoryId debe ser el id numérico correspondiente.
 
     Devuelve solo JSON válido, sin markdown, sin explicaciones y sin texto adicional.
 
@@ -170,7 +170,7 @@ data:
           "assertion_index": 0,
           "idAssertion": "1",
           "text": "Aserción factual, autocontenida y verificable.",
-          "category": "ECONOMY",
+          "category": "ECONOMÍA",
           "categoryId": 1,
           "subcategory": "EMPLOYMENT",
           "context": {

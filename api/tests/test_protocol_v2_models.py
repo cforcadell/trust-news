@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from common.models.async_models import Assertion
 from common.models.protocol_models import (
     AssertionsDocumentV2,
+    EnrichedAssertion,
     SourceDocumentStorage,
     build_assertion_validation_payload_v2,
     build_assertions_document_v2,
@@ -84,3 +85,20 @@ def test_assertion_context_accepts_legacy_string_lists_from_llms():
     assert assertion.context.entities[0].name == "Union Europea"
     assert assertion.context.temporal_context[0].value == "2026"
     assert assertion.to_enriched().context.temporal_context[0].value == "2026"
+
+
+def test_categories_are_canonicalized_to_blockchain_labels():
+    politica = EnrichedAssertion(assertion_id=1, assertion_index=0, text="x", category="POLÍTICA")
+    economy_legacy = EnrichedAssertion(assertion_id=2, assertion_index=1, text="x", category="ECONOMY")
+    environment = EnrichedAssertion(assertion_id=3, assertion_index=2, text="x", category="MEDIO AMBIENTE")
+
+    assert politica.category == "POLÍTICA"
+    assert politica.category_id_for_chain() == 3
+    assert economy_legacy.category == "ECONOMÍA"
+    assert economy_legacy.category_id_for_chain() == 1
+    assert environment.category_id_for_chain() == 9
+
+
+def test_unknown_category_is_rejected_in_protocol_models():
+    with pytest.raises(ValidationError):
+        EnrichedAssertion(assertion_id=1, assertion_index=0, text="x", category="INTERNATIONAL_RELATIONS")

@@ -108,11 +108,11 @@ Devuelve exclusivamente JSON válido:
 }"""
 
 DEFAULT_RAG_PROMPT = """Actúa como validador factual estricto.
-Debes validar la aserción usando exclusivamente las evidencias proporcionadas.
-No uses conocimiento interno salvo razonamiento lógico básico.
-No inventes fuentes.
-No accedas a URLs externas.
-Si las evidencias no son suficientes, devuelve UNKNOWN.
+Debes validar la aserción usando exclusivamente las evidencias y contextos proporcionados en el prompt.
+No uses conocimiento interno salvo razonamiento lógico básico sobre el texto aportado.
+No accedas a URLs externas ni supongas que una URL contiene información no incluida en los contextos.
+No inventes fuentes, datos ni citas.
+Si los contextos no contienen soporte directo ni contradicción directa para la aserción, responde UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
   "resultado": "TRUE | FALSE | UNKNOWN",
@@ -121,6 +121,7 @@ Devuelve exclusivamente JSON válido:
   "evidence_used": [
     {
       "source_id": "string",
+      "context_id": "string",
       "url": "string",
       "supports": true,
       "reason": "string"
@@ -303,14 +304,54 @@ def normalize_assertion_input(texto: Any, contexto: Optional[str] = None) -> Tup
 def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> str:
     if not evidences:
         return "No hay evidencias disponibles."
-    lines = []
-    for source in evidences:
-        snippet = source.get("snippet") or source.get("excerpt") or source.get("content") or ""
-        lines.append(
-            f"- source_id={source.get('source_id', '')} | url={source.get('url', '')} | "
-            f"title={source.get('title', '')} | snippet={snippet}"
-        )
-    return "\n".join(lines)
+    blocks = []
+    for idx, source in enumerate(evidences, start=1):
+        source_id = source.get("source_id") or f"source-{idx}"
+        source_lines = [
+            f"FUENTE {idx}",
+            f"source_id: {source_id}",
+            f"title: {source.get('title', '')}",
+            f"url: {source.get('url', '')}",
+            f"domain: {source.get('domain', '')}",
+            f"source_type: {source.get('source_type', '')}",
+            f"trust_score: {source.get('trust_score', '')}",
+            f"why_selected: {source.get('why_selected', '')}",
+        ]
+
+        contexts = source.get("contexts") or []
+        chunks = source.get("chunks") or []
+        if contexts:
+            for context_idx, context in enumerate(contexts, start=1):
+                source_lines.extend([
+                    f"CONTEXTO {context_idx}",
+                    f"context_id: {context.get('context_id', '')}",
+                    f"origin: {context.get('origin', '')}",
+                    f"score: {context.get('score', '')}",
+                    f"included_chunk_ids: {context.get('included_chunk_ids', [])}",
+                    f"text: {context.get('text', '')}",
+                ])
+        elif chunks:
+            for chunk_idx, chunk in enumerate(chunks, start=1):
+                source_lines.extend([
+                    f"CONTEXTO {chunk_idx}",
+                    f"context_id: {chunk.get('context_id') or chunk.get('chunk_id', '')}",
+                    f"origin: {chunk.get('origin', 'chunk')}",
+                    f"score: {chunk.get('score', '')}",
+                    f"included_chunk_ids: {chunk.get('included_chunk_ids') or [chunk.get('chunk_id')] if chunk.get('chunk_id') else []}",
+                    f"text: {chunk.get('text', '')}",
+                ])
+        else:
+            snippet = source.get("snippet") or source.get("excerpt") or source.get("content") or ""
+            source_lines.extend([
+                "CONTEXTO 1",
+                "context_id: ",
+                "origin: legacy_snippet",
+                "score: ",
+                "included_chunk_ids: []",
+                f"text: {snippet}",
+            ])
+        blocks.append("\n".join(source_lines))
+    return "\n\n".join(blocks)
 
 
 def build_prompt_content(texto: Any, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:

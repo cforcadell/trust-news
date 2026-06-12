@@ -815,6 +815,34 @@ pre, .event-payload-pre {
 .summary-metrics-table th {
   width: 220px;
 }
+.news-summary-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  white-space: pre-wrap;
+}
+.news-summary-text.expanded {
+  display: block;
+  overflow: visible;
+}
+.news-summary-toggle {
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-cyan);
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.news-summary-toggle:hover,
+.news-summary-toggle:focus-visible {
+  color: var(--accent-green);
+  text-decoration: underline;
+}
 @media (max-width: 900px) {
   .verification-summary-main,
   .verification-ai-row {

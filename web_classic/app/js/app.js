@@ -659,7 +659,8 @@ async function loadOrderById(orderId, cleanup = true) {
 
             if (cleanup || tabs.children.length === 0) {
                 tabs.innerHTML = '';
-                sections.forEach((s,i) => {
+                const defaultTabKey = "validations";
+                sections.forEach((s) => {
                     const btn = document.createElement("button");
                     btn.innerText = s.name;
                     btn.dataset.tabKey = s.key;
@@ -675,9 +676,9 @@ async function loadOrderById(orderId, cleanup = true) {
                         btn.classList.add("activeTab");
                         renderTabContent(s.key, s.data, orderAssertions, data);
                     };
-                    if(i===0) btn.classList.add("activeTab");
+                    if(s.key === defaultTabKey) btn.classList.add("activeTab");
                     tabs.appendChild(btn);
-                    if(i===0) renderTabContent(s.key, s.data, orderAssertions, data);
+                    if(s.key === defaultTabKey) renderTabContent(s.key, s.data, orderAssertions, data);
                 });
             } else {
                 const activeTab = tabs.querySelector('.activeTab');
@@ -966,7 +967,7 @@ function buildVerificationSummary(order, events = []) {
     const completedValidations = Object.values(validations).reduce((sum, validators) => {
         return sum + (validators && typeof validators === "object" ? Object.keys(validators).length : 0);
     }, 0);
-    const totalValidations = expectedValidations || Math.max(validationRequestCount, completedValidations + Number(order.validators_pending || 0), 0);
+    const totalValidations = validationRequestCount || expectedValidations || Math.max(completedValidations + Number(order.validators_pending || 0), 0);
     const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - completedValidations, 0);
 
     const assertionIds = new Set(Object.keys(validations).map(String));
@@ -1100,17 +1101,18 @@ function renderDetails(container, data, events = []) {
     const detailsHtml = `<table class="compact-table">` +
         Object.entries(data)
               .filter(([k, v]) => !["_id", "document", "assertions", "text", "status", "validators_pending", "validation_requests", "validators", "validations", "assertion_results"].includes(k))
+              .filter(([k]) => !(lightMode && k === "assertions_without_validator"))
               .map(([k, v]) => {
                   if (k === "text" && typeof v === "object" && v?.text) v = v.text;
 
-                  if (lightMode && ["tx_hash", "postId", "cid"].includes(k)) {
+                  if (lightMode && ["tx_hash", "postId", "post_id", "cid"].includes(k)) {
                       return `<tr><th>${safeText(k)}</th><td><span class="text-muted">not_available</span></td></tr>`;
                   }
                   if (k === "tx_hash" && v) {
                       const safeHash = String(v).replace(/'/g, "\\'");
                       return `<tr><th>${safeText(k)}</th><td><a href="#" onclick="event.preventDefault(); navigateToTx('${safeHash}'); return false;">${shortHex(v)}</a></td></tr>`;
                   }
-                  if (k === "postId" && v) {
+                  if ((k === "postId" || k === "post_id") && v) {
                       const safeId = String(v).replace(/'/g, "\\'");
                       return `<tr><th>${safeText(k)}</th><td><a href="#" onclick="event.preventDefault(); navigateToPost('${safeId}'); return false;">${safeText(v)}</a></td></tr>`;
                   }
@@ -1167,7 +1169,16 @@ function renderDetails(container, data, events = []) {
         <table class="compact-table summary-metrics-table">
             <tr><th>${t("summary.orderId")}</th><td>${safeText(data.order_id || "N/A")}</td></tr>
             <tr><th>${t("summary.progress")}</th><td>${renderStatusBadge(data.status || "N/A")}${renderProcessingFlow(data.status || "PENDING", summary.pendingValidations, summary.totalValidations)}</td></tr>
-            <tr><th>${t("summary.newsSummary")}</th><td>${safeText(data.text || "N/A")}</td></tr>
+            <tr>
+                <th>${t("summary.newsSummary")}</th>
+                <td>
+                    <div class="news-summary-text">${safeText(data.text || "N/A")}</div>
+                    <button type="button" class="news-summary-toggle" hidden
+                        aria-expanded="false" title="${safeText(t("summary.expandNewsSummaryHint"))}">
+                        ${safeText(t("summary.showMore"))}
+                    </button>
+                </td>
+            </tr>
             <tr><th>Modo</th><td>${safeText(data.validation_mode || "BLOCKCHAIN")}</td></tr>
             <tr><th>${t("summary.validationTotalTime")}</th><td>${safeText(summary.validationDuration || "N/A")}</td></tr>
         </table>`;
@@ -1193,6 +1204,18 @@ function renderDetails(container, data, events = []) {
         });
     });
     container.querySelector(".subTab.activeSubTab")?.classList.add('text-primary');
+
+    const newsSummary = container.querySelector(".news-summary-text");
+    const newsSummaryToggle = container.querySelector(".news-summary-toggle");
+    if (newsSummary && newsSummaryToggle) {
+        newsSummaryToggle.hidden = newsSummary.scrollHeight <= newsSummary.clientHeight + 1;
+        newsSummaryToggle.addEventListener("click", () => {
+            const expanded = newsSummary.classList.toggle("expanded");
+            newsSummaryToggle.setAttribute("aria-expanded", String(expanded));
+            newsSummaryToggle.textContent = t(expanded ? "summary.showLess" : "summary.showMore");
+            newsSummaryToggle.title = t(expanded ? "summary.collapseNewsSummaryHint" : "summary.expandNewsSummaryHint");
+        });
+    }
 
     // Add polling indicator if status is PENDING/SUBMITTED
     if (data.status && (data.status.includes('PENDING') || data.status.includes('SUBMITTED'))) {
@@ -2665,7 +2688,7 @@ function renderValidatorProviderModelTitle(info = {}) {
 
 function renderValidationsTree(container, validations, assertions, orderData = null) {
     if (!validations || Object.keys(validations).length === 0) {
-        container.innerHTML = "<p class='empty-state'>No hay validaciones disponibles para esta orden.</p>";
+        container.innerHTML = `<p class="empty-state">${safeText(t("messages.noValidationsRegistered"))}</p>`;
         return;
     }
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trust News</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=20260613-process-widgets-2">
     <link rel="icon" type="image/png" href="img/fake_news_v3.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/auth/js/keycloak.js"></script>
@@ -134,19 +134,16 @@
         </section>
 
         <section id="order" class="card page-card detail-page">
-            <div class="page-head compact-head">
-                <div>
-                    <span class="section-kicker" data-i18n="sections.search">Buscar</span>
-                    <h2 data-i18n="sections.searchOrder">Buscar Orden Específica</h2>
-                    <p data-i18n="sections.searchOrderHelp">Introduce un order_id para revisar documento, aserciones, validaciones y eventos.</p>
+            <div class="order-search-header">
+                <label for="orderId" data-i18n="sections.searchOrder">Buscar Orden Específica</label>
+                <div id="orderTopBar" class="input-group search-row">
+                    <input type="text" id="orderId" placeholder="Introduce el order_id" data-i18n-placeholder="sections.orderId">
+                    <button id="btn-findOrder" class="btn-primary" data-i18n="sections.findOrder">Buscar Orden</button>
                 </div>
+                <button type="button" class="btn-secondary order-back-button" onclick="showSection('orders')">← Volver al buscador</button>
             </div>
-            <div id="orderTopBar" class="input-group search-row">
-                <input type="text" id="orderId" placeholder="Introduce el order_id" data-i18n-placeholder="sections.orderId">
-                <button id="btn-findOrder" class="btn-primary" data-i18n="sections.findOrder">Buscar Orden</button>
-            </div>
-            <div id="fixedDetailsContainer" class="details-shell"></div>
             <div id="orderTabs" class="tabs"></div>
+            <div id="fixedDetailsContainer" class="order-polling-state" aria-live="polite"></div>
             <div id="tabContent" class="tab-shell"></div>
         </section>
 
@@ -215,6 +212,6 @@
 </main>
 
 <script src="js/i18n.js"></script>
-<script src="js/app.js"></script>
+<script src="js/app.js?v=20260613-process-widgets-2"></script>
 </body>
 </html>

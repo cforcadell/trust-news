@@ -14,12 +14,13 @@ def validation_weight_detail(
     validator: str,
     validation: dict,
     get_cached_validator_config: Optional[Callable[[str], Optional[dict]]] = None,
+    validator_type_weights: Optional[dict] = None,
 ) -> dict:
     cfg = validation.get("validator_config") or (get_cached_validator_config(validator) if get_cached_validator_config else {}) or {}
     config = cfg.get("config") or {}
     validator_type = cfg.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
     reputation = float(cfg.get("reputation", 1.0) or 1.0)
-    type_weight = get_validator_type_weight(validator_type)
+    type_weight = get_validator_type_weight(validator_type, validator_type_weights)
     result = normalize_validation_result(validation.get("approval"))
     return {
         "validator": validator,
@@ -38,9 +39,10 @@ def calculate_assertion_result(
     assertion_id: str,
     validators_obj: dict,
     get_cached_validator_config: Optional[Callable[[str], Optional[dict]]] = None,
+    validator_type_weights: Optional[dict] = None,
 ) -> dict:
     details = [
-        validation_weight_detail(validator, validation or {}, get_cached_validator_config)
+        validation_weight_detail(validator, validation or {}, get_cached_validator_config, validator_type_weights)
         for validator, validation in (validators_obj or {}).items()
     ]
     scores = {"TRUE": 0.0, "FALSE": 0.0, "UNKNOWN": 0.0}
@@ -62,12 +64,18 @@ def calculate_assertion_result(
 def calculate_order_assertion_results(
     order: dict,
     get_cached_validator_config: Optional[Callable[[str], Optional[dict]]] = None,
+    validator_type_weights: Optional[dict] = None,
 ) -> Dict[str, dict]:
     validations = order.get("validations") or {}
     assertion_ids = set(str(k) for k in validations.keys())
     for index, assertion in enumerate(order.get("assertions") or []):
         assertion_ids.add(str(assertion.get("idAssertion", index)))
     return {
-        aid: calculate_assertion_result(aid, validations.get(aid, {}), get_cached_validator_config)
+        aid: calculate_assertion_result(
+            aid,
+            validations.get(aid, {}),
+            get_cached_validator_config,
+            validator_type_weights,
+        )
         for aid in sorted(assertion_ids)
     }

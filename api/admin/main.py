@@ -1,6 +1,7 @@
 # gateway_quotas.py
 import os
 import json
+import math
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -17,6 +18,7 @@ from typing import Optional, List, Dict, Any
 # (Asegúrate de que la ruta 'common.async_models' es correcta en tu entorno)
 # =========================================================
 from common.utils.kafka_contracts import ACTION_TO_QUOTA_MODEL, BILLABLE_SERVICES, DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_RESPONSES
+from common.models.async_models import ValidatorType, default_validator_type_weights
 from common.models.quota_models import ClientCreate, ClientResponse, ClientStatus, ClientUpdate, QuotaDetail
 from common.utils.mongo import build_mongo_uri_from_env
 
@@ -54,6 +56,10 @@ class OpenRouterRecommendationsResponse(BaseModel):
     estimation_note: str
     recommendations: List[OpenRouterModelRecommendation]
 
+
+class ValidatorTypeWeightsUpdate(BaseModel):
+    weights: Dict[str, float]
+
 # =========================================================
 # Configuración
 # =========================================================
@@ -61,6 +67,8 @@ MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
 ORDERS_COLLECTION_NAME = os.getenv("ORDERS_COLLECTION", "news")
 QUOTAS_COLLECTION_NAME = os.getenv("QUOTAS_COLLECTION_NAME", "clients_quotas")
+CONFIG_COLLECTION_NAME = os.getenv("CONFIG_COLLECTION_NAME", "config")
+VALIDATOR_TYPE_WEIGHTS_CONFIG_ID = "validator_type_weights"
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", DEFAULT_KAFKA_BOOTSTRAP)
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", DEFAULT_TOPIC_RESPONSES)
@@ -81,7 +89,34 @@ mongo_client = None
 db = None
 orders_collection = None
 quotas_collection = None
+config_collection = None
 consumer = None
+
+
+def validate_validator_type_weights(weights: Dict[str, float]) -> Dict[str, float]:
+    allowed_names = {validator_type.name for validator_type in ValidatorType}
+    unknown_names = sorted(set(weights) - allowed_names)
+    if unknown_names:
+        raise HTTPException(status_code=422, detail=f"Tipos de validador desconocidos: {', '.join(unknown_names)}")
+
+    normalized = {}
+    for name, value in weights.items():
+        numeric_value = float(value)
+        if not math.isfinite(numeric_value) or numeric_value < 0 or numeric_value > 1:
+            raise HTTPException(status_code=422, detail=f"El peso de {name} debe estar entre 0 y 1")
+        normalized[name] = numeric_value
+    return normalized
+
+
+async def get_validator_type_weights_document() -> dict:
+    defaults = default_validator_type_weights()
+    document = await config_collection.find_one({"_id": VALIDATOR_TYPE_WEIGHTS_CONFIG_ID})
+    configured = validate_validator_type_weights((document or {}).get("weights") or {})
+    return {
+        "config_id": VALIDATOR_TYPE_WEIGHTS_CONFIG_ID,
+        "weights": {**defaults, **configured},
+        "updated_at": (document or {}).get("updated_at"),
+    }
 
 
 # =========================================================
@@ -441,6 +476,32 @@ async def get_openrouter_model_recommendations(
     )
 
 
+@app.get("/config/validator-type-weights", response_model=dict)
+async def get_validator_type_weights():
+    return await get_validator_type_weights_document()
+
+
+@app.put("/config/validator-type-weights", response_model=dict)
+async def update_validator_type_weights(payload: ValidatorTypeWeightsUpdate):
+    if not payload.weights:
+        raise HTTPException(status_code=400, detail="Debes indicar al menos un peso")
+
+    weights = validate_validator_type_weights(payload.weights)
+    now = datetime.now(timezone.utc)
+    set_values = {f"weights.{name}": value for name, value in weights.items()}
+    set_values["updated_at"] = now
+    await config_collection.update_one(
+        {"_id": VALIDATOR_TYPE_WEIGHTS_CONFIG_ID},
+        {
+            "$set": set_values,
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+    logger.info(f"Validator type weights updated: {weights}")
+    return await get_validator_type_weights_document()
+
+
 @app.post("/clients", response_model=dict, status_code=201)
 async def create_client(client: ClientCreate):
     existing = await quotas_collection.find_one({"client_id": client.client_id})
@@ -534,13 +595,26 @@ async def delete_client(client_id: str):
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
-    global mongo_client, db, orders_collection, quotas_collection
+    global mongo_client, db, orders_collection, quotas_collection, config_collection
 
     mongo_client = AsyncIOMotorClient(MONGO_URI)
     db = mongo_client[MONGO_DBNAME]
     orders_collection = db[ORDERS_COLLECTION_NAME]
     quotas_collection = db[QUOTAS_COLLECTION_NAME]
+    config_collection = db[CONFIG_COLLECTION_NAME]
     
+    now = datetime.now(timezone.utc)
+    await config_collection.update_one(
+        {"_id": VALIDATOR_TYPE_WEIGHTS_CONFIG_ID},
+        {
+            "$setOnInsert": {
+                "weights": default_validator_type_weights(),
+                "created_at": now,
+                "updated_at": now,
+            }
+        },
+        upsert=True,
+    )
     await quotas_collection.create_index("client_id", unique=True)
     await orders_collection.create_index("order_id")
     await orders_collection.create_index("postId")

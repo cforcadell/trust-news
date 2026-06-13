@@ -147,13 +147,16 @@ class ValidatorType(IntEnum):
 VALIDATOR_TYPE_WEIGHTS = {
     ValidatorType.LLM_MEMORY_VALIDATION: 0.25,
     ValidatorType.LLM_SEARCH_VALIDATION: 0.5,
-    ValidatorType.RAG_EVIDENCE_VALIDATION: 0.8,
+    ValidatorType.RAG_EVIDENCE_VALIDATION: 1.0,
     ValidatorType.DETERMINISTIC_VALIDATION: 1.0,
     ValidatorType.HUMAN: 0.1,
 }
 
 
-def get_validator_type_weight(validator_type: ValidatorType | int | str | None) -> float:
+def get_validator_type_weight(
+    validator_type: ValidatorType | int | str | None,
+    weights: dict | None = None,
+) -> float:
     try:
         parsed = ValidatorType(int(validator_type))
     except Exception:
@@ -161,7 +164,18 @@ def get_validator_type_weight(validator_type: ValidatorType | int | str | None) 
             parsed = ValidatorType[str(validator_type)]
         except Exception:
             parsed = ValidatorType.LLM_MEMORY_VALIDATION
+    if weights:
+        configured_weight = weights.get(parsed.name, weights.get(str(int(parsed))))
+        if configured_weight is not None:
+            try:
+                return float(configured_weight)
+            except (TypeError, ValueError):
+                pass
     return VALIDATOR_TYPE_WEIGHTS.get(parsed, 0.25)
+
+
+def default_validator_type_weights() -> dict[str, float]:
+    return {validator_type.name: weight for validator_type, weight in VALIDATOR_TYPE_WEIGHTS.items()}
 
 
 def normalize_validation_result(result: Any) -> str:

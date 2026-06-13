@@ -55,7 +55,8 @@ from common.models.async_models import (
     ValidationMode,
     LightValidationRequest,
     LightValidationResponse,
-    ValidatorType
+    ValidatorType,
+    default_validator_type_weights,
 )
 from common.utils.kafka_contracts import (
     ACTION_TO_MODEL_RESPONSE,
@@ -113,6 +114,8 @@ MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "orders")
 MONGO_EVENTS_COLLECTION = os.getenv("MONGO_EVENTS_COLLECTION", "events")
 MONGO_VALIDATIONS_COLLECTION = os.getenv("MONGO_VALIDATIONS_COLLECTION", "validations")
+MONGO_CONFIG_COLLECTION = os.getenv("MONGO_CONFIG_COLLECTION", "config")
+VALIDATOR_TYPE_WEIGHTS_CONFIG_ID = "validator_type_weights"
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 
@@ -143,6 +146,8 @@ order_locks = {}
 orders_collection = None
 events_collection = None
 validations_collection = None
+config_collection = None
+validator_type_weights = default_validator_type_weights()
 
 
 
@@ -258,6 +263,23 @@ async def get_order_id_by_post_id(post_id: str) -> Optional[str]:
     query_post_id = int(post_id) if str(post_id).isdigit() else post_id
     doc = await orders_collection.find_one({"post_id": query_post_id})
     return doc["order_id"] if doc else None
+
+
+async def load_validator_type_weights():
+    global validator_type_weights
+    defaults = default_validator_type_weights()
+    try:
+        document = await config_collection.find_one({"_id": VALIDATOR_TYPE_WEIGHTS_CONFIG_ID})
+        configured = (document or {}).get("weights") or {}
+        validator_type_weights = {
+            name: float(configured.get(name, default_weight))
+            for name, default_weight in defaults.items()
+        }
+        logger.info(f"Validator type weights loaded: {validator_type_weights}")
+    except Exception as e:
+        validator_type_weights = defaults
+        logger.warning(f"Could not load validator type weights; using defaults: {e}")
+    return validator_type_weights
 
 
 async def load_validators_cache_from_chain():
@@ -471,7 +493,11 @@ def get_light_validators_for_category(category_id: int) -> List[dict]:
     return light_validators_for_category(validators_cache.values(), category_id)
 
 def calculate_order_assertion_results(order: dict) -> dict:
-    return calculate_order_assertion_results_common(order, get_cached_validator_config)
+    return calculate_order_assertion_results_common(
+        order,
+        get_cached_validator_config,
+        validator_type_weights,
+    )
 
 
 def light_document_for_order(order_id: str, assertions_document: AssertionsDocumentV2) -> dict:
@@ -1847,6 +1873,7 @@ async def get_order(
 
     order["_id"] = str(order_object_id)
     attach_validator_config_snapshots(order)
+    await load_validator_type_weights()
     order["assertion_results"] = calculate_order_assertion_results(order)
     return order
 
@@ -2293,7 +2320,7 @@ async def check_order_consistency(
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
-    global producer, consumer, mongo_client, db, orders_collection, events_collection, validations_collection, validators_cache
+    global producer, consumer, mongo_client, db, orders_collection, events_collection, validations_collection, config_collection, validators_cache
 
     # MongoDB
     mongo_client = AsyncIOMotorClient(MONGO_URI)
@@ -2301,6 +2328,7 @@ async def startup_event():
     orders_collection = db[MONGO_COLLECTION]
     events_collection = db[MONGO_EVENTS_COLLECTION]
     validations_collection = db[MONGO_VALIDATIONS_COLLECTION]
+    config_collection = db[MONGO_CONFIG_COLLECTION]
     logger.info(f"MongoDB connected at {MONGO_COLLECTION}")
 
     # Crear índices útiles
@@ -2315,6 +2343,7 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Could not create indexes: {e}")
 
+    await load_validator_type_weights()
     await load_validators_cache_from_chain()
 
     # Kafka producer

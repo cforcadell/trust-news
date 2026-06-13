@@ -23,6 +23,7 @@ data:
   MONGO_COLLECTION: "news"
   MONGO_EVENTS_COLLECTION: "events"
   MONGO_VALIDATIONS_COLLECTION: "validations"
+  MONGO_CONFIG_COLLECTION: "config"
   
   # --- App Config ---
   MAX_WORKERS: "3"

@@ -13,9 +13,13 @@ def test_validator_type_has_no_legacy_aliases():
 def test_validator_type_weights():
     assert get_validator_type_weight(ValidatorType.LLM_MEMORY_VALIDATION) == 0.25
     assert get_validator_type_weight(ValidatorType.LLM_SEARCH_VALIDATION) == 0.5
-    assert get_validator_type_weight(ValidatorType.RAG_EVIDENCE_VALIDATION) == 0.8
+    assert get_validator_type_weight(ValidatorType.RAG_EVIDENCE_VALIDATION) == 1.0
     assert get_validator_type_weight(ValidatorType.DETERMINISTIC_VALIDATION) == 1.0
     assert get_validator_type_weight(ValidatorType.HUMAN) == 0.1
+    assert get_validator_type_weight(
+        ValidatorType.RAG_EVIDENCE_VALIDATION,
+        {"RAG_EVIDENCE_VALIDATION": 0.6},
+    ) == 0.6
 
 
 def test_result_normalization():
@@ -38,5 +42,5 @@ def test_weighted_score_formula_divides_by_validator_count():
         scores[normalize_validation_result(result)] += get_validator_type_weight(validator_type) * reputation / len(validations)
 
     assert round(scores["TRUE"], 4) == 0.25
-    assert round(scores["FALSE"], 4) == 0.2667
+    assert round(scores["FALSE"], 4) == 0.3333
     assert max(scores, key=scores.get) == "FALSE"

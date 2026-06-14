@@ -54,7 +54,7 @@
         </div>
         <div class="header-actions">
             <div id="statusBar" class="status-toast"></div>
-            <label class="language-control"><span data-i18n="header.language">Idioma</span><select id="languageSelector" aria-label="Idioma"><option value="es">Castellano</option><option value="en">English</option></select></label>
+            <label class="language-control"><span data-i18n="header.language">Idioma</span><select id="languageSelector" aria-label="Idioma" data-i18n-aria-label="header.language"><option value="es">Castellano</option><option value="en">English</option></select></label>
             <span id="sessionBadge" class="session-badge" data-i18n="header.protectedSession">● Sesión protegida</span>
             <button id="btn-logout" class="btn-logout" type="button" data-i18n="header.logout">Salir</button>
         </div>
@@ -80,14 +80,14 @@
                     <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar." data-i18n-placeholder="sections.newsText"></textarea>
 
                     <div class="validation-mode-panel">
-                        <label for="validationMode">Modo de validación</label>
+                        <label for="validationMode" data-i18n="ui.validationModeLabel">Modo de validación</label>
                         <select id="validationMode" name="validation_mode">
                             <option value="BLOCKCHAIN" selected>Blockchain</option>
                             <option value="LIGHT">Light</option>
                         </select>
                         <div class="mode-help">
-                            <span data-mode-help="BLOCKCHAIN">Validación completa con trazabilidad blockchain e IPFS</span>
-                            <span data-mode-help="LIGHT" hidden>Validación rápida sin publicación en blockchain/IPFS</span>
+                            <span data-mode-help="BLOCKCHAIN" data-i18n="ui.blockchainHelp">Validación completa con trazabilidad blockchain e IPFS</span>
+                            <span data-mode-help="LIGHT" data-i18n="ui.lightHelp" hidden>Validación rápida sin publicación en blockchain/IPFS</span>
                         </div>
                     </div>
 
@@ -140,7 +140,7 @@
                     <input type="text" id="orderId" placeholder="Introduce el order_id" data-i18n-placeholder="sections.orderId">
                     <button id="btn-findOrder" class="btn-primary" data-i18n="sections.findOrder">Buscar Orden</button>
                 </div>
-                <button type="button" class="btn-secondary order-back-button" onclick="showSection('orders')">← Volver al buscador</button>
+                <button type="button" class="btn-secondary order-back-button" onclick="showSection('orders')" data-i18n="ui.backToSearch">← Volver al buscador</button>
             </div>
             <div id="orderTabs" class="tabs"></div>
             <div id="fixedDetailsContainer" class="order-polling-state" aria-live="polite"></div>
@@ -201,7 +201,7 @@
         </section>
 
         <section id="contract" class="card page-card compact-tool">
-            <div class="page-head compact-head"><div><span class="section-kicker">Smart Contract</span><h2>Smart Contract (Post)</h2></div></div>
+            <div class="page-head compact-head"><div><span class="section-kicker">Smart Contract</span><h2 data-i18n="ui.smartContractPost">Smart Contract (Post)</h2></div></div>
             <div class="input-group search-row">
                 <input type="text" id="postId" placeholder="Introduce post Id" data-i18n-placeholder="sections.postId">
                 <button id="btn-findPost" class="btn-primary" data-i18n="sections.findPost">Buscar Post</button>

@@ -53,6 +53,10 @@ function t(key, params = {}) {
     return window.I18N?.t(key, params) || key;
 }
 
+function categoryLabel(id) {
+    return t(`ui.categoriesMap.${id}`);
+}
+
 
 // =========================================================
 // UTILIDAD: Toast Notifications (UI no bloqueante)
@@ -197,7 +201,7 @@ function formatDate(ts) {
     if (isNaN(timestampValue) || timestampValue === 0) return "N/A";
     const milliseconds = timestampValue * 1000;
     const d = new Date(milliseconds);
-    return isNaN(d.getTime()) ? "Fecha Inválida" : d.toISOString().replace("T"," ").split(".")[0];
+    return isNaN(d.getTime()) ? t("ui.invalidDate") : d.toISOString().replace("T"," ").split(".")[0];
 }
 
 
@@ -310,7 +314,7 @@ async function generateAssertionsFromText(text) {
 
         // 🟢 NUEVO: Detectar si el usuario se ha quedado sin cuota (Status 429)
         if (response.status === 429) {
-            alertMessage("⛔ Límite alcanzado: No te quedan cuotas para generar aserciones.", "error", 5000);
+            alertMessage(t("ui.quotaReached"), "error", 5000);
             return []; // Devolvemos un array vacío para no romper la tabla de la interfaz
         }
 
@@ -321,7 +325,7 @@ async function generateAssertionsFromText(text) {
         return data.payload.assertions || [];
     } catch (err) {
         console.error("Error al generar aserciones:", err);
-        alertMessage("Error al conectar con el servicio de aserciones", "error");
+        alertMessage(t("ui.assertionsServiceError"), "error");
         return [];
     }
 }
@@ -385,8 +389,8 @@ function renderEditableAssertionsTable(container, assertions) {
             <thead>
                 <tr>
                     <th>ID</th>
-                    <th>Aserción</th>
-                    <th>Categoría</th>
+                    <th>${t("ui.assertion")}</th>
+                    <th>${t("ui.category")}</th>
                     <th style="width:60px;"></th>
                 </tr>
             </thead>
@@ -405,7 +409,7 @@ function renderEditableAssertionsTable(container, assertions) {
         </table>
 
         <button id="btn-add-row" class="btn btn-tertiary">+</button>
-        <button id="btn-publish-with-assertions" class="btn btn-tertiary">Publicar con Aserciones</button>
+        <button id="btn-publish-with-assertions" class="btn btn-tertiary">${t("ui.publishWithAssertions")}</button>
     `;
 
     // Conectar los eventos de edición y borrado
@@ -430,9 +434,9 @@ function renderEditableAssertionsTable(container, assertions) {
 function renderCategorySelect(selected) {
     return `
         <select class="category-select">
-            ${Object.entries(CATEGORY_MAP)
-                .map(([id, name]) => `
-                    <option value="${id}" ${selected == id ? "selected" : ""}>${name}</option>`
+            ${Object.keys(CATEGORY_MAP)
+                .map(id => `
+                    <option value="${id}" ${selected == id ? "selected" : ""}>${categoryLabel(id)}</option>`
                 ).join("")}
         </select>
     `;
@@ -445,10 +449,10 @@ function renderCategorySelect(selected) {
 // =========================================================
 async function publishNew() {
     const text = document.getElementById("newsText").value.trim();
-    if (!text) return alertMessage("Introduce un texto para verificar.", 'error');
+    if (!text) return alertMessage(t("ui.publishTextRequired"), 'error');
 
     showSection('order');
-    document.getElementById("orderId").value = "Publicando...";
+    document.getElementById("orderId").value = t("ui.publishing");
 
     const res = await fetchWithAuth(`${API}/orders/publishNew`, {
         method: "POST",
@@ -456,7 +460,7 @@ async function publishNew() {
     });
 
     if (!res.ok) {
-        alertMessage("Error al publicar la noticia. Inténtalo de nuevo.", 'error');
+        alertMessage(t("ui.publishError"), 'error');
         document.getElementById("orderId").value = "Error...";
         return;
     }
@@ -466,16 +470,16 @@ async function publishNew() {
 
     document.getElementById("orderId").value = newOrderId;
     updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
-    alertMessage(`Noticia publicada. Iniciando polling para Order ID: ${newOrderId}`, 'primary');
+    alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
     pollOrder(newOrderId);
 }
 
 async function publishWithAssertions() {
     const text = document.getElementById("newsText").value.trim();
-    if (!text) return alertMessage("Introduce un texto para verificar.", 'error');
+    if (!text) return alertMessage(t("ui.publishTextRequired"), 'error');
 
     const container = document.getElementById("news-assertions-container");
-    if (!container) return alertMessage("No se encontró el contenedor de aserciones.", 'error');
+    if (!container) return alertMessage(t("ui.assertionsContainerMissing"), 'error');
 
     // Construir lista de aserciones desde la tabla
     const assertions = [];
@@ -495,7 +499,7 @@ async function publishWithAssertions() {
     });
 
     if (assertions.length === 0) {
-        return alertMessage("Debes tener al menos una aserción", 'error');
+        return alertMessage(t("ui.assertionRequired"), 'error');
     }
 
     const payload = { text, assertions, validation_mode: getSelectedValidationMode() };
@@ -519,13 +523,13 @@ async function publishWithAssertions() {
 
         document.getElementById("orderId").value = newOrderId;
         updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
-        alertMessage(`Noticia publicada. Iniciando polling para Order ID: ${newOrderId}`, 'primary');
+        alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
         pollOrder(newOrderId);
 
         return data;
     } catch (error) {
         console.error("Error al publicar con aserciones:", error);
-        alertMessage("Error al publicar la noticia con aserciones", 'error');
+        alertMessage(t("ui.publishAssertionsError"), 'error');
         throw error;
     }
 }
@@ -536,9 +540,9 @@ async function publishWithAssertions() {
 
 async function findPrevious() {
     const text = document.getElementById("newsText").value.trim();
-    if (!text) return alertMessage("Introduce un texto a buscar.", 'error');
+    if (!text) return alertMessage(t("ui.searchTextRequired"), 'error');
 
-    alertMessage("Buscando verificaciones previas...", 'info');
+    alertMessage(t("ui.searchingPrevious"), 'info');
 
     try {
         const res = await fetchWithAuth(`${API}/find-order-by-text`, {
@@ -550,10 +554,10 @@ async function findPrevious() {
 
         const data = await res.json();
         renderTableData(document.getElementById("findResults"), data);
-        alertMessage(`Se encontraron ${data.length} resultados.`, 'primary');
+        alertMessage(t("ui.resultsFound", { count: data.length }), 'primary');
     } catch (e) {
-        alertMessage("Error de conexión o datos inválidos al buscar.", 'error');
-        document.getElementById("findResults").innerHTML = '<tr><td colspan="3">Error al cargar los resultados.</td></tr>';
+        alertMessage(t("ui.searchError"), 'error');
+        document.getElementById("findResults").innerHTML = `<tr><td colspan="3">${safeText(t("ui.resultsLoadError"))}</td></tr>`;
     }
 }
 
@@ -653,9 +657,9 @@ async function loadOrderById(orderId, cleanup = true) {
             const sections = [
                 {key: "summary", name: t("tabs.summary"), data},
                 {key: "assertions", name: t("tabs.assertions"), data: orderAssertions},
-                {key: "evidence", name: "Evidencias", data: data.validations || {}},
-                {key: "process", name: "Proceso", data: eventsData},
-                {key: "technical", name: "Técnico", data},
+                {key: "evidence", name: t("ui.evidence"), data: data.validations || {}},
+                {key: "process", name: t("ui.process"), data: eventsData},
+                {key: "technical", name: t("ui.technical"), data},
                 {key: "ipfs", name: "IPFS", data: data.document || null, disabled: lightMode},
                 {key: "events", name: t("tabs.events"), data: eventsData}
             ];
@@ -671,7 +675,7 @@ async function loadOrderById(orderId, cleanup = true) {
                     if (s.disabled) {
                         btn.disabled = true;
                         btn.classList.add("disabled-tab");
-                        btn.title = "Detalle blockchain/IPFS no disponible para validaciones en modo Light.";
+                        btn.title = t("ui.lightUnavailable");
                     }
                     btn.onclick = () => {
                         if (s.disabled) return;
@@ -716,11 +720,11 @@ function renderTabContent(tabName, data, assertions=[], orderData=null, events=[
             break;
         case "ipfs":
             if (isLightOrder(orderData)) {
-                container.innerHTML = `<p class="empty-state">Detalle blockchain/IPFS no disponible para validaciones en modo Light.</p>`;
+                container.innerHTML = `<p class="empty-state">${safeText(t("ui.lightUnavailable"))}</p>`;
                 break;
             }
             container.innerHTML = `
-                <div class="json-box-header">Documento IPFS</div>
+                <div class="json-box-header">${safeText(t("ui.ipfsDocument"))}</div>
                 <div class="json-tree">${renderJsonTree(data)}</div>
             `;
             break;
@@ -961,7 +965,7 @@ function resolveAssertionText(assertionId, assertions = [], orderData = null, va
     const validationText = Object.values(validatorsObj || {})
         .map(info => extractAssertionText(info?.payload?.assertion) || info?.assertion_text || info?.payload?.assertion_text)
         .find(Boolean);
-    return validationText || "(Aserción sin texto)";
+    return validationText || `(${t("ui.assertionWithoutText")})`;
 }
 
 function getAssertionCategory(assertion) {
@@ -1108,9 +1112,9 @@ function assertionOutcome(orderData, assertionId) {
 
 function outcomeMeta(outcome) {
     const values = {
-        confirmed: { label: "Confirmada", icon: "✓", className: "confirmed" },
-        contradicted: { label: "Desmentida", icon: "×", className: "contradicted" },
-        inconclusive: { label: "No concluyente", icon: "?", className: "inconclusive" }
+        confirmed: { label: t("ui.confirmed"), icon: "✓", className: "confirmed" },
+        contradicted: { label: t("ui.disproved"), icon: "×", className: "contradicted" },
+        inconclusive: { label: t("summary.inconclusive"), icon: "?", className: "inconclusive" }
     };
     return values[outcome] || values.inconclusive;
 }
@@ -1138,9 +1142,9 @@ function renderOrderSummary(container, data, events = []) {
         const assertionId = getAssertionId(assertion, index + 1);
         const meta = outcomeMeta(assertionOutcome(data, assertionId));
         return `<li><span>${safeText(assertionId)}. ${safeText(compactText(extractAssertionText(assertion), 76))}</span><b class="outcome-badge ${meta.className}">${meta.label}</b></li>`;
-    }).join("") : `<li class="no-problems">No se han detectado afirmaciones problemáticas.</li>`;
+    }).join("") : `<li class="no-problems">${safeText(t("ui.noProblematicAssertions"))}</li>`;
 
-    const newsText = typeof data.text === "object" ? data.text?.text || JSON.stringify(data.text) : data.text || "No hay texto disponible.";
+    const newsText = typeof data.text === "object" ? data.text?.text || JSON.stringify(data.text) : data.text || t("ui.noNewsText");
 
     container.innerHTML = `
         <div class="order-summary">
@@ -1153,49 +1157,49 @@ function renderOrderSummary(container, data, events = []) {
                     </div>
                 </div>
                 <dl class="order-meta-card">
-                    <div><dt>ID de orden</dt><dd>${shortValue(data.order_id, 30)}</dd></div>
-                    <div><dt>Fecha</dt><dd>${formatAnyDate(data.created_at || data.created)}</dd></div>
-                    <div><dt>Modo de validación</dt><dd><span class="mode-badge">${safeText(data.validation_mode || "BLOCKCHAIN")}</span></dd></div>
+                    <div><dt>${t("ui.orderId")}</dt><dd>${shortValue(data.order_id, 30)}</dd></div>
+                    <div><dt>${t("ui.date")}</dt><dd>${formatAnyDate(data.created_at || data.created)}</dd></div>
+                    <div><dt>${t("ui.validationMode")}</dt><dd><span class="mode-badge">${safeText(data.validation_mode || "BLOCKCHAIN")}</span></dd></div>
                 </dl>
             </div>
 
             <div class="summary-grid-main">
                 <article class="dashboard-card assertion-overview">
-                    <h3>Resumen de afirmaciones <span>(${totalAssertions} en total)</span></h3>
-                    <div class="assertion-distribution" aria-label="Distribución de resultados">
+                    <h3>${t("ui.assertionSummary")} <span>(${t("ui.totalCount", { count: totalAssertions })})</span></h3>
+                    <div class="assertion-distribution" aria-label="${safeText(t("ui.assertionSummary"))}">
                         <span class="confirmed" style="width:${confirmedPercent}%">${confirmedPercent ? `${confirmedPercent}%` : ""}</span>
                         <span class="contradicted" style="width:${contradictedPercent}%">${contradictedPercent ? `${contradictedPercent}%` : ""}</span>
                         <span class="inconclusive" style="width:${inconclusivePercent}%">${inconclusivePercent ? `${inconclusivePercent}%` : ""}</span>
                     </div>
                     <div class="assertion-counts">
-                        <div><i class="confirmed">✓</i><strong>${summary.confirmedAssertions} Confirmadas</strong><small>Afirmaciones respaldadas por evidencia fiable.</small></div>
-                        <div><i class="contradicted">×</i><strong>${summary.contradictedAssertions} Desmentidas</strong><small>Afirmaciones contradichas por la evidencia.</small></div>
-                        <div><i class="inconclusive">?</i><strong>${summary.inconclusiveAssertions} No concluyentes</strong><small>No hay evidencia suficiente para determinar.</small></div>
+                        <div><i class="confirmed">✓</i><strong>${summary.confirmedAssertions} ${t("ui.confirmed")}</strong><small>${t("ui.confirmedHelp")}</small></div>
+                        <div><i class="contradicted">×</i><strong>${summary.contradictedAssertions} ${t("ui.disproved")}</strong><small>${t("ui.disprovedHelp")}</small></div>
+                        <div><i class="inconclusive">?</i><strong>${summary.inconclusiveAssertions} ${t("ui.inconclusive")}</strong><small>${t("ui.inconclusiveHelp")}</small></div>
                     </div>
                 </article>
 
                 <article class="dashboard-card vote-overview">
-                    <h3>Voto ponderado de validadores</h3>
+                    <h3>${t("ui.weightedValidatorVote")}</h3>
                     <div class="vote-content">
                         <div class="vote-donut" style="--true:${truePercent * 3.6}deg;--false:${(truePercent + falsePercent) * 3.6}deg"><span>◎</span></div>
                         <div class="vote-legend">
-                            <div><i class="confirmed"></i><span>A favor</span><b>${formatMaxTwoDecimals(summary.validatorVotes.true)} (${truePercent}%)</b></div>
-                            <div><i class="contradicted"></i><span>En contra</span><b>${formatMaxTwoDecimals(summary.validatorVotes.false)} (${falsePercent}%)</b></div>
-                            <div><i class="inconclusive"></i><span>Sin conclusión</span><b>${formatMaxTwoDecimals(summary.validatorVotes.unknown)} (${unknownPercent}%)</b></div>
-                            <strong>Total ponderado: ${formatMaxTwoDecimals(totalWeight)}</strong>
+                            <div><i class="confirmed"></i><span>${t("ui.inFavor")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.true)} (${truePercent}%)</b></div>
+                            <div><i class="contradicted"></i><span>${t("ui.against")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.false)} (${falsePercent}%)</b></div>
+                            <div><i class="inconclusive"></i><span>${t("ui.noConclusion")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.unknown)} (${unknownPercent}%)</b></div>
+                            <strong>${t("ui.weightedTotal")}: ${formatMaxTwoDecimals(totalWeight)}</strong>
                         </div>
                     </div>
                 </article>
             </div>
 
             <div class="summary-grid-secondary">
-                <article class="dashboard-card metric-card"><span class="metric-icon confirmed">♙</span><div><small>Resumen de validación</small><strong>${summary.completedValidations} / ${summary.totalValidations || summary.completedValidations}</strong><p>Validaciones completadas</p><b class="metric-tag">${progressPercent}% completado</b></div></article>
-                <article class="dashboard-card metric-card"><span class="metric-icon time">◷</span><div><small>Tiempo total de validación</small><strong>${safeText(summary.validationDuration || "En curso")}</strong><p>${summary.pendingValidations ? `${summary.pendingValidations} pendientes` : "Proceso completado"}</p></div></article>
-                <article class="dashboard-card problems-card"><h3>Afirmaciones con problemas</h3><ol>${problemRows}</ol><button type="button" onclick="activateOrderTab('assertions')">Ver todas las afirmaciones →</button></article>
+                <article class="dashboard-card metric-card"><span class="metric-icon confirmed">♙</span><div><small>${t("ui.validationSummary")}</small><strong>${summary.completedValidations} / ${summary.totalValidations || summary.completedValidations}</strong><p>${t("ui.validationsCompleted")}</p><b class="metric-tag">${t("ui.percentCompleted", { percent: progressPercent })}</b></div></article>
+                <article class="dashboard-card metric-card"><span class="metric-icon time">◷</span><div><small>${t("ui.totalValidationTime")}</small><strong>${safeText(summary.validationDuration || t("ui.inProgress"))}</strong><p>${summary.pendingValidations ? t("ui.pendingCount", { count: summary.pendingValidations }) : t("ui.processCompleted")}</p></div></article>
+                <article class="dashboard-card problems-card"><h3>${t("ui.problematicAssertions")}</h3><ol>${problemRows}</ol><button type="button" onclick="activateOrderTab('assertions')">${t("ui.viewAllAssertions")}</button></article>
             </div>
 
             <article class="dashboard-card news-card">
-                <h3>▤ Resumen de la noticia</h3>
+                <h3>▤ ${t("ui.newsSummary")}</h3>
                 <div class="news-summary-text">${safeText(newsText)}</div>
                 <button type="button" class="news-summary-toggle" hidden
                     aria-expanded="false" title="${safeText(t("summary.expandNewsSummaryHint"))}">
@@ -1224,7 +1228,7 @@ function activateOrderTab(tabKey) {
 
 function renderOrderAssertions(container, assertions, orderData) {
     if (!assertions?.length) {
-        container.innerHTML = `<p class="empty-state">No hay afirmaciones disponibles.</p>`;
+        container.innerHTML = `<p class="empty-state">${safeText(t("ui.noAssertions"))}</p>`;
         return;
     }
     const cards = assertions.map((assertion, index) => {
@@ -1234,21 +1238,21 @@ function renderOrderAssertions(container, assertions, orderData) {
         const evidenceCount = Object.values(validators).reduce((sum, info) => sum + validationEvidenceItems(info).length, 0);
         return `<article class="assertion-card ${meta.className}">
             <span class="assertion-number">${safeText(assertionId)}</span>
-            <div class="assertion-copy"><h3>${safeText(extractAssertionText(assertion) || "Afirmación sin texto")}</h3><div><span>Resultado <b class="outcome-badge ${meta.className}">${meta.label}</b></span><span>Validadores <b>${Object.keys(validators).length}</b></span><span>Evidencias <b>${evidenceCount}</b></span></div></div>
-            <button type="button" onclick="activateOrderTab('evidence')">Ver detalle →</button>
+            <div class="assertion-copy"><h3>${safeText(extractAssertionText(assertion) || t("ui.assertionWithoutText"))}</h3><div><span>${t("ui.result")} <b class="outcome-badge ${meta.className}">${meta.label}</b></span><span>${t("ui.validators")} <b>${Object.keys(validators).length}</b></span><span>${t("ui.evidence")} <b>${evidenceCount}</b></span></div></div>
+            <button type="button" onclick="activateOrderTab('evidence')">${t("ui.viewDetail")}</button>
         </article>`;
     }).join("");
-    container.innerHTML = `<div class="assertions-toolbar"><strong>${assertions.length} afirmaciones</strong><span>Resultados calculados mediante consenso ponderado</span></div><div class="assertion-card-list">${cards}</div>`;
+    container.innerHTML = `<div class="assertions-toolbar"><strong>${assertions.length} ${t("ui.assertions").toLowerCase()}</strong><span>${t("ui.weightedValidatorVote")}</span></div><div class="assertion-card-list">${cards}</div>`;
 }
 
 function buildOrderProcessRows(orderData, events = []) {
     const labels = {
-        CREATED: "Orden creada", ASSERTIONS_REQUESTED: "Aserciones solicitadas",
-        DOCUMENT_CREATED: "Documento creado", IPFS_PENDING: "Publicación en IPFS pendiente",
-        IPFS_UPLOADED: "Documento publicado en IPFS", BLOCKCHAIN_PENDING: "Registro en blockchain pendiente",
-        VALIDATION_PENDING: "Validaciones en curso", VALIDATED: "Validación completada",
-        NO_VALIDATORS_AVAILABLE: "Sin validadores disponibles",
-        ASSERTIONS_NOT_AVAILABLE: "Aserciones no disponibles", QUOTA_EXCEDED: "Cuota excedida"
+        CREATED: t("status.CREATED"), ASSERTIONS_REQUESTED: t("status.ASSERTIONS_REQUESTED"),
+        DOCUMENT_CREATED: t("status.DOCUMENT_CREATED"), IPFS_PENDING: t("status.IPFS_PENDING"),
+        IPFS_UPLOADED: t("status.IPFS_UPLOADED"), BLOCKCHAIN_PENDING: t("status.BLOCKCHAIN_PENDING"),
+        VALIDATION_PENDING: t("status.VALIDATION_PENDING"), VALIDATED: t("status.VALIDATED"),
+        NO_VALIDATORS_AVAILABLE: t("status.NO_VALIDATORS_AVAILABLE"),
+        ASSERTIONS_NOT_AVAILABLE: t("status.ASSERTIONS_NOT_AVAILABLE"), QUOTA_EXCEDED: t("status.QUOTA_EXCEDED")
     };
     const transitions = {
         generate_assertions: ["ASSERTIONS_REQUESTED"], assertions_generated: ["DOCUMENT_CREATED"],
@@ -1297,17 +1301,17 @@ function getProcessElapsedTime(orderData) {
 function getLastValidationAge(events = []) {
     const actions = new Set(["validation_completed", "light_validation_completed"]);
     const dates = events.filter(event => actions.has(event?.action)).map(event => parseEventTimestamp(event.timestamp)).filter(Boolean);
-    if (!dates.length) return "Todavía no se ha recibido ninguna validación";
+    if (!dates.length) return t("ui.noValidationYet");
     const seconds = Math.max(0, Math.round((Date.now() - Math.max(...dates.map(date => date.getTime()))) / 1000));
-    return seconds < 60 ? `Última validación recibida hace ${seconds} s` : `Última validación recibida hace ${Math.floor(seconds / 60)} min`;
+    return seconds < 60 ? t("ui.lastValidationSeconds", { count: seconds }) : t("ui.lastValidationMinutes", { count: Math.floor(seconds / 60) });
 }
 function renderOrderProcess(container, orderData, events = []) {
     const mode = isLightOrder(orderData) ? "LIGHT" : "BLOCKCHAIN";
     const summary = buildVerificationSummary(orderData || {}, events);
     const rows = buildOrderProcessRows(orderData, events);
     const stages = mode === "LIGHT"
-        ? [{ label: "Orden creada", icon: "✓" }, { label: "Aserciones", icon: "A" }, { label: "Búsqueda de evidencias", icon: "⌕" }, { label: "Validaciones", icon: "V" }, { label: "Consenso / Resultado", icon: "◎" }]
-        : [{ label: "Orden creada", icon: "✓" }, { label: "Aserciones", icon: "A" }, { label: "Documento", icon: "D" }, { label: "IPFS", icon: "I" }, { label: "Blockchain", icon: "B" }, { label: "Validaciones", icon: "V" }, { label: "Consenso / Resultado", icon: "◎" }];
+        ? [{ label: t("ui.orderCreated"), icon: "✓" }, { label: t("ui.assertions"), icon: "A" }, { label: t("ui.evidenceSearch"), icon: "⌕" }, { label: t("ui.validations"), icon: "V" }, { label: t("ui.consensusResult"), icon: "◎" }]
+        : [{ label: t("ui.orderCreated"), icon: "✓" }, { label: t("ui.assertions"), icon: "A" }, { label: t("ui.document"), icon: "D" }, { label: "IPFS", icon: "I" }, { label: t("ui.blockchain"), icon: "B" }, { label: t("ui.validations"), icon: "V" }, { label: t("ui.consensusResult"), icon: "◎" }];
     const stage = getProcessStageState(orderData, mode, stages.length);
     const processPercent = Math.round((stage.reached / stages.length) * 100);
     const votes = countProcessVotes(orderData);
@@ -1318,8 +1322,8 @@ function renderOrderProcess(container, orderData, events = []) {
     const contradictedPercent = percentage(votes.contradicted, received);
     const pending = summary.pendingValidations;
     const complete = String(orderData?.status || "").toUpperCase() === "VALIDATED";
-    const currentStage = stages[stage.currentIndex]?.label || "Proceso";
-    const provisional = summary.confirmedAssertions > summary.contradictedAssertions ? { label: "Tendencia confirmada", className: "confirmed" } : summary.contradictedAssertions > summary.confirmedAssertions ? { label: "Tendencia desmentida", className: "contradicted" } : { label: "Sin tendencia clara", className: "inconclusive" };
+    const currentStage = stages[stage.currentIndex]?.label || t("ui.process");
+    const provisional = summary.confirmedAssertions > summary.contradictedAssertions ? { label: t("ui.clearTrend"), className: "confirmed" } : summary.contradictedAssertions > summary.confirmedAssertions ? { label: t("ui.disprovedTrend"), className: "contradicted" } : { label: t("ui.noClearTrend"), className: "inconclusive" };
     const recent = rows.slice(-4).reverse();
     const ratio = total ? `${received}/${total}` : String(received);
     const stageHtml = stages.map((item, index) => {
@@ -1328,16 +1332,16 @@ function renderOrderProcess(container, orderData, events = []) {
     }).join("");
     container.innerHTML = `
         <div class="process-dashboard mode-${mode.toLowerCase()}">
-            <section class="process-hero"><div class="process-radar"><span></span></div><div><div class="process-mode-label">MODO ${mode}</div><h2>${complete ? "Verificación completada" : "Verificación en curso"}</h2><p>${complete ? "El consenso está cerrado y el resultado definitivo ya está disponible." : "Estamos validando la noticia y actualizando el resultado a medida que llegan nuevas respuestas."}</p></div><div class="process-live"><strong>${complete ? "Completada" : "En curso"}</strong><small>Última actualización: ${formatAnyDate(orderData?.updated_at || events.at(-1)?.timestamp || orderData?.created_at)}</small></div></section>
-            <section class="process-stage-card" data-process-widget="flow"><div class="process-section-title"><strong>Flujo visual de etapas (${mode})</strong><span>${stage.reached}/${stages.length}</span></div><div class="process-stages">${stageHtml}</div><div class="process-progress-header"><strong>Progreso del proceso</strong><span>${processPercent}%</span></div><div class="process-progress-copy"><span><b>${stage.reached} / ${stages.length}</b> etapas alcanzadas</span><span>Fase actual: <b>${safeText(currentStage)}</b></span></div><div class="process-progress-track" role="progressbar" aria-label="Progreso del proceso" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${processPercent}"><span style="width:${processPercent}%"></span></div></section>
+            <section class="process-hero"><div class="process-radar"><span></span></div><div><div class="process-mode-label">${t("ui.mode").toUpperCase()} ${mode}</div><h2>${complete ? t("ui.verificationCompleted") : t("ui.verificationInProgress")}</h2><p>${complete ? t("ui.completedExplanation") : t("ui.progressExplanation")}</p></div><div class="process-live"><strong>${complete ? t("ui.completed") : t("ui.inProgress")}</strong><small>${t("ui.lastUpdate")}: ${formatAnyDate(orderData?.updated_at || events.at(-1)?.timestamp || orderData?.created_at)}</small></div></section>
+            <section class="process-stage-card" data-process-widget="flow"><div class="process-section-title"><strong>${t("ui.visualStageFlow", { mode })}</strong><span>${stage.reached}/${stages.length}</span></div><div class="process-stages">${stageHtml}</div><div class="process-progress-header"><strong>${t("ui.processProgress")}</strong><span>${processPercent}%</span></div><div class="process-progress-copy"><span><b>${t("ui.stagesReached", { reached: stage.reached, total: stages.length })}</b></span><span>${t("ui.currentPhase")}: <b>${safeText(currentStage)}</b></span></div><div class="process-progress-track" role="progressbar" aria-label="${safeText(t("ui.processProgress"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${processPercent}"><span style="width:${processPercent}%"></span></div></section>
             <div class="process-main-grid">
-                <section class="process-card process-now" data-process-widget="current-activity"><h3>Qué está ocurriendo ahora</h3><ul><li><i>◷</i><span>${complete ? "Todas las validaciones esperadas han llegado" : pending ? `Esperando ${pending} validaciones restantes` : "Esperando la siguiente actualización"}</span></li><li><i>◎</i><span>${complete ? "El consenso ya se ha cerrado" : "El consenso aún no puede cerrarse"}</span></li><li><i>↻</i><span>${safeText(getLastValidationAge(events))}</span></li><li><i>◇</i><span>${complete ? "El resultado ya es definitivo" : "El resultado provisional puede variar"}</span></li></ul></section>
-                <section class="process-card process-validations"><h3>Validaciones recibidas</h3><div class="process-validation-content"><div class="process-donut" style="--confirmed:${confirmedPercent * 3.6}deg;--contradicted:${(confirmedPercent + contradictedPercent) * 3.6}deg"><span><b>${safeText(ratio)}</b><small>${validationPercent}% completado</small></span></div><div class="process-validation-breakdown"><div><i class="confirmed"></i><span>Confirmadas</span><b>${votes.confirmed}</b></div><div><i class="contradicted"></i><span>Desmentidas</span><b>${votes.contradicted}</b></div><div><i class="inconclusive"></i><span>No concluyentes</span><b>${votes.inconclusive}</b></div><strong>${pending} pendientes</strong></div></div></section>
-                <section class="process-card process-provisional"><div class="process-section-title"><h3>Resultado provisional</h3><span>Provisional</span></div><strong class="provisional-result ${provisional.className}">${safeText(provisional.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>Confirmadas</small></div><div><b>${summary.contradictedAssertions}</b><small>Desmentidas</small></div><div><b>${summary.inconclusiveAssertions}</b><small>No concluyentes</small></div></div><p>Este resultado puede cambiar hasta alcanzar el consenso final.</p></section>
-                <section class="process-card process-activity" data-process-widget="recent-activity"><div class="process-section-title"><h3>Actividad reciente</h3><span>${rows.length} cambios</span></div><ol>${recent.map(row => `<li><i>•</i><span><b>${safeText(row.label)}</b><small>${formatAnyDate(row.date)}</small></span></li>`).join("") || "<li>Sin actividad registrada.</li>"}</ol></section>
+                <section class="process-card process-now" data-process-widget="current-activity"><h3>${t("ui.currentActivity")}</h3><ul><li><i>◷</i><span>${complete ? t("ui.allValidationsReceived") : pending ? t("ui.waitingValidations", { count: pending }) : t("ui.waitingUpdate")}</span></li><li><i>◎</i><span>${complete ? t("ui.consensusClosed") : t("ui.consensusOpen")}</span></li><li><i>↻</i><span>${safeText(getLastValidationAge(events))}</span></li><li><i>◇</i><span>${complete ? t("ui.definitiveResult") : t("ui.provisionalMayChange")}</span></li></ul></section>
+                <section class="process-card process-validations"><h3>${t("ui.receivedValidations")}</h3><div class="process-validation-content"><div class="process-donut" style="--confirmed:${confirmedPercent * 3.6}deg;--contradicted:${(confirmedPercent + contradictedPercent) * 3.6}deg"><span><b>${safeText(ratio)}</b><small>${t("ui.percentCompleted", { percent: validationPercent })}</small></span></div><div class="process-validation-breakdown"><div><i class="confirmed"></i><span>${t("ui.confirmed")}</span><b>${votes.confirmed}</b></div><div><i class="contradicted"></i><span>${t("ui.disproved")}</span><b>${votes.contradicted}</b></div><div><i class="inconclusive"></i><span>${t("ui.inconclusive")}</span><b>${votes.inconclusive}</b></div><strong>${t("ui.pendingCount", { count: pending })}</strong></div></div></section>
+                <section class="process-card process-provisional"><div class="process-section-title"><h3>${t("ui.provisionalResult")}</h3><span>${t("ui.provisional")}</span></div><strong class="provisional-result ${provisional.className}">${safeText(provisional.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>${t("ui.confirmed")}</small></div><div><b>${summary.contradictedAssertions}</b><small>${t("ui.disproved")}</small></div><div><b>${summary.inconclusiveAssertions}</b><small>${t("ui.inconclusive")}</small></div></div><p>${t("ui.provisionalNotice")}</p></section>
+                <section class="process-card process-activity" data-process-widget="recent-activity"><div class="process-section-title"><h3>${t("ui.recentActivity")}</h3><span>${t("ui.changesCount", { count: rows.length })}</span></div><ol>${recent.map(row => `<li><i>•</i><span><b>${safeText(row.label)}</b><small>${formatAnyDate(row.date)}</small></span></li>`).join("") || `<li>${t("ui.noActivity")}</li>`}</ol></section>
             </div>
-            <div class="process-kpi-grid"><article><i>V</i><div><small>Resumen de validación</small><strong>${safeText(ratio)}</strong><span>${validationPercent}% completado</span></div></article><article><i>◷</i><div><small>Tiempo transcurrido</small><strong>${safeText(getProcessElapsedTime(orderData))}</strong><span>Desde la creación de la orden</span></div></article><article><i>◎</i><div><small>Estado actual</small><strong>${safeText(currentStage)}</strong><span>${pending ? `${pending} pendientes` : complete ? "Consenso cerrado" : "Actualizando"}</span></div></article><article><i>↻</i><div><small>Cambios de estado</small><strong>${rows.length}</strong><span>Hasta ahora</span></div></article></div>
-            <div class="process-auto-note">ⓘ Cuando el proceso alcance el estado final, la vista cambiará automáticamente a la pestaña <b>Resumen</b>.</div>
+            <div class="process-kpi-grid"><article><i>V</i><div><small>${t("ui.validationSummary")}</small><strong>${safeText(ratio)}</strong><span>${t("ui.percentCompleted", { percent: validationPercent })}</span></div></article><article><i>◷</i><div><small>${t("ui.elapsedTime")}</small><strong>${safeText(getProcessElapsedTime(orderData))}</strong><span>${t("ui.sinceOrderCreation")}</span></div></article><article><i>◎</i><div><small>${t("ui.currentStatus")}</small><strong>${safeText(currentStage)}</strong><span>${pending ? t("ui.pendingCount", { count: pending }) : complete ? t("ui.consensusComplete") : t("ui.updating")}</span></div></article><article><i>↻</i><div><small>${t("ui.statusChanges")}</small><strong>${rows.length}</strong><span>${t("ui.untilNow")}</span></div></article></div>
+            <div class="process-auto-note">ⓘ ${t("ui.autoSummaryNotice")}</div>
         </div>`;
 }
 function renderTechnicalDetails(container, data) {
@@ -1458,7 +1462,7 @@ function renderDetails(container, data, events = []) {
                     </button>
                 </td>
             </tr>
-            <tr><th>Modo</th><td>${safeText(data.validation_mode || "BLOCKCHAIN")}</td></tr>
+            <tr><th>${t("ui.mode")}</th><td>${safeText(data.validation_mode || "BLOCKCHAIN")}</td></tr>
             <tr><th>${t("summary.validationTotalTime")}</th><td>${safeText(summary.validationDuration || "N/A")}</td></tr>
         </table>`;
 
@@ -1512,7 +1516,7 @@ function renderDetails(container, data, events = []) {
 // =========================================================
 function renderValidationsTree(container, validations, assertions, orderData = null) {
     if (!validations || Object.keys(validations).length === 0) {
-        container.innerHTML = "<p class='text-gray-400'>No hay validaciones disponibles para esta orden.</p>";
+        container.innerHTML = `<p class="text-gray-400">${safeText(t("ui.noOrderValidations"))}</p>`;
         return;
     }
 
@@ -1592,7 +1596,7 @@ function renderTableData(container, data) {
     // Si no hay datos
     // =====================================================
     if (!data?.length) {
-        container.innerHTML = "<p class='text-gray-400 p-4'>No hay datos disponibles.</p>";
+        container.innerHTML = `<p class="text-gray-400 p-4">${safeText(t("ui.noData"))}</p>`;
         return;
     }
 
@@ -1674,15 +1678,15 @@ function renderTableData(container, data) {
                 class="px-3 py-1 bg-gray-700 rounded disabled:opacity-40"
                 onclick="changeTablePage(-1)"
                 ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}
-            >Anterior</button>
+            >${t("ui.previous")}</button>
 
-            <span class="text-sm">Página ${TABLE_PAGE_ORDERS} / ${totalPages}</span>
+            <span class="text-sm">${t("ui.pageOf", { page: TABLE_PAGE_ORDERS, total: totalPages })}</span>
 
             <button
                 class="px-3 py-1 bg-gray-700 rounded disabled:opacity-40"
                 onclick="changeTablePage(1)"
                 ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}
-            >Siguiente</button>
+            >${t("ui.next")}</button>
         </div>
     `;
 
@@ -1702,7 +1706,7 @@ function changeTablePage(delta) {
 
 function renderEventsTable(container, events) {
     if (!events?.length) {
-        container.innerHTML = "<p class='text-gray-400 p-4'>No hay eventos registrados.</p>";
+        container.innerHTML = `<p class="text-gray-400 p-4">${safeText(t("ui.noEvents"))}</p>`;
         return;
     }
 
@@ -1754,7 +1758,7 @@ function renderEventsTable(container, events) {
 
         container.innerHTML = `
             <h3 class="text-lg font-bold mb-3">
-                Eventos (${events.length} total) — Página ${page}/${totalPages}
+                ${t("ui.eventsCount", { count: events.length })} — ${t("ui.pageOf", { page, total: totalPages })}
             </h3>
             <table class="compact-table w-full">
                 <thead>
@@ -1762,16 +1766,16 @@ function renderEventsTable(container, events) {
                         <th class="col-icon">Icono</th>
                         <th class="col-action">Acción</th>
                         <th class="col-topic">Topic</th>
-                        <th class="col-date">Fecha</th>
+                        <th class="col-date">${t("ui.date")}</th>
                         <th class="col-payload">Payload</th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>
             <div class="flex justify-between items-center mt-3">
-                <button id="prevPage" class="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">⟵ Anterior</button>
-                <span class="text-sm text-gray-300">Página ${page} de ${totalPages}</span>
-                <button id="nextPage" class="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">Siguiente ⟶</button>
+                <button id="prevPage" class="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">⟵ ${t("ui.previous").replace("‹ ", "")}</button>
+                <span class="text-sm text-gray-300">${t("ui.pageOf", { page, total: totalPages })}</span>
+                <button id="nextPage" class="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">${t("ui.next").replace(" ›", "")} ⟶</button>
             </div>
         `;
 
@@ -1796,7 +1800,7 @@ function renderEventsTable(container, events) {
 // =========================
 function renderAssertions(container, assertions) {
     if (!assertions || assertions.length === 0) {
-        container.innerHTML = "<p class='text-gray-400 p-4'>No hay aserciones disponibles.</p>";
+        container.innerHTML = `<p class="text-gray-400 p-4">${safeText(t("ui.noAssertionsAvailable"))}</p>`;
         return;
     }
 
@@ -1805,8 +1809,8 @@ function renderAssertions(container, assertions) {
             <thead>
                 <tr>
                     <th class="id-col">ID</th>
-                    <th class="text-col">Texto</th>
-                    <th class="cat-col">Categoría</th>
+                    <th class="text-col">${t("ui.text")}</th>
+                    <th class="cat-col">${t("ui.category")}</th>
                 </tr>
             </thead>
             <tbody>
@@ -1814,7 +1818,7 @@ function renderAssertions(container, assertions) {
 
     assertions.forEach((a, index) => {
         const category = getAssertionCategory(a);
-        const catDesc = CATEGORY_MAP[category] || (category ? `(${category})` : "-");
+        const catDesc = category ? categoryLabel(category) : "-";
         const textValue = extractAssertionText(a);
 
         html += `
@@ -1844,9 +1848,9 @@ async function findIpfs() {
     const oldBox = document.getElementById("ipfsContentBox");
     if (oldBox) oldBox.remove();
 
-    if (!cid) return alertMessage("Introduce un hash de IPFS", "error");
+    if (!cid) return alertMessage(t("ui.enterIpfsHash"), "error");
 
-    alertMessage("Buscando contenido en IPFS...", "info");
+    alertMessage(t("ui.searchingIpfs"), "info");
 
     try {
         const res = await fetchWithAuth(`${IPFS_API}/ipfs/${cid}`);
@@ -1855,7 +1859,7 @@ async function findIpfs() {
         const data = await res.json();
         if (!data.content) throw new Error("Campo 'content' no encontrado en la respuesta");
 
-        alertMessage("Contenido recuperado.", "primary");
+        alertMessage(t("ui.contentRetrieved"), "primary");
 
         const rawContent = typeof data.content === "string" ? data.content.trim() : data.content;
         const normalizedContent = typeof rawContent === "string" && /^b['"]/.test(rawContent)
@@ -1876,12 +1880,12 @@ async function findIpfs() {
 
         if (typeof parsedContent === "string") {
             box.innerHTML = `
-                <div class="json-box-header">Contenido IPFS</div>
+                <div class="json-box-header">${t("ui.ipfsContent")}</div>
                 <pre class="event-payload-pre json-highlight">${escapeHTML(parsedContent)}</pre>
             `;
         } else {
             box.innerHTML = `
-                <div class="json-box-header">Contenido IPFS</div>
+                <div class="json-box-header">${t("ui.ipfsContent")}</div>
                 <div class="json-tree">${renderJsonTree(parsedContent)}</div>
             `;
         }
@@ -1897,10 +1901,10 @@ async function findIpfs() {
         const box = document.createElement("div");
         box.id = "ipfsContentBox";
         box.className = "post-box";
-        box.innerHTML = `<div class="error">Error al obtener el contenido desde IPFS.</div>`;
+        box.innerHTML = `<div class="error">${safeText(t("ui.ipfsContentError"))}</div>`;
 
         table.insertAdjacentElement("afterend", box);
-        alertMessage("Error al buscar en IPFS.", "error");
+        alertMessage(t("ui.ipfsSearchError"), "error");
     }
 }
 
@@ -1913,8 +1917,8 @@ async function findTx() {
     const table = document.getElementById("txTable");
     table.innerHTML = "";
 
-    if (!hash) return alertMessage("Introduce un transaction hash", 'error');
-    alertMessage("Buscando transacción...", 'info');
+    if (!hash) return alertMessage(t("ui.enterTxHash"), 'error');
+    alertMessage(t("ui.searchingTransaction"), 'info');
 
     try {
         const res = await fetchWithAuth(`${TX_API}/blockchain/tx/${hash}`);
@@ -1926,11 +1930,11 @@ async function findTx() {
         alertMessage(responseData.payload);
         renderTxTable(responseData.payload);
         updateAppHistory({ section: "tx", inputId: "txHash", value: hash });
-        alertMessage("Transacción encontrada.", 'primary');
+        alertMessage(t("ui.transactionFound"), 'primary');
     } catch (err) {
         console.error(err);
-        table.innerHTML = "<tbody><tr><td><div class='p-3 text-red-400'>Error al obtener transacción o hash inválido.</div></td></tr></tbody>";
-        alertMessage("Error al buscar la transacción.", 'error');
+        table.innerHTML = `<tbody><tr><td><div class="p-3 text-red-400">${safeText(t("ui.invalidTransaction"))}</div></td></tr></tbody>`;
+        alertMessage(t("ui.transactionSearchError"), 'error');
     }
 }
 
@@ -1960,7 +1964,7 @@ function renderTxTable(apiData) {
     ];
 
     txTable.innerHTML = `
-        <tr><th>Campo</th><th>Valor</th></tr>
+        <tr><th>${t("ui.field")}</th><th>${t("ui.value")}</th></tr>
         ${rows.map(([k, v]) => `<tr><td>${safeText(k)}</td><td>${k === "blockNumber" || k === "blockHash" ? (v ?? "") : safeText(v ?? "")}</td></tr>`).join("")}
     `;
 }
@@ -2048,8 +2052,8 @@ async function findBlock() {
     const tableContainer = document.getElementById("blockTable");
     tableContainer.innerHTML = "";
 
-    if (!blockId) return alertMessage("Introduce un número o hash de bloque", 'error');
-    alertMessage("Buscando bloque...", 'info');
+    if (!blockId) return alertMessage(t("ui.enterBlock"), 'error');
+    alertMessage(t("ui.searchingBlock"), 'info');
 
     try {
         const res = await fetchWithAuth(`${TX_API}/blockchain/block/${blockId}`);
@@ -2063,11 +2067,11 @@ async function findBlock() {
         tableContainer.appendChild(blockTable);
         updateAppHistory({ section: "blocks", inputId: "blockId", value: blockId });
 
-        alertMessage("Bloque encontrado.", 'primary');
+        alertMessage(t("ui.blockFound"), 'primary');
     } catch (err) {
         console.error(err);
-        tableContainer.innerHTML = "<tbody><tr><td><div class='p-3 text-red-400'>Error al obtener bloque o ID/Hash inválido.</div></td></tr></tbody>";
-        alertMessage("Error al buscar el bloque.", 'error');
+        tableContainer.innerHTML = `<tbody><tr><td><div class="p-3 text-red-400">${safeText(t("ui.invalidBlock"))}</div></td></tr></tbody>`;
+        alertMessage(t("ui.blockSearchError"), 'error');
     }
 }
 
@@ -2080,7 +2084,7 @@ function renderBlockTable(data) {
 
   const timestamp = Number(data.timestamp);
   const formattedTime = !isNaN(timestamp)
-    ? new Date(timestamp * 1000).toLocaleString("es-ES", {
+    ? new Date(timestamp * 1000).toLocaleString(window.I18N?.getLanguage?.() === "en" ? "en-US" : "es-ES", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
@@ -2099,7 +2103,7 @@ function renderBlockTable(data) {
   ];
 
   blockTable.innerHTML = `
-    <tr><th>Campo</th><th>Valor</th></tr>
+    <tr><th>${t("ui.field")}</th><th>${t("ui.value")}</th></tr>
     ${blockRows.map(([k, v]) => `
       <tr>
         <th>${safeText(k)}</th>
@@ -2112,7 +2116,7 @@ function renderBlockTable(data) {
   // ======= 📦 Tabla de transacciones =======
   if (Array.isArray(data.transactions) && data.transactions.length > 0) {
     const txTitle = document.createElement("h3");
-    txTitle.textContent = "Transacciones del bloque";
+    txTitle.textContent = t("ui.blockTransactions");
     txTitle.style.marginTop = "20px";
     txTitle.style.color = "#0D9488";
     container.appendChild(txTitle);
@@ -2165,10 +2169,10 @@ async function findPostById() {
     tableContainer.innerHTML = "";
 
     if (!postId) {
-        return alertMessage("Introduce un contract address o nombre", "error");
+        return alertMessage(t("ui.enterContract"), "error");
     }
 
-    alertMessage("Buscando contrato...", "info");
+    alertMessage(t("ui.searchingContract"), "info");
 
     try {
         const res = await fetchWithAuth(`${TX_API}/blockchain/post/${postId}`);
@@ -2185,13 +2189,13 @@ async function findPostById() {
         tableContainer.appendChild(contractPost);
         updateAppHistory({ section: "contract", inputId: "postId", value: postId });
 
-        alertMessage("Contrato encontrado.", "primary");
+        alertMessage(t("ui.contractFound"), "primary");
 
     } catch (err) {
         console.error(err);
         tableContainer.innerHTML =
-            "<tbody><tr><td><div class='p-3 text-red-400'>Error al obtener el contrato o ID inválido.</div></td></tr></tbody>";
-        alertMessage("Error al buscar contrato.", "error");
+            `<tbody><tr><td><div class="p-3 text-red-400">${safeText(t("ui.invalidContract"))}</div></td></tr></tbody>`;
+        alertMessage(t("ui.contractSearchError"), "error");
     }
 }
 
@@ -2211,7 +2215,7 @@ function renderPost(post) {
     ].filter(([, value]) => value !== undefined && value !== null);
 
     postTable.innerHTML = `
-        <tr><th>Campo</th><th>Valor</th></tr>
+        <tr><th>${t("ui.field")}</th><th>${t("ui.value")}</th></tr>
         ${rows.map(([k, v]) => {
             if (k === "document" && v) {
                 v = `<a href="#" onclick="event.preventDefault(); navigateToIpfs('${String(v).replace(/'/g, "\\'")}'); return false;">${safeText(v)}</a>`;
@@ -2231,7 +2235,7 @@ function renderPost(post) {
     // ===== Árbol de Aserciones =====
     if (Array.isArray(post.asertions) && post.asertions.length > 0) {
         const assertionsTitle = document.createElement("h3");
-        assertionsTitle.textContent = `Aserciones (${post.asertions.length})`;
+        assertionsTitle.textContent = `${t("ui.assertions")} (${post.asertions.length})`;
         container.appendChild(assertionsTitle);
 
         post.asertions.forEach((a, i) => {
@@ -2247,7 +2251,7 @@ function renderPost(post) {
             header.appendChild(arrow);
 
             const headerText = document.createElement("span");
-            headerText.textContent = `Aserción ${i + 1} Digest: ${a.hash_asertion?.digest ?? ""}`;
+            headerText.textContent = `${t("ui.assertion")} ${i + 1} Digest: ${a.hash_asertion?.digest ?? ""}`;
             header.appendChild(headerText);
 
             // Contenido colapsable
@@ -2258,14 +2262,14 @@ function renderPost(post) {
             const assertionTable = document.createElement("table");
             assertionTable.className = "compact-table";
             assertionTable.innerHTML = `
-                <tr><th>Categoría</th><td>${safeText(a.categoryId)}</td></tr>
+                <tr><th>${t("ui.category")}</th><td>${safeText(a.categoryId)}</td></tr>
             `;
             content.appendChild(assertionTable);
 
             // Validaciones
             if (Array.isArray(a.validations) && a.validations.length > 0) {
                 const validationsTitle = document.createElement("h4");
-                validationsTitle.textContent = `Validaciones (${a.validations.length})`;
+                validationsTitle.textContent = `${t("ui.validations")} (${a.validations.length})`;
                 content.appendChild(validationsTitle);
 
                 a.validations.forEach((v) => {
@@ -2273,9 +2277,9 @@ function renderPost(post) {
                     validationTable.className = "compact-table";
                     validationTable.innerHTML = `
                         <tr><th>Validator</th><td>${safeText(v.validatorAddress)}</td></tr>
-                        <tr><th>Dominio</th><td>${safeText(v.domain)}</td></tr>
-                        <tr><th>Reputación</th><td>${safeText(v.reputation)}</td></tr>
-                        <tr><th>Veredicto</th><td>${mapVeredict(v.veredict)}</td></tr>
+                        <tr><th>${t("ui.domain")}</th><td>${safeText(v.domain)}</td></tr>
+                        <tr><th>${t("ui.reputation")}</th><td>${safeText(v.reputation)}</td></tr>
+                        <tr><th>${t("ui.verdict")}</th><td>${mapVeredict(v.veredict)}</td></tr>
                         <tr><th>cid</th>
                             <td>
                                 ${v.cid
@@ -2357,7 +2361,7 @@ async function checkOrderConsistency() {
         table.innerHTML = `
             <tr>
                 <td colspan="5" class="error">
-                    Error al conectar con el servicio local.<br>
+                    ${safeText(t("ui.localServiceError"))}<br>
                     Detalle: ${safeText(error.message)}
                 </td>
             </tr>`;
@@ -2597,11 +2601,15 @@ function safeText(value) {
 
 function validatorTypeLabel(value) {
     if (value === null || value === undefined || value === "") return "-";
-    const direct = VALIDATOR_TYPE_LABELS[value];
-    if (direct) return direct;
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && VALIDATOR_TYPE_LABELS[numeric]) return VALIDATOR_TYPE_LABELS[numeric];
-    return String(value);
+    const enumToId = {
+        LLM_MEMORY_VALIDATION: 1,
+        LLM_SEARCH_VALIDATION: 2,
+        RAG_EVIDENCE_VALIDATION: 3,
+        DETERMINISTIC_VALIDATION: 4,
+        HUMAN: 5
+    };
+    const typeId = enumToId[value] || Number(value);
+    return Number.isFinite(typeId) && typeId >= 1 && typeId <= 5 ? t(`ui.validatorTypes.${typeId}`) : String(value);
 }
 
 function syntaxHighlightJson(json) {
@@ -2722,7 +2730,7 @@ function compactText(value, size = 90) {
 // Tabla de órdenes/listados con columnas más visuales, badges de estado y hashes compactos.
 function renderTableData(container, data) {
     if (!data?.length) {
-        container.innerHTML = "<p class='empty-state'>No hay datos disponibles.</p>";
+        container.innerHTML = `<p class="empty-state">${safeText(t("ui.noData"))}</p>`;
         container._fullData = data || [];
         return;
     }
@@ -2752,13 +2760,13 @@ function renderTableData(container, data) {
     const headerLabels = {
         order_id: "Order ID",
         client_id: "Client ID",
-        validation_mode: "Modo",
-        status: "Estado",
-        hash_text: "Hash texto",
+        validation_mode: t("ui.mode"),
+        status: t("ui.status"),
+        hash_text: t("ui.textHash"),
         tx_hash: "Tx hash",
-        created_at: "Creado",
-        updated_at: "Actualizado",
-        validators_pending: "Pendientes"
+        created_at: t("ui.created"),
+        updated_at: t("ui.updated"),
+        validators_pending: t("ui.pending")
     };
 
     const rows = pageData.map(row => {
@@ -2813,11 +2821,11 @@ function renderTableData(container, data) {
             <tbody>${rows}</tbody>
         </table>
         <div class="pagination">
-            <button onclick="changeTablePage(-1)" ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}>‹ Anterior</button>
-            <span class="vote-pill vote-true">Página ${TABLE_PAGE_ORDERS} / ${totalPages}</span>
-            <button onclick="changeTablePage(1)" ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}>Siguiente ›</button>
+            <button onclick="changeTablePage(-1)" ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}>${t("ui.previous")}</button>
+            <span class="vote-pill vote-true">${t("ui.pageOf", { page: TABLE_PAGE_ORDERS, total: totalPages })}</span>
+            <button onclick="changeTablePage(1)" ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}>${t("ui.next")}</button>
         </div>
-        <p style="color:var(--text-secondary);font-size:.82rem;margin:10px 0 0;">Mostrando ${pageData.length} de ${totalItems} órdenes</p>
+        <p style="color:var(--text-secondary);font-size:.82rem;margin:10px 0 0;">${t("ui.showingOrders", { shown: pageData.length, total: totalItems })}</p>
     `;
     container._fullData = data;
 }
@@ -2852,7 +2860,7 @@ function renderScorePills(result) {
 
 function preferredDomainsStatusFromPolicy(usePreferredDomains) {
     if (usePreferredDomains === true) {
-        return { enabled: true, label: "Sí", title: "EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true", className: "preferred-domains-on" };
+        return { enabled: true, label: t("ui.yes"), title: "EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true", className: "preferred-domains-on" };
     }
     if (usePreferredDomains === false) {
         return { enabled: false, label: "No", title: "EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=false", className: "preferred-domains-off" };
@@ -2885,7 +2893,7 @@ function preferredDomainsStatusFromEvidenceResponse(response) {
     if (preferredDomains.length || hasSiteQueries) {
         return {
             enabled: true,
-            label: preferredDomains.length ? `Sí (${preferredDomains.length})` : "Sí",
+            label: preferredDomains.length ? `${t("ui.yes")} (${preferredDomains.length})` : t("ui.yes"),
             title: preferredDomains.map(item => item.domain).filter(Boolean).join(", "),
             className: "preferred-domains-on"
         };
@@ -2903,7 +2911,7 @@ function preferredDomainsInfoForValidation(info = {}) {
     );
     return preferredDomainsStatusFromPolicy(explicitPolicy)
         || preferredDomainsStatusFromEvidenceResponse(info.evidence_search_response || info.payload?.evidence_search_response)
-        || { enabled: null, label: "No consta", title: "Sin política explícita en esta validación", className: "preferred-domains-unknown" };
+        || { enabled: null, label: t("ui.noRecord"), title: "Sin política explícita en esta validación", className: "preferred-domains-unknown" };
 }
 
 function renderPreferredDomainsBadge(info) {
@@ -2951,7 +2959,7 @@ function renderEvidenceLinks(info = {}) {
 
     return `
         <details class="validator-evidence-summary">
-            <summary>Ver evidencias (${items.length})</summary>
+            <summary>${t("ui.viewEvidence", { count: items.length })}</summary>
             <ul>${rows}</ul>
         </details>
     `;
@@ -2992,7 +3000,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         const validatorsHtml = Object.entries(validatorsObj).map(([validator, info]) => {
             const lit = getValidationLiteral(info.approval);
             const litClass = lit === "True" ? "true-news" : lit === "False" ? "false-news" : "partial-news";
-            let desc = info.text || "Sin descripción";
+            let desc = info.text || t("ui.noDescription");
             if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
             const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
             const responseTime = formatDurationSeconds(info.response_time_seconds);
@@ -3009,9 +3017,9 @@ function renderValidationsTree(container, validations, assertions, orderData = n
                     <div class="validator-desc">${safeText(desc)}</div>
                     <div class="validator-meta">
                         ${weightHtml}
-                        <div class="validator-response-time" title="Tiempo request-response"><span class="clock-icon" aria-hidden="true"></span>${safeText(responseTime)}</div>
+                        <div class="validator-response-time" title="${safeText(t("ui.requestResponseTime"))}"><span class="clock-icon" aria-hidden="true"></span>${safeText(responseTime)}</div>
                     </div>
-                    <div class="validator-tx" title="Transaction hash">${tx}</div>
+                    <div class="validator-tx" title="${safeText(t("ui.transactionHash"))}">${tx}</div>
                     ${renderEvidenceLinks(info)}
                 </div>
             `;
@@ -3040,7 +3048,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
 
 function renderValidatorValidationsByOrder(container, groupedOrders) {
     if (!groupedOrders || !Object.keys(groupedOrders).length) {
-        container.innerHTML = "<p class='empty-state'>No hay validaciones para este validador.</p>";
+        container.innerHTML = `<p class="empty-state">${safeText(t("ui.noValidatorValidations"))}</p>`;
         return;
     }
 
@@ -3048,18 +3056,18 @@ function renderValidatorValidationsByOrder(container, groupedOrders) {
 
     for (const [orderId, orderData] of Object.entries(groupedOrders)) {
         const assertionsCount = Object.keys(orderData.validations || {}).length;
-        const titleText = compactText(orderData.text || "Sin texto de noticia", 110);
+        const titleText = compactText(orderData.text || t("ui.noNewsTextShort"), 110);
         const safeOrder = String(orderId).replace(/'/g, "\\'");
         html += `
             <details class="validation-node order-validation-node" open>
                 <summary class="validation-summary order-validation-summary">
                     <div>
-                        <div class="assertion-title">Orden ${shortValue(orderId, 26)}</div>
+                        <div class="assertion-title">${t("ui.order")} ${shortValue(orderId, 26)}</div>
                         <div class="text-muted">(${safeText(titleText)})</div>
                     </div>
                     <div class="vote-pills">
-                        <span class="vote-pill vote-unknown">${assertionsCount} aserciones</span>
-                        <a class="btn-secondary btn-small" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${safeOrder}');">Ver orden</a>
+                        <span class="vote-pill vote-unknown">${assertionsCount} ${t("ui.assertions").toLowerCase()}</span>
+                        <a class="btn-secondary btn-small" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${safeOrder}');">${t("ui.viewOrder")}</a>
                     </div>
                 </summary>
                 <div class="order-validation-content">
@@ -3088,7 +3096,7 @@ function renderValidatorCategories(categories = []) {
     if (!Array.isArray(categories) || !categories.length) return "-";
     const labels = categories.map(cat => {
         const id = cat.id ?? cat.categoryId ?? cat;
-        const name = cat.name || CATEGORY_MAP[id] || `Categoría ${id}`;
+        const name = cat.name || categoryLabel(id) || `${t("ui.category")} ${id}`;
         return `${name} (${id})`;
     });
     const preview = labels.slice(0, 2).join(", ");
@@ -3114,14 +3122,14 @@ function renderValidatorsTable(validators) {
             <thead>
                 <tr>
                     <th>Validator Hash</th>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Provider</th>
-                    <th>Model</th>
-                    <th>Categories</th>
-                    <th>Status</th>
-                    <th>IPFS Config</th>
-                    <th>Acciones</th>
+                    <th>${t("ui.name")}</th>
+                    <th>${t("ui.type")}</th>
+                    <th>${t("ui.provider")}</th>
+                    <th>${t("ui.model")}</th>
+                    <th>${t("ui.categories")}</th>
+                    <th>${t("ui.status")}</th>
+                    <th>${t("ui.ipfsConfig")}</th>
+                    <th>${t("ui.actions")}</th>
                 </tr>
             </thead>
             <tbody>
@@ -3138,7 +3146,7 @@ function renderValidatorsTable(validators) {
                             <td>${renderValidatorCategories(v.categories)}</td>
                             <td>${safeText(cfg.status || "-")}</td>
                             <td>${v.ipfs_hash ? shortValue(v.ipfs_hash, 18) : "-"}</td>
-                            <td><button class="btn-secondary btn-small" onclick="showValidatorValidations('${validatorHashForJs(validator)}')">Ver validaciones</button></td>
+                            <td><button class="btn-secondary btn-small" onclick="showValidatorValidations('${validatorHashForJs(validator)}')">${t("ui.viewValidations")}</button></td>
                         </tr>
                     `;
                 }).join("")}
@@ -3152,7 +3160,7 @@ async function listValidatorsCache() {
     const detail = document.getElementById("validatorDetailContainer");
     if (!container) return;
 
-    container.innerHTML = "<p class='empty-state'>Cargando validadores...</p>";
+    container.innerHTML = `<p class="empty-state">${safeText(t("ui.loadingValidators"))}</p>`;
     if (detail) detail.innerHTML = "";
 
     try {
@@ -3162,15 +3170,15 @@ async function listValidatorsCache() {
         const validators = data.validators || [];
 
         if (!validators.length) {
-            container.innerHTML = "<p class='empty-state'>No hay validadores registrados.</p>";
+            container.innerHTML = `<p class="empty-state">${safeText(t("ui.noValidators"))}</p>`;
             return;
         }
 
         container.innerHTML = renderValidatorsTable(validators);
     } catch (error) {
         console.error("Error cargando validadores:", error);
-        container.innerHTML = "<p class='empty-state'>Error cargando validadores.</p>";
-        alertMessage("Error al cargar validadores", "error");
+        container.innerHTML = `<p class="empty-state">${safeText(t("ui.validatorsLoadError"))}</p>`;
+        alertMessage(t("ui.validatorsLoadError"), "error");
     }
 }
 
@@ -3178,7 +3186,7 @@ async function showValidatorDetail(validatorHash) {
     const container = document.getElementById("validatorsTableContainer");
     const detail = document.getElementById("validatorDetailContainer");
     if (!detail) return;
-    detail.innerHTML = "<p class='empty-state'>Cargando configuración...</p>";
+    detail.innerHTML = `<p class="empty-state">${safeText(t("ui.loadingConfig"))}</p>`;
     showSection('validators', false);
 
     try {
@@ -3190,31 +3198,31 @@ async function showValidatorDetail(validatorHash) {
         if (container) container.innerHTML = renderValidatorsTable([data]);
         detail.innerHTML = `
             <div class="validator-detail-card">
-                <h3>Configuración del validador</h3>
+                <h3>${t("ui.validatorConfig")}</h3>
                 <table class="compact-table">
                     <tbody>
                         <tr><th>Validator Hash</th><td>${safeText(data.validator || validatorHash)}</td></tr>
-                        <tr><th>IPFS Config</th><td>${safeText(data.ipfs_hash || "-")}</td></tr>
-                        <tr><th>Name</th><td>${safeText(cfg.name || "-")}</td></tr>
-                        <tr><th>Type</th><td>${safeText(validatorTypeLabel(cfg.type))}</td></tr>
-                        <tr><th>Provider</th><td>${safeText(cfg.provider || "-")}</td></tr>
-                        <tr><th>Model</th><td>${safeText(cfg.model || "-")}</td></tr>
-                        <tr><th>Categories</th><td>${renderValidatorCategories(data.categories)}</td></tr>
-                        <tr><th>Requests sent</th><td>${stats.requests}</td></tr>
-                        <tr><th>Successful responses</th><td>${stats.responses}</td></tr>
-                        <tr><th>Average response time</th><td>${stats.avgResponseTime}</td></tr>
-                        <tr><th>Active Date</th><td>${safeText(cfg.active_date || "-")}</td></tr>
-                        <tr><th>Updated Date</th><td>${safeText(cfg.updated_date || "-")}</td></tr>
-                        <tr><th>End Date</th><td>${safeText(cfg.end_date || "-")}</td></tr>
-                        <tr><th>Status</th><td>${safeText(cfg.status || "-")}</td></tr>
+                        <tr><th>${t("ui.ipfsConfig")}</th><td>${safeText(data.ipfs_hash || "-")}</td></tr>
+                        <tr><th>${t("ui.name")}</th><td>${safeText(cfg.name || "-")}</td></tr>
+                        <tr><th>${t("ui.type")}</th><td>${safeText(validatorTypeLabel(cfg.type))}</td></tr>
+                        <tr><th>${t("ui.provider")}</th><td>${safeText(cfg.provider || "-")}</td></tr>
+                        <tr><th>${t("ui.model")}</th><td>${safeText(cfg.model || "-")}</td></tr>
+                        <tr><th>${t("ui.categories")}</th><td>${renderValidatorCategories(data.categories)}</td></tr>
+                        <tr><th>${t("ui.requestsSent")}</th><td>${stats.requests}</td></tr>
+                        <tr><th>${t("ui.successfulResponses")}</th><td>${stats.responses}</td></tr>
+                        <tr><th>${t("ui.averageResponseTime")}</th><td>${stats.avgResponseTime}</td></tr>
+                        <tr><th>${t("ui.activeDate")}</th><td>${safeText(cfg.active_date || "-")}</td></tr>
+                        <tr><th>${t("ui.updatedDate")}</th><td>${safeText(cfg.updated_date || "-")}</td></tr>
+                        <tr><th>${t("ui.endDate")}</th><td>${safeText(cfg.end_date || "-")}</td></tr>
+                        <tr><th>${t("ui.status")}</th><td>${safeText(cfg.status || "-")}</td></tr>
                     </tbody>
                 </table>
-                <button class="btn-secondary" onclick="showValidatorValidations('${String(validatorHash).replace(/'/g, "\\'")}')">Ver validaciones realizadas</button>
+                <button class="btn-secondary" onclick="showValidatorValidations('${String(validatorHash).replace(/'/g, "\\'")}')">${t("ui.viewCompletedValidations")}</button>
             </div>
         `;
     } catch (error) {
         console.error("Error cargando detalle de validador:", error);
-        detail.innerHTML = "<p class='empty-state'>Error cargando configuración del validador.</p>";
+        detail.innerHTML = `<p class="empty-state">${safeText(t("ui.validatorConfigError"))}</p>`;
     }
 }
 
@@ -3222,7 +3230,7 @@ async function showValidatorValidations(validatorHash) {
     const container = document.getElementById("validatorsTableContainer");
     const detail = document.getElementById("validatorDetailContainer");
     if (!detail) return;
-    detail.innerHTML = "<p class='empty-state'>Cargando validaciones...</p>";
+    detail.innerHTML = `<p class="empty-state">${safeText(t("ui.loadingValidations"))}</p>`;
     showSection('validators', false);
 
     try {
@@ -3257,7 +3265,7 @@ async function showValidatorValidations(validatorHash) {
                 groupedOrders[orderId].validations[assertionId] = {};
                 groupedOrders[orderId].assertions.push({
                     idAssertion: assertionId,
-                    text: assertionText || `Aserción ${assertionId}`
+                    text: assertionText || `${t("ui.assertion")} ${assertionId}`
                 });
             }
 
@@ -3279,9 +3287,9 @@ async function showValidatorValidations(validatorHash) {
 
         detail.innerHTML = `
             <div class="validator-detail-card">
-                <h3>Validaciones realizadas</h3>
+                <h3>${t("ui.completedValidationsTitle")}</h3>
                 <p class="text-muted">Validator: ${safeText(validatorHash)}</p>
-                ${validations.length ? `<div id="validatorValidationsTree"></div>` : "<p class='empty-state'>No hay validaciones para este validador.</p>"}
+                ${validations.length ? `<div id="validatorValidationsTree"></div>` : `<p class="empty-state">${safeText(t("ui.noValidatorValidations"))}</p>`}
             </div>
         `;
 
@@ -3291,15 +3299,57 @@ async function showValidatorValidations(validatorHash) {
         }
     } catch (error) {
         console.error("Error cargando validaciones del validador:", error);
-        detail.innerHTML = "<p class='empty-state'>Error cargando validaciones del validador.</p>";
+        detail.innerHTML = `<p class="empty-state">${safeText(t("ui.validatorValidationsError"))}</p>`;
     }
 }
 
 window.addEventListener("trustnews:languagechange", () => {
     if (currentOrderData?.order_id) {
+        const tabs = document.getElementById("orderTabs");
         const detailsContainer = document.getElementById("fixedDetailsContainer");
-        if (detailsContainer) renderDetails(detailsContainer, currentOrderData, currentOrderEvents);
+        const tabContent = document.getElementById("tabContent");
+        const activeTabKey = tabs?.querySelector(".activeTab")?.dataset.tabKey;
+        const translatedTabNames = {
+            summary: t("tabs.summary"),
+            assertions: t("tabs.assertions"),
+            evidence: t("ui.evidence"),
+            process: t("ui.process"),
+            technical: t("ui.technical"),
+            ipfs: "IPFS",
+            events: t("tabs.events")
+        };
+
+        tabs?.querySelectorAll("[data-tab-key]").forEach(button => {
+            const translatedName = translatedTabNames[button.dataset.tabKey];
+            if (translatedName) button.textContent = translatedName;
+        });
+
+        if (detailsContainer) {
+            detailsContainer.innerHTML = `<span class="status-value" data-status="${safeText(currentOrderData.status || "UNKNOWN")}"></span>`;
+        }
+
+        if (tabContent && activeTabKey) {
+            const assertions = collectOrderAssertions(currentOrderData.assertions, currentOrderData);
+            const activeTabData = {
+                summary: currentOrderData,
+                assertions,
+                evidence: currentOrderData.validations || {},
+                process: currentOrderEvents,
+                technical: currentOrderData,
+                ipfs: currentOrderData.document || null,
+                events: currentOrderEvents
+            }[activeTabKey];
+            renderTabContent(activeTabKey, activeTabData, assertions, currentOrderData, currentOrderEvents);
+        }
     }
+    const activeSectionId = document.querySelector("main section.active")?.id || document.querySelector("section.active")?.id;
+    if (activeSectionId === "orders") {
+        const listContainer = document.getElementById("listTabContent");
+        if (listContainer?._fullData) renderTableData(listContainer, listContainer._fullData);
+    } else if (activeSectionId === "validators") {
+        listValidatorsCache();
+    }
+
     const badge = document.getElementById("sessionBadge");
     if (badge && keycloak?.tokenParsed?.preferred_username) {
         badge.textContent = `${t("header.protectedSession")} · ${keycloak.tokenParsed.preferred_username}`;

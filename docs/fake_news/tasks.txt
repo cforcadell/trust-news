@@ -84,6 +84,7 @@ Develop v0.0.11.
 
 - endpoints de recomendación de modelos apirouter economicos OK 
 - cambiar login  skin OK
+- Restylish de FE
 - cambiar resultado validacion con mejoras visuales OK
 - soporte multiidioma (castellano + ingles) OK
 - Nueva monitotizacion de mongodb +  Separacion de usuarios admin/user + uso de appuser en apis OK
@@ -102,18 +103,7 @@ Develop v0.0.11.
             - Cargador de config de preferred domains OK 
             - Soporte a multiples perfiles de predefined domains OK
             - Cacheo de resultados OK
-            - en lugar de guardar snippet hacer download y guardar chunks que se inyectan al validador 
-
-            What changed:
-                Added HTML fetch/extraction, chunking, context-window building, and chunk ranking modules:document_fetcher.py (line 1)
-                chunker.py (line 1)
-                chunk_ranker.py (line 1)
-
-                Added beautifulsoup4, lxml, and rank-bm25 to requirements.txt (line 1).
-                Wired EVIDENCE_FETCH_FULL_TEXT and related context/chunk env vars into evidence-search main.py (line 35).
-                Updated cache partitioning so extraction settings change the cache key at main.py (line 219).
-                Replaced direct evidence normalization with build_evidences_with_optional_contexts at main.py (line 340) and the endpoint call at main.py (line 616).
-                Updated RAG prompt rules and evidence formatting to prioritize contexts, then chunks, then legacy snippets in validate-asertions/main.py (line 110) and validate-asertions/main.py (line 304).
+            - en lugar de guardar snippet hacer download y guardar chunks que se inyectan al validador OK
 
         - Nueva Configuracion de validadores 
             - levantar 1 validador RAG_EVIDENCE_VALIDATION escuchando a todas las categoria con preferred domains bien configurado. Modelos LLM simples  RAG_EVIDENCE_VALIDATION 

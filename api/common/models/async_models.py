@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from typing import List, Optional, Dict, Any
 from enum import Enum, IntEnum
 from common.models.veredicto import Validacion
@@ -6,14 +6,13 @@ from common.models.protocol_models import (
     AssertionContext,
     AssertionsDocumentV2,
     AssertionValidationPayloadV2,
+    CategoryId,
     ContextConfidence,
     EnrichedAssertion,
     SearchHints,
     SourceDocumentStorage,
     build_assertions_document_v2,
     build_assertion_validation_payload_v2,
-    canonical_category,
-    category_id_for_value,
 )
 
 
@@ -35,17 +34,14 @@ class ValidatorAddress(BaseModel):
 
 
 class Assertion(BaseModel):
-    """Represents one enriched assertion while preserving chain-edge aliases.
+    model_config = ConfigDict(extra="forbid")
 
-    idAssertion/categoryId are retained only for adapters that call the current
-    Solidity contract. New protocol documents use assertion_id/category.
-    """
+    """Represents one assertion with the on-chain category id as its identity."""
     idAssertion: Optional[str] = None
     text: str
-    categoryId: Optional[int] = None
+    categoryId: CategoryId
     assertion_id: Optional[int | str] = None
     assertion_index: Optional[int] = None
-    category: Optional[str | int] = None
     subcategory: str = "unknown"
     context: AssertionContext = Field(default_factory=AssertionContext)
     search_hints: SearchHints = Field(default_factory=SearchHints)
@@ -61,18 +57,13 @@ class Assertion(BaseModel):
                 self.assertion_index = max(0, int(self.assertion_id or self.idAssertion or 1) - 1)
             except Exception:
                 self.assertion_index = 0
-        if self.category is None and self.categoryId is not None:
-            self.category = self.categoryId
-        if self.category is not None:
-            self.category = canonical_category(self.category)
-            self.categoryId = category_id_for_value(self.category)
 
     def to_enriched(self) -> EnrichedAssertion:
         return EnrichedAssertion(
             assertion_id=self.assertion_id or self.idAssertion or 1,
             assertion_index=self.assertion_index or 0,
             text=self.text,
-            category=self.category if self.category is not None else (self.categoryId or 0),
+            categoryId=self.categoryId,
             subcategory=self.subcategory,
             context=self.context,
             search_hints=self.search_hints,
@@ -117,7 +108,7 @@ class ValidationRegistrationModel(BaseModel):
 class ValidatorRegistrationInput(BaseModel):
     """Input model for registering a new validator."""
     name: str
-    categories: Optional[List[int]] = None
+    categories: Optional[List[CategoryId]] = None
     
 
     
@@ -227,7 +218,7 @@ class ValidatorConfigEventPayload(BaseModel):
     validator: str
     ipfs_hash: Optional[str] = None
     config: Optional[ValidatorConfig] = None
-    categories: Optional[List[int]] = None
+    categories: Optional[List[CategoryId]] = None
     source: Optional[str] = None
     timestamp: Optional[str] = None
     metrics_reset_at: Optional[str] = None
@@ -428,7 +419,7 @@ class LightValidationRequestPayload(BaseModel):
     assertion_index: int
     idAssertion: str
     assertion_text: str
-    category: int
+    categoryId: CategoryId
     validator_id: str
     original_text: Optional[str] = None
     client_id: Optional[str] = None
@@ -449,7 +440,7 @@ class LightValidationResponsePayload(BaseModel):
     assertion_index: int
     idAssertion: str
     validator_id: str
-    category: int
+    categoryId: CategoryId
     verdict: Validacion
     description: str
     confidence: Optional[float | str] = None

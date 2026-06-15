@@ -17,18 +17,7 @@ const POLLING_INTERVAL = 1000;  // 1 segundo
 const TABLE_PAGE_SIZE_ORDERS = 10;   // cantidad por página
 let TABLE_PAGE_ORDERS = 1;           // página actual
 
-const CATEGORY_MAP = {
-    1: "ECONOMÍA",
-    2: "DEPORTES",
-    3: "POLÍTICA",
-    4: "TECNOLOGÍA",
-    5: "SALUD",
-    6: "ENTRETENIMIENTO",
-    7: "CIENCIA",
-    8: "CULTURA",
-    9: "MEDIO AMBIENTE",
-    10: "SOCIAL"
-};
+const CATEGORY_IDS = window.I18N?.getCategoryIds() || [];
 
 const VALIDATOR_TYPE_LABELS = {
     1: "LLM memoria",
@@ -434,7 +423,7 @@ function renderEditableAssertionsTable(container, assertions) {
 function renderCategorySelect(selected) {
     return `
         <select class="category-select">
-            ${Object.keys(CATEGORY_MAP)
+            ${CATEGORY_IDS
                 .map(id => `
                     <option value="${id}" ${selected == id ? "selected" : ""}>${categoryLabel(id)}</option>`
                 ).join("")}
@@ -969,7 +958,7 @@ function resolveAssertionText(assertionId, assertions = [], orderData = null, va
 }
 
 function getAssertionCategory(assertion) {
-    return assertion?.categoryId ?? assertion?.category ?? assertion?.category_id;
+    return assertion?.categoryId;
 }
 
 function buildVerificationSummary(order, events = []) {
@@ -1233,12 +1222,16 @@ function renderOrderAssertions(container, assertions, orderData) {
     }
     const cards = assertions.map((assertion, index) => {
         const assertionId = getAssertionId(assertion, index + 1);
+        const categoryId = getAssertionCategory(assertion);
+        const category = categoryId != null
+            ? `${categoryLabel(categoryId)} (${categoryId})`
+            : "-";
         const meta = outcomeMeta(assertionOutcome(orderData, assertionId));
         const validators = orderData?.validations?.[String(assertionId)] || {};
         const evidenceCount = Object.values(validators).reduce((sum, info) => sum + validationEvidenceItems(info).length, 0);
         return `<article class="assertion-card ${meta.className}">
             <span class="assertion-number">${safeText(assertionId)}</span>
-            <div class="assertion-copy"><h3>${safeText(extractAssertionText(assertion) || t("ui.assertionWithoutText"))}</h3><div><span>${t("ui.result")} <b class="outcome-badge ${meta.className}">${meta.label}</b></span><span>${t("ui.validators")} <b>${Object.keys(validators).length}</b></span><span>${t("ui.evidence")} <b>${evidenceCount}</b></span></div></div>
+            <div class="assertion-copy"><h3>${safeText(extractAssertionText(assertion) || t("ui.assertionWithoutText"))}</h3><div><span>${t("ui.category")} <b>${safeText(category)}</b></span><span>${t("ui.result")} <b class="outcome-badge ${meta.className}">${meta.label}</b></span><span>${t("ui.validators")} <b>${Object.keys(validators).length}</b></span><span>${t("ui.evidence")} <b>${evidenceCount}</b></span></div></div>
             <button type="button" onclick="activateOrderTab('evidence')">${t("ui.viewDetail")}</button>
         </article>`;
     }).join("");

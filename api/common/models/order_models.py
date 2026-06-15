@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from common.models.async_models import Assertion, ValidationMode, ValidatorConfig
 from common.models.veredicto import Validacion
+from common.models.protocol_models import CategoryId
 
 
 class EventRecord(BaseModel):
@@ -22,7 +23,7 @@ class ValidationRecord(BaseModel):
     validator_alias: str = ""
     validator_config: Optional[Dict[str, Any]] = None
     validation_mode: Optional[ValidationMode] = None
-    category: Optional[int] = None
+    categoryId: Optional[CategoryId] = None
     assertion_index: Optional[int] = None
     correlation_id: Optional[str] = None
     sources: List[Dict[str, Any]] = Field(default_factory=list)
@@ -39,7 +40,7 @@ class ValidatorAssignment(BaseModel):
     idAssertion: str
     validatorAddresses: List[str] = Field(default_factory=list)
     text: Optional[str] = None
-    categoryId: Optional[int] = None
+    categoryId: Optional[CategoryId] = None
 
 
 class AssertionResultDetail(BaseModel):

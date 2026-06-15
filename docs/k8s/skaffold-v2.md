@@ -674,4 +674,24 @@ for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
   echo "==== Limpiando $node ===="
   docker exec "$node" crictl rmi --prune || true
 done
+
+
+for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
+  echo
+  echo "=================================================="
+  echo "BORRANDO import-* EN $node"
+  echo "=================================================="
+
+  docker exec "$node" sh -c '
+    crictl images | grep "docker.io/library/import-" | awk "{print \$3}" | sort -u > /tmp/import-images.txt
+
+    echo "Total a borrar:"
+    wc -l /tmp/import-images.txt
+
+    while read img; do
+      echo "Borrando $img"
+      crictl rmi "$img"
+    done < /tmp/import-images.txt
+  '
+done
 ```

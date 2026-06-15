@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
-import unicodedata
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+
+from common.category_catalog import CATEGORY_CATALOG_PROMPT, CATEGORY_IDS, validate_category_id
 
 
 ASSERTIONS_DOCUMENT_SCHEMA_VERSION = "assertions-document-v2"
@@ -58,69 +59,11 @@ SOURCE_TYPES = {
 }
 
 
-CHAIN_CATEGORIES: Dict[int, str] = {
-    1: "ECONOMÍA",
-    2: "DEPORTES",
-    3: "POLÍTICA",
-    4: "TECNOLOGÍA",
-    5: "SALUD",
-    6: "ENTRETENIMIENTO",
-    7: "CIENCIA",
-    8: "CULTURA",
-    9: "MEDIO AMBIENTE",
-    10: "SOCIAL",
-}
-
-
-def _category_key(value: Any) -> str:
-    text = str(value or "").strip().upper()
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    return text.replace("-", " ").replace("_", " ")
-
-
-CATEGORY_ALIASES: Dict[str, int] = {
-    _category_key(name): category_id for category_id, name in CHAIN_CATEGORIES.items()
-}
-CATEGORY_ALIASES.update({
-    "ECONOMY": 1,
-    "ECONOMIA": 1,
-    "SPORT": 2,
-    "SPORTS": 2,
-    "DEPORTE": 2,
-    "POLITICS": 3,
-    "POLITICA": 3,
-    "PUBLIC ADMINISTRATION": 3,
-    "TECHNOLOGY": 4,
-    "TECNOLOGIA": 4,
-    "HEALTH": 5,
-    "ENTERTAINMENT": 6,
-    "SCIENCE": 7,
-    "CULTURE": 8,
-    "ENVIRONMENT": 9,
-    "ENVIRONMENTAL": 9,
-    "MEDIOAMBIENTE": 9,
-    "SOCIAL": 10,
-})
-
-ACCEPTED_CATEGORY_PROMPT = "\n".join(f"{category_id} {name}" for category_id, name in CHAIN_CATEGORIES.items())
-
-
-def category_id_for_value(value: Any) -> int:
-    if isinstance(value, bool):
-        raise ValueError("Invalid category: booleans are not valid category ids")
-    try:
-        category_id = int(value)
-    except Exception:
-        category_id = CATEGORY_ALIASES.get(_category_key(value), 0)
-    if category_id not in CHAIN_CATEGORIES:
-        accepted = ", ".join(CHAIN_CATEGORIES.values())
-        raise ValueError(f"Invalid category {value!r}. Accepted categories: {accepted}")
-    return category_id
-
-
-def canonical_category(value: Any) -> str:
-    return CHAIN_CATEGORIES[category_id_for_value(value)]
+CategoryId = Annotated[
+    StrictInt,
+    Field(json_schema_extra={"enum": sorted(CATEGORY_IDS)}),
+    AfterValidator(validate_category_id),
+]
 
 
 def utc_now_iso() -> str:
@@ -234,28 +177,22 @@ class ContextConfidence(BaseModel):
 
 
 class EnrichedAssertion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     assertion_id: int | str
     assertion_index: int = Field(ge=0)
     text: str
-    category: str | int
+    categoryId: CategoryId
     subcategory: str = "unknown"
     context: AssertionContext = Field(default_factory=AssertionContext)
     search_hints: SearchHints = Field(default_factory=SearchHints)
     context_confidence: ContextConfidence = Field(default_factory=ContextConfidence)
 
-    @field_validator("category")
-    @classmethod
-    def normalize_category(cls, value: str | int) -> str:
-        return canonical_category(value)
-
-    def category_id_for_chain(self) -> int:
-        return category_id_for_value(self.category)
-
     def to_chain_assertion(self) -> Dict[str, Any]:
         return {
             "idAssertion": str(self.assertion_id),
             "text": self.text,
-            "categoryId": self.category_id_for_chain(),
+            "categoryId": self.categoryId,
         }
 
 
@@ -349,8 +286,6 @@ def assertion_input_for_protocol(assertion: Any) -> EnrichedAssertion | Dict[str
     if "idAssertion" in raw:
         raw["assertion_id"] = raw.pop("idAssertion")
         raw["assertion_index"] = int(raw["assertion_id"]) - 1
-    if "category" not in raw and "categoryId" in raw:
-        raw["category"] = raw["categoryId"]
     return raw
 
 

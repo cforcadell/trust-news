@@ -20,7 +20,7 @@ def sample_profiles():
     return {
         "source_types": {"official": {"default_trust_score": 1.0}, "statistics": {"default_trust_score": 0.95}},
         "categories": {
-            "ECONOMY": {
+            "1": {
                 "preferred_domains": [
                     {"domain": "ine.es", "source_type": "statistics", "weight": 0.9, "reason": "stats"}
                 ]
@@ -43,7 +43,19 @@ def test_build_profile_documents_splits_profile_into_index_and_subset_docs():
     assert docs[0]["subsets"] == list(init_domains.PROFILE_SUBSETS)
     subset_docs = [doc for doc in docs if doc["doc_type"] == "profile_subset"]
     assert {doc["subset"] for doc in subset_docs} == set(init_domains.PROFILE_SUBSETS)
-    assert next(doc for doc in subset_docs if doc["subset"] == "categories")["items"]["ECONOMY"]
+    assert next(doc for doc in subset_docs if doc["subset"] == "categories")["items"]["1"]
+
+
+def test_profile_validation_rejects_unknown_category_ids():
+    profiles = sample_profiles()
+    profiles["categories"] = {"11": profiles["categories"]["1"]}
+
+    try:
+        init_domains.validate_profiles(profiles)
+    except ValueError as exc:
+        assert "Unknown categoryId" in str(exc)
+    else:
+        raise AssertionError("unknown categoryId should fail")
 
 
 def test_assemble_profiles_from_documents_round_trips_subsets():

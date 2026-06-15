@@ -524,7 +524,7 @@ async def clear_cache():
 async def search_evidence(req: EvidenceSearchRequestV2):
     """Search for evidence supporting a validated assertion payload."""
     # Validate the minimum assertion text required to build any useful query.
-    assertion = req.assertion
+    assertion = req.assertion.model_dump(mode="json")
     text = str(assertion.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="assertion.text is required")

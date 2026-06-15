@@ -17,7 +17,7 @@ def enriched_assertion():
         "assertion_id": 1,
         "assertion_index": 0,
         "text": "El paro en Barcelona bajó en 2024.",
-        "category": "ECONOMY",
+        "categoryId": 1,
         "subcategory": "EMPLOYMENT",
         "context": {
             "locations": [{"name": "Barcelona", "country_code": "ES", "region_code": "ES-CAT", "city": "Barcelona"}],
@@ -43,8 +43,8 @@ def test_domain_router_prioritizes_entity_city_and_subcategory():
     assert domains[0] == "ine.es"
     assert "barcelona.cat" in domains
     assert "sepe.es" in domains
-    assert "category_ECONOMY" in result["selected_profiles"]
-    assert "subcategory_ECONOMY_EMPLOYMENT" in result["selected_profiles"]
+    assert "category_1" in result["selected_profiles"]
+    assert "subcategory_1_EMPLOYMENT" in result["selected_profiles"]
     assert "entity_INE" in result["selected_profiles"]
 
 

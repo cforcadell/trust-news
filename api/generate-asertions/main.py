@@ -32,7 +32,7 @@ from common.models.async_models import (
     TextoEntrada,
     build_assertions_document_v2,
 )
-from common.models.protocol_models import ACCEPTED_CATEGORY_PROMPT
+from common.models.protocol_models import CATEGORY_CATALOG_PROMPT
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
 from common.utils.llm_json import extract_chat_content, parse_model_list
@@ -77,10 +77,9 @@ def build_assertions_prompt(text: str) -> str:
     return (
         f"{PROMPT}\n\n"
         "CATEGORÍAS CANÓNICAS OBLIGATORIAS ALINEADAS CON BLOCKCHAIN:\n"
-        f"{ACCEPTED_CATEGORY_PROMPT}\n\n"
-        "El campo category DEBE ser exactamente una de esas etiquetas, respetando acentos y espacios. "
-        "No traduzcas las categorías, no uses sinónimos y no inventes categorías nuevas. "
-        "El campo categoryId DEBE ser el id numérico correspondiente a category.\n\n"
+        f"{CATEGORY_CATALOG_PROMPT}\n\n"
+        "El campo categoryId DEBE ser uno de esos enteros. "
+        "No devuelvas un campo category, no traduzcas ni inventes categorías.\n\n"
         f"Texto a analizar:\n{text}\n\n"
         f"IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones.\n"
     )
@@ -396,7 +395,7 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
         assertions_document = build_generated_document(req.payload.text, assertion_objs, req.payload.validation_mode)
         logger.info(f"[generate-asertions] generated assertions-document-v2 assertions={len(assertions_document.assertions)}")
         for assertion in assertions_document.assertions:
-            logger.info(f"[generate-asertions] assertion_id={assertion.assertion_id} category={assertion.category} subcategory={assertion.subcategory} location={[loc.country_code or loc.name for loc in assertion.context.locations]} entities={[ent.name for ent in assertion.context.entities]} temporal={[item.value for item in assertion.context.temporal_context]}")
+            logger.info(f"[generate-asertions] assertion_id={assertion.assertion_id} categoryId={assertion.categoryId} subcategory={assertion.subcategory} location={[loc.country_code or loc.name for loc in assertion.context.locations]} entities={[ent.name for ent in assertion.context.entities]} temporal={[item.value for item in assertion.context.temporal_context]}")
         payload = AssertionGeneratedPayload(
             text=req.payload.text,
             assertions=assertion_objs,

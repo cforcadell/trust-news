@@ -139,21 +139,6 @@ data:
 
     Si la respuesta a alguna de estas preguntas es "no", no incluyas la aserción.
 
-    CATEGORÍAS
-
-    1 ECONOMÍA
-    2 DEPORTES
-    3 POLÍTICA
-    4 TECNOLOGÍA
-    5 SALUD
-    6 ENTRETENIMIENTO
-    7 CIENCIA
-    8 CULTURA
-    9 MEDIO AMBIENTE
-    10 SOCIAL
-
-    Usa exactamente una de esas etiquetas en el campo category, respetando acentos y espacios. No traduzcas las categorías, no uses sinónimos y no inventes categorías nuevas. categoryId debe ser el id numérico correspondiente.
-
     Devuelve solo JSON válido, sin markdown, sin explicaciones y sin texto adicional.
 
     IMPORTANTE SOBRE context:
@@ -170,7 +155,6 @@ data:
           "assertion_index": 0,
           "idAssertion": "1",
           "text": "Aserción factual, autocontenida y verificable.",
-          "category": "ECONOMÍA",
           "categoryId": 1,
           "subcategory": "EMPLOYMENT",
           "context": {
@@ -196,6 +180,6 @@ data:
 
     No inventes contexto. Si no está claro, usa listas vacías, null o "unknown".
     origin debe ser explicit, inferred o unknown. confidence debe estar entre 0 y 1.
-    categoryId se conserva solo para mapear con la categoría on-chain existente; el documento protocolar usa category/subcategory/context/search_hints.
+    categoryId es la identidad única de categoría tanto on-chain como off-chain; subcategory sigue siendo libre y off-chain.
 
   ADMIN_URL: "http://admin-service.apis.svc.cluster.local:8400"

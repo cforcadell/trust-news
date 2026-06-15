@@ -22,12 +22,12 @@ def test_minimal_document_for_order_shape():
     module = load_news_handler_module()
     document = module.minimal_document_for_order(
         text="Este es un texto de prueba",
-        assertions=[{"idAssertion": "a1", "text": "Prueba", "category": 1}],
+        assertions=[{"idAssertion": "a1", "text": "Prueba", "categoryId": 1}],
     )
 
     assert document == {
         "text": "Este es un texto de prueba",
-        "assertions": [{"idAssertion": "a1", "text": "Prueba", "category": 1}],
+        "assertions": [{"idAssertion": "a1", "text": "Prueba", "categoryId": 1}],
     }
 
 
@@ -79,7 +79,7 @@ def test_start_light_flow_updates_order_with_minimal_document(monkeypatch):
     assertion_item = order_update["document"]["assertions"][0]
     assert assertion_item["idAssertion"] == "1"
     assert assertion_item["text"] == "Aserción de prueba"
-    assert assertion_item["category"] == 1
+    assert assertion_item["categoryId"] == 1
     assert "assertion_id" not in assertion_item
     assert "assertion_index" not in assertion_item
 

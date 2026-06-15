@@ -114,7 +114,7 @@ Develop v0.0.11.
 
     - Nuevos validadores con búsqueda online (LLM_SEARCH_VALIDATION) OK
     - en modo light no enviar validacion si los validadores no responden a health chechk Pte Test
-
+-Estandarizacion de categorias en base a su categoryId a lo largo de toda la cadena
     
 
 Hecho. Añadí el healthcheck y el filtro previo en modo light.

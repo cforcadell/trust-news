@@ -153,10 +153,9 @@ validator_type_weights = default_validator_type_weights()
 
 def assertion_to_enriched(assertion: Any, index: int = 0) -> EnrichedAssertion:
     raw = assertion.model_dump() if hasattr(assertion, "model_dump") else dict(assertion or {})
-    raw["assertion_id"] = raw["idAssertion"]
-    raw["assertion_index"] = int(raw["idAssertion"]) - 1
-    if "category" not in raw and "categoryId" in raw:
-        raw["category"] = raw["categoryId"]
+    assertion_id = raw.pop("idAssertion")
+    raw["assertion_id"] = assertion_id
+    raw["assertion_index"] = int(assertion_id) - 1
     return EnrichedAssertion(**raw)
 
 
@@ -566,7 +565,7 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
 
     for index, assertion in enumerate(assertions_document.assertions):
         assertion_id = str(assertion.assertion_id)
-        category_id = assertion.category_id_for_chain()
+        category_id = assertion.categoryId
         assertion_text = assertion.text
         candidate_validators = get_light_validators_for_category(category_id)
         validators = [
@@ -581,7 +580,6 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
             "validatorAddresses": validator_ids,
             "text": assertion_text,
             "categoryId": category_id,
-            "category": assertion.category,
             "subcategory": assertion.subcategory,
             "reputation": {str(v.get("validator")): float(v.get("reputation", 1.0) or 1.0) for v in validators},
         })
@@ -611,7 +609,7 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
                     "assertion_index": assertion.assertion_index,
                     "idAssertion": assertion_id,
                     "assertion_text": assertion_text,
-                    "category": category_id,
+                    "categoryId": category_id,
                     "validator_id": validator_id,
                     "original_text": text,
                     "client_id": client_id,
@@ -1168,7 +1166,7 @@ async def process_kafka_message(data: dict):
             approval_raw = payload.get("verdict")
             status_val = Validacion(approval_raw)
             description = payload.get("description", "")
-            category = payload.get("category")
+            category_id = payload.get("categoryId")
             correlation_id = payload.get("correlation_id")
             error = payload.get("error")
 
@@ -1205,7 +1203,7 @@ async def process_kafka_message(data: dict):
                     "validator_alias": (validator_config_snapshot or {}).get("config", {}).get("name", ""),
                     "validator_config": validator_config_snapshot,
                     "validation_mode": ValidationMode.LIGHT.value,
-                    "category": category,
+                    "categoryId": category_id,
                     "correlation_id": correlation_id,
                     "sources": payload.get("sources", []),
                     "evidence_used": payload.get("evidence_used", []),

@@ -133,7 +133,7 @@ Payload conceptual de light_validation_request:
     "assertion_index": 0,
     "idAssertion": "1",
     "assertion_text": "asercion",
-    "category": 1,
+    "categoryId": 1,
     "validator_id": "0x...",
     "original_text": "texto completo",
     "correlation_id": "order:assertion:validator"
@@ -150,7 +150,7 @@ Respuesta conceptual light_validation_completed:
     "assertion_index": 0,
     "idAssertion": "1",
     "validator_id": "0x...",
-    "category": 1,
+    "categoryId": 1,
     "verdict": 1,
     "description": "...",
     "confidence": "HIGH",

@@ -30,13 +30,14 @@ def _profiles_for_assertion(assertion: Dict[str, Any]) -> list[tuple[str, str, f
     """Extract candidate profile lookups from an enriched assertion."""
     # Category and subcategory matches provide broad topical routing signals.
     profiles: list[tuple[str, str, float, str]] = []
-    category = assertion.get("category")
-    if category not in (None, ""):
-        profiles.append(("categories", str(category).upper(), CATEGORY_MATCH, f"category_{str(category).upper()}"))
+    category_id = assertion.get("categoryId")
+    if category_id is not None:
+        key = str(category_id)
+        profiles.append(("categories", key, CATEGORY_MATCH, f"category_{key}"))
     subcategory = assertion.get("subcategory")
-    if category not in (None, "") and subcategory not in (None, "", "unknown"):
-        key = f"{str(category).upper()}.{str(subcategory).upper()}"
-        profiles.append(("subcategories", key, SUBCATEGORY_MATCH, f"subcategory_{key.replace('.', '_')}"))
+    if category_id is not None and subcategory not in (None, "", "unknown"):
+        key = f"{category_id}.{subcategory}"
+        profiles.append(("subcategories", key, SUBCATEGORY_MATCH, f"subcategory_{category_id}_{subcategory}"))
 
     # Location matches become more specific from country to region to city.
     context = assertion.get("context") or {}

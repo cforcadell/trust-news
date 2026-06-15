@@ -23,6 +23,7 @@ from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,Va
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     AssertionValidationPayloadV2,
+    CategoryId,
     SourceDocumentStorage,
     build_assertion_validation_payload_v2,
     build_assertions_document_v2,
@@ -30,7 +31,7 @@ from common.models.protocol_models import (
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
 from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
 from common.utils.llm_json import strip_json_markdown
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 
@@ -163,7 +164,7 @@ light_producer: Optional[AIOKafkaProducer] = None
 # =========================================================
 try:
     VALIDATOR_CATEGORIES = json.loads(os.getenv("VALIDATOR_CATEGORIES", "[]"))
-    VALIDATOR_CATEGORIES = [int(x) for x in VALIDATOR_CATEGORIES]
+    VALIDATOR_CATEGORIES = TypeAdapter(List[CategoryId]).validate_python(VALIDATOR_CATEGORIES)
 except Exception:
     VALIDATOR_CATEGORIES = []
 
@@ -175,7 +176,7 @@ except Exception:
 class AdminConfigResponse(BaseModel):
     provider: str
     model: str
-    categories: List[int]
+    categories: List[CategoryId]
     api_url: Optional[str] = None
     service_url: Optional[str] = None
     validator_type: int
@@ -191,7 +192,7 @@ class AdminConfigResponse(BaseModel):
 class AdminConfigUpdate(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
-    categories: Optional[List[int]] = None
+    categories: Optional[List[CategoryId]] = None
     api_url: Optional[str] = None
     service_url: Optional[str] = None
     validator_type: Optional[int] = None
@@ -561,7 +562,7 @@ def validator_config_event_payload(
     ipfs_config_hash: Optional[str],
     source: str = "validate-asertions",
     status: ValidatorStatus = ValidatorStatus.Registered,
-    categories: Optional[List[int]] = None,
+    categories: Optional[List[CategoryId]] = None,
     metrics_reset_at: Optional[str] = None,
 ) -> ValidatorConfigEvent:
     return ValidatorConfigEvent(
@@ -581,7 +582,7 @@ async def publish_validator_config_event(
     ipfs_config_hash: Optional[str],
     source: str = "validate-asertions",
     status: ValidatorStatus = ValidatorStatus.Registered,
-    categories: Optional[List[int]] = None,
+    categories: Optional[List[CategoryId]] = None,
     metrics_reset_at: Optional[str] = None,
 ):
     msg = validator_config_event_payload(ipfs_config_hash, source=source, status=status, categories=categories, metrics_reset_at=metrics_reset_at)
@@ -615,7 +616,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
 
     logger.info(
         f"[LIGHT] Request received | order_id={payload.order_id} "
-        f"assertion={payload.assertion_index} validator={ACCOUNT_ADDRESS} category={payload.category}"
+        f"assertion={payload.assertion_index} validator={ACCOUNT_ADDRESS} category={payload.categoryId}"
     )
 
     verdict = Validacion.UNKNOWN
@@ -645,7 +646,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "assertion_index": payload.assertion_index,
             "idAssertion": payload.idAssertion,
             "validator_id": ACCOUNT_ADDRESS,
-            "category": payload.category,
+            "categoryId": payload.categoryId,
             "verdict": verdict,
             "description": description,
             "confidence": extras.get("confidence"),
@@ -662,7 +663,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
     await light_producer.send_and_wait(TOPIC_RESPONSES, response.model_dump_json().encode("utf-8"))
     logger.info(
         f"[LIGHT] Response sent | order_id={payload.order_id} assertion={payload.assertion_index} "
-        f"validator={ACCOUNT_ADDRESS} category={payload.category} verdict={int(verdict)}"
+        f"validator={ACCOUNT_ADDRESS} category={payload.categoryId} verdict={int(verdict)}"
     )
 
 
@@ -713,7 +714,7 @@ app = FastAPI(title="Validate Asertions API")
 # =========================================================
 # Funciones internas
 # =========================================================
-def verificar_asercion_con_evidencias(texto: Any, contexto: Optional[str] = None, category: Optional[int] = None) -> tuple[str, List[Dict[str, Any]]]:
+def verificar_asercion_con_evidencias(texto: Any, contexto: Optional[str] = None) -> tuple[str, List[Dict[str, Any]]]:
     if isinstance(texto, dict) and texto.get("schema_version") == "assertion-validation-payload-v2":
         payload_v2 = AssertionValidationPayloadV2(**texto)
         verdict, description, extras, _evidence_response = validate_payload_v2(payload_v2)
@@ -721,8 +722,8 @@ def verificar_asercion_con_evidencias(texto: Any, contexto: Optional[str] = None
     raise ValueError("validate-asertions accepts assertion-validation-payload-v2 for automatic validation flows")
 
 
-def verificar_asercion(texto: Any, contexto: Optional[str] = None, category: Optional[int] = None) -> str:
-    result_text, _ = verificar_asercion_con_evidencias(texto, contexto, category)
+def verificar_asercion(texto: Any, contexto: Optional[str] = None) -> str:
+    result_text, _ = verificar_asercion_con_evidencias(texto, contexto)
     return result_text
 
 async def upload_validation_to_ipfs(validation_doc_bytes: bytes) -> str:
@@ -865,7 +866,7 @@ def consultar_tx_status_internal(tx_hash: str) -> Dict[str, Any]:
 # =========================================================
 # Registrar validador (espera confirmación)
 # =========================================================
-def registrar_validador_blockchain(name: str, categories: List[int], ipfs_config_hash: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+def registrar_validador_blockchain(name: str, categories: List[CategoryId], ipfs_config_hash: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """
     Registra validador y espera minado.
     Devuelve (tx_hash, receipt_dict) o (None, None) en error.

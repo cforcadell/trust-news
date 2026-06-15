@@ -15,6 +15,7 @@ from web3.middleware import geth_poa_middleware
 
 from aiokafka import AIOKafkaProducer
 
+from common.category_catalog import CATEGORY_IDS
 from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking
 from common.utils.hash_utils import (
     safe_multihash_to_tuple,
@@ -133,12 +134,12 @@ def normalize_validator_config(cid: str) -> Optional[ValidatorConfig]:
         return None
 
 
-def get_validator_categories(validator_address: str, max_category_id: int = 10) -> List[Dict[str, Any]]:
+def get_validator_categories(validator_address: str) -> List[Dict[str, Any]]:
     """Return the category ids/names where a validator is registered."""
     categories = []
     try:
         checksum = Web3.to_checksum_address(validator_address)
-        for category_id in range(1, max_category_id + 1):
+        for category_id in sorted(CATEGORY_IDS):
             validators = contract.functions.getValidatorsByCategory(category_id).call()
             if any(str(v).lower() == checksum.lower() for v in validators):
                 categories.append({

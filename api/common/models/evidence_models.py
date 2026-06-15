@@ -2,6 +2,8 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
+from common.models.protocol_models import EnrichedAssertion
+
 
 
 class EvidenceSearchPolicy(BaseModel):
@@ -16,7 +18,7 @@ class EvidenceSearchPolicy(BaseModel):
 
 class EvidenceSearchRequestV2(BaseModel):
     schema_version: str
-    assertion: dict
+    assertion: EnrichedAssertion
     search_policy: EvidenceSearchPolicy = Field(default_factory=EvidenceSearchPolicy)
 
     def model_post_init(self, __context):

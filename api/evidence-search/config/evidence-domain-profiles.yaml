@@ -27,7 +27,7 @@ source_types:
     default_trust_score: 0.30
 
 categories:
-  ECONOMY:
+  "1":
     preferred_domains:
       - domain: ine.es
         source_type: statistics
@@ -41,7 +41,7 @@ categories:
         source_type: statistics
         weight: 0.80
         reason: European statistical source
-  HEALTH:
+  "5":
     preferred_domains:
       - domain: who.int
         source_type: international_organization
@@ -55,7 +55,7 @@ categories:
         source_type: official
         weight: 0.85
         reason: European Medicines Agency
-  PUBLIC_ADMINISTRATION:
+  "3":
     preferred_domains:
       - domain: boe.es
         source_type: public_registry
@@ -65,7 +65,7 @@ categories:
         source_type: official
         weight: 0.75
         reason: Spanish Government
-  SPORTS:
+  "2":
     preferred_domains:
       - domain: csd.gob.es
         source_type: official
@@ -81,7 +81,7 @@ categories:
         reason: Spanish professional football league
 
 subcategories:
-  ECONOMY.EMPLOYMENT:
+  "1.EMPLOYMENT":
     preferred_domains:
       - domain: ine.es
         source_type: statistics
@@ -95,7 +95,7 @@ subcategories:
         source_type: official
         weight: 0.85
         reason: Spanish Ministry of Labour and Social Economy
-  ECONOMY.INFLATION:
+  "1.INFLATION":
     preferred_domains:
       - domain: ine.es
         source_type: statistics
@@ -109,7 +109,7 @@ subcategories:
         source_type: statistics
         weight: 0.80
         reason: European inflation statistics
-  PUBLIC_ADMINISTRATION.LEGAL_PUBLICATION:
+  "3.LEGAL_PUBLICATION":
     preferred_domains:
       - domain: boe.es
         source_type: public_registry
@@ -119,7 +119,7 @@ subcategories:
         source_type: public_registry
         weight: 0.95
         reason: Catalan official gazette
-  SPORTS.FOOTBALL:
+  "2.FOOTBALL":
     preferred_domains:
       - domain: laliga.com
         source_type: sports_federation

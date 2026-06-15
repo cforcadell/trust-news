@@ -17,6 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "api"))
+
+from common.category_catalog import CATEGORY_IDS
+
 PROFILE_ID = "default"
 PROFILE_VERSION = "contextual-v3"
 PROFILE_INDEX_DOC_TYPE = "profile_index"
@@ -61,6 +66,21 @@ def validate_profiles(profiles: dict[str, Any]) -> None:
         score = float((cfg or {}).get("default_trust_score", -1))
         if score < 0 or score > 1:
             raise ValueError(f"default_trust_score out of range for source_type={source_type}")
+
+    for profile_name in profiles["categories"]:
+        try:
+            category_id = int(profile_name)
+        except (TypeError, ValueError):
+            raise ValueError(f"Category profile key must be a categoryId: {profile_name!r}")
+        if str(category_id) != str(profile_name) or category_id not in CATEGORY_IDS:
+            raise ValueError(f"Unknown categoryId profile: {profile_name!r}")
+
+    for profile_name in profiles["subcategories"]:
+        category_key, separator, subcategory = str(profile_name).partition(".")
+        if not separator or not subcategory:
+            raise ValueError(f"Subcategory profile key must be <categoryId>.<subcategory>: {profile_name!r}")
+        if not category_key.isdigit() or int(category_key) not in CATEGORY_IDS:
+            raise ValueError(f"Unknown categoryId in subcategory profile: {profile_name!r}")
 
     for section in ("categories", "subcategories", "countries", "regions", "cities", "entities"):
         for profile_name, profile in (profiles.get(section) or {}).items():

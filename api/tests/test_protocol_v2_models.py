@@ -16,7 +16,7 @@ def sample_assertion():
         "assertion_id": 1,
         "assertion_index": 0,
         "text": "El paro en España bajó al 11,8% en 2024.",
-        "category": "ECONOMY",
+        "categoryId": 1,
         "subcategory": "EMPLOYMENT",
         "context": {
             "locations": [{"name": "España", "type": "country", "country_code": "ES", "origin": "explicit", "confidence": 0.98}],
@@ -70,7 +70,7 @@ def test_assertion_context_accepts_legacy_string_lists_from_llms():
         assertion_id=1,
         assertion_index=0,
         text="Catalunya tiene mas de 7 millones de habitantes en 2026.",
-        category="SOCIAL",
+        categoryId=10,
         context={
             "locations": ["Catalunya"],
             "entities": ["Union Europea"],
@@ -87,18 +87,16 @@ def test_assertion_context_accepts_legacy_string_lists_from_llms():
     assert assertion.to_enriched().context.temporal_context[0].value == "2026"
 
 
-def test_categories_are_canonicalized_to_blockchain_labels():
-    politica = EnrichedAssertion(assertion_id=1, assertion_index=0, text="x", category="POLÍTICA")
-    economy_legacy = EnrichedAssertion(assertion_id=2, assertion_index=1, text="x", category="ECONOMY")
-    environment = EnrichedAssertion(assertion_id=3, assertion_index=2, text="x", category="MEDIO AMBIENTE")
+def test_categories_use_strict_blockchain_ids():
+    assertion = EnrichedAssertion(assertion_id=1, assertion_index=0, text="x", categoryId=3)
+    assert assertion.categoryId == 3
+    assert assertion.to_chain_assertion()["categoryId"] == 3
 
-    assert politica.category == "POLÍTICA"
-    assert politica.category_id_for_chain() == 3
-    assert economy_legacy.category == "ECONOMÍA"
-    assert economy_legacy.category_id_for_chain() == 1
-    assert environment.category_id_for_chain() == 9
+    for invalid in ("3", 3.0, True, 0, 11, "POLÍTICA"):
+        with pytest.raises(ValidationError):
+            EnrichedAssertion(assertion_id=1, assertion_index=0, text="x", categoryId=invalid)
 
 
-def test_unknown_category_is_rejected_in_protocol_models():
+def test_legacy_category_field_is_rejected():
     with pytest.raises(ValidationError):
-        EnrichedAssertion(assertion_id=1, assertion_index=0, text="x", category="INTERNATIONAL_RELATIONS")
+        EnrichedAssertion(assertion_id=1, assertion_index=0, text="x", categoryId=3, category="POLÍTICA")

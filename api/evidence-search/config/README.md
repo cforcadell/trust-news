@@ -169,3 +169,19 @@ configuracion actualizada:
 kubectl rollout restart deployment/evidence-search -n apis
 kubectl logs deployment/evidence-search -n apis
 ```
+
+## Mantenimiento de categorias
+
+`categoryId` es la identidad unica de categoria en blockchain, mensajes,
+documentos y perfiles. Los literales son solo etiquetas de presentacion.
+
+Para incorporar una categoria nueva:
+
+1. Registrarla con `TrustNews.addCategory(id, label)` en la red objetivo.
+2. Anadir el mismo ID y su etiqueta en `api/common/category_catalog.py`.
+3. Anadir las traducciones de presentacion en `web_classic/app/js/i18n.js`.
+4. Anadir perfiles `categories.<id>` y `subcategories.<id>.<subcategory>` si corresponden.
+5. Registrar o actualizar validadores que soporten el nuevo ID.
+
+No se deben introducir aliases, conversiones desde literales ni rangos fijos
+de IDs. El cargador rechaza perfiles que no pertenezcan al catalogo backend.

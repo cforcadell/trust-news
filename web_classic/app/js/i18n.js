@@ -74,7 +74,8 @@
         applyTranslations,
         t: translate,
         getLanguage: currentLanguage,
-        getLanguages: () => Object.entries(dictionaries).map(([code, data]) => ({ code, name: data.name }))
+        getLanguages: () => Object.entries(dictionaries).map(([code, data]) => ({ code, name: data.name })),
+        getCategoryIds: () => Object.keys(dictionaries[currentLanguage()]?.messages?.ui?.categoriesMap || {})
     };
 
     registerLanguage("es", "Castellano", {

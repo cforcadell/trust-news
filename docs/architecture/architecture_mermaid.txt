@@ -57,9 +57,8 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    OffChain[Off-chain protocol category<br/>string or int] --> Mapper[category_id_for_chain]
-    Mapper --> ChainCat[On-chain categoryId<br/>1..10]
-    ChainCat --> ContractSelection[Validator selection by category]
-    OffChain --> DomainRouter[Domain router<br/>category/subcategory/context]
+    OffChain[Off-chain protocol categoryId<br/>strict integer] --> ChainCat[On-chain categoryId<br/>registered catalog]
+    ChainCat --> ContractSelection[Validator selection by categoryId]
+    OffChain --> DomainRouter[Domain router<br/>categoryId/subcategory/context]
     DomainRouter --> EvidenceDomains[Preferred evidence domains]
 ```

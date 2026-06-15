@@ -95,7 +95,7 @@ sequenceDiagram
     H->>N: GET /blockchain/validators?recover_ipfs=true on startup/cache refresh
     N-->>H: Validators with categories, type, config, status
     loop For each assertion
-        H->>H: category_id_for_chain(category)
+        H->>H: read categoryId
         H->>H: Select active automatic validators for category
         loop For each selected validator
             H->>K: light_validation_request with assertion-validation-payload-v2

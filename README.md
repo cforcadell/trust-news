@@ -1,9 +1,9 @@
 # 📰 TrustNews
 
-> **Automated news verification using AI, IPFS and Ethereum**  
-> Proof of Concept (Academic / Research Project)
+> **Automated news verification platform using AI validators, RAG-assisted evidence search and optional blockchain auditability.**  
+> Post-TFM evolution of an academic Proof of Concept.
 
-![status](https://img.shields.io/badge/status-proof--of--concept-blue)
+![status](https://img.shields.io/badge/status-post--TFM--prototype-blue)
 ![python](https://img.shields.io/badge/python-3.10+-blue)
 ![kubernetes](https://img.shields.io/badge/kubernetes-skaffold-blue)
 ![blockchain](https://img.shields.io/badge/blockchain-ethereum-lightgrey)
@@ -11,66 +11,218 @@
 
 ---
 
-## 🔍 What is TrustNews?
+## 🔍 Overview
 
-**TrustNews** is a **Proof of Concept** for a system that automatically verifies news content by:
+**TrustNews** is a prototype platform for automated news verification.
 
-* Breaking news into **atomic, objective assertions**
-* Validating each assertion using **AI-based validators** or dedicated validators with his own database Knowledge
-* Enriching RAG validators with **evidence-search** and preferred official sources
-* Persisting the full validation process **immutably on Ethereum**
-* Storing documents in a **distributed way using IPFS**
+It decomposes news into **atomic assertions**, enriches them with optional **RAG-based evidence search**, validates each assertion with **AI-based validators**, and provides traceability through centralized persistence or blockchain-based auditability.
 
-The verification pipeline is designed to run automatically from publication to final validation, while keeping the process auditable end to end.
+TrustNews can operate in two modes:
 
----
+* **LIGHT mode**: centralized validation without blockchain.
+* **BLOCKCHAIN mode**: auditable validation using IPFS and Ethereum smart contracts.
 
-## ✨ Why does this matter?
-
-Most fact-checking solutions are:
-
-* Manual or semi-automated
-* Centralized
-* Not auditable end-to-end
-
-TrustNews explores a different approach:
-
-* ✅ Assertions instead of full-text validation
-* ✅ Multiple automated validators
-* ✅ Evidence-backed RAG validation
-* ✅ Tamper-proof validation history
-* ✅ Full traceability (Order → IPFS → Blockchain)
+The project was originally developed as a Master Thesis Proof of Concept and later extended in the post-TFM phase.
 
 ---
 
-## 🧠 Core Ideas
+## ✨ Key Features
 
-1. **Atomic Assertions**  
-   News is decomposed into small, verifiable statements.
-
-2. **Unattended Validation**  
-   AI validators automatically verify assertions without human intervention.
-
-3. **Evidence Search**  
-   RAG validators can retrieve and cache supporting sources, prioritizing configurable official domains.
-
-4. **Immutable Traceability**  
-   Every step is recorded either in MongoDB, IPFS, Kafka events, or Ethereum.
+* Atomic assertion extraction from news content.
+* AI-based unattended validation.
+* RAG-assisted evidence search.
+* Preferred-domain search strategies.
+* MongoDB-backed evidence profiles and cache.
+* Secure API Gateway.
+* OIDC frontend authentication.
+* OAuth 2.0 Client Credentials for B2B access.
+* Client quotas managed through Admin API.
+* Kafka-based asynchronous processing.
+* Optional IPFS persistence.
+* Optional Ethereum smart contract auditability.
+* Kubernetes/Skaffold deployment workflow.
 
 ---
 
-## 🏗️ Architecture (High Level)
+## ⚙️ Operating Modes
+
+TrustNews separates the **validation engine** from the **trust and persistence layer**.
+
+| Mode | Description | Main Use Case |
+|---|---|---|
+| `LIGHT` | Centralized validation using backend services and MongoDB persistence | Internal platforms, CMS integrations, corporate systems |
+| `BLOCKCHAIN` | Auditable validation using IPFS, Ethereum and blockchain events | Traceable, tamper-resistant validation workflows |
+
+---
+
+### LIGHT Mode
+
+`LIGHT` mode is designed for centralized systems where blockchain is not required.
+
+```mermaid
+flowchart TD
+    A[User / External System] --> B[API Gateway]
+    B --> C[news-handler]
+    C --> D[generate-assertions]
+    C --> E[evidence-search]
+    C --> F[validate-assertions]
+    C --> G[(MongoDB / internal persistence)]
+    F --> H[Final validation result]
+    G --> H
+```
+
+In this mode:
+
+* No smart contract is required.
+* No blockchain events are required.
+* IPFS persistence is optional.
+* Validation state is stored centrally.
+* Deployment and operation are simpler.
+
+---
+
+### BLOCKCHAIN Mode
+
+`BLOCKCHAIN` mode is designed for scenarios requiring stronger auditability and integrity.
+
+```mermaid
+flowchart TD
+    A[User / External System] --> B[API Gateway]
+    B --> C[news-handler]
+    C --> D[generate-assertions]
+    C --> E[evidence-search]
+    C --> F[ipfs-fastapi]
+    C --> G[news-chain]
+    F --> I[(IPFS)]
+    G --> J[TrustNews.sol Smart Contract]
+    J --> K[ValidationRequested events]
+    K --> L[validate-assertions]
+    L --> I
+    L --> M[ValidationSubmitted transaction]
+    M --> J
+    J --> N[ValidationSubmitted events]
+    N --> C
+    C --> O[Final validation result]
+```
+
+In this mode:
+
+* Documents are stored in IPFS.
+* Posts are registered in Ethereum.
+* Validation requests are emitted as blockchain events.
+* Validators submit results back to the smart contract.
+* Validation documents are linked through IPFS CIDs.
+
+---
+
+## 🔎 Evidence Search
+
+TrustNews includes a dedicated `evidence-search` service used by RAG validators.
+
+RAG evidence search retrieves supporting or contradicting sources before validating an assertion.
+
+The service exposes:
+
+```http
+POST /search/evidence
+```
+
+It uses MongoDB for:
+
+```text
+newsdb.evidence_domain_profiles
+newsdb.evidence_normalization_configs
+newsdb.evidence_search_cache
+```
+
+Search results are cached using a key based on:
+
+* Normalized assertion.
+* Search policy.
+* Preferred-domain mode.
+* Domain profile version.
+* Search backend settings.
+
+---
+
+## Preferred-Domain Strategy
+
+Evidence search is controlled by:
+
+```env
+EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+```
+
+Supported modes:
+
+| Mode | Meaning |
+|---|---|
+| `NONE` | Use only the search suggested by `generate-assertions` or the fallback assertion query |
+| `LOCAL` | Enrich preferred domains using MongoDB-stored profiles and pass them as `include_domains` |
+| `EXT_OFFICIAL_FIRST` | Ask the external provider to prioritize official sources |
+| `EXT_ONLY_OFFICIAL` | Ask the external provider to restrict results to official sources when supported |
+
+External modes depend on the capabilities of the configured search provider.
+
+---
+
+## 🧩 Main Components
+
+| Component | Responsibility |
+|---|---|
+| `gateway` | Authenticated API entrypoint |
+| `admin` | Clients, quotas and evidence-search configuration |
+| `news-handler` | Main orchestration service |
+| `generate-assertions` | AI-based assertion extraction |
+| `evidence-search` | RAG evidence retrieval, domain routing and cache |
+| `validate-assertions` / `validate-asertions` | Automated validation workers |
+| `news-chain` | Blockchain access layer |
+| `ipfs-fastapi` | IPFS document storage abstraction |
+| `mongodb` | Orders, quotas, evidence, profiles and cache |
+| `keycloak` | Identity provider |
+| `TrustNews.sol` | Smart contract for blockchain mode |
+| `web_classic` | Frontend |
+| `kafka` | Asynchronous event backbone |
+
+---
+
+## 🏗️ Architecture
 
 <img src="./docs/img/Architecture.png" width="70%"/>
 
-**Key traits**:
+Main architectural traits:
 
-* Domain-oriented microservices
-* Asynchronous messaging (Kafka)
-* Pluggable AI validators (memory, online search, RAG evidence)
-* MongoDB-backed order, quota, validator and evidence data
-* Private Ethereum network (PoA)
-* Kubernetes/Skaffold local and production overlays
+* Domain-oriented microservices.
+* Kafka-based asynchronous communication.
+* Pluggable AI providers and validators.
+* MongoDB-backed operational state.
+* Dedicated evidence-search service.
+* Optional IPFS and Ethereum auditability.
+* Kubernetes/Skaffold deployment profiles.
+
+```mermaid
+flowchart TD
+    A[Frontend / Client] --> B[API Gateway]
+    B --> C[news-handler]
+
+    C --> D[generate-assertions]
+    C --> E[evidence-search]
+    C --> F[validate-assertions]
+    C --> G[(MongoDB)]
+
+    E --> G
+    F --> G
+
+    C --> H[ipfs-fastapi]
+    H --> I[(IPFS)]
+
+    C --> J[news-chain]
+    J --> K[TrustNews.sol]
+    K --> L[(Ethereum / PoA)]
+
+    B --> M[Admin API]
+    B --> N[Keycloak]
+```
 
 ---
 
@@ -78,34 +230,16 @@ TrustNews explores a different approach:
 
 <img src="./docs/img/security.png" width="70%"/>
 
-**Key points**:
+Security capabilities include:
 
-* IAM: OIDC Auth for Frontend and OAuth 2.0 (Client Credentials) via Nginx for B2B Partners.
-* Gateway: Token validation and internal ID generation by merging sub and client_id claims.
-* Proxy: Secure request forwarding to the Orchestrator with identity injection via Query Parameters.
-* Quotas: Real-time balance verification via Admin API with proactive blocking (429 Error).
-* Events: Post-processing consumption increment and event dispatching to the Kafka architecture.
-* Secrets: Local overlays use ignored `.env` files; production secrets are created outside the repository.
-
----
-
-## 🧩 Main Components
-
-| Component | Responsibility |
-| --- | --- |
-| `gateway` | Authenticated API entrypoint |
-| `admin` | Quotas, clients, model recommendations and evidence-search config CRUD |
-| `news-handler` | End-to-end orchestration and Kafka event handling |
-| `generate-assertions` | AI-based assertion extraction |
-| `validate-assertions` | Automated assertion validation workers |
-| `evidence-search` | Tavily-backed evidence retrieval with MongoDB cache |
-| `news-chain` | Blockchain access layer |
-| `ipfs-fastapi` | Document storage abstraction |
-| `mongodb` | Orders, quotas, validator cache, evidence and config data |
-| `mongo-express` | Local MongoDB inspection UI |
-| `keycloak` | Identity provider |
-| `TrustNews.sol` | Immutable system state |
-| `web_classic` | User interaction and monitoring |
+* OIDC authentication for frontend users.
+* OAuth 2.0 Client Credentials for B2B partners.
+* Gateway token validation.
+* Internal client identity generation.
+* Admin API quota control.
+* Secure forwarding to internal services.
+* Environment-based secret management.
+* Production secrets created outside the repository.
 
 ---
 
@@ -114,7 +248,8 @@ TrustNews explores a different approach:
 ### Prerequisites
 
 * Docker >= 24
-* Kubernetes local cluster (Kind is used in the project docs)
+* Kubernetes local cluster
+* Kind
 * Skaffold v4
 * kubectl
 * 8GB RAM recommended
@@ -128,7 +263,7 @@ cd trustnews
 
 ### Local Environment Files
 
-Create local `.env` files from the examples before running Skaffold. Real secrets must not be committed.
+Create local `.env` files from the provided examples before running Skaffold.
 
 Important local files:
 
@@ -143,28 +278,23 @@ k8s/apis/evidence-search/overlays/local/tavily.env
 k8s/apis/validate-asertions/overlays/local/worker-*/worker-*.env
 ```
 
-MongoDB local examples:
+Example:
 
 ```bash
 cp k8s/infra/mongodb/overlays/local/mongodb.env.example \
   k8s/infra/mongodb/overlays/local/mongodb.env
+
 cp k8s/apis/mongodb-app/overlays/local/mongodb-app.env.example \
   k8s/apis/mongodb-app/overlays/local/mongodb-app.env
-cp k8s/infra/mongo-express/overlays/local/mongo-express.env.example \
-  k8s/infra/mongo-express/overlays/local/mongo-express.env
 ```
 
-`mongodb.env` creates the MongoDB root/admin user and the application user `app_trust_user`. Runtime services use only `mongodb-app-secret`, whose `MONGO_URI` must authenticate `app_trust_user` against `newsdb` with `readWrite` permissions. Mongo Express keeps using the admin/root secret for database inspection.
+Real secrets must never be committed.
 
-Production overlays expect sensitive secrets to be created outside the repository, usually with:
+---
 
-```bash
-kubectl create secret generic <secret-name> --from-env-file=<file>.env -n <namespace>
-```
+## Local Kubernetes Run
 
-### Local Kubernetes Run
-
-The repository is aligned around Skaffold profiles:
+The repository is organized around Skaffold profiles:
 
 ```bash
 skaffold dev -p setup
@@ -173,12 +303,12 @@ skaffold dev -p infra
 skaffold dev -p apis-frontend
 ```
 
-Main local URLs exposed by Skaffold:
+Main local URLs:
 
 | Service | URL |
-| --- | --- |
+|---|---|
 | Frontend | https://localhost:7443 |
-| Keycloak admin console | https://localhost:7443/auth/admin/master/console/ |
+| Keycloak Admin | https://localhost:7443/auth/admin/master/console/ |
 | Admin API | http://localhost:8400/docs |
 | Gateway | http://localhost:8500/docs |
 | Evidence Search | http://localhost:8074/docs |
@@ -186,49 +316,46 @@ Main local URLs exposed by Skaffold:
 | Kafdrop | http://localhost:9000 |
 | Grafana | http://localhost:3000 |
 
-> ⏳ First startup may take a few minutes while Ethereum, Kafka, MongoDB, IPFS and Keycloak stabilize.
-
-For detailed commands, see:
-
-* `docs/k8s/skaffold.md` for the current Kubernetes/Skaffold workflow.
-* `docs/k8s/kind.md` for Kind setup notes.
-* `docs/docker/installation_blockchain.md` for private Geth PoA setup notes.
-* `docs/blockchain/scripts_blockchain.md` for smart contract deploy/test scripts.
-
 ---
 
-## Evidence Search Configuration
+## Configuration Example
 
-RAG validators call `evidence-search` through the v2 endpoint:
+```env
+APP_MODE=LIGHT
+# APP_MODE=BLOCKCHAIN
 
-```http
-POST /search/evidence
-```
+EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL
+# EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE
+# EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_OFFICIAL_FIRST
+# EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_ONLY_OFFICIAL
 
-The service resolves preferred domains from MongoDB collection:
+EVIDENCE_SEARCH_CACHE_TTL_SECONDS=86400
 
-```text
-newsdb.evidence_domain_profiles
-```
+SEARCH_PROVIDER=tavily
+API_KEY_PROVIDER=...
 
-Search responses are cached separately in:
+AI_PROVIDER=openrouter
+MODEL=...
+API_KEY=...
 
-```text
-newsdb.evidence_search_cache
-```
+MONGO_DBNAME=newsdb
+MONGO_URI=mongodb://app_trust_user:***@mongodb:27017/newsdb
 
-The cache key includes normalized assertion text, the v2 search policy and the domain profile version, and expires with `EVIDENCE_SEARCH_CACHE_TTL_SECONDS`.
+KAFKA_BROKER=kafka:9092
 
-LOCAL domain scoring uses one complete Mongo document per profile plus independent normalization documents for subcategories, location scopes and source types. To validate or refresh the versioned JSON seeds, use:
+ADMIN_URL=http://admin:8000
 
-```bash
-python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
-python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
+IPFS_FASTAPI_URL=http://ipfs-fastapi:8060
+
+RPC_URL=http://geth-node:8545
+CONTRACT_ADDRESS=...
+PRIVATE_KEY=...
+ACCOUNT_ADDRESS=...
 ```
 
 ---
 
-## 📂 Project Structure (main folders)
+## 📂 Project Structure
 
 ```text
 .
@@ -254,40 +381,62 @@ python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 
 ---
 
-## ✅ Integrity Checks
+## 📚 Additional Documentation
 
-The system includes consistency checks across:
+A more detailed architecture and evidence-search document.
 
-* MongoDB orders
-* IPFS documents
-* Ethereum posts, assertions and validations
-* Kafka validation events
+* `docs/k8s/TrustNews_detailed.md`
 
-This helps keep the validation process auditable and tamper-resistant.
+Recommended detailed documents:
+
+* `docs/k8s/skaffold.md`
+* `docs/k8s/kind.md`
+* `docs/docker/installation_blockchain.md`
+* `docs/blockchain/scripts_blockchain.md`
+
+
 
 ---
 
 ## 🛣️ Roadmap
 
-* [X] Secure and authenticate platform
-* [X] Migrate requests and responses to validation from Kafka to blockchain events
-* [X] Integrate UI with IDP and custom chains for user
-* [X] Evidence-backed RAG validation
-* [ ] Support Hyperledger Besu or Fabric
-* [ ] Validator reputation system
-* [ ] Performance and cost analysis
-* [ ] API Control
+* [x] Secure and authenticate platform.
+* [x] Assertion-based news verification.
+* [x] AI-based validation engine.
+* [x] Evidence-backed RAG validation.
+* [x] Preferred-domain evidence search.
+* [x] MongoDB-backed evidence domain profiles.
+* [x] Evidence search cache.
+* [x] LIGHT mode for centralized validation workflows.
+* [x] BLOCKCHAIN mode for auditable validation workflows.
+* [x] IPFS document storage in blockchain mode.
+* [x] Ethereum smart contract registration.
+* [x] Blockchain event-based validation.
+* [x] Gateway authentication.
+* [x] Admin and quota management.
+* [x] Kubernetes/Skaffold deployment workflow.
+* [ ] Improve evidence ranking and deduplication.
+* [ ] Improve provider-specific official-source filtering behavior.
+* [ ] Validator reputation system.
+* [ ] Full production hardening.
+* [ ] Performance and cost analysis.
+* [ ] Support Hyperledger Besu or Fabric.
 
 ---
 
-## 🤝 Contributing
+## ⚠️ Current Limitations
 
-This is an academic PoC, but contributions are welcome:
+TrustNews is still a research/prototype platform.
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Open a Pull Request
+Current limitations include:
+
+* AI validators depend on external LLM providers.
+* Evidence quality depends on the selected search provider.
+* External official-source modes depend on provider support.
+* Some providers may treat official-source policies as ranking hints rather than hard filters.
+* Validator reputation is planned but not completed.
+* Production hardening is still pending.
+* `BLOCKCHAIN` mode has higher operational complexity than `LIGHT` mode.
 
 ---
 
@@ -299,4 +448,19 @@ Academic / research use only.
 
 ## 👤 Author
 
-Developed as a **Master Thesis – Proof of Concept**.
+Developed as a **Master Thesis – Proof of Concept**, later extended in the post-TFM phase.
+
+---
+
+## 📌 Summary
+
+TrustNews is a flexible automated news validation platform.
+
+It supports:
+
+* **LIGHT mode** for centralized validation.
+* **BLOCKCHAIN mode** for auditable validation.
+* **RAG evidence search** with preferred-domain strategies.
+* **AI validators** for unattended assertion verification.
+
+The goal is to provide a modular, extensible and auditable approach to automated news verification.

@@ -42,22 +42,6 @@ JURISDICTIONS = {
     "unknown",
 }
 
-SOURCE_TYPES = {
-    "official",
-    "public_registry",
-    "statistics",
-    "scientific",
-    "academic",
-    "international_organization",
-    "reputable_media",
-    "corporate",
-    "sports_federation",
-    "legal",
-    "financial",
-    "social_media",
-    "unknown",
-}
-
 
 CategoryId = Annotated[
     StrictInt,
@@ -80,6 +64,7 @@ def clamp_confidence(value: Any, default: float = 0.0) -> float:
 
 class LocationContext(BaseModel):
     name: str = "unknown"
+    scope: str = "unknown"
     type: str = "unknown"
     country_code: Optional[str] = None
     region_code: Optional[str] = None
@@ -166,7 +151,7 @@ class SearchHints(BaseModel):
         normalized = []
         for value in values or []:
             item = str(value or "unknown").strip().lower()
-            normalized.append(item if item in SOURCE_TYPES else "unknown")
+            normalized.append(item)
         return list(dict.fromkeys(normalized))
 
 

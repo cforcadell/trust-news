@@ -1,119 +1,61 @@
 #!/usr/bin/env python3
-"""Seed MongoDB evidence domain profiles for contextual domain routing.
-
-Examples:
-  scripts/k8s/apis/init-evidence-search-domains.py --source /path/to/profiles.yaml --dry-run
-  scripts/k8s/apis/init-evidence-search-domains.py --source /path/to/profiles.yaml --refresh --confirm
-"""
-
+"""Validate and load one-document evidence profiles plus normalization configs."""
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "api"))
+sys.path.insert(0, str(REPO_ROOT / "api" / "evidence-search"))
 
-from common.category_catalog import CATEGORY_IDS
+from common.models.evidence_models import EvidenceDomainProfile, EvidenceNormalizationConfig
+from app.domain_router.profiles_loader import CONFIG_TYPES, validate_profile_references
 
 PROFILE_ID = "default"
-PROFILE_VERSION = "contextual-v3"
-PROFILE_INDEX_DOC_TYPE = "profile_index"
-PROFILE_SUBSET_DOC_TYPE = "profile_subset"
-PROFILE_SUBSETS = ("source_types", "categories", "subcategories", "countries", "regions", "cities", "entities")
+PROFILE_VERSION = "weighted-v1"
 DEFAULT_DB = os.getenv("MONGO_DBNAME", "newsdb")
 DEFAULT_COLLECTION = os.getenv("EVIDENCE_DOMAIN_CONFIG_COLLECTION", "evidence_domain_profiles")
-DOMAIN_RE = re.compile(r"^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$")
+DEFAULT_NORMALIZATION_COLLECTION = os.getenv("EVIDENCE_NORMALIZATION_CONFIG_COLLECTION", "evidence_normalization_configs")
+DEFAULT_PROFILE_SOURCE = REPO_ROOT / "api/evidence-search/config/evidence-domain-profile-default.json"
+DEFAULT_NORMALIZATION_SOURCE = REPO_ROOT / "api/evidence-search/config/evidence-normalization-configs.json"
+
+
+def load_json(path: str | Path) -> Any:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def load_profiles(path: Path) -> dict[str, Any]:
-    source = path
-    if source.exists():
-        if source.suffix.lower() == ".json":
-            return json.loads(source.read_text(encoding="utf-8"))
-        try:
-            import yaml
-        except Exception as exc:
-            raise SystemExit(f"PyYAML is required to load {source}: {exc}")
-        return yaml.safe_load(source.read_text(encoding="utf-8"))
-    raise SystemExit(f"Source profile file not found: {source}")
+    return load_json(path)
 
 
-def iter_preferred_domains(profiles: dict[str, Any]):
-    for section in ("categories", "subcategories", "countries", "regions", "cities", "entities"):
-        for profile_name, profile in (profiles.get(section) or {}).items():
-            for domain in profile.get("preferred_domains") or []:
-                yield section, profile_name, domain
+def load_configs(path: Path) -> dict[str, EvidenceNormalizationConfig]:
+    docs = load_json(path)
+    configs = {doc["config_type"]: EvidenceNormalizationConfig.model_validate(doc) for doc in docs}
+    missing = set(CONFIG_TYPES) - set(configs)
+    if missing:
+        raise ValueError(f"Missing normalization configs: {sorted(missing)}")
+    return configs
 
 
-def validate_profiles(profiles: dict[str, Any]) -> None:
-    for subset in PROFILE_SUBSETS:
-        if subset not in profiles:
-            raise ValueError(f"{subset} is required")
-        if not isinstance(profiles.get(subset), dict):
-            raise ValueError(f"{subset} must be an object")
-
-    source_types = profiles.get("source_types") or {}
-    if not source_types:
-        raise ValueError("source_types is required")
-    for source_type, cfg in source_types.items():
-        score = float((cfg or {}).get("default_trust_score", -1))
-        if score < 0 or score > 1:
-            raise ValueError(f"default_trust_score out of range for source_type={source_type}")
-
-    for profile_name in profiles["categories"]:
-        try:
-            category_id = int(profile_name)
-        except (TypeError, ValueError):
-            raise ValueError(f"Category profile key must be a categoryId: {profile_name!r}")
-        if str(category_id) != str(profile_name) or category_id not in CATEGORY_IDS:
-            raise ValueError(f"Unknown categoryId profile: {profile_name!r}")
-
-    for profile_name in profiles["subcategories"]:
-        category_key, separator, subcategory = str(profile_name).partition(".")
-        if not separator or not subcategory:
-            raise ValueError(f"Subcategory profile key must be <categoryId>.<subcategory>: {profile_name!r}")
-        if not category_key.isdigit() or int(category_key) not in CATEGORY_IDS:
-            raise ValueError(f"Unknown categoryId in subcategory profile: {profile_name!r}")
-
-    for section in ("categories", "subcategories", "countries", "regions", "cities", "entities"):
-        for profile_name, profile in (profiles.get(section) or {}).items():
-            seen_domains: set[str] = set()
-            for domain_cfg in profile.get("preferred_domains") or []:
-                for field in ("domain", "source_type", "weight", "reason"):
-                    if field not in domain_cfg:
-                        raise ValueError(f"{section}.{profile_name} preferred_domain missing {field}")
-                domain = str(domain_cfg["domain"]).lower().strip()
-                if not DOMAIN_RE.match(domain):
-                    raise ValueError(f"Invalid domain {domain} in {section}.{profile_name}")
-                if domain in seen_domains:
-                    raise ValueError(f"Duplicated domain {domain} in {section}.{profile_name}")
-                seen_domains.add(domain)
-                if domain_cfg["source_type"] not in source_types:
-                    raise ValueError(f"Unknown source_type {domain_cfg['source_type']} for {domain}")
-                weight = float(domain_cfg["weight"])
-                if weight < 0 or weight > 1:
-                    raise ValueError(f"weight out of range for {domain}")
+def validate_profiles(profile_doc: dict[str, Any], configs=None) -> None:
+    profile = EvidenceDomainProfile.model_validate(profile_doc)
+    if configs is not None:
+        validate_profile_references(profile, configs)
 
 
-def summarize(profiles: dict[str, Any]) -> dict[str, int]:
-    return {
-        "profile_documents": 1 + len(PROFILE_SUBSETS),
-        "source_types": len(profiles.get("source_types") or {}),
-        "categories": len(profiles.get("categories") or {}),
-        "subcategories": len(profiles.get("subcategories") or {}),
-        "countries": len(profiles.get("countries") or {}),
-        "regions": len(profiles.get("regions") or {}),
-        "cities": len(profiles.get("cities") or {}),
-        "entities": len(profiles.get("entities") or {}),
-        "preferred_domains": sum(1 for _ in iter_preferred_domains(profiles)),
-    }
+def build_profile_documents(profile_doc: dict[str, Any], **_kwargs) -> list[dict[str, Any]]:
+    profile = EvidenceDomainProfile.model_validate(profile_doc)
+    return [profile.model_dump(mode="json")]
+
+
+def summarize(profile_doc: dict[str, Any]) -> dict[str, int]:
+    profile = EvidenceDomainProfile.model_validate(profile_doc)
+    return {"profile_documents": 1, "preferred_domains": len(profile.domains)}
 
 
 def mongo_uri_from_env() -> str:
@@ -125,128 +67,61 @@ def mongo_uri_from_env() -> str:
     host = os.getenv("MONGO_APP_HOST") or os.getenv("MONGO_HOST", "localhost")
     port = os.getenv("MONGO_APP_PORT") or os.getenv("MONGO_PORT", "27017")
     db = os.getenv("MONGO_APP_DATABASE") or DEFAULT_DB
-    if user and password:
-        return f"mongodb://{user}:{password}@{host}:{port}/{db}?authSource={db}"
-    return f"mongodb://{host}:{port}/{db}"
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def build_profile_documents(
-    profiles: dict[str, Any],
-    source: str | Path | None = None,
-    profile_id: str = PROFILE_ID,
-    version: str = PROFILE_VERSION,
-    updated_at: str | None = None,
-) -> list[dict[str, Any]]:
-    validate_profiles(profiles)
-    now = updated_at or utc_now_iso()
-    source_value = str(source) if source is not None else None
-    docs: list[dict[str, Any]] = [
-        {
-            "doc_type": PROFILE_INDEX_DOC_TYPE,
-            "profile_id": profile_id,
-            "version": version,
-            "updated_at": now,
-            "source": source_value,
-            "subsets": list(PROFILE_SUBSETS),
-        }
-    ]
-    for subset in PROFILE_SUBSETS:
-        docs.append(
-            {
-                "doc_type": PROFILE_SUBSET_DOC_TYPE,
-                "profile_id": profile_id,
-                "subset": subset,
-                "version": version,
-                "updated_at": now,
-                "source": source_value,
-                "items": profiles.get(subset) or {},
-            }
-        )
-    return docs
-
-
-def assemble_profiles_from_documents(docs: list[dict[str, Any]], profile_id: str = PROFILE_ID) -> dict[str, Any]:
-    subsets: dict[str, Any] = {}
-    for doc in docs:
-        if doc.get("doc_type") != PROFILE_SUBSET_DOC_TYPE or doc.get("profile_id") != profile_id:
-            continue
-        subset = doc.get("subset")
-        if subset in PROFILE_SUBSETS:
-            subsets[subset] = doc.get("items") or {}
-    missing = [subset for subset in PROFILE_SUBSETS if subset not in subsets]
-    if missing:
-        raise ValueError(f"Missing profile subsets for profile_id={profile_id}: {', '.join(missing)}")
-    validate_profiles(subsets)
-    return subsets
+    auth = f"{user}:{password}@" if user and password else ""
+    suffix = f"?authSource={db}" if auth else ""
+    return f"mongodb://{auth}{host}:{port}/{db}{suffix}"
 
 
 def create_profile_indexes(collection) -> None:
-    collection.create_index([("doc_type", 1), ("profile_id", 1)], name="idx_profile_docs")
-    collection.create_index(
-        [("doc_type", 1), ("profile_id", 1)],
-        name="uniq_profile_index",
-        unique=True,
-        partialFilterExpression={"doc_type": PROFILE_INDEX_DOC_TYPE},
-    )
-    collection.create_index(
-        [("doc_type", 1), ("profile_id", 1), ("subset", 1)],
-        name="uniq_profile_subset",
-        unique=True,
-        partialFilterExpression={"doc_type": PROFILE_SUBSET_DOC_TYPE},
-    )
+    for legacy_name in ("idx_profile_docs", "uniq_profile_index", "uniq_profile_subset"):
+        try:
+            collection.drop_index(legacy_name)
+        except Exception:
+            pass
+    collection.create_index("profile_id", name="uniq_domain_profile_id", unique=True)
 
 
-def apply_refresh(profiles: dict[str, Any], db_name: str, collection_name: str, source: str | Path | None = None) -> str:
-    try:
-        from pymongo import MongoClient
-    except Exception as exc:
-        raise SystemExit(f"pymongo is required for real MongoDB writes: {exc}")
-    client = MongoClient(mongo_uri_from_env())
-    collection = client[db_name][collection_name]
-    docs = build_profile_documents(profiles, source=source)
-    collection.delete_many({"profile_id": PROFILE_ID})
-    collection.drop_indexes()
-    collection.insert_many(docs)
-    create_profile_indexes(collection)
-    return "refreshed"
+def apply_refresh(profile_doc, config_docs, db_name, collection_name, normalization_collection_name):
+    from pymongo import MongoClient
+    db = MongoClient(mongo_uri_from_env())[db_name]
+    profile = EvidenceDomainProfile.model_validate(profile_doc).model_dump(mode="json")
+    db[collection_name].delete_many({"profile_id": profile["profile_id"]})
+    db[collection_name].insert_one(profile)
+    create_profile_indexes(db[collection_name])
+    for config in config_docs:
+        parsed = EvidenceNormalizationConfig.model_validate(config).model_dump(mode="json")
+        db[normalization_collection_name].replace_one({"config_type": parsed["config_type"]}, parsed, upsert=True)
+    db[normalization_collection_name].create_index("config_type", name="uniq_normalization_config_type", unique=True)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Initialize contextual evidence domain profiles in MongoDB")
-    parser.add_argument("--source", required=True, help="YAML or JSON source profile file")
-    parser.add_argument("--dry-run", action="store_true", help="Validate and print summary without writing")
-    parser.add_argument("--refresh", action="store_true", help="Replace the evidence domain profile config for profile_id=default")
-    parser.add_argument("--confirm", action="store_true", help="Required with --refresh for real writes")
-    parser.add_argument("--db", default=DEFAULT_DB, help="MongoDB database")
-    parser.add_argument("--collection", default=DEFAULT_COLLECTION, help="MongoDB collection")
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", default=str(DEFAULT_PROFILE_SOURCE))
+    parser.add_argument("--normalization-source", default=str(DEFAULT_NORMALIZATION_SOURCE))
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--confirm", action="store_true")
+    parser.add_argument("--db", default=DEFAULT_DB)
+    parser.add_argument("--collection", default=DEFAULT_COLLECTION)
+    parser.add_argument("--normalization-collection", default=DEFAULT_NORMALIZATION_COLLECTION)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    source = Path(args.source)
-    profiles = load_profiles(source)
-    validate_profiles(profiles)
-    summary = summarize(profiles)
-    for key, value in summary.items():
-        print(f"[evidence-domains] {key}={value}")
-    print(f"[evidence-domains] profile_id={PROFILE_ID}")
-    print(f"[evidence-domains] schema_version={PROFILE_VERSION}")
-    print(f"[evidence-domains] dry_run={str(args.dry_run).lower()}")
-    print(f"[evidence-domains] backend=mongo collection={args.db}.{args.collection}")
-
+    profile_doc = load_json(args.source)
+    config_docs = load_json(args.normalization_source)
+    configs = load_configs(Path(args.normalization_source))
+    validate_profiles(profile_doc, configs)
+    print(f"[evidence-domains] profile_id={profile_doc['profile_id']} profile_documents=1 normalization_documents={len(config_docs)}")
     if args.dry_run or not args.refresh:
         print("[evidence-domains] no changes applied")
         return 0
     if not args.confirm:
         print("[evidence-domains] --confirm is required with --refresh", file=sys.stderr)
         return 2
-    result = apply_refresh(profiles, args.db, args.collection, source=source)
-    print(f"[evidence-domains] changes_applied=true result={result}")
+    apply_refresh(profile_doc, config_docs, args.db, args.collection, args.normalization_collection)
+    print("[evidence-domains] changes_applied=true result=profile-loaded")
     return 0
 
 

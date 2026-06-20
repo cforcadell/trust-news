@@ -190,9 +190,13 @@ async def test_search_evidence_logs_final_search_calls(monkeypatch, capsys):
     monkeypatch.setattr(evidence, "search_with_provider", fake_search_with_provider)
     async def fake_load_profile_bundle(profile_id="default"):
         calls.append({"profile_id": profile_id})
-        return {}, "v1"
+        selection_policy = SimpleNamespace(
+            max_domains=3, max_results=3, max_queries_per_domain=2, fallback_to_general_search=True
+        )
+        return SimpleNamespace(profile_id="custom-profile", selection_policy=selection_policy), {}, "v1"
 
     monkeypatch.setattr(evidence, "load_profile_bundle", fake_load_profile_bundle)
+    monkeypatch.setattr(evidence, "normalize_assertion", lambda assertion, configs: assertion)
     monkeypatch.setattr(
         evidence,
         "resolve_domains",
@@ -228,7 +232,7 @@ async def test_search_evidence_logs_final_search_calls(monkeypatch, capsys):
     assert "preferred_profile_id=custom-profile" in captured
     assert "include_domains=['ine.es', 'sepe.es']" in captured or "include_domains=['sepe.es', 'ine.es']" in captured
     assert calls[0] == {"profile_id": "custom-profile"}
-    assert len([call for call in calls if "provider" in call]) == 2
+    assert len([call for call in calls if "provider" in call]) == 1
 
 
 @pytest.mark.asyncio
@@ -302,3 +306,47 @@ async def test_search_evidence_raises_when_all_provider_requests_fail(monkeypatc
 
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail["code"] == "EVIDENCE_PROVIDER_FAILED"
+
+@pytest.mark.parametrize(
+    "mode,expected_request_modes",
+    [
+        ("NONE", ["general_fallback"]),
+        ("EXT_OFFICIAL_FIRST", ["external_official_first", "general_fallback"]),
+        ("EXT_ONLY_OFFICIAL", ["external_only_official"]),
+    ],
+)
+def test_non_local_modes_preserve_external_planning_without_local_domains(mode, expected_request_modes):
+    policy = {
+        "use_preferred_domains": mode,
+        "max_queries_per_domain": 2,
+        "fallback_to_general_search": True,
+    }
+    requests = evidence.build_search_requests(enriched_assertion(), evidence.empty_domain_resolution(), policy)
+    assert [request["mode"] for request in requests] == expected_request_modes
+    assert all(request["include_domains"] is None for request in requests)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["NONE", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])
+async def test_non_local_modes_do_not_load_mongo_profiles(monkeypatch, mode):
+    original_api_key = evidence.API_KEY_PROVIDER
+    evidence.API_KEY_PROVIDER = ""
+
+    async def forbidden_profile_load(*args, **kwargs):
+        raise AssertionError("non-LOCAL mode must not read evidence_domain_profiles")
+
+    monkeypatch.setattr(evidence, "load_profile_bundle", forbidden_profile_load)
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    req = SimpleNamespace(
+        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
+        search_policy=SimpleNamespace(
+            use_preferred_domains=mode, preferred_profile_id="ignored", max_domains=3,
+            max_results=3, max_queries_per_domain=2, fallback_to_general_search=True,
+            mode="official_first",
+        ),
+    )
+    try:
+        response = await evidence.search_evidence(req)
+    finally:
+        evidence.API_KEY_PROVIDER = original_api_key
+    assert response["search_policy"]["domain_scoring_enabled"] is False
+    assert response["search_policy"]["selected_domains"] == []

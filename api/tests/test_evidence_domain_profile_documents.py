@@ -1,78 +1,101 @@
+import asyncio
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-INIT_SCRIPT = ROOT / "scripts" / "k8s" / "apis" / "init-evidence-search-domains.py"
-PROFILES_LOADER_ROOT = ROOT / "api" / "evidence-search" / "app" / "domain_router"
-sys.path.insert(0, str(PROFILES_LOADER_ROOT))
+import pytest
 
+ROOT = Path(__file__).resolve().parents[2]
+EVIDENCE_ROOT = ROOT / "api/evidence-search"
+sys.path.insert(0, str(ROOT / "api"))
+sys.path.insert(0, str(EVIDENCE_ROOT))
+
+from common.category_catalog import CATEGORY_IDS
+from app.domain_router.profiles_loader import (
+    MIN_SUBCATEGORIES_PER_CATEGORY,
+    DomainProfileNotFound,
+    load_profile_from_mongo,
+    load_normalization_configs,
+    validate_subcategory_coverage,
+)
+
+INIT_SCRIPT = ROOT / "scripts/k8s/apis/init-evidence-search-domains.py"
 spec = importlib.util.spec_from_file_location("init_evidence_search_domains", INIT_SCRIPT)
 init_domains = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(init_domains)
 
-loader_spec = importlib.util.spec_from_file_location("domain_profiles_loader", PROFILES_LOADER_ROOT / "profiles_loader.py")
-profiles_loader = importlib.util.module_from_spec(loader_spec)
-loader_spec.loader.exec_module(profiles_loader)
+
+class FakeCollection:
+    def __init__(self, docs):
+        self.docs = docs
+        self.calls = []
+
+    async def find_one(self, query, projection=None):
+        self.calls.append(query)
+        return next((dict(doc) for doc in self.docs if all(doc.get(k) == v for k, v in query.items())), None)
 
 
-def sample_profiles():
-    return {
-        "source_types": {"official": {"default_trust_score": 1.0}, "statistics": {"default_trust_score": 0.95}},
-        "categories": {
-            "1": {
-                "preferred_domains": [
-                    {"domain": "ine.es", "source_type": "statistics", "weight": 0.9, "reason": "stats"}
-                ]
-            }
-        },
-        "subcategories": {},
-        "countries": {},
-        "regions": {},
-        "cities": {},
-        "entities": {},
-    }
+def seed_profile():
+    return json.loads((EVIDENCE_ROOT / "config/evidence-domain-profile-default.json").read_text())
 
 
-def test_build_profile_documents_splits_profile_into_index_and_subset_docs():
-    docs = init_domains.build_profile_documents(sample_profiles(), source="seed.yaml", updated_at="2026-01-01T00:00:00+00:00")
+def seed_configs():
+    return json.loads((EVIDENCE_ROOT / "config/evidence-normalization-configs.json").read_text())
 
-    assert len(docs) == 8
-    assert docs[0]["doc_type"] == "profile_index"
+
+def test_seed_is_one_complete_profile_and_validates_references():
+    profile = seed_profile()
+    configs = init_domains.load_configs(EVIDENCE_ROOT / "config/evidence-normalization-configs.json")
+    init_domains.validate_profiles(profile, configs)
+    docs = init_domains.build_profile_documents(profile)
+    assert len(docs) == 1
     assert docs[0]["profile_id"] == "default"
-    assert docs[0]["subsets"] == list(init_domains.PROFILE_SUBSETS)
-    subset_docs = [doc for doc in docs if doc["doc_type"] == "profile_subset"]
-    assert {doc["subset"] for doc in subset_docs} == set(init_domains.PROFILE_SUBSETS)
-    assert next(doc for doc in subset_docs if doc["subset"] == "categories")["items"]["1"]
+    assert len(docs[0]["domains"]) == 1000
+    counts = {category_id: 0 for category_id in CATEGORY_IDS}
+    for domain in docs[0]["domains"]:
+        for category in domain["categories"]:
+            counts[category["category_id"]] += 1
+        assert any(location["scope"] in {"global", "macroregion"} for location in domain["locations"])
+    assert counts == {category_id: 100 for category_id in CATEGORY_IDS}
 
 
-def test_profile_validation_rejects_unknown_category_ids():
-    profiles = sample_profiles()
-    profiles["categories"] = {"11": profiles["categories"]["1"]}
-
-    try:
-        init_domains.validate_profiles(profiles)
-    except ValueError as exc:
-        assert "Unknown categoryId" in str(exc)
-    else:
-        raise AssertionError("unknown categoryId should fail")
+@pytest.mark.asyncio
+async def test_profile_repository_loads_requested_profile():
+    profile = seed_profile()
+    profile["profile_id"] = "custom"
+    result = await load_profile_from_mongo(FakeCollection([profile]), "custom")
+    assert result.profile_id == "custom"
 
 
-def test_assemble_profiles_from_documents_round_trips_subsets():
-    profiles = sample_profiles()
-    docs = init_domains.build_profile_documents(profiles, updated_at="2026-01-01T00:00:00+00:00")
+@pytest.mark.asyncio
+async def test_profile_repository_falls_back_to_default():
+    collection = FakeCollection([seed_profile()])
+    result = await load_profile_from_mongo(collection, "missing")
+    assert result.profile_id == "default"
+    assert len(collection.calls) == 2
 
-    assert init_domains.assemble_profiles_from_documents(docs) == profiles
-    assert profiles_loader.assemble_profiles_from_subset_docs(docs) == profiles
+
+@pytest.mark.asyncio
+async def test_profile_repository_errors_without_requested_or_default():
+    with pytest.raises(DomainProfileNotFound) as exc_info:
+        await load_profile_from_mongo(FakeCollection([]), "missing")
+    assert exc_info.value.code == "DOMAIN_PROFILE_NOT_FOUND"
 
 
-def test_assemble_profiles_from_documents_rejects_missing_subset():
-    docs = init_domains.build_profile_documents(sample_profiles(), updated_at="2026-01-01T00:00:00+00:00")
-    docs = [doc for doc in docs if doc.get("subset") != "entities"]
+@pytest.mark.asyncio
+async def test_normalization_configs_are_independent_documents():
+    configs = await load_normalization_configs(FakeCollection(seed_configs()))
+    assert set(configs) == {"subcategories", "location_types", "source_types"}
 
-    try:
-        init_domains.assemble_profiles_from_documents(docs)
-    except ValueError as exc:
-        assert "entities" in str(exc)
-    else:
-        raise AssertionError("missing subset should fail")
+
+def test_every_category_has_at_least_ten_subcategories():
+    configs = init_domains.load_configs(EVIDENCE_ROOT / "config/evidence-normalization-configs.json")
+    validate_subcategory_coverage(configs["subcategories"])
+    counts = {}
+    for item in configs["subcategories"].items:
+        if item.get("enabled", True):
+            for category_id in item.get("category_ids") or []:
+                counts[category_id] = counts.get(category_id, 0) + 1
+    assert set(counts) == set(CATEGORY_IDS)
+    assert min(counts.values()) >= MIN_SUBCATEGORIES_PER_CATEGORY

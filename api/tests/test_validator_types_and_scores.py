@@ -44,3 +44,13 @@ def test_weighted_score_formula_divides_by_validator_count():
     assert round(scores["TRUE"], 4) == 0.25
     assert round(scores["FALSE"], 4) == 0.3333
     assert max(scores, key=scores.get) == "FALSE"
+
+
+def test_local_preferred_domains_only_supports_rag_validator():
+    from common.models.async_models import EvidencePreferredDomainsMode, local_preferred_domains_supported
+
+    assert local_preferred_domains_supported(ValidatorType.RAG_EVIDENCE_VALIDATION, EvidencePreferredDomainsMode.LOCAL)
+    assert not local_preferred_domains_supported(ValidatorType.LLM_MEMORY_VALIDATION, EvidencePreferredDomainsMode.LOCAL)
+    assert not local_preferred_domains_supported(ValidatorType.DETERMINISTIC_VALIDATION, EvidencePreferredDomainsMode.LOCAL)
+    assert local_preferred_domains_supported(ValidatorType.LLM_MEMORY_VALIDATION, EvidencePreferredDomainsMode.NONE)
+    assert local_preferred_domains_supported(ValidatorType.LLM_SEARCH_VALIDATION, EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST)

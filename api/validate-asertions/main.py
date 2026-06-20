@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking, send_and_wait, receipt_succeeded, require_successful_receipt
 from common.utils.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple,cid_to_multihash_tuple
 from common.models.veredicto import Veredicto, Validacion
-from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidencePreferredDomainsMode
+from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidencePreferredDomainsMode, local_preferred_domains_supported
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     AssertionValidationPayloadV2,
@@ -237,6 +237,17 @@ def current_evidence_search_use_preferred_domains() -> EvidencePreferredDomainsM
     except ValueError as exc:
         allowed = ", ".join(mode.value for mode in EvidencePreferredDomainsMode)
         raise RuntimeError(f"EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS invalido: {raw}. Valores permitidos: {allowed}") from exc
+
+
+def ensure_local_mode_supported(validator_type: ValidatorType, mode: EvidencePreferredDomainsMode) -> None:
+    if not local_preferred_domains_supported(validator_type, mode):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "LOCAL_PREFERRED_DOMAINS_UNSUPPORTED_VALIDATOR_TYPE",
+                "message": "LOCAL preferred domains are only supported for RAG_EVIDENCE_VALIDATION validators.",
+            },
+        )
 
 
 def mask_secret(value: Optional[str]) -> Optional[str]:
@@ -459,6 +470,7 @@ def openrouter_model_for_current_type(model: str) -> str:
 
 def current_evidence_search_policy() -> Dict[str, Any]:
     preferred_domains_mode = current_evidence_search_use_preferred_domains()
+    ensure_local_mode_supported(VALIDATOR_TYPE, preferred_domains_mode)
     policy = {
         "mode": "official_first",
         "use_preferred_domains": preferred_domains_mode.value,
@@ -1122,6 +1134,13 @@ async def update_admin_config(config: AdminConfigUpdate):
     new_api_url = config.api_url if config.api_url is not None else API_URL
     new_service_url = config.service_url if config.service_url is not None else VALIDATOR_SERVICE_URL
     new_api_key = API_KEY if config.api_key is None or is_masked_secret(config.api_key) else config.api_key
+
+    new_preferred_domains_mode = (
+        config.evidence_search_use_preferred_domains
+        if config.evidence_search_use_preferred_domains is not None
+        else current_evidence_search_use_preferred_domains()
+    )
+    ensure_local_mode_supported(new_validator_type, new_preferred_domains_mode)
 
     allowed_providers = {"mistral", "gemini", "openrouter", "grok"}
     if new_validator_type in AUTOMATIC_VALIDATOR_TYPES and new_provider not in allowed_providers:

@@ -219,12 +219,11 @@ newsdb.evidence_search_cache
 
 The cache key includes normalized assertion text, the v2 search policy and the domain profile version, and expires with `EVIDENCE_SEARCH_CACHE_TTL_SECONDS`.
 
-Domain profiles are contextual: category, subcategory, country, region, city and entity profiles can all contribute preferred domains. To seed or refresh them, use:
+LOCAL domain scoring uses one complete Mongo document per profile plus independent normalization documents for subcategories, location scopes and source types. To validate or refresh the versioned JSON seeds, use:
 
 ```bash
-python scripts/k8s/apis/init-evidence-search-domains.py \
-  --source /path/to/profiles.yaml \
-  --refresh --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
+python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 ```
 
 ---

@@ -415,7 +415,8 @@ validations
 | `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Guarda eventos del flujo por `order_id`: acciones Kafka enviadas/recibidas, topic, timestamp y payload. La UI los recupera para pintar la pestaña de eventos de una orden. |
 | `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | Guarda registros normalizados de validaciones por orden/aserción/validador, incluyendo resultado, `tx_hash`, evidencia usada, config del validador y tiempos de respuesta. |
 | `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Guarda clientes y cuotas disponibles/consumidas por servicio, como generación de noticias o validaciones. |
-| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | Configura el enrutado contextual v2 de dominios por categoría, subcategoría, país, región, ciudad y entidad. Si no hay documento en Mongo, `evidence-search` usa un fallback mínimo en código. |
+| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | Un documento completo por `profile_id` para scoring LOCAL; no existe fallback hardcodeado ni modelo legacy por categoría. |
+| `newsdb` | `evidence_normalization_configs` | `evidence-search` | `EVIDENCE_NORMALIZATION_CONFIG_COLLECTION=evidence_normalization_configs` | Un documento por taxonomía off-chain: subcategorías, scopes de localización y source types. |
 | `newsdb` | `evidence_search_cache` | `evidence-search` | `EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache` | Cache v2 de respuestas de `/search/evidence` por aserción normalizada, política de búsqueda y versión de perfiles. Expira por TTL (`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`). |
 
 **Reset de datos de desarrollo y recarga de dominios preferentes**
@@ -430,24 +431,25 @@ db.events.deleteMany({})
 db.clients_quotas.countDocuments()
 ```
 
-La configuración contextual de dominios preferentes vive en MongoDB, colección `evidence_domain_profiles`. El seed versionado está en `api/evidence-search/config/evidence-domain-profiles.yaml`. Dry-run del cargador destructivo controlado:
+La configuración contextual de dominios preferentes vive en MongoDB, colección `evidence_domain_profiles`. El seed versionado está en `api/evidence-search/config/evidence-domain-profile-default.json` y `api/evidence-search/config/evidence-normalization-configs.json`. Dry-run del cargador destructivo controlado:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --dry-run
+python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
 ```
 
-Recarga real a demanda. El cargador borra primero `evidence_domain_profiles`, carga el perfil `default` y borra `evidence_search_cache` salvo que se pase `--keep-cache`:
+Recarga real a demanda. El cargador hace upsert del perfil indicado y de las taxonomías, preservando otros perfiles:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 ```
 
-También se puede cargar otro fichero explícito:
+También se pueden cargar ficheros explícitos:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py \
-  --source /path/to/profiles.yaml \
-  --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py \
+  --source /path/to/profile.json \
+  --normalization-source /path/to/normalization-configs.json \
+  --refresh --confirm
 ```
 
 Verificación recomendada:

@@ -32,3 +32,11 @@ En `startup` conecta a MongoDB, inicializa colecciones de perfiles de dominio y 
 - `TAVILY_MAX_RESULTS`: máximo de resultados por llamada Tavily.
 - `TAVILY_TIMEOUT`: timeout de Tavily.
 - `TAVILY_API_KEY`: API key de Tavily. Si no está configurada, el servicio devuelve evidencias fallback basadas en dominios preferentes.
+
+## Preferred domains y normalización
+
+`LOCAL` es el único modo que lee MongoDB y activa scoring. `evidence_domain_profiles` almacena un documento completo por perfil; `evidence_normalization_configs` almacena documentos independientes para `subcategories`, `location_types` y `source_types`. No se admite el esquema legacy por subsets.
+
+`NONE` mantiene búsqueda abierta. `EXT_OFFICIAL_FIRST` y `EXT_ONLY_OFFICIAL` siguen delegando la política de fuentes al proveedor sin scoring local. `LOCAL` solo es válido para `RAG_EVIDENCE_VALIDATION` y se usa igual en LIGHT y BLOCKCHAIN.
+
+La respuesta incluye `search_policy.selected_domains` con score base, score final y señales coincidentes. Las versiones del perfil y taxonomías forman parte de la clave de caché.

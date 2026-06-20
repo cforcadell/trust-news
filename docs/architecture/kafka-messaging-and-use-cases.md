@@ -175,8 +175,8 @@ Flujo:
 
 1. El worker recibe una solicitud de validacion por blockchain event o Kafka light.
 2. Antes de llamar al LLM, ejecuta POST /search/evidence en evidence-search con evidence-search-request-v2.
-3. evidence-search carga perfiles desde Mongo `evidence_domain_profiles` o usa fallback minimo en codigo.
-4. domain_router resuelve dominios por category, subcategory, ubicaciones, entidades y preferred_source_types.
+3. evidence-search carga el perfil completo y las taxonomias Mongo solo para LOCAL; no hay fallback hardcodeado.
+4. domain_router normaliza las dimensiones off-chain y calcula scoring ponderado por asercion.
 5. Si hay un proveedor de busqueda configurado, consulta dominios preferentes y busqueda general de fallback; si no, devuelve dominios simulados para trazabilidad.
 6. El worker inyecta sources en el prompt RAG.
 7. El LLM debe responder usando exclusivamente esas evidencias.

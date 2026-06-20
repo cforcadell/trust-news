@@ -1,10 +1,146 @@
+# Despliegue Trust News en Hetzner
+
+## Orden de inicialización de un entorno nuevo
+
+El orden recomendado evita que las APIs arranquen contra una base de datos o un contrato incompletos:
+
+1. Crear namespaces y secretos.
+2. Desplegar `infra-prod` y esperar a MongoDB, Kafka e IPFS.
+3. Inicializar MongoDB con usuarios, índices, taxonomías y preferred domains.
+4. Desplegar la blockchain privada.
+5. Desplegar `TrustNews` e inicializar/verificar las categorías on-chain.
+6. Configurar `CONTRACT_ADDRESS` en las APIs y desplegar `apis-prod`.
+7. Crear clientes/cuotas de negocio mediante `admin`; no deben incluirse como datos fijos del bootstrap.
+
+## Inicialización general de MongoDB
+
+### Secretos requeridos
+
+El secreto `mongodb-secret` del namespace `infra` debe contener:
+
+```dotenv
+MONGO_INITDB_ROOT_USERNAME=<root-user>
+MONGO_INITDB_ROOT_PASSWORD=<root-password>
+MONGO_APP_USERNAME=<application-user>
+MONGO_APP_PASSWORD=<application-password>
+MONGO_APP_DATABASE=newsdb
+```
+
+`mongodb-app-secret` en `apis` debe usar el mismo usuario, contraseña y base de datos de aplicación. No se deben versionar estos valores.
+
+El fichero [`k8s/infra/mongodb/init-users.js`](../../k8s/infra/mongodb/init-users.js) montado en `/docker-entrypoint-initdb.d` crea el usuario de aplicación automáticamente, pero Mongo solo ejecuta estos scripts cuando `/data/db` está vacío. No basta para restauraciones, PVC reutilizados o actualizaciones de configuración.
+
+### Bootstrap idempotente después de desplegar infra
+
+Desde la raíz del repositorio en el servidor:
+
+```bash
+kubectl apply -k k8s/infra/mongodb/overlays/prod
+kubectl rollout status statefulset/mongodb -n infra --timeout=180s
+
+scripts/k8s/init-mongodb-server.sh --dry-run
+scripts/k8s/init-mongodb-server.sh
+```
+
+El script [`scripts/k8s/init-mongodb-server.sh`](../../scripts/k8s/init-mongodb-server.sh):
+
+- crea o actualiza el usuario de aplicación;
+- crea los índices generales de `news`, `clients_quotas`, `events` y `validations`;
+- reemplaza solamente el perfil `default` en `evidence_domain_profiles`;
+- elimina los documentos e índices del antiguo modelo `profile_index/profile_subset` para ese perfil;
+- hace upsert de los tres documentos de `evidence_normalization_configs`;
+- crea los índices de `evidence_search_cache` y limpia la caché por defecto.
+
+Los seeds versionados son:
+
+```text
+api/evidence-search/config/evidence-domain-profile-default.json
+api/evidence-search/config/evidence-normalization-configs.json
+```
+
+Para conservar la caché —normalmente no es recomendable después de cambiar perfiles—:
+
+```bash
+scripts/k8s/init-mongodb-server.sh --keep-cache
+```
+
+Para indicar otro namespace o pod:
+
+```bash
+scripts/k8s/init-mongodb-server.sh --namespace infra --pod mongodb-0
+```
+
+El script usa el cliente `mongo` que ya existe dentro del pod y las credenciales del propio secreto; no requiere exponer el puerto 27017 ni instalar `pymongo` en el servidor.
+
+### Verificación MongoDB
+
+```bash
+kubectl exec -it mongodb-0 -n infra -- sh -c \
+  'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$MONGO_APP_DATABASE" --quiet --eval "const p=db.evidence_domain_profiles.findOne({profile_id: \"default\"}); printjson({profiles: db.evidence_domain_profiles.countDocuments({profile_id: \"default\"}), normalization: db.evidence_normalization_configs.countDocuments({}), domains: p ? p.domains.length : 0})"'
+```
+
+Resultado esperado:
+
+```text
+profiles: 1
+normalization: 3
+domains: 8
+```
+
+Los servicios también recrean sus índices al arrancar. El script de bootstrap los crea anticipadamente para detectar duplicados o problemas de permisos antes de desplegar las APIs.
+
+## Inicialización de categorías blockchain
+
+Las categorías no se guardan en MongoDB. Su fuente de verdad es el contrato `TrustNews`; `api/common/category_catalog.py` es el espejo backend y debe coincidir con [`smart-contracts/config/categories.json`](../../smart-contracts/config/categories.json).
+
+### Contrato nuevo
+
+El despliegue ya registra las diez categorías. La clave no se escribe en `hardhat.config.js`; se proporciona mediante `DEPLOYER_PRIVATE_KEY`:
+
+```bash
+cd smart-contracts
+read -rsp "Deployer private key: " DEPLOYER_PRIVATE_KEY && echo
+export DEPLOYER_PRIVATE_KEY
+npx hardhat run scripts/deployGeth.js --network cloudGeth
+unset DEPLOYER_PRIVATE_KEY
+```
+
+Anotar la dirección mostrada y configurarla como `CONTRACT_ADDRESS` en los componentes que consumen el contrato.
+
+### Contrato ya desplegado o despliegue interrumpido
+
+El inicializador es idempotente: crea categorías ausentes, deja intactas las correctas y falla si un ID existente tiene otro nombre. Debe ejecutarse con la cuenta propietaria del contrato:
+
+```bash
+cd smart-contracts
+export CONTRACT_ADDRESS=0x<direccion-trust-news>
+read -rsp "Contract owner private key: " DEPLOYER_PRIVATE_KEY && echo
+export DEPLOYER_PRIVATE_KEY
+npx hardhat run scripts/initCategories.js --network cloudGeth
+# Repetir para verificar idempotencia: debe mostrar diez entradas "unchanged".
+npx hardhat run scripts/initCategories.js --network cloudGeth
+unset DEPLOYER_PRIVATE_KEY
+```
+
+Si aparece `Signer ... is not contract owner`, hay que usar la clave privada de la cuenta que desplegó el contrato. Si aparece un `mismatch`, no se debe continuar: `addCategory` no permite modificar una categoría existente y hay que corregir la red/contrato seleccionado o desplegar uno nuevo.
+
+## Reejecución y recuperación
+
+- `initCategories.js` se puede repetir siempre que se use el propietario y el mismo contrato.
+- `init-mongodb-server.sh` preserva noticias, validaciones, eventos, cuotas y perfiles distintos de `default`.
+- El bootstrap Mongo reemplaza el perfil `default` y las taxonomías por las versiones del repositorio.
+- Los scripts de `/docker-entrypoint-initdb.d` no se vuelven a ejecutar con un PVC existente; usar siempre el bootstrap explícito tras restaurar o actualizar.
+- Antes de cambiar datos productivos, realizar backup del PVC o `mongodump`.
+
+---
+
 **Just one shot execution**
 ```bash infra inside server 
-scripts/create-namespaces.sh
+scripts/k8s/create-namespaces.sh
 
 secrets/create-secrets.sh
 
-touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env mongodb-app.env mongodb.env
+touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env mongodb-app.env mongodb.env gateway.env keycloak.env ethereum.env
 chmod 600 *.env
 
 kubectl create secret generic validator-secret-1 --from-env-file=worker-1.env -n apis
@@ -21,8 +157,6 @@ kubectl create secret generic gate-config --from-env-file=gateway.env -n apis
 
 
 kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
-
-kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
 
 kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
 
@@ -106,22 +240,16 @@ ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 8565:localhost:8555 sysadmin@135.181.8
 
 ```
 
-Add hardhat.config.js entry for cloud blockchain
+La red `cloudGeth` ya está definida en `hardhat.config.js`. Mantener el túnel abierto y proporcionar la cuenta mediante entorno:
 
-    cloudGeth: {
-      url: "http://localhost:8565", 
-      accounts: [
-        "0x*********************************"
-      ],
-      gas: 25_000_000,
-      chainId: 1214
-    }
-
-```bash blockchain from hardhat
+```bash
 cd smart-contracts
+read -rsp "Deployer private key: " DEPLOYER_PRIVATE_KEY && echo
+export DEPLOYER_PRIVATE_KEY
 npx hardhat run scripts/deployGeth.js --network cloudGeth
+unset DEPLOYER_PRIVATE_KEY
 
-#get contract address and configure apis
+# Guardar la dirección mostrada como CONTRACT_ADDRESS en las APIs.
 ```
 
 ```bash blockchain inside server

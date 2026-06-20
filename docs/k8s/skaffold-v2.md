@@ -270,7 +270,11 @@ Servicios expuestos por Skaffold:
 ```text
 Kafdrop: http://localhost:9000
 Grafana: http://localhost:3000
-Mongo Express: http://localhost:18081
+Mongo Express: http://localhost:18081 
+kubectl port-forward \
+  --address 0.0.0.0 \
+  -n infra svc/mongo-express \
+  8081:8081 si se reompe el tunel)
 ```
 
 ### 5.1 Ver Estado
@@ -526,53 +530,32 @@ La configuracion contextual vive en MongoDB, coleccion `evidence_domain_profiles
 Seed versionado:
 
 ```text
-api/evidence-search/config/evidence-domain-profiles.yaml
+api/evidence-search/config/evidence-domain-profile-default.json
+api/evidence-search/config/evidence-normalization-configs.json
 ```
 
 Dry-run:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --dry-run
+python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
 ```
 
 Carga real del perfil `default` sin borrar otros perfiles de la coleccion:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 ```
 
-Carga de otro `profile_id`:
+Carga de otro perfil o de otras taxonomias:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --profile-id custom --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py \
+  --source /path/to/profile.json \
+  --normalization-source /path/to/normalization-configs.json \
+  --refresh --confirm
 ```
 
-Carga de otro fichero:
-
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py \
-  --source /path/to/profiles.yaml \
-  --confirm
-```
-
-El loader reemplaza solo los documentos del `profile_id` indicado y crea documentos separados:
-
-```text
-profile_index/<profile_id>
-profile_subset/<profile_id>/source_types
-profile_subset/<profile_id>/categories
-profile_subset/<profile_id>/subcategories
-profile_subset/<profile_id>/countries
-profile_subset/<profile_id>/regions
-profile_subset/<profile_id>/cities
-profile_subset/<profile_id>/entities
-```
-
-Por defecto tambien borra `evidence_search_cache`. Para conservar cache:
-
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --confirm --keep-cache
-```
+El loader hace `upsert` de un único documento por `profile_id` y de un documento por `config_type`. Preserva los demás perfiles. Tras cambiar perfiles o taxonomías se debe limpiar `evidence_search_cache` mediante `DELETE /admin/cache`, porque sus versiones forman parte de las claves nuevas pero los documentos anteriores permanecen hasta el TTL.
 
 Despues de recargar:
 
@@ -581,7 +564,7 @@ kubectl rollout restart deployment/evidence-search -n apis
 kubectl logs deployment/evidence-search -n apis
 ```
 
-Verificacion esperada: una busqueda con `city=Barcelona` y `entity=Ayuntamiento de Barcelona` debe priorizar `barcelona.cat`, `seu.barcelona.cat` y `bop.diba.cat` cuando `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL`.
+Verificacion esperada: una asercion SOCIAL/DEMOGRAPHICS de Catalunya debe ordenar `idescat.cat`, `ine.es`, `eurostat.ec.europa.eu` y `reuters.com` cuando `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL`.
 
 ---
 
@@ -658,7 +641,8 @@ db.clients_quotas.countDocuments()
 | `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Guarda eventos del flujo por `order_id`: acciones Kafka enviadas/recibidas, topic, timestamp y payload. La UI los recupera para pintar la pestana de eventos de una orden. |
 | `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | Guarda registros normalizados de validaciones por orden/asercion/validador, incluyendo resultado, `tx_hash`, evidencia usada, config del validador y tiempos de respuesta. |
 | `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Guarda clientes y cuotas disponibles/consumidas por servicio, como generacion de noticias o validaciones. |
-| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | Configura el enrutado contextual v3 de dominios. Usa documentos separados por perfil: `profile_index` y `profile_subset` para `source_types`, `categories`, `subcategories`, `countries`, `regions`, `cities` y `entities`. |
+| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | Un documento completo por `profile_id` con pesos, política y array `domains`; LOCAL es el único modo que lo consulta. |
+| `newsdb` | `evidence_normalization_configs` | `evidence-search` | `EVIDENCE_NORMALIZATION_CONFIG_COLLECTION=evidence_normalization_configs` | Un documento por taxonomía off-chain: subcategorías, scopes de localización y source types. |
 | `newsdb` | `evidence_search_cache` | `evidence-search` | `EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache` | Cache v2 de respuestas de `/search/evidence` por asercion normalizada, politica de busqueda y version de perfiles. Expira por TTL (`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`). |
 
 ---

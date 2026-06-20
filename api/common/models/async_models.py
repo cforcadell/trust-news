@@ -154,6 +154,15 @@ class EvidencePreferredDomainsMode(str, Enum):
     EXT_ONLY_OFFICIAL = "EXT_ONLY_OFFICIAL"
 
 
+def local_preferred_domains_supported(validator_type: ValidatorType | int, mode: EvidencePreferredDomainsMode | str) -> bool:
+    try:
+        parsed_type = validator_type if isinstance(validator_type, ValidatorType) else ValidatorType(int(validator_type))
+        parsed_mode = mode if isinstance(mode, EvidencePreferredDomainsMode) else EvidencePreferredDomainsMode(str(mode).upper())
+    except (TypeError, ValueError):
+        return False
+    return parsed_mode != EvidencePreferredDomainsMode.LOCAL or parsed_type == ValidatorType.RAG_EVIDENCE_VALIDATION
+
+
 
 VALIDATOR_TYPE_WEIGHTS = {
     ValidatorType.LLM_MEMORY_VALIDATION: 0.25,

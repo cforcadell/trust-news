@@ -1,193 +1,58 @@
-# Evidence Domain Profiles Loader
+# Evidence domain profiles and normalization
 
-Esta carpeta contiene la configuracion de perfiles de dominios preferentes para
-`evidence-search` y el cargador que los publica en MongoDB.
+`evidence-search` usa MongoDB únicamente cuando `use_preferred_domains=LOCAL`. Los modos `NONE`, `EXT_OFFICIAL_FIRST` y `EXT_ONLY_OFFICIAL` no consultan estas colecciones ni ejecutan scoring local.
 
-## Archivos
+## Colecciones
 
-- `evidence-domain-profiles.yaml`: seed versionado de perfiles.
-- `load-evidence-domain-profiles.py`: cargador hacia MongoDB.
+### `evidence_domain_profiles`
 
-## Que hace el cargador
+Contiene un documento completo por `profile_id`, con índice único sobre `profile_id`. Cada documento incluye `selection_policy`, `scoring_weights` y el array `domains`. No existe compatibilidad con el antiguo modelo `profile_index/profile_subset` ni con documentos por categoría.
 
-El cargador reemplaza solo los documentos del `profile_id` indicado dentro de
-la coleccion `evidence_domain_profiles`.
+El ejemplo versionado es `evidence-domain-profile-default.json`. Las categorías se identifican exclusivamente mediante el `categoryId` registrado en blockchain y reflejado por `common/category_catalog.py`.
 
-No borra toda la coleccion de perfiles. Esto permite tener varios perfiles en
-MongoDB, por ejemplo `default`, `custom`, `validator-a`, etc.
+El perfil `default` contiene 1.000 dominios únicos, 100 por categoría. Prioriza ámbitos `global` y `macroregion`; las macroregiones se derivan de ccTLD y los dominios genéricos se consideran globales.
 
-Por defecto si borra la coleccion `evidence_search_cache`, porque una recarga
-de perfiles puede invalidar resultados cacheados. Usa `--keep-cache` para
-conservarla.
-
-## Dry-run
-
-Valida el YAML y muestra el resumen sin escribir en MongoDB:
+Para regenerarlo desde sitios oficiales catalogados en Wikidata (vía su mirror QLever):
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --dry-run
+python scripts/k8s/apis/generate-evidence-domain-profile.py
 ```
 
-Dry-run para otro perfil:
+### `evidence_normalization_configs`
+
+Contiene un documento independiente, versionado e indexado por `config_type`, para cada taxonomía off-chain:
+
+- `subcategories`: ID canónico, aliases y `category_ids` compatibles.
+- `location_types`: scopes y organizaciones internacionales; países y regiones usan ISO 3166-1/ISO 3166-2.
+- `source_types`: IDs canónicos, aliases y confianza por defecto.
+
+El seed es `evidence-normalization-configs.json`. Los perfiles solo pueden referenciar IDs canónicos existentes.
+
+## Carga
+
+Validación sin escribir:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --dry-run --profile-id custom
+python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
 ```
 
-## Carga real
-
-Cargar o reemplazar el perfil `default`:
+Carga o reemplazo atómico por clave, preservando otros perfiles:
 
 ```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --confirm
+python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 ```
 
-Cargar o reemplazar otro `profile_id`:
-
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --profile-id custom --confirm
-```
-
-Conservar la cache:
-
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --confirm --keep-cache
-```
-
-Usar otro fichero fuente:
-
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py \
-  --source /path/to/profiles.yaml \
-  --profile-id custom \
-  --confirm
-```
-
-## Backends
-
-Por defecto `--backend auto` intenta usar `pymongo` y, si no esta disponible o
-falla, cae a `kubectl`.
-
-Forzar `pymongo`:
-
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --backend pymongo --confirm
-```
-
-Forzar `kubectl`:
-
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py --backend kubectl --confirm
-```
-
-El backend `kubectl` usa por defecto:
+Variables relevantes:
 
 ```text
-pod: mongodb-0
-namespace: infra
+MONGO_DBNAME=newsdb
+EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles
+EVIDENCE_NORMALIZATION_CONFIG_COLLECTION=evidence_normalization_configs
+EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache
 ```
 
-Se puede ajustar con:
+## Flujo LOCAL
 
-```bash
-api/evidence-search/config/load-evidence-domain-profiles.py \
-  --backend kubectl \
-  --mongo-pod mongodb-0 \
-  --mongo-namespace infra \
-  --confirm
-```
+Para cada aserción RAG, el servicio normaliza subcategoría, localizaciones y source types; carga el perfil solicitado con fallback a `default`; calcula `final_score`; filtra por `min_score`; limita por `max_domains`; y envía los dominios seleccionados mediante `include_domains`. La política efectiva, sus versiones y el desglose de matching se guardan en `search_policy`.
 
-## Variables relevantes
-
-El cargador reutiliza la configuracion del script base:
-
-```text
-MONGO_DBNAME
-EVIDENCE_DOMAIN_CONFIG_COLLECTION
-MONGO_URI
-MONGO_APP_USERNAME
-MONGO_APP_PASSWORD
-MONGO_APP_HOST
-MONGO_APP_PORT
-MONGO_APP_DATABASE
-```
-
-Valores por defecto:
-
-```text
-database: newsdb
-profiles collection: evidence_domain_profiles
-cache collection: evidence_search_cache
-profile_id: default
-```
-
-## Documentos creados
-
-Para cada `profile_id`, el cargador crea un indice y un documento por subset:
-
-```text
-profile_index/<profile_id>
-profile_subset/<profile_id>/source_types
-profile_subset/<profile_id>/categories
-profile_subset/<profile_id>/subcategories
-profile_subset/<profile_id>/countries
-profile_subset/<profile_id>/regions
-profile_subset/<profile_id>/cities
-profile_subset/<profile_id>/entities
-```
-
-## Uso desde validadores
-
-Los validadores controlan la estrategia de dominios preferentes con `use_preferred_domains`:
-
-```json
-{
-  "search_policy": {
-    "use_preferred_domains": "LOCAL",
-    "preferred_profile_id": "default"
-  }
-}
-```
-
-Valores validos:
-
-- `NONE`: busqueda general sin dominios preferentes.
-- `LOCAL`: usa perfiles de dominios desde MongoDB y envia `include_domains` al proveedor.
-- `EXT_OFFICIAL_FIRST`: pide al proveedor priorizar fuentes oficiales sin dominios locales.
-- `EXT_ONLY_OFFICIAL`: pide al proveedor limitarse a fuentes oficiales sin dominios locales.
-
-En Kubernetes, el validador lo controla con:
-
-```text
-EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL
-EVIDENCE_SEARCH_PREFERRED_PROFILE_ID=default
-```
-
-Si `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID` no existe o esta vacio, el validador
-usa `default` en modo `LOCAL`.
-
-## Despues de cargar
-
-Si `evidence-search` mantiene estado en memoria o quieres asegurar que lee la
-configuracion actualizada:
-
-```bash
-kubectl rollout restart deployment/evidence-search -n apis
-kubectl logs deployment/evidence-search -n apis
-```
-
-## Mantenimiento de categorias
-
-`categoryId` es la identidad unica de categoria en blockchain, mensajes,
-documentos y perfiles. Los literales son solo etiquetas de presentacion.
-
-Para incorporar una categoria nueva:
-
-1. Registrarla con `TrustNews.addCategory(id, label)` en la red objetivo.
-2. Anadir el mismo ID y su etiqueta en `api/common/category_catalog.py`.
-3. Anadir las traducciones de presentacion en `web_classic/app/js/i18n.js`.
-4. Anadir perfiles `categories.<id>` y `subcategories.<id>.<subcategory>` si corresponden.
-5. Registrar o actualizar validadores que soporten el nuevo ID.
-
-No se deben introducir aliases, conversiones desde literales ni rangos fijos
-de IDs. El cargador rechaza perfiles que no pertenezcan al catalogo backend.
+Si no hay dominios elegibles, solo se hace búsqueda abierta cuando `fallback_to_general_search=true`. `LOCAL` se rechaza para cualquier tipo de validador distinto de `RAG_EVIDENCE_VALIDATION`. El flujo es común a LIGHT y BLOCKCHAIN.

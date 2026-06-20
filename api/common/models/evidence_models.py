@@ -2,13 +2,14 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
+from common.models.async_models import EvidencePreferredDomainsMode
 from common.models.protocol_models import EnrichedAssertion
 
 
 
 class EvidenceSearchPolicy(BaseModel):
     mode: str = "official_first"
-    use_preferred_domains: bool = False
+    use_preferred_domains: EvidencePreferredDomainsMode = EvidencePreferredDomainsMode.NONE
     preferred_profile_id: str = "default"
     max_domains: int = Field(default=8, ge=1, le=50)
     max_results: int = Field(default=10, ge=1, le=50)

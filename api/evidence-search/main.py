@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient
+from common.models.async_models import EvidencePreferredDomainsMode
 from common.models.evidence_models import EvidenceSearchRequestV2
 from common.utils.domain_utils import normalize_domain
 from common.utils.mongo import build_mongo_uri_from_env
@@ -90,17 +91,48 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
             if domain not in grouped[query]:
                 grouped[query].append(domain)
 
+    preferred_domains_mode = preferred_domains_mode_for_policy(policy)
+
     # Build the preferred-domain requests first, preserving the router priority.
     requests = []
     for query in base_queries:
         domains = grouped.get(query, [])
         if domains:
-            requests.append({"query": query, "include_domains": domains, "mode": "preferred_domains"})
+            requests.append({
+                "query": query,
+                "include_domains": domains,
+                "mode": "preferred_domains",
+                "external_source_policy": "none",
+            })
+
+    if preferred_domains_mode in {EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST, EvidencePreferredDomainsMode.EXT_ONLY_OFFICIAL}:
+        external_source_policy = (
+            "official_first"
+            if preferred_domains_mode == EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST
+            else "only_official"
+        )
+        request_mode = (
+            "external_official_first"
+            if preferred_domains_mode == EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST
+            else "external_only_official"
+        )
+        for query in base_queries:
+            requests.append({
+                "query": query,
+                "include_domains": None,
+                "mode": request_mode,
+                "external_source_policy": external_source_policy,
+            })
 
     # Optionally add general fallback searches to avoid returning no evidence when routing is sparse.
-    if getattr(policy, "fallback_to_general_search", False):
+    if preferred_domains_mode != EvidencePreferredDomainsMode.EXT_ONLY_OFFICIAL and getattr(policy, "fallback_to_general_search", False):
         for query in base_queries:
-            requests.append({"query": query, "include_domains": None, "mode": "general_fallback"})
+            requests.append({
+                "query": query,
+                "include_domains": None,
+                "mode": "general_fallback",
+                "external_source_policy": "none",
+            })
 
     # Return both the normalized base queries and the executable request plan for callers/tests.
     return {"base_queries": base_queries, "requests": requests}
@@ -263,6 +295,17 @@ def preferred_profile_id_for_policy(policy: Any) -> str:
     return profile_id or PROFILE_ID
 
 
+def preferred_domains_mode_for_policy(policy: Any) -> EvidencePreferredDomainsMode:
+    """Return the configured evidence-search domain preference mode."""
+    if isinstance(policy, dict):
+        raw_mode = policy.get("use_preferred_domains", EvidencePreferredDomainsMode.NONE)
+    else:
+        raw_mode = getattr(policy, "use_preferred_domains", EvidencePreferredDomainsMode.NONE)
+    if isinstance(raw_mode, EvidencePreferredDomainsMode):
+        return raw_mode
+    return EvidencePreferredDomainsMode(str(raw_mode or "").strip().upper())
+
+
 async def load_profile_bundle(profile_id: str = PROFILE_ID) -> tuple[Dict[str, Any], str]:
     """Load the domain routing profile bundle and translate loader errors to HTTP."""
     # Keep Mongo/profile validation failures visible to API callers as service errors.
@@ -419,10 +462,21 @@ async def build_evidences_with_optional_contexts(
 
 
 
-async def call_search_provider(query: str, max_sources: int, include_domains: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Call the configured provider with an optional include-domain filter."""
+async def call_search_provider(
+    query: str,
+    max_sources: int,
+    include_domains: Optional[List[str]] = None,
+    external_source_policy: str = "none",
+) -> Dict[str, Any]:
+    """Call the configured provider with optional domain and source-policy hints."""
     # Delegate provider-specific payload details to the search provider module.
-    return await search_with_provider(SEARCH_PROVIDER, query, max_sources, include_domains=include_domains)
+    return await search_with_provider(
+        SEARCH_PROVIDER,
+        query,
+        max_sources,
+        include_domains=include_domains,
+        external_source_policy=external_source_policy,
+    )
 
 
 def merge_search_results(*result_groups: List[Dict[str, Any]], max_sources: int) -> List[Dict[str, Any]]:
@@ -529,13 +583,14 @@ async def search_evidence(req: EvidenceSearchRequestV2):
     if not text:
         raise HTTPException(status_code=400, detail="assertion.text is required")
 
-    # Load routing profiles only when the request policy enables preferred domains.
-    use_preferred_domains = bool(req.search_policy.use_preferred_domains)
+    # Load routing profiles only when the request policy enables local preferred domains.
+    preferred_domains_mode = preferred_domains_mode_for_policy(req.search_policy)
+    use_local_preferred_domains = preferred_domains_mode == EvidencePreferredDomainsMode.LOCAL
     preferred_profile_id = preferred_profile_id_for_policy(req.search_policy)
-    if use_preferred_domains:
+    if use_local_preferred_domains:
         profiles, profile_version = await load_profile_bundle(preferred_profile_id)
     else:
-        profiles, profile_version = {}, "preferred-domains-disabled"
+        profiles, profile_version = {}, f"preferred-domains-{preferred_domains_mode.value.lower()}"
 
     # Build the cache key from the normalized assertion, policy, and profile version.
     cache_key = evidence_cache_key(assertion, req.search_policy, profile_version)
@@ -551,19 +606,21 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             print(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
             return response
 
-    # Resolve contextual preferred domains, or keep the same response shape when disabled.
-    if use_preferred_domains:
+    # Resolve contextual preferred domains only for LOCAL mode.
+    if use_local_preferred_domains:
         domain_resolution = resolve_domains(assertion, profiles, max_domains=req.search_policy.max_domains)
     else:
         domain_resolution = empty_domain_resolution()
-    domain_resolution["profile_id"] = preferred_profile_id if use_preferred_domains else None
+        domain_resolution["reason"] = f"{preferred_domains_mode.value.lower()}_mode"
+    domain_resolution["preferred_domains_mode"] = preferred_domains_mode.value
+    domain_resolution["profile_id"] = preferred_profile_id if use_local_preferred_domains else None
     domain_resolution["profile_version"] = profile_version
 
     # Log the routing decision to make evidence selection auditable.
     logger_prefix = f"[domain-router] assertion_id={assertion.get('assertion_id')}"
     print(
-        f"{logger_prefix} use_preferred_domains={use_preferred_domains} "
-        f"preferred_profile_id={preferred_profile_id if use_preferred_domains else None} "
+        f"{logger_prefix} preferred_domains_mode={preferred_domains_mode.value} "
+        f"preferred_profile_id={preferred_profile_id if use_local_preferred_domains else None} "
         f"selected_profiles={domain_resolution.get('selected_profiles')}"
     )
 
@@ -580,19 +637,30 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             f"provider='{SEARCH_PROVIDER}' "
             f"query='{search_request['query']}' "
             f"include_domains={search_request.get('include_domains')} "
+            f"external_source_policy={search_request.get('external_source_policy')} "
             f"mode={search_request.get('mode')}"
         )
 
     # Execute live provider searches when an API key is configured.
     raw_results: List[Dict[str, Any]] = []
+    successful_searches = 0
+    provider_errors: List[Dict[str, str]] = []
     provider_name = SEARCH_PROVIDER
     if API_KEY_PROVIDER:
         for search_request in search_requests:
             query = search_request["query"]
             include_domains = search_request.get("include_domains")
+            external_source_policy = search_request.get("external_source_policy") or "none"
             try:
                 # Merge each provider response into the ordered, deduplicated result set.
-                search_results = await search_with_provider(provider_name, query, req.search_policy.max_results, include_domains=include_domains or None)
+                search_results = await search_with_provider(
+                    provider_name,
+                    query,
+                    req.search_policy.max_results,
+                    include_domains=include_domains or None,
+                    external_source_policy=external_source_policy,
+                )
+                successful_searches += 1
                 raw_results = merge_search_results(
                     raw_results,
                     search_results.get("results", []) or [],
@@ -602,6 +670,20 @@ async def search_evidence(req: EvidenceSearchRequestV2):
                     break
             except Exception as e:
                 print(f"[evidence-search] search provider failed provider='{provider_name}' query='{query}': {e}")
+                provider_errors.append({"provider": provider_name, "query": query, "error": str(e) or e.__class__.__name__})
+
+        # Zero results is valid. Zero successful requests is a dependency failure.
+        # Raise before cache storage so transient provider failures are never cached.
+        if search_requests and successful_searches == 0:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "EVIDENCE_PROVIDER_FAILED",
+                    "message": "All evidence provider requests failed",
+                    "provider": provider_name,
+                    "errors": provider_errors,
+                },
+            )
     else:
         # Without a provider key, return routed domains as placeholder evidence.
         for idx, domain_cfg in enumerate(domain_resolution.get("preferred_domains") or [], start=1):
@@ -639,6 +721,8 @@ async def search_evidence(req: EvidenceSearchRequestV2):
                     "cache_key": cache_key,
                     "assertion_hash": assertion_hash,
                     "profile_version": profile_version,
+                    "search_strategy": req.search_policy.mode,
+                    "preferred_domains_mode": preferred_domains_mode.value,
                     "search_backend": search_backend_for_cache(),
                     "created_at": now,
                     "expires_at": now + timedelta(seconds=EVIDENCE_SEARCH_CACHE_TTL_SECONDS),

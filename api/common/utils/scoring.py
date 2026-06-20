@@ -41,22 +41,37 @@ def calculate_assertion_result(
     get_cached_validator_config: Optional[Callable[[str], Optional[dict]]] = None,
     validator_type_weights: Optional[dict] = None,
 ) -> dict:
+    responses = list((validators_obj or {}).items())
+    completed = [
+        (validator, validation or {})
+        for validator, validation in responses
+        if (validation or {}).get("execution_status") == "COMPLETED"
+    ]
+    failed = [
+        validator
+        for validator, validation in responses
+        if (validation or {}).get("execution_status") == "ERROR"
+    ]
     details = [
-        validation_weight_detail(validator, validation or {}, get_cached_validator_config, validator_type_weights)
-        for validator, validation in (validators_obj or {}).items()
+        validation_weight_detail(validator, validation, get_cached_validator_config, validator_type_weights)
+        for validator, validation in completed
     ]
     scores = {"TRUE": 0.0, "FALSE": 0.0, "UNKNOWN": 0.0}
     count = len(details)
-    if count == 0:
-        return {"assertion_id": assertion_id, "scores": scores, "winner": "UNKNOWN", "validations_count": 0, "details": []}
-    for detail in details:
-        scores[detail["result"]] = scores.get(detail["result"], 0.0) + detail["effective_weight"] / count
-    winner = max(scores.items(), key=lambda item: item[1])[0] if any(scores.values()) else "UNKNOWN"
+    if count:
+        for detail in details:
+            scores[detail["result"]] = scores.get(detail["result"], 0.0) + detail["effective_weight"] / count
+        winner = max(scores.items(), key=lambda item: item[1])[0]
+    else:
+        winner = None
     return {
         "assertion_id": assertion_id,
         "scores": {k: round(v, 4) for k, v in scores.items()},
         "winner": winner,
         "validations_count": count,
+        "responses_count": len(responses),
+        "errors_count": len(failed),
+        "excluded_validators": failed,
         "details": details,
     }
 

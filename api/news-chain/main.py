@@ -37,7 +37,8 @@ from common.models.async_models import (
     ValidatorConfig,
     ValidatorConfigEvent,
     ValidatorConfigEventPayload,
-    ValidatorType
+    ValidatorType,
+    ValidationExecutionStatus,
 )
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN, DEFAULT_TOPIC_RESPONSES
 from common.utils.ipfs_client import get_ipfs_text, get_ipfs_json
@@ -759,6 +760,7 @@ async def blockchain_event_listener():
                                         sources=validation_json.get("sources") or [],
                                         evidence_used=validation_json.get("evidence_used") or [],
                                         evidence_search_response=validation_json.get("evidence_search_response"),
+                                        execution_status=ValidationExecutionStatus.COMPLETED,
                                     ),
                                 )
 

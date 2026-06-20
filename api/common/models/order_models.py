@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from common.models.async_models import Assertion, ValidationMode, ValidatorConfig
+from common.models.async_models import Assertion, ValidationErrorDetails, ValidationExecutionStatus, ValidationMode, ValidatorConfig
 from common.models.veredicto import Validacion
 from common.models.protocol_models import CategoryId
 
@@ -17,7 +17,7 @@ class EventRecord(BaseModel):
 
 
 class ValidationRecord(BaseModel):
-    approval: Validacion
+    approval: Optional[Validacion] = None
     text: str = ""
     tx_hash: Optional[str] = None
     validator_alias: str = ""
@@ -29,8 +29,21 @@ class ValidationRecord(BaseModel):
     sources: List[Dict[str, Any]] = Field(default_factory=list)
     evidence_used: List[Dict[str, Any]] = Field(default_factory=list)
     confidence: Optional[float | str] = None
+    execution_status: ValidationExecutionStatus
     error: Optional[str] = None
+    error_details: Optional[ValidationErrorDetails] = None
     response_time_seconds: Optional[float] = None
+
+    @model_validator(mode="after")
+    def validate_execution_result(self):
+        if self.execution_status == ValidationExecutionStatus.COMPLETED and self.approval is None:
+            raise ValueError("COMPLETED validation requires approval")
+        if self.execution_status == ValidationExecutionStatus.ERROR:
+            if self.approval is not None:
+                raise ValueError("ERROR validation cannot contain approval")
+            if self.error_details is None:
+                raise ValueError("ERROR validation requires error_details")
+        return self
 
 
 OrderValidationMap = Dict[str, Dict[str, ValidationRecord]]
@@ -58,8 +71,11 @@ class AssertionResultDetail(BaseModel):
 class AssertionResult(BaseModel):
     assertion_id: str
     scores: Dict[str, float] = Field(default_factory=lambda: {"TRUE": 0.0, "FALSE": 0.0, "UNKNOWN": 0.0})
-    winner: str = "UNKNOWN"
+    winner: Optional[str] = None
     validations_count: int = 0
+    responses_count: int = 0
+    errors_count: int = 0
+    excluded_validators: List[str] = Field(default_factory=list)
     details: List[AssertionResultDetail] = Field(default_factory=list)
 
 

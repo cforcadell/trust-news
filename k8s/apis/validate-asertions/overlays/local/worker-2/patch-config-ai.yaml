@@ -11,11 +11,11 @@ spec:
         # Kustomize inyectará estas variables automáticamente en la lista de 'env' de tu base
         env:
         - name: AI_PROVIDER
-          value: "grok"
+          value: "openrouter"
         - name: MODEL
-          value: "llama-3.1-8b-instant"
+          value: "mistralai/mistral-small-24b-instruct-2501"
         - name: API_URL
-          value: "https://api.groq.com/openai/v1/chat/completions"
+          value: "https://openrouter.ai/api/v1/chat/completions"
         - name: VALIDATOR_SERVICE_URL
           value: "http://validate-service-2.apis.svc.cluster.local:8070"
         - name: VALIDATOR_TYPE
@@ -27,6 +27,6 @@ spec:
         - name: EVIDENCE_SEARCH_URL
           value: "http://evidence-search.apis.svc.cluster.local:8074"
         - name: EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
-          value: "false"
+          value: "EXT_OFFICIAL_FIRST"
         - name: EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
           value: "default"

@@ -138,27 +138,33 @@ profile_subset/<profile_id>/entities
 
 ## Uso desde validadores
 
-Los validadores que activan dominios preferentes deben enviar a
-`evidence-search`:
+Los validadores controlan la estrategia de dominios preferentes con `use_preferred_domains`:
 
 ```json
 {
   "search_policy": {
-    "use_preferred_domains": true,
+    "use_preferred_domains": "LOCAL",
     "preferred_profile_id": "default"
   }
 }
 ```
 
+Valores validos:
+
+- `NONE`: busqueda general sin dominios preferentes.
+- `LOCAL`: usa perfiles de dominios desde MongoDB y envia `include_domains` al proveedor.
+- `EXT_OFFICIAL_FIRST`: pide al proveedor priorizar fuentes oficiales sin dominios locales.
+- `EXT_ONLY_OFFICIAL`: pide al proveedor limitarse a fuentes oficiales sin dominios locales.
+
 En Kubernetes, el validador lo controla con:
 
 ```text
-EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true
+EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL
 EVIDENCE_SEARCH_PREFERRED_PROFILE_ID=default
 ```
 
 Si `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID` no existe o esta vacio, el validador
-usa `default`.
+usa `default` en modo `LOCAL`.
 
 ## Despues de cargar
 

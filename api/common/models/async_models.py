@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 from typing import List, Optional, Dict, Any
 from enum import Enum, IntEnum
 from common.models.veredicto import Validacion
@@ -122,6 +122,19 @@ class ValidationMode(str, Enum):
     LIGHT = "LIGHT"
 
 
+class ValidationExecutionStatus(str, Enum):
+    COMPLETED = "COMPLETED"
+    ERROR = "ERROR"
+
+
+class ValidationErrorDetails(BaseModel):
+    stage: str
+    code: str
+    message: str
+    retryable: bool
+    status_code: Optional[int] = None
+
+
 
 # ============================================================
 # 🔹 VALIDATOR CONFIG MODELS
@@ -132,6 +145,13 @@ class ValidatorType(IntEnum):
     RAG_EVIDENCE_VALIDATION = 3
     DETERMINISTIC_VALIDATION = 4
     HUMAN = 5
+
+
+class EvidencePreferredDomainsMode(str, Enum):
+    NONE = "NONE"
+    LOCAL = "LOCAL"
+    EXT_OFFICIAL_FIRST = "EXT_OFFICIAL_FIRST"
+    EXT_ONLY_OFFICIAL = "EXT_ONLY_OFFICIAL"
 
 
 
@@ -204,7 +224,7 @@ class ValidatorConfig(BaseModel):
     use_evidence_search: Optional[bool] = None
     online_search_enabled: Optional[bool] = None
     evidence_search_url: Optional[str] = None
-    evidence_search_use_preferred_domains: Optional[bool] = None
+    evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
     evidence_search_preferred_profile_id: Optional[str] = None
 
 
@@ -386,18 +406,30 @@ class RequestValidationRequest(BaseModel):
 # ============================================================
 
 class ValidationCompletedPayload(BaseModel):
-    """Model for a successful validation response."""
+    """Model for a completed or failed blockchain validation execution."""
     postId: str
     idValidator: str
     idAssertion: str
-    approval: Validacion
+    approval: Optional[Validacion] = None
     text: str
-    tx_hash: str
-    validator_alias: str
+    tx_hash: Optional[str] = None
+    validator_alias: str = ""
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
     sources: Optional[List[Dict[str, Any]]] = None
     evidence_used: Optional[List[Dict[str, Any]]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
+    search_policy: Optional[Dict[str, Any]] = None
+    execution_status: ValidationExecutionStatus
+    error: Optional[str] = None
+    error_details: Optional[ValidationErrorDetails] = None
+
+    @model_validator(mode="after")
+    def require_execution_result(self):
+        if self.execution_status == ValidationExecutionStatus.COMPLETED and self.approval is None:
+            raise ValueError("Completed blockchain validation requires approval")
+        if self.execution_status == ValidationExecutionStatus.ERROR and not self.error:
+            raise ValueError("Failed blockchain validation requires error")
+        return self
 
 
 class ValidationCompletedResponse(BaseModel):
@@ -441,7 +473,7 @@ class LightValidationResponsePayload(BaseModel):
     idAssertion: str
     validator_id: str
     categoryId: CategoryId
-    verdict: Validacion
+    verdict: Optional[Validacion] = None
     description: str
     confidence: Optional[float | str] = None
     sources: Optional[List[Dict[str, Any]]] = None
@@ -451,7 +483,23 @@ class LightValidationResponsePayload(BaseModel):
     search_policy: Optional[Dict[str, Any]] = None
     timestamp: str
     correlation_id: str
+    execution_status: ValidationExecutionStatus
     error: Optional[str] = None
+    error_details: Optional[ValidationErrorDetails] = None
+
+    @model_validator(mode="after")
+    def validate_execution_result(self):
+        if self.execution_status == ValidationExecutionStatus.COMPLETED:
+            if self.verdict is None:
+                raise ValueError("COMPLETED validation requires verdict")
+            if self.error is not None or self.error_details is not None:
+                raise ValueError("COMPLETED validation cannot contain error data")
+        else:
+            if self.verdict is not None:
+                raise ValueError("ERROR validation cannot contain verdict")
+            if self.error_details is None:
+                raise ValueError("ERROR validation requires error_details")
+        return self
 
 
 class LightValidationResponse(BaseModel):

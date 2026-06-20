@@ -8,9 +8,9 @@ data:
   EVIDENCE_DOMAIN_CONFIG_COLLECTION: "evidence_domain_profiles"
   EVIDENCE_SEARCH_CACHE_COLLECTION: "evidence_search_cache"
   EVIDENCE_SEARCH_CACHE_TTL_SECONDS: "86400"
-  SEARCH_PROVIDER: "exa" #tavily || exa
-  #SEARCH_API_URL: "https://api.tavily.com/search"
-  SEARCH_API_URL: "https://api.exa.ai/search"
+  SEARCH_PROVIDER: "tavily" #tavily || exa
+  SEARCH_API_URL: "https://api.tavily.com/search"
+  #SEARCH_API_URL: "https://api.exa.ai/search"
   SEARCH_DEPTH: "advanced"
   SEARCH_INCLUDE_ANSWER: "false"
   SEARCH_INCLUDE_RAW_CONTENT: "true"

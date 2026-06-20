@@ -581,7 +581,7 @@ kubectl rollout restart deployment/evidence-search -n apis
 kubectl logs deployment/evidence-search -n apis
 ```
 
-Verificacion esperada: una busqueda con `city=Barcelona` y `entity=Ayuntamiento de Barcelona` debe priorizar `barcelona.cat`, `seu.barcelona.cat` y `bop.diba.cat` cuando `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true`.
+Verificacion esperada: una busqueda con `city=Barcelona` y `entity=Ayuntamiento de Barcelona` debe priorizar `barcelona.cat`, `seu.barcelona.cat` y `bop.diba.cat` cuando `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL`.
 
 ---
 

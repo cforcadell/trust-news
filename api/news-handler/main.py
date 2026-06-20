@@ -53,6 +53,7 @@ from common.models.async_models import (
     ValidatorConfig,
     ValidatorWithValidationsResponse,
     ValidationMode,
+    ValidationExecutionStatus,
     LightValidationRequest,
     LightValidationResponse,
     ValidatorType,
@@ -427,7 +428,7 @@ async def get_validator_stats(validator: str, since: Optional[datetime] = None) 
         request_query["timestamp"] = {"$gte": since_ms}
     requests_sent = await events_collection.count_documents(request_query)
 
-    validation_query = {"idValidator": validator_filter}
+    validation_query = {"idValidator": validator_filter, "execution_status": ValidationExecutionStatus.COMPLETED.value}
     if since is not None:
         validation_query["created_at"] = {"$gte": since.isoformat()}
     successful_responses = await validations_collection.count_documents(validation_query)
@@ -697,7 +698,7 @@ async def log_event(order_id: str, action: str, topic: str, payload: dict):
     await events_col.insert_one(event_doc)
     logger.info(f"[{order_id}] 🟢 Evento '{action}' registrado en MongoDB ({topic}).")
 
-async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: Validacion, tx_hash: str, payload: dict, response_time_seconds: Optional[float] = None):
+async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: Optional[Validacion], tx_hash: str, payload: dict, execution_status: ValidationExecutionStatus, response_time_seconds: Optional[float] = None):
     global db
     if not order_id:
         logger.warning(f"Intento de log_validation sin order_id, ignorado.")
@@ -710,6 +711,9 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
         "idAssertion": id_assertion,
         "idValidator": id_validator,
         "approval": approval,
+        "execution_status": execution_status.value,
+        "error": payload.get("error"),
+        "error_details": payload.get("error_details"),
         "tx_hash": tx_hash,
         "payload": payload,
         "timestamp": asyncio.get_event_loop().time(),
@@ -1163,8 +1167,9 @@ async def process_kafka_message(data: dict):
             payload = parsed.payload.model_dump()
             id_val = payload.get("validator_id")
             id_assert = str(payload.get("idAssertion"))
+            execution_status = ValidationExecutionStatus(payload["execution_status"])
             approval_raw = payload.get("verdict")
-            status_val = Validacion(approval_raw)
+            status_val = Validacion(approval_raw) if execution_status == ValidationExecutionStatus.COMPLETED else None
             description = payload.get("description", "")
             category_id = payload.get("categoryId")
             correlation_id = payload.get("correlation_id")
@@ -1210,13 +1215,15 @@ async def process_kafka_message(data: dict):
                     "evidence_search_response": payload.get("evidence_search_response"),
                     "search_policy": payload.get("search_policy"),
                     "confidence": payload.get("confidence"),
+                    "execution_status": execution_status.value,
                     "error": error,
+                    "error_details": payload.get("error_details"),
                     "response_time_seconds": response_time_seconds
                 }
                 await update_order(order_id, {"$set": {"validations": validations, "updated_at": datetime.now(timezone.utc).isoformat()}})
                 validation_payload = {**payload, "validator_config": validator_config_snapshot}
                 validation_payload.pop("assertion_index", None)
-                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, validation_payload, response_time_seconds)
+                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, validation_payload, execution_status, response_time_seconds)
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
@@ -1228,19 +1235,23 @@ async def process_kafka_message(data: dict):
 
                 await update_order(order_id, {"$set": {"validators_pending": total_pending}})
                 if total_pending == 0:
-                    await update_order(order_id, {"$set": {"status": "VALIDATED", "updated_at": datetime.now(timezone.utc).isoformat()}})
-                    logger.info(f"[LIGHT] All validations completed | order_id={order_id}")
+                    has_errors = any(
+                        item.get("execution_status") == ValidationExecutionStatus.ERROR.value
+                        for assertion_validations in validations.values()
+                        for item in assertion_validations.values()
+                    )
+                    terminal_status = "VALIDATED_WITH_ERRORS" if has_errors else "VALIDATED"
+                    await update_order(order_id, {"$set": {"status": terminal_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
+                    logger.info(f"[LIGHT] All validation responses completed | order_id={order_id} status={terminal_status}")
 
         elif action == "validation_completed":
             payload = parsed.payload.model_dump()
             postId = str(payload.get("postId", ""))
             id_val = payload.get("idValidator")
             id_assert = str(payload.get("idAssertion"))
+            execution_status = ValidationExecutionStatus(payload["execution_status"])
             approval_raw = payload.get("approval")
-            try:
-                status_val = Validacion(approval_raw)
-            except Exception:
-                status_val = Validacion(approval_raw) if approval_raw else None
+            status_val = Validacion(approval_raw) if execution_status == ValidationExecutionStatus.COMPLETED else None
 
             assertion_text = payload.get("text", "")
             tx_hash = payload.get("tx_hash", "")
@@ -1293,6 +1304,9 @@ async def process_kafka_message(data: dict):
                     "evidence_used": payload.get("evidence_used", []),
                     "evidence_search_response": payload.get("evidence_search_response"),
                     "search_policy": payload.get("search_policy"),
+                    "execution_status": execution_status.value,
+                    "error": payload.get("error"),
+                    "error_details": payload.get("error_details"),
                     "response_time_seconds": response_time_seconds
                 }
 
@@ -1300,7 +1314,7 @@ async def process_kafka_message(data: dict):
                 logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
 
                 # Registrar validación en colección 'validations'
-                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, {**payload, "validator_config": validator_config_snapshot}, response_time_seconds)
+                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, {**payload, "validator_config": validator_config_snapshot}, execution_status, response_time_seconds)
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
@@ -1318,8 +1332,14 @@ async def process_kafka_message(data: dict):
                 logger.info(f"[{order_id}] 📊 Validadores pendientes totales: {total_pending}")
 
                 if total_pending == 0:
-                    await update_order(order_id, {"$set": {"status": "VALIDATED"}})
-                    logger.info(f"[{order_id}] 🎯 Todas las validaciones completadas. Noticia VALIDADA.")
+                    has_errors = any(
+                        item.get("execution_status") == ValidationExecutionStatus.ERROR.value
+                        for assertion_validations in validations.values()
+                        for item in assertion_validations.values()
+                    )
+                    terminal_status = "VALIDATED_WITH_ERRORS" if has_errors else "VALIDATED"
+                    await update_order(order_id, {"$set": {"status": terminal_status}})
+                    logger.info(f"[{order_id}] 🎯 Todas las validaciones finalizadas. Estado={terminal_status}.")
                 else:
                     logger.info(f"[{order_id}] 🕓 Aún quedan {total_pending} validaciones pendientes.")
 

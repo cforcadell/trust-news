@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking, send_and_wait, receipt_succeeded, require_successful_receipt
 from common.utils.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple,cid_to_multihash_tuple
 from common.models.veredicto import Veredicto, Validacion
-from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationMode, ValidatorConfigEvent, ValidatorConfigEventPayload
+from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidencePreferredDomainsMode
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     AssertionValidationPayloadV2,
@@ -183,7 +183,7 @@ class AdminConfigResponse(BaseModel):
     use_evidence_search: bool
     online_search_enabled: bool
     evidence_search_url: str
-    evidence_search_use_preferred_domains: bool
+    evidence_search_use_preferred_domains: EvidencePreferredDomainsMode
     evidence_search_preferred_profile_id: str
     private_key: Optional[str] = None
     account_address: str
@@ -199,7 +199,7 @@ class AdminConfigUpdate(BaseModel):
     use_evidence_search: Optional[bool] = None
     online_search_enabled: Optional[bool] = None
     evidence_search_url: Optional[str] = None
-    evidence_search_use_preferred_domains: Optional[bool] = None
+    evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
     evidence_search_preferred_profile_id: Optional[str] = None
     private_key: Optional[str] = None
     account_address: Optional[str] = None
@@ -230,8 +230,13 @@ def current_evidence_search_preferred_profile_id() -> str:
     return str(os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID) or "").strip() or "default"
 
 
-def current_evidence_search_use_preferred_domains() -> bool:
-    return os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "false").lower() == "true"
+def current_evidence_search_use_preferred_domains() -> EvidencePreferredDomainsMode:
+    raw = str(os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", EvidencePreferredDomainsMode.NONE.value) or "").strip().upper()
+    try:
+        return EvidencePreferredDomainsMode(raw)
+    except ValueError as exc:
+        allowed = ", ".join(mode.value for mode in EvidencePreferredDomainsMode)
+        raise RuntimeError(f"EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS invalido: {raw}. Valores permitidos: {allowed}") from exc
 
 
 def mask_secret(value: Optional[str]) -> Optional[str]:
@@ -376,17 +381,70 @@ def payload_context_for_prompt(payload_v2: AssertionValidationPayloadV2) -> str:
     }, ensure_ascii=False)
 
 
+class ValidationExecutionFailure(Exception):
+    def __init__(self, stage: str, cause: Exception, evidences: List[Dict[str, Any]], evidence_response: Optional[Dict[str, Any]]):
+        super().__init__(str(cause))
+        self.stage = stage
+        self.cause = cause
+        self.evidences = evidences
+        self.evidence_response = evidence_response
+
+
+def validation_error_details(failure: ValidationExecutionFailure) -> ValidationErrorDetails:
+    cause = failure.cause
+    response = getattr(cause, "response", None)
+    status_code = getattr(cause, "status_code", None) or getattr(response, "status_code", None)
+    detail = getattr(cause, "detail", None)
+    if detail is None and response is not None:
+        try:
+            detail = response.json().get("detail")
+        except Exception:
+            detail = getattr(response, "text", None)
+    if detail is not None:
+        message = json.dumps(detail, ensure_ascii=False) if isinstance(detail, (dict, list)) else str(detail)
+    else:
+        message = str(cause) or cause.__class__.__name__
+
+    if failure.stage == "EVIDENCE_SEARCH" and status_code:
+        code = f"EVIDENCE_SEARCH_HTTP_{status_code}"
+    elif failure.stage == "EVIDENCE_SEARCH":
+        code = "EVIDENCE_SEARCH_FAILED"
+    elif failure.stage == "LLM_REQUEST" and status_code:
+        code = f"LLM_HTTP_{status_code}"
+    elif failure.stage == "LLM_RESPONSE_PARSE":
+        code = "LLM_INVALID_RESPONSE"
+    else:
+        code = "VALIDATION_EXECUTION_ERROR"
+    retryable = status_code in {408, 429} or bool(status_code and status_code >= 500)
+    return ValidationErrorDetails(
+        stage=failure.stage,
+        code=code,
+        message=message,
+        retryable=retryable,
+        status_code=status_code,
+    )
+
+
 def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Validacion, str, Dict[str, Any], Optional[Dict[str, Any]]]:
     if not is_automatic_validator() or ai_validator is None:
         raise RuntimeError(f"Validator type {VALIDATOR_TYPE.name} does not execute automatic LLM validation")
     logger.info(f"[validate-asertions] received assertion-validation-payload-v2 mode={payload_v2.mode} assertion_id={payload_v2.assertion.assertion_id}")
-    evidences, evidence_response = fetch_evidences_for_payload(payload_v2)
-    result_text = ai_validator.verificar_asercion(
-        payload_v2.assertion.text,
-        payload_context_for_prompt(payload_v2),
-        evidences,
-    )
-    verdict, description, extras = parse_validator_api_response(result_text)
+    try:
+        evidences, evidence_response = fetch_evidences_for_payload(payload_v2)
+    except Exception as exc:
+        raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], None) from exc
+    try:
+        result_text = ai_validator.verificar_asercion(
+            payload_v2.assertion.text,
+            payload_context_for_prompt(payload_v2),
+            evidences,
+        )
+    except Exception as exc:
+        raise ValidationExecutionFailure("LLM_REQUEST", exc, evidences, evidence_response) from exc
+    try:
+        verdict, description, extras = parse_validator_api_response(result_text)
+    except Exception as exc:
+        raise ValidationExecutionFailure("LLM_RESPONSE_PARSE", exc, evidences, evidence_response) from exc
     if evidences and not extras.get("sources"):
         extras["sources"] = evidences
     if evidences and not extras.get("evidence_used"):
@@ -400,16 +458,16 @@ def openrouter_model_for_current_type(model: str) -> str:
 
 
 def current_evidence_search_policy() -> Dict[str, Any]:
-    use_preferred_domains = current_evidence_search_use_preferred_domains()
+    preferred_domains_mode = current_evidence_search_use_preferred_domains()
     policy = {
         "mode": "official_first",
-        "use_preferred_domains": use_preferred_domains,
+        "use_preferred_domains": preferred_domains_mode.value,
         "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
         "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
         "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
         "fallback_to_general_search": True,
     }
-    if use_preferred_domains:
+    if preferred_domains_mode == EvidencePreferredDomainsMode.LOCAL:
         policy["preferred_profile_id"] = current_evidence_search_preferred_profile_id()
     return policy
 
@@ -430,9 +488,9 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
         response = resp.json()
         response.setdefault("search_policy", search_policy)
         return response.get("evidences", []) or response.get("sources", []) or [], response
-    except Exception as e:
-        logger.warning(f"⚠️ evidence-search failed; RAG validator will answer with no evidences: {e}")
-        return [], None
+    except Exception:
+        logger.exception("Evidence search failed")
+        raise
 
 class MistralValidator(AIValidator):
     def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
@@ -619,10 +677,13 @@ async def handle_light_validation_request(req: LightValidationRequest):
         f"assertion={payload.assertion_index} validator={ACCOUNT_ADDRESS} category={payload.categoryId}"
     )
 
-    verdict = Validacion.UNKNOWN
+    verdict = None
     description = ""
+    execution_status = ValidationExecutionStatus.COMPLETED
     error = None
+    error_details = None
     extras = {}
+    evidence_response = None
     try:
         if payload.assertion_validation_payload is None:
             raise ValueError("Missing assertion-validation-payload-v2 in LIGHT request")
@@ -630,9 +691,26 @@ async def handle_light_validation_request(req: LightValidationRequest):
             validate_payload_v2,
             payload.assertion_validation_payload,
         )
-    except Exception as e:
-        error = str(e)
+    except ValidationExecutionFailure as failure:
+        execution_status = ValidationExecutionStatus.ERROR
+        evidence_response = failure.evidence_response
+        error_details = validation_error_details(failure)
+        error = error_details.message
         description = error
+        logger.exception(
+            f"[LIGHT] Error validating assertion | order_id={payload.order_id} "
+            f"assertion={payload.assertion_index} validator={ACCOUNT_ADDRESS}"
+        )
+    except Exception as exc:
+        execution_status = ValidationExecutionStatus.ERROR
+        error = str(exc) or exc.__class__.__name__
+        description = error
+        error_details = ValidationErrorDetails(
+            stage="VALIDATION_SETUP",
+            code="VALIDATION_EXECUTION_ERROR",
+            message=error,
+            retryable=False,
+        )
         logger.exception(
             f"[LIGHT] Error validating assertion | order_id={payload.order_id} "
             f"assertion={payload.assertion_index} validator={ACCOUNT_ADDRESS}"
@@ -653,17 +731,20 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "sources": extras.get("sources", []),
             "evidence_used": extras.get("evidence_used", []),
             "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
-            "evidence_search_response": evidence_response if 'evidence_response' in locals() else None,
+            "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if USE_EVIDENCE_SEARCH else None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "correlation_id": payload.correlation_id,
-            "error": error
+            "execution_status": execution_status,
+            "error": error,
+            "error_details": error_details
         }
     )
     await light_producer.send_and_wait(TOPIC_RESPONSES, response.model_dump_json().encode("utf-8"))
     logger.info(
         f"[LIGHT] Response sent | order_id={payload.order_id} assertion={payload.assertion_index} "
-        f"validator={ACCOUNT_ADDRESS} category={payload.categoryId} verdict={int(verdict)}"
+        f"validator={ACCOUNT_ADDRESS} category={payload.categoryId} status={execution_status.value} "
+        f"verdict={verdict.name if verdict is not None else None}"
     )
 
 
@@ -1091,7 +1172,7 @@ async def update_admin_config(config: AdminConfigUpdate):
         set_runtime_env("EVIDENCE_SEARCH_URL", EVIDENCE_SEARCH_URL)
 
     if config.evidence_search_use_preferred_domains is not None:
-        set_runtime_env("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", str(config.evidence_search_use_preferred_domains).lower())
+        set_runtime_env("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", config.evidence_search_use_preferred_domains.value)
 
     if config.evidence_search_preferred_profile_id is not None:
         EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = config.evidence_search_preferred_profile_id
@@ -1167,6 +1248,53 @@ async def update_admin_config(config: AdminConfigUpdate):
 # =========================================================
 # Blockchain Event Agent
 # =========================================================
+async def publish_blockchain_validation_error(
+    post_id: Any,
+    assertion_id: str,
+    failure: Exception,
+) -> None:
+    if isinstance(failure, ValidationExecutionFailure):
+        error_details = validation_error_details(failure)
+        evidence_response = failure.evidence_response
+    else:
+        message = str(failure) or failure.__class__.__name__
+        error_details = ValidationErrorDetails(
+            stage="VALIDATION_SETUP",
+            code="VALIDATION_EXECUTION_ERROR",
+            message=message,
+            retryable=False,
+        )
+        evidence_response = None
+
+    response = ValidationCompletedResponse(
+        payload={
+            "postId": str(post_id),
+            "idValidator": ACCOUNT_ADDRESS,
+            "idAssertion": str(assertion_id),
+            "approval": None,
+            "text": error_details.message,
+            "tx_hash": None,
+            "validation_mode": ValidationMode.BLOCKCHAIN,
+            "sources": [],
+            "evidence_used": [],
+            "evidence_search_response": evidence_response,
+            "search_policy": current_evidence_search_policy() if USE_EVIDENCE_SEARCH else None,
+            "execution_status": ValidationExecutionStatus.ERROR,
+            "error": error_details.message,
+            "error_details": error_details,
+        }
+    )
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_BROKER,
+        **kafka_security_kwargs(),
+    )
+    await producer.start()
+    try:
+        await producer.send_and_wait(TOPIC_RESPONSES, response.model_dump_json(exclude_none=True).encode("utf-8"))
+    finally:
+        await producer.stop()
+
+
 class BlockchainEventAgent:
     def __init__(self, w3: Web3, contract, validator_address: str, ipfs_api: str):
         self.w3 = w3
@@ -1249,6 +1377,10 @@ class BlockchainEventAgent:
                 logger.error(f"❌ Falló la transacción de validación para post {post_id}")
         except Exception as e:
             logger.exception(f"Error procesando validación: {e}")
+            try:
+                await publish_blockchain_validation_error(post_id, assertion.assertion_id, e)
+            except Exception:
+                logger.exception("No se pudo publicar el estado ERROR de la validación blockchain")
 
 # =========================================================
 # Startup FastAPI

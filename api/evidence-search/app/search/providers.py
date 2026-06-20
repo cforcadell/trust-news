@@ -89,10 +89,26 @@ class SearchProvider:
 
     name = "base"
 
-    async def search(self, query: str, max_sources: int, include_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def search(
+        self,
+        query: str,
+        max_sources: int,
+        include_domains: Optional[List[str]] = None,
+        external_source_policy: str = "none",
+    ) -> Dict[str, Any]:
         """Execute a search request and return provider-normalized data."""
         # Concrete providers must implement their own HTTP payload and response mapping.
         raise NotImplementedError
+
+
+def query_with_external_source_policy(query: str, external_source_policy: str) -> str:
+    """Ask the upstream provider for official-source preference without local domain lists."""
+    policy = (external_source_policy or "none").lower()
+    if policy == "official_first":
+        return f"{query} preferentemente fuente oficial organismo publico government agency regulator official source".strip()
+    if policy == "only_official":
+        return f"{query} solo fuentes oficiales organismos publicos government agency regulator official source only".strip()
+    return query
 
 
 class TavilySearchProvider(SearchProvider):
@@ -100,7 +116,13 @@ class TavilySearchProvider(SearchProvider):
 
     name = "tavily"
 
-    async def search(self, query: str, max_sources: int, include_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def search(
+        self,
+        query: str,
+        max_sources: int,
+        include_domains: Optional[List[str]] = None,
+        external_source_policy: str = "none",
+    ) -> Dict[str, Any]:
         """Call Tavily and return its response using the shared provider contract."""
         # Validate credentials early so the API reports configuration issues clearly.
         api_key = os.getenv("API_KEY_PROVIDER", "")
@@ -110,7 +132,7 @@ class TavilySearchProvider(SearchProvider):
         # Build the Tavily payload from environment-backed tuning options.
         payload = {
             "api_key": api_key,
-            "query": query,
+            "query": query_with_external_source_policy(query, external_source_policy),
             "search_depth": os.getenv("SEARCH_DEPTH", "advanced"),
             "include_answer": os.getenv("SEARCH_INCLUDE_ANSWER", "false").lower() == "true",
             "include_raw_content": tavily_include_raw_content_value(),
@@ -140,7 +162,13 @@ class ExaSearchProvider(SearchProvider):
 
     name = "exa"
 
-    async def search(self, query: str, max_sources: int, include_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def search(
+        self,
+        query: str,
+        max_sources: int,
+        include_domains: Optional[List[str]] = None,
+        external_source_policy: str = "none",
+    ) -> Dict[str, Any]:
         """Call Exa and adapt its response into the shared provider contract."""
         # Validate credentials early so the API reports configuration issues clearly.
         api_key = os.getenv("API_KEY_PROVIDER", "")
@@ -149,7 +177,7 @@ class ExaSearchProvider(SearchProvider):
 
         # Build the Exa payload and translate include-domain filters to Exa naming.
         payload = {
-            "query": query,
+            "query": query_with_external_source_policy(query, external_source_policy),
             "numResults": min(max_sources, int(os.getenv("SEARCH_MAX_RESULTS", "5"))),
             "contents": {
                 "highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true").lower() == "true",
@@ -158,6 +186,8 @@ class ExaSearchProvider(SearchProvider):
         }
         if include_domains:
             payload["includeDomains"] = include_domains
+        if (external_source_policy or "none").lower() in {"official_first", "only_official"}:
+            payload["category"] = "official source"
 
         # Use configurable endpoint and timeout values for local/prod provider swaps.
         api_url = os.getenv("SEARCH_API_URL", "https://api.exa.ai/search")
@@ -213,11 +243,22 @@ def register_search_provider(name: str, provider: SearchProvider) -> None:
     registry.register(name, provider)
 
 
-async def search_with_provider(provider_name: Optional[str], query: str, max_sources: int, include_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+async def search_with_provider(
+    provider_name: Optional[str],
+    query: str,
+    max_sources: int,
+    include_domains: Optional[List[str]] = None,
+    external_source_policy: str = "none",
+) -> Dict[str, Any]:
     """Resolve the provider name and execute a search through its adapter."""
     # Environment configuration fills in the provider when callers pass None.
     provider_name = provider_name or os.getenv("SEARCH_PROVIDER", "tavily")
     provider = get_search_provider(provider_name)
 
     # The resolved adapter owns provider-specific request and response behavior.
-    return await provider.search(query, max_sources, include_domains=include_domains)
+    return await provider.search(
+        query,
+        max_sources,
+        include_domains=include_domains,
+        external_source_policy=external_source_policy,
+    )

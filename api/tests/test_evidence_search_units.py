@@ -183,8 +183,8 @@ async def test_search_evidence_logs_final_search_calls(monkeypatch, capsys):
 
     calls = []
 
-    async def fake_search_with_provider(provider_name, query, max_sources, include_domains=None):
-        calls.append({"provider": provider_name, "query": query, "include_domains": include_domains})
+    async def fake_search_with_provider(provider_name, query, max_sources, include_domains=None, external_source_policy="none"):
+        calls.append({"provider": provider_name, "query": query, "include_domains": include_domains, "external_source_policy": external_source_policy})
         return {"results": []}
 
     monkeypatch.setattr(evidence, "search_with_provider", fake_search_with_provider)
@@ -206,9 +206,9 @@ async def test_search_evidence_logs_final_search_calls(monkeypatch, capsys):
     monkeypatch.setattr(evidence, "cache_collection", None)
 
     req = SimpleNamespace(
-        assertion=enriched_assertion(),
+        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
         search_policy=SimpleNamespace(
-            use_preferred_domains=True,
+            use_preferred_domains="LOCAL",
             preferred_profile_id="custom-profile",
             max_domains=3,
             max_results=3,
@@ -238,8 +238,8 @@ async def test_search_provider_registry_can_switch_to_exa(monkeypatch):
     class FakeExaProvider(search_providers.SearchProvider):
         name = "exa"
 
-        async def search(self, query, max_sources, include_domains=None):
-            calls.append((query, max_sources, include_domains))
+        async def search(self, query, max_sources, include_domains=None, external_source_policy="none"):
+            calls.append((query, max_sources, include_domains, external_source_policy))
             return {"results": []}
 
     monkeypatch.setattr(search_providers, "registry", search_providers.SearchProviderRegistry())
@@ -248,7 +248,7 @@ async def test_search_provider_registry_can_switch_to_exa(monkeypatch):
     result = await search_providers.search_with_provider("exa", "foo", 5, include_domains=["one.es"])
 
     assert result == {"results": []}
-    assert calls == [("foo", 5, ["one.es"])]
+    assert calls == [("foo", 5, ["one.es"], "none")]
 
 
 def test_merge_search_results_keeps_same_domain_results_and_dedupes_urls():
@@ -267,3 +267,38 @@ def test_merge_search_results_keeps_same_domain_results_and_dedupes_urls():
     assert len(merged) == 4
     assert sum(1 for item in merged if "ine.es" in item["url"]) == 3
     assert sum(1 for item in merged if "sepe.es" in item["url"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_evidence_raises_when_all_provider_requests_fail(monkeypatch):
+    original_provider = evidence.SEARCH_PROVIDER
+    original_api_key = evidence.API_KEY_PROVIDER
+    evidence.SEARCH_PROVIDER = "exa"
+    evidence.API_KEY_PROVIDER = "fake-key"
+
+    async def failing_search(*args, **kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(evidence, "search_with_provider", failing_search)
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    req = SimpleNamespace(
+        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
+        search_policy=SimpleNamespace(
+            use_preferred_domains="NONE",
+            preferred_profile_id=None,
+            max_domains=3,
+            max_results=3,
+            max_queries_per_domain=2,
+            fallback_to_general_search=True,
+        ),
+    )
+
+    try:
+        with pytest.raises(evidence.HTTPException) as exc_info:
+            await evidence.search_evidence(req)
+    finally:
+        evidence.SEARCH_PROVIDER = original_provider
+        evidence.API_KEY_PROVIDER = original_api_key
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail["code"] == "EVIDENCE_PROVIDER_FAILED"

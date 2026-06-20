@@ -655,7 +655,7 @@ async function loadOrderById(orderId, cleanup = true) {
 
             if (cleanup || tabs.children.length === 0) {
                 tabs.innerHTML = '';
-                const defaultTabKey = data.status === "VALIDATED" ? "summary" : "process";
+                const defaultTabKey = String(data.status || "").startsWith("VALIDATED") ? "summary" : "process";
                 sections.forEach((s) => {
                     const btn = document.createElement("button");
                     btn.innerText = s.name;
@@ -765,8 +765,9 @@ function renderProcessingFlow(currentStatus, validatorsPending = 0, totalValidat
         "VALIDATED"
     ];
 
-    const currentIndex = steps.indexOf(currentStatus);
-    const isValidated = currentStatus === "VALIDATED";
+    const normalizedStatus = String(currentStatus || "").startsWith("VALIDATED") ? "VALIDATED" : currentStatus;
+    const currentIndex = steps.indexOf(normalizedStatus);
+    const isValidated = normalizedStatus === "VALIDATED";
     return `
         <div class="process-flow">
             ${steps.map((step, i) => {
@@ -974,6 +975,9 @@ function buildVerificationSummary(order, events = []) {
     }, 0);
     const totalValidations = validationRequestCount || expectedValidations || Math.max(completedValidations + Number(order.validators_pending || 0), 0);
     const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - completedValidations, 0);
+    const errorValidations = Object.values(validations).reduce((sum, validators) => {
+        return sum + Object.values(validators || {}).filter(isValidationError).length;
+    }, 0);
 
     const assertionIds = new Set(Object.keys(validations).map(String));
     collectOrderAssertions(order.assertions, order).forEach((assertion, index) => assertionIds.add(getAssertionId(assertion, index + 1)));
@@ -986,6 +990,7 @@ function buildVerificationSummary(order, events = []) {
     assertionIds.forEach(assertionId => {
         const weighted = weightedResults[String(assertionId)];
         if (weighted) {
+            if (!Number(weighted.validations_count || 0)) return;
             const scores = weighted.scores || {};
             validatorVotes.true += scores.TRUE || 0;
             validatorVotes.false += scores.FALSE || 0;
@@ -996,12 +1001,13 @@ function buildVerificationSummary(order, events = []) {
             return;
         }
 
-        const validators = validations[assertionId] || {};
+        const validators = completedValidations(validations[assertionId] || {});
+        if (!validators.length) return;
         let trueVotes = 0;
         let falseVotes = 0;
         let unknownVotes = 0;
 
-        Object.values(validators).forEach(v => {
+        validators.forEach(v => {
             const lit = getValidationLiteral(v?.approval);
             if (lit === "True") trueVotes++;
             else if (lit === "False") falseVotes++;
@@ -1018,11 +1024,15 @@ function buildVerificationSummary(order, events = []) {
     });
 
     const totalAssertions = assertionIds.size;
+    const scoredAssertions = confirmedAssertions + contradictedAssertions + inconclusiveAssertions;
+    const unscoredAssertions = Math.max(0, totalAssertions - scoredAssertions);
     const hasMixedResult = [confirmedAssertions, contradictedAssertions, inconclusiveAssertions].filter(Boolean).length > 1;
     let statusKey = "inconclusive";
 
     if (totalValidations > 0 && completedValidations < totalValidations) {
         statusKey = "pending";
+    } else if (scoredAssertions === 0 && errorValidations > 0) {
+        statusKey = "error";
     } else if (totalAssertions === 0) {
         statusKey = completedValidations > 0 ? "inconclusive" : "pending";
     } else if (contradictedAssertions > confirmedAssertions && contradictedAssertions >= inconclusiveAssertions) {
@@ -1040,7 +1050,8 @@ function buildVerificationSummary(order, events = []) {
         partial: { statusLabel: t("summary.partial"), statusIcon: "🟡" },
         contradicted: { statusLabel: t("summary.contradicted"), statusIcon: "🔴" },
         inconclusive: { statusLabel: t("summary.inconclusive"), statusIcon: "🟠" },
-        pending: { statusLabel: t("summary.pending"), statusIcon: "⚪" }
+        pending: { statusLabel: t("summary.pending"), statusIcon: "⚪" },
+        error: { statusLabel: "Validation error", statusIcon: "🔴" }
     };
 
     const joinWord = window.I18N?.getLanguage() === "en" ? " and " : " y ";
@@ -1053,6 +1064,8 @@ function buildVerificationSummary(order, events = []) {
     let conclusionText;
     if (statusKey === "pending") {
         conclusionText = t("summary.pendingConclusion", { completed: completedValidations, total: totalValidations || completedValidations });
+    } else if (statusKey === "error") {
+        conclusionText = `No valid result was produced; ${errorValidations} validation(s) ended in error.`;
     } else if (statusKey === "verified") {
         conclusionText = t("summary.verifiedConclusion", { breakdown: assertionBreakdown });
     } else if (statusKey === "contradicted") {
@@ -1073,6 +1086,9 @@ function buildVerificationSummary(order, events = []) {
         confirmedAssertions,
         contradictedAssertions,
         inconclusiveAssertions,
+        unscoredAssertions,
+        errorValidations,
+        validValidations: completedValidations - errorValidations,
         totalValidations,
         completedValidations,
         pendingValidations,
@@ -1091,7 +1107,9 @@ function assertionOutcome(orderData, assertionId) {
     if (result?.winner === "UNKNOWN") return "inconclusive";
 
     const validators = orderData?.validations?.[String(assertionId)] || {};
-    const votes = Object.values(validators).map(item => getValidationLiteral(item?.approval));
+    const completed = completedValidations(validators);
+    if (!completed.length && Object.values(validators).some(isValidationError)) return "error";
+    const votes = completed.map(item => getValidationLiteral(item?.approval));
     const approved = votes.filter(vote => vote === "True").length;
     const rejected = votes.filter(vote => vote === "False").length;
     if (approved > rejected) return "confirmed";
@@ -1103,7 +1121,8 @@ function outcomeMeta(outcome) {
     const values = {
         confirmed: { label: t("ui.confirmed"), icon: "✓", className: "confirmed" },
         contradicted: { label: t("ui.disproved"), icon: "×", className: "contradicted" },
-        inconclusive: { label: t("summary.inconclusive"), icon: "?", className: "inconclusive" }
+        inconclusive: { label: t("summary.inconclusive"), icon: "?", className: "inconclusive" },
+        error: { label: "Error", icon: "!", className: "contradicted" }
     };
     return values[outcome] || values.inconclusive;
 }
@@ -1116,13 +1135,14 @@ function renderOrderSummary(container, data, events = []) {
     const summary = buildVerificationSummary(data, events);
     const assertions = collectOrderAssertions(data.assertions, data);
     const totalAssertions = summary.totalAssertions || assertions.length;
-    const confirmedPercent = percentage(summary.confirmedAssertions, totalAssertions);
-    const contradictedPercent = percentage(summary.contradictedAssertions, totalAssertions);
-    const inconclusivePercent = Math.max(0, 100 - confirmedPercent - contradictedPercent);
+    const scoredAssertions = summary.confirmedAssertions + summary.contradictedAssertions + summary.inconclusiveAssertions;
+    const confirmedPercent = percentage(summary.confirmedAssertions, scoredAssertions);
+    const contradictedPercent = percentage(summary.contradictedAssertions, scoredAssertions);
+    const inconclusivePercent = scoredAssertions > 0 ? Math.max(0, 100 - confirmedPercent - contradictedPercent) : 0;
     const totalWeight = summary.validatorVotes.true + summary.validatorVotes.false + summary.validatorVotes.unknown;
     const truePercent = percentage(summary.validatorVotes.true, totalWeight);
     const falsePercent = percentage(summary.validatorVotes.false, totalWeight);
-    const unknownPercent = Math.max(0, 100 - truePercent - falsePercent);
+    const unknownPercent = totalWeight > 0 ? Math.max(0, 100 - truePercent - falsePercent) : 0;
     const progressPercent = percentage(summary.completedValidations, summary.totalValidations || summary.completedValidations);
     const problematic = assertions.filter((assertion, index) => assertionOutcome(data, getAssertionId(assertion, index + 1)) !== "confirmed").slice(0, 3);
     const statusIcon = summary.statusKey === "verified" ? "✓" : summary.statusKey === "contradicted" ? "×" : summary.statusKey === "pending" ? "…" : "!";
@@ -1182,7 +1202,7 @@ function renderOrderSummary(container, data, events = []) {
             </div>
 
             <div class="summary-grid-secondary">
-                <article class="dashboard-card metric-card"><span class="metric-icon confirmed">♙</span><div><small>${t("ui.validationSummary")}</small><strong>${summary.completedValidations} / ${summary.totalValidations || summary.completedValidations}</strong><p>${t("ui.validationsCompleted")}</p><b class="metric-tag">${t("ui.percentCompleted", { percent: progressPercent })}</b></div></article>
+                <article class="dashboard-card metric-card"><span class="metric-icon confirmed">♙</span><div><small>${t("ui.validationSummary")}</small><strong>${summary.validValidations} valid · ${summary.errorValidations} errors / ${summary.totalValidations || summary.completedValidations}</strong><p>${t("ui.validationsCompleted")}</p><b class="metric-tag">${t("ui.percentCompleted", { percent: progressPercent })}</b></div></article>
                 <article class="dashboard-card metric-card"><span class="metric-icon time">◷</span><div><small>${t("ui.totalValidationTime")}</small><strong>${safeText(summary.validationDuration || t("ui.inProgress"))}</strong><p>${summary.pendingValidations ? t("ui.pendingCount", { count: summary.pendingValidations }) : t("ui.processCompleted")}</p></div></article>
                 <article class="dashboard-card problems-card"><h3>${t("ui.problematicAssertions")}</h3><ol>${problemRows}</ol><button type="button" onclick="activateOrderTab('assertions')">${t("ui.viewAllAssertions")}</button></article>
             </div>
@@ -1244,6 +1264,7 @@ function buildOrderProcessRows(orderData, events = []) {
         DOCUMENT_CREATED: t("status.DOCUMENT_CREATED"), IPFS_PENDING: t("status.IPFS_PENDING"),
         IPFS_UPLOADED: t("status.IPFS_UPLOADED"), BLOCKCHAIN_PENDING: t("status.BLOCKCHAIN_PENDING"),
         VALIDATION_PENDING: t("status.VALIDATION_PENDING"), VALIDATED: t("status.VALIDATED"),
+        VALIDATED_WITH_ERRORS: "Validated with errors",
         NO_VALIDATORS_AVAILABLE: t("status.NO_VALIDATORS_AVAILABLE"),
         ASSERTIONS_NOT_AVAILABLE: t("status.ASSERTIONS_NOT_AVAILABLE"), QUOTA_EXCEDED: t("status.QUOTA_EXCEDED")
     };
@@ -1268,15 +1289,19 @@ function buildOrderProcessRows(orderData, events = []) {
 }
 function getProcessStageState(orderData, mode, count) {
     const status = String(orderData?.status || "CREATED").toUpperCase();
-    if (status === "VALIDATED") return { currentIndex: count - 1, reached: count, complete: true };
+    if (status.startsWith("VALIDATED")) return { currentIndex: count - 1, reached: count, complete: true };
     const light = { CREATED: 1, ASSERTIONS_REQUESTED: 1, DOCUMENT_CREATED: 2, VALIDATION_PENDING: 3, NO_VALIDATORS_AVAILABLE: 4, ASSERTIONS_NOT_AVAILABLE: 1, QUOTA_EXCEDED: 1 };
     const blockchain = { CREATED: 1, ASSERTIONS_REQUESTED: 1, DOCUMENT_CREATED: 2, IPFS_PENDING: 3, IPFS_UPLOADED: 4, BLOCKCHAIN_PENDING: 4, VALIDATION_PENDING: 5, NO_VALIDATORS_AVAILABLE: 6, ASSERTIONS_NOT_AVAILABLE: 1, QUOTA_EXCEDED: 1 };
     const currentIndex = Math.min((mode === "LIGHT" ? light : blockchain)[status] ?? 0, count - 1);
     return { currentIndex, reached: currentIndex + 1, complete: false };
 }
 function countProcessVotes(orderData) {
-    const counts = { confirmed: 0, contradicted: 0, inconclusive: 0 };
+    const counts = { confirmed: 0, contradicted: 0, inconclusive: 0, errors: 0 };
     Object.values(orderData?.validations || {}).forEach(validators => Object.values(validators || {}).forEach(validation => {
+        if (isValidationError(validation)) {
+            counts.errors++;
+            return;
+        }
         const literal = getValidationLiteral(validation?.approval);
         if (literal === "True") counts.confirmed++;
         else if (literal === "False") counts.contradicted++;
@@ -1287,7 +1312,7 @@ function countProcessVotes(orderData) {
 function getProcessElapsedTime(orderData) {
     const start = parseOrderTimestamp(orderData?.created_at || orderData?.created || orderData?.createdAt);
     if (!start) return "-";
-    const final = String(orderData?.status || "").toUpperCase() === "VALIDATED";
+    const final = String(orderData?.status || "").toUpperCase().startsWith("VALIDATED");
     const end = final ? parseOrderTimestamp(orderData?.updated_at || orderData?.updatedAt) || new Date() : new Date();
     return formatDurationMinutesSeconds(Math.max(0, end.getTime() - start.getTime()));
 }
@@ -1308,13 +1333,14 @@ function renderOrderProcess(container, orderData, events = []) {
     const stage = getProcessStageState(orderData, mode, stages.length);
     const processPercent = Math.round((stage.reached / stages.length) * 100);
     const votes = countProcessVotes(orderData);
-    const received = votes.confirmed + votes.contradicted + votes.inconclusive;
+    const validResponses = votes.confirmed + votes.contradicted + votes.inconclusive;
+    const received = validResponses + votes.errors;
     const total = summary.totalValidations || received;
     const validationPercent = percentage(received, total || received);
-    const confirmedPercent = percentage(votes.confirmed, received);
-    const contradictedPercent = percentage(votes.contradicted, received);
+    const confirmedPercent = percentage(votes.confirmed, validResponses);
+    const contradictedPercent = percentage(votes.contradicted, validResponses);
     const pending = summary.pendingValidations;
-    const complete = String(orderData?.status || "").toUpperCase() === "VALIDATED";
+    const complete = String(orderData?.status || "").toUpperCase().startsWith("VALIDATED");
     const currentStage = stages[stage.currentIndex]?.label || t("ui.process");
     const provisional = summary.confirmedAssertions > summary.contradictedAssertions ? { label: t("ui.clearTrend"), className: "confirmed" } : summary.contradictedAssertions > summary.confirmedAssertions ? { label: t("ui.disprovedTrend"), className: "contradicted" } : { label: t("ui.noClearTrend"), className: "inconclusive" };
     const recent = rows.slice(-4).reverse();
@@ -1329,7 +1355,7 @@ function renderOrderProcess(container, orderData, events = []) {
             <section class="process-stage-card" data-process-widget="flow"><div class="process-section-title"><strong>${t("ui.visualStageFlow", { mode })}</strong><span>${stage.reached}/${stages.length}</span></div><div class="process-stages">${stageHtml}</div><div class="process-progress-header"><strong>${t("ui.processProgress")}</strong><span>${processPercent}%</span></div><div class="process-progress-copy"><span><b>${t("ui.stagesReached", { reached: stage.reached, total: stages.length })}</b></span><span>${t("ui.currentPhase")}: <b>${safeText(currentStage)}</b></span></div><div class="process-progress-track" role="progressbar" aria-label="${safeText(t("ui.processProgress"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${processPercent}"><span style="width:${processPercent}%"></span></div></section>
             <div class="process-main-grid">
                 <section class="process-card process-now" data-process-widget="current-activity"><h3>${t("ui.currentActivity")}</h3><ul><li><i>◷</i><span>${complete ? t("ui.allValidationsReceived") : pending ? t("ui.waitingValidations", { count: pending }) : t("ui.waitingUpdate")}</span></li><li><i>◎</i><span>${complete ? t("ui.consensusClosed") : t("ui.consensusOpen")}</span></li><li><i>↻</i><span>${safeText(getLastValidationAge(events))}</span></li><li><i>◇</i><span>${complete ? t("ui.definitiveResult") : t("ui.provisionalMayChange")}</span></li></ul></section>
-                <section class="process-card process-validations"><h3>${t("ui.receivedValidations")}</h3><div class="process-validation-content"><div class="process-donut" style="--confirmed:${confirmedPercent * 3.6}deg;--contradicted:${(confirmedPercent + contradictedPercent) * 3.6}deg"><span><b>${safeText(ratio)}</b><small>${t("ui.percentCompleted", { percent: validationPercent })}</small></span></div><div class="process-validation-breakdown"><div><i class="confirmed"></i><span>${t("ui.confirmed")}</span><b>${votes.confirmed}</b></div><div><i class="contradicted"></i><span>${t("ui.disproved")}</span><b>${votes.contradicted}</b></div><div><i class="inconclusive"></i><span>${t("ui.inconclusive")}</span><b>${votes.inconclusive}</b></div><strong>${t("ui.pendingCount", { count: pending })}</strong></div></div></section>
+                <section class="process-card process-validations"><h3>${t("ui.receivedValidations")}</h3><div class="process-validation-content"><div class="process-donut" style="--confirmed:${confirmedPercent * 3.6}deg;--contradicted:${(confirmedPercent + contradictedPercent) * 3.6}deg"><span><b>${safeText(ratio)}</b><small>${t("ui.percentCompleted", { percent: validationPercent })}</small></span></div><div class="process-validation-breakdown"><div><i class="confirmed"></i><span>${t("ui.confirmed")}</span><b>${votes.confirmed}</b></div><div><i class="contradicted"></i><span>${t("ui.disproved")}</span><b>${votes.contradicted}</b></div><div><i class="inconclusive"></i><span>${t("ui.inconclusive")}</span><b>${votes.inconclusive}</b></div><div><i class="validation-error-text"></i><span>Error</span><b>${votes.errors}</b></div><strong>${t("ui.pendingCount", { count: pending })}</strong></div></div></section>
                 <section class="process-card process-provisional"><div class="process-section-title"><h3>${t("ui.provisionalResult")}</h3><span>${t("ui.provisional")}</span></div><strong class="provisional-result ${provisional.className}">${safeText(provisional.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>${t("ui.confirmed")}</small></div><div><b>${summary.contradictedAssertions}</b><small>${t("ui.disproved")}</small></div><div><b>${summary.inconclusiveAssertions}</b><small>${t("ui.inconclusive")}</small></div></div><p>${t("ui.provisionalNotice")}</p></section>
                 <section class="process-card process-activity" data-process-widget="recent-activity"><div class="process-section-title"><h3>${t("ui.recentActivity")}</h3><span>${t("ui.changesCount", { count: rows.length })}</span></div><ol>${recent.map(row => `<li><i>•</i><span><b>${safeText(row.label)}</b><small>${formatAnyDate(row.date)}</small></span></li>`).join("") || `<li>${t("ui.noActivity")}</li>`}</ol></section>
             </div>
@@ -1360,7 +1386,11 @@ function renderDetails(container, data, events = []) {
 
     const summary = buildVerificationSummary(data, events);
     const progressPercent = summary.totalValidations > 0 ? Math.round((summary.completedValidations / summary.totalValidations) * 100) : 0;
-    const consensusLabel = summary.pendingValidations === 0 && summary.totalValidations > 0 ? t("summary.fullConsensus") : t("summary.partialConsensus");
+    const consensusLabel = summary.errorValidations > 0
+        ? `Completed with ${summary.errorValidations} error(s)`
+        : summary.pendingValidations === 0 && summary.totalValidations > 0
+            ? t("summary.fullConsensus")
+            : t("summary.partialConsensus");
     const completedValidationsLabel = t("summary.completedValidations", {
         completed: summary.completedValidations,
         total: summary.totalValidations || summary.completedValidations,
@@ -2829,6 +2859,14 @@ function getAssertionResult(orderData, assertionId) {
     return orderData?.assertion_results?.[String(assertionId)] || null;
 }
 
+function isValidationError(validation = {}) {
+    return validation.execution_status === "ERROR";
+}
+
+function completedValidations(validators = {}) {
+    return Object.values(validators).filter(validation => validation?.execution_status === "COMPLETED");
+}
+
 function scorePercent(value) {
     const n = Number(value || 0);
     return `${formatMaxTwoDecimals(n * 100)}%`;
@@ -2842,43 +2880,51 @@ function renderScorePill(value, label, className) {
 
 function renderScorePills(result) {
     const scores = result?.scores || {TRUE: 0, FALSE: 0, UNKNOWN: 0};
+    const errors = Number(result?.errors_count || 0);
     return `
         <div class="vote-pills score-pills">
             ${renderScorePill(scores.TRUE, "TRUE", "vote-true")}
             ${renderScorePill(scores.FALSE, "FALSE", "vote-false")}
             ${renderScorePill(scores.UNKNOWN, "UNKNOWN", "vote-unknown")}
+            ${errors ? `<span class="vote-pill vote-error">ERROR ${errors}</span>` : ""}
         </div>
     `;
 }
 
 function preferredDomainsStatusFromPolicy(usePreferredDomains) {
-    if (usePreferredDomains === true) {
-        return { enabled: true, label: t("ui.yes"), title: "EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true", className: "preferred-domains-on" };
-    }
-    if (usePreferredDomains === false) {
-        return { enabled: false, label: "No", title: "EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=false", className: "preferred-domains-off" };
-    }
-    return null;
+    const mode = String(usePreferredDomains || "NONE").toUpperCase();
+    const labels = {
+        NONE: "No",
+        LOCAL: "Local",
+        EXT_OFFICIAL_FIRST: "Official first",
+        EXT_ONLY_OFFICIAL: "Only official",
+    };
+    if (!labels[mode]) return null;
+    return {
+        enabled: mode !== "NONE",
+        label: labels[mode],
+        title: `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=${mode}`,
+        className: mode === "NONE" ? "preferred-domains-off" : "preferred-domains-on",
+    };
 }
 
-function normalizeBooleanFlag(value) {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "string") {
-        const normalized = value.trim().toLowerCase();
-        if (["true", "1", "yes", "si", "sí"].includes(normalized)) return true;
-        if (["false", "0", "no"].includes(normalized)) return false;
-    }
-    return null;
+function normalizePreferredDomainsMode(value) {
+    if (typeof value !== "string") return null;
+    const mode = value.trim().toUpperCase();
+    return ["NONE", "LOCAL", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"].includes(mode) ? mode : null;
 }
 
 function preferredDomainsStatusFromEvidenceResponse(response) {
     if (!response || typeof response !== "object") return null;
 
-    const explicitPolicy = normalizeBooleanFlag(response.search_policy?.use_preferred_domains);
+    const explicitPolicy = normalizePreferredDomainsMode(response.search_policy?.use_preferred_domains);
     const fromPolicy = preferredDomainsStatusFromPolicy(explicitPolicy);
     if (fromPolicy) return fromPolicy;
 
     const resolution = response.domain_resolution || {};
+    const fromResolutionMode = preferredDomainsStatusFromPolicy(normalizePreferredDomainsMode(resolution.preferred_domains_mode));
+    if (fromResolutionMode) return fromResolutionMode;
+
     const preferredDomains = Array.isArray(resolution.preferred_domains) ? resolution.preferred_domains : [];
     const queries = Array.isArray(response.queries_executed) ? response.queries_executed : [];
     const hasSiteQueries = queries.some(query => String(query || "").trim().startsWith("site:"));
@@ -2897,7 +2943,7 @@ function preferredDomainsStatusFromEvidenceResponse(response) {
 
 function preferredDomainsInfoForValidation(info = {}) {
     const config = info.validator_config?.config || info.config || info.validator_config || {};
-    const explicitPolicy = normalizeBooleanFlag(
+    const explicitPolicy = normalizePreferredDomainsMode(
         info.search_policy?.use_preferred_domains
         ?? info.payload?.search_policy?.use_preferred_domains
         ?? config.evidence_search_use_preferred_domains
@@ -2978,10 +3024,12 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         const assertionText = resolveAssertionText(assertionId, assertions, orderData, validatorsObj);
 
         const assertionResult = getAssertionResult(orderData, assertionId);
-        const literals = Object.values(validatorsObj).map(v => getValidationLiteral(v.approval));
+        const completed = completedValidations(validatorsObj);
+        const literals = completed.map(v => getValidationLiteral(v.approval));
         const approvedCount = literals.filter(v => v === "True").length;
         const rejectedCount = literals.filter(v => v === "False").length;
         const unknownCount = literals.filter(v => v === "Unknown").length;
+        const errorCount = Object.values(validatorsObj).filter(isValidationError).length;
 
         let status = "unknown";
         if (assertionResult?.winner === "TRUE") status = "true";
@@ -2989,11 +3037,13 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         else if (approvedCount > rejectedCount) status = "true";
         else if (rejectedCount > approvedCount) status = "false";
         else if (unknownCount > 0) status = "pending";
+        else if (errorCount > 0) status = "error";
 
         const validatorsHtml = Object.entries(validatorsObj).map(([validator, info]) => {
-            const lit = getValidationLiteral(info.approval);
-            const litClass = lit === "True" ? "true-news" : lit === "False" ? "false-news" : "partial-news";
-            let desc = info.text || t("ui.noDescription");
+            const validationError = isValidationError(info);
+            const lit = validationError ? "ERROR" : getValidationLiteral(info.approval);
+            const litClass = validationError ? "validation-error-text" : lit === "True" ? "true-news" : lit === "False" ? "false-news" : "partial-news";
+            let desc = validationError ? (info.error_details?.message || info.error || info.text || "Validation failed") : (info.text || t("ui.noDescription"));
             if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
             const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
             const responseTime = formatDurationSeconds(info.response_time_seconds);
@@ -3004,11 +3054,12 @@ function renderValidationsTree(container, validations, assertions, orderData = n
             const reputationHtml = weightedDetail ? `<span>rep ${safeText(formatMaxTwoDecimals(weightedDetail.reputation))}</span>` : "";
             const weightHtml = `<div class="validator-weights"><span>${safeText(typeLabel)}</span>${reputationHtml}${preferredDomainsBadge}</div>`;
             return `
-                <div class="validator-card">
+                <div class="validator-card${validationError ? " validation-error-card" : ""}">
                     <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${safeText(info.validator_alias || validator)}</a></div>
                     <div class="validator-result ${litClass}">${lit}</div>
                     <div class="validator-desc">${safeText(desc)}</div>
                     <div class="validator-meta">
+                        ${validationError ? `<span class="validation-error-badge">${safeText(info.error_details?.stage || "VALIDATION")} · ${safeText(info.error_details?.code || "ERROR")}</span>` : ""}
                         ${weightHtml}
                         <div class="validator-response-time" title="${safeText(t("ui.requestResponseTime"))}"><span class="clock-icon" aria-hidden="true"></span>${safeText(responseTime)}</div>
                     </div>
@@ -3021,11 +3072,12 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         html += `
             <details class="validation-node">
                 <summary class="validation-summary">
-                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult ? ` → ${safeText(assertionResult.winner)}` : ""}</div>
+                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult?.winner ? ` → ${safeText(assertionResult.winner)}` : errorCount ? " → ERROR" : ""}</div>
                     ${assertionResult ? renderScorePills(assertionResult) : `<div class="vote-pills">
                         ${renderVotePill(approvedCount, "True", "vote-true")}
                         ${renderVotePill(rejectedCount, "False", "vote-false")}
                         ${renderVotePill(unknownCount, "Unknown", "vote-unknown")}
+                        ${errorCount ? renderVotePill(errorCount, "Error", "vote-error") : ""}
                     </div>`}
                 </summary>
                 <div class="validator-grid">
@@ -3264,6 +3316,9 @@ async function showValidatorValidations(validatorHash) {
 
             groupedOrders[orderId].validations[assertionId][validatorHash] = {
                 approval: v.approval,
+                execution_status: v.execution_status,
+                error: v.error,
+                error_details: v.error_details,
                 text: v.payload?.descripcion || v.payload?.text || v.text || "",
                 tx_hash: v.tx_hash,
                 validator_alias: data.config?.name || validatorHash,

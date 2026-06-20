@@ -109,8 +109,8 @@ El prompt RAG exige validar solo con las evidencias proporcionadas. Si no hay ev
 
 | Variante | Configuracion | Comportamiento |
 |---|---|---|
-| RAG general | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=false` | Construye queries desde texto, entidades, ubicaciones y contexto temporal, con busqueda general como fallback. |
-| RAG con dominios preferentes | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=true` | Usa perfiles Mongo `evidence_domain_profiles` para priorizar dominios por categoria, subcategoria, entidades y ubicaciones. |
+| RAG general | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE` | Construye queries desde texto, entidades, ubicaciones y contexto temporal, con busqueda general como fallback. |
+| RAG con dominios preferentes | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL` | Usa perfiles Mongo `evidence_domain_profiles` para priorizar dominios por categoria, subcategoria, entidades y ubicaciones. |
 | RAG sin Tavily | `TAVILY_API_KEY` vacio | Devuelve dominios seleccionados como evidencias placeholder; util para desarrollo, no para validacion factual completa. |
 | RAG con Tavily | `TAVILY_API_KEY` configurado | Ejecuta queries reales, fusiona resultados, deduplica URLs y limita resultados por dominio. |
 
@@ -168,7 +168,7 @@ La clasificacion real de cada worker se decide por variables de entorno:
 | `USE_EVIDENCE_SEARCH` | Activa recuperacion RAG para tipo 3. |
 | `ONLINE_SEARCH_ENABLED` | Activa sufijo `:online` para OpenRouter en tipo 2. |
 | `EVIDENCE_SEARCH_URL` | URL interna del microservicio de evidencias. |
-| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS` | Activa routing por perfiles de dominio. |
+| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS` | Estrategia de dominios: `NONE`, `LOCAL`, `EXT_OFFICIAL_FIRST` o `EXT_ONLY_OFFICIAL`. |
 
 En Kubernetes, `k8s/apis/validate-asertions/base/configmap-common.yaml` define defaults y prompts. Los overlays locales especializan cada worker. En la configuracion local actual:
 

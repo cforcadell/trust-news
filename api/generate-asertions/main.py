@@ -4,12 +4,12 @@ import asyncio
 import logging
 import uuid
 import httpx
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import aiohttp
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from dotenv import load_dotenv
 
 # Cargar env
@@ -96,6 +96,125 @@ RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))
 app = FastAPI(title="Generate Assertions Worker (Typed)")
 
 # ============================================================
+# Admin config
+# ============================================================
+class ProviderRuntimeConfig(BaseModel):
+    api_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
+class AdminConfigResponse(BaseModel):
+    provider: str
+    prompt: str
+    temperature: float
+    max_assertions: int
+    http_timeout: int
+    num_reintentos: int
+    retry_delay: float
+    admin_url: str
+    mistral: ProviderRuntimeConfig
+    gemini: ProviderRuntimeConfig
+    openrouter: ProviderRuntimeConfig
+
+
+class ProviderRuntimeConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
+class AdminConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Optional[str] = None
+    prompt: Optional[str] = None
+    temperature: Optional[float] = None
+    max_assertions: Optional[int] = None
+    http_timeout: Optional[int] = None
+    num_reintentos: Optional[int] = None
+    retry_delay: Optional[float] = None
+    admin_url: Optional[str] = None
+    mistral: Optional[ProviderRuntimeConfigUpdate] = None
+    gemini: Optional[ProviderRuntimeConfigUpdate] = None
+    openrouter: Optional[ProviderRuntimeConfigUpdate] = None
+
+
+def mask_secret(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    return "*" * 8
+
+
+def is_masked_secret(value: Optional[str]) -> bool:
+    return bool(value) and set(str(value)) == {"*"}
+
+
+def set_runtime_env(name: str, value: Any) -> None:
+    if value is None:
+        return
+    os.environ[name] = str(value)
+
+
+def normalize_provider(value: str) -> str:
+    provider = str(value or "").strip().lower()
+    allowed = {"mistral", "gemini", "openrouter"}
+    if provider not in allowed:
+        raise HTTPException(status_code=400, detail=f"Provider desconocido: {provider}. Valores permitidos: {', '.join(sorted(allowed))}")
+    return provider
+
+
+def normalize_positive_int(name: str, value: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{name} debe ser un entero.")
+    if parsed <= 0:
+        raise HTTPException(status_code=400, detail=f"{name} debe ser mayor que 0.")
+    return parsed
+
+
+def normalize_non_negative_float(name: str, value: float) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{name} debe ser numerico.")
+    if parsed < 0:
+        raise HTTPException(status_code=400, detail=f"{name} no puede ser negativo.")
+    return parsed
+
+
+def normalize_admin_config_response() -> AdminConfigResponse:
+    return AdminConfigResponse(
+        provider=AI_PROVIDER,
+        prompt=PROMPT,
+        temperature=TEMPERATURE,
+        max_assertions=MAX_ASSERTIONS,
+        http_timeout=HTTP_TIMEOUT,
+        num_reintentos=NUM_REINTENTOS,
+        retry_delay=RETRY_DELAY,
+        admin_url=ADMIN_URL,
+        mistral=ProviderRuntimeConfig(
+            api_url=MISTRAL_API_URL,
+            api_key=mask_secret(MISTRAL_API_KEY),
+            model=MISTRAL_MODEL,
+        ),
+        gemini=ProviderRuntimeConfig(
+            api_url=GEMINI_API_URL,
+            api_key=mask_secret(GEMINI_API_KEY),
+            model=GEMINI_MODEL,
+        ),
+        openrouter=ProviderRuntimeConfig(
+            api_url=OPENROUTER_API_URL,
+            api_key=mask_secret(OPENROUTER_API_KEY),
+            model=OPENROUTER_MODEL,
+        ),
+    )
+
+
+# ============================================================
 # Helpers Pydantic JSON Schema
 # ============================================================
 
@@ -117,6 +236,7 @@ async def call_mistral(text: str) -> List[Assertion]:
         raise HTTPException(status_code=500, detail="Mistral no está configurado en variables de entorno.")
 
     full_prompt = build_assertions_prompt(text)
+    logger.info(f"[generate-asertions] Mistral prompt:\n{full_prompt}")
     headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MISTRAL_MODEL,
@@ -131,6 +251,7 @@ async def call_mistral(text: str) -> List[Assertion]:
             try:
                 async with session.post(MISTRAL_API_URL, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
                     text_resp = await resp.text()
+                    logger.info(f"[generate-asertions] Mistral response status={resp.status} body:\n{text_resp}")
                     if resp.status != 200:
                         logger.error(f"Mistral status {resp.status}: {text_resp}")
                         if resp.status in [429, 500, 502, 503, 504]:
@@ -164,6 +285,7 @@ async def call_gemini(text: str) -> List[Assertion]:
         raise HTTPException(status_code=500, detail="Gemini no está configurado en variables de entorno.")
 
     full_prompt = build_assertions_prompt(text)
+    logger.info(f"[generate-asertions] Gemini prompt:\n{full_prompt}")
 
     api_endpoint = f"{GEMINI_API_URL}/models/{GEMINI_MODEL}:generateContent"
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
@@ -175,8 +297,8 @@ async def call_gemini(text: str) -> List[Assertion]:
         "contents": [{"parts": [{"text": full_prompt}]}],
         "generationConfig": {
             "temperature": TEMPERATURE,
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema
+            "responseMimeType": "application/json"
+            #,"responseSchema": response_schema
         }
     }
 
@@ -185,6 +307,7 @@ async def call_gemini(text: str) -> List[Assertion]:
             try:
                 async with session.post(api_endpoint, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
                     text_resp = await resp.text()
+                    logger.info(f"[generate-asertions] Gemini response status={resp.status} body:\n{text_resp}")
                     if resp.status != 200:
                         logger.error(f"Gemini status {resp.status}: {text_resp}")
                         if resp.status in [429, 500, 502, 503, 504]:
@@ -228,6 +351,7 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
     full_prompt = build_assertions_prompt(text)
     if contexto:
         full_prompt += f"\nContexto adicional:\n{contexto}"
+    logger.info(f"[generate-asertions] OpenRouter prompt:\n{full_prompt}")
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -255,7 +379,7 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
                 ) as resp:
 
                     text_resp = await resp.text()
-                    logger.debug(f"OpenRouter status: {resp.status}, body: {text_resp[:500]}")
+                    logger.info(f"[generate-asertions] OpenRouter response status={resp.status} body:\n{text_resp}")
 
                     if resp.status != 200:
                         # Si es un error de cuota o temporal, el except Exception lo capturará para reintentar
@@ -467,6 +591,99 @@ async def update_client_consumed(client_id: str, field: str, new_value: int):
 # ============================================================
 # Endpoint HTTP 
 # ============================================================
+@app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"])
+def get_admin_config():
+    """Consulta la configuracion runtime del generador de aserciones."""
+    return normalize_admin_config_response()
+
+
+@app.put("/admin/config", tags=["Admin"])
+async def update_admin_config(config: AdminConfigUpdate):
+    """Modifica la configuracion runtime del generador de aserciones."""
+    global AI_PROVIDER, PROMPT, TEMPERATURE, MAX_ASSERTIONS, HTTP_TIMEOUT
+    global NUM_REINTENTOS, MAX_RETRIES, RETRY_DELAY, ADMIN_URL
+    global MISTRAL_API_URL, MISTRAL_API_KEY, MISTRAL_MODEL
+    global GEMINI_API_URL, GEMINI_API_KEY, GEMINI_MODEL
+    global OPENROUTER_API_URL, OPENROUTER_API_KEY, OPENROUTER_MODEL
+
+    if config.provider is not None:
+        AI_PROVIDER = normalize_provider(config.provider)
+        set_runtime_env("AI_PROVIDER", AI_PROVIDER)
+
+    if config.prompt is not None:
+        PROMPT = config.prompt
+        set_runtime_env("PROMPT", PROMPT)
+
+    if config.temperature is not None:
+        TEMPERATURE = normalize_non_negative_float("TEMPERATURE", config.temperature)
+        set_runtime_env("TEMPERATURE", TEMPERATURE)
+
+    if config.max_assertions is not None:
+        MAX_ASSERTIONS = normalize_positive_int("MAX_ASSERTIONS", config.max_assertions)
+        set_runtime_env("MAX_ASSERTIONS", MAX_ASSERTIONS)
+
+    if config.http_timeout is not None:
+        HTTP_TIMEOUT = normalize_positive_int("HTTP_TIMEOUT", config.http_timeout)
+        set_runtime_env("HTTP_TIMEOUT", HTTP_TIMEOUT)
+
+    if config.num_reintentos is not None:
+        NUM_REINTENTOS = normalize_positive_int("NUM_REINTENTOS", config.num_reintentos)
+        MAX_RETRIES = NUM_REINTENTOS
+        set_runtime_env("NUM_REINTENTOS", NUM_REINTENTOS)
+        set_runtime_env("MAX_RETRIES", MAX_RETRIES)
+
+    if config.retry_delay is not None:
+        RETRY_DELAY = normalize_non_negative_float("RETRY_DELAY", config.retry_delay)
+        set_runtime_env("RETRY_DELAY", RETRY_DELAY)
+
+    if config.admin_url is not None:
+        ADMIN_URL = config.admin_url
+        set_runtime_env("ADMIN_URL", ADMIN_URL)
+
+    if config.mistral is not None:
+        if config.mistral.api_url is not None:
+            MISTRAL_API_URL = config.mistral.api_url
+            set_runtime_env("MISTRAL_API_URL", MISTRAL_API_URL)
+        if config.mistral.api_key is not None and not is_masked_secret(config.mistral.api_key):
+            MISTRAL_API_KEY = config.mistral.api_key
+            set_runtime_env("MISTRAL_API_KEY", MISTRAL_API_KEY)
+        if config.mistral.model is not None:
+            MISTRAL_MODEL = config.mistral.model
+            set_runtime_env("MISTRAL_MODEL", MISTRAL_MODEL)
+
+    if config.gemini is not None:
+        if config.gemini.api_url is not None:
+            GEMINI_API_URL = config.gemini.api_url
+            set_runtime_env("GEMINI_API_URL", GEMINI_API_URL)
+        if config.gemini.api_key is not None and not is_masked_secret(config.gemini.api_key):
+            GEMINI_API_KEY = config.gemini.api_key
+            set_runtime_env("GEMINI_API_KEY", GEMINI_API_KEY)
+        if config.gemini.model is not None:
+            GEMINI_MODEL = config.gemini.model
+            set_runtime_env("GEMINI_MODEL", GEMINI_MODEL)
+
+    if config.openrouter is not None:
+        if config.openrouter.api_url is not None:
+            OPENROUTER_API_URL = config.openrouter.api_url
+            set_runtime_env("OPENROUTER_API_URL", OPENROUTER_API_URL)
+        if config.openrouter.api_key is not None and not is_masked_secret(config.openrouter.api_key):
+            OPENROUTER_API_KEY = config.openrouter.api_key
+            set_runtime_env("OPENROUTER_API_KEY", OPENROUTER_API_KEY)
+        if config.openrouter.model is not None:
+            OPENROUTER_MODEL = config.openrouter.model
+            set_runtime_env("OPENROUTER_MODEL", OPENROUTER_MODEL)
+
+    logger.info(
+        "Configuracion de generate-asertions actualizada en memoria: "
+        f"provider={AI_PROVIDER.upper()} max_assertions={MAX_ASSERTIONS} temperature={TEMPERATURE}"
+    )
+    return {
+        "status": "ok",
+        "message": "Configuracion actualizada correctamente.",
+        "config": normalize_admin_config_response().model_dump(mode="json"),
+    }
+
+
 @app.post("/extraer")
 async def extraer_texto(
     body: TextoEntrada,

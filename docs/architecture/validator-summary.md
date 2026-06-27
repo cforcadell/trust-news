@@ -64,7 +64,7 @@ Para cualquier tipo automatico el flujo base es:
 
 1. Recibir una solicitud `assertion-validation-payload-v2`.
 2. Comprobar que el worker es automatico y tiene cliente AI inicializado.
-3. Si el tipo es RAG y `USE_EVIDENCE_SEARCH=true`, solicitar evidencias a `evidence-search`.
+3. Si el tipo es RAG (`VALIDATOR_TYPE=3`), solicitar evidencias a `evidence-search`.
 4. Construir el prompt con prompt especifico del tipo, contexto de noticia serializado, evidencias solo en RAG y texto de la asercion.
 5. Enviar el prompt al proveedor configurado (`mistral`, `gemini`, `openrouter` o `grok`).
 6. Parsear JSON del modelo con `resultado`, `descripcion` y, opcionalmente, `confidence`, `sources` y `evidence_used`.
@@ -79,7 +79,7 @@ Para cualquier tipo automatico el flujo base es:
 
 El worker usa el prompt `LLM_MEMORY_VALIDATION_PROMPT`. El modelo razona sobre la asercion con su conocimiento interno y el contexto incluido en el payload. No llama a `evidence-search` y no activa busqueda online.
 
-**Variables clave:** `VALIDATOR_TYPE=1`, `USE_EVIDENCE_SEARCH=false`, `ONLINE_SEARCH_ENABLED=false`, `LLM_MEMORY_VALIDATION_PROMPT`.
+**Variables clave:** `VALIDATOR_TYPE=1`, `LLM_MEMORY_VALIDATION_PROMPT`.
 
 **Uso esperado:** validador rapido y barato, util como senal inicial. Su peso es bajo (`0.25`) porque no aporta fuentes externas ni evidencia recuperada en tiempo de validacion.
 
@@ -89,9 +89,9 @@ El worker usa el prompt `LLM_MEMORY_VALIDATION_PROMPT`. El modelo razona sobre l
 
 El worker usa `LLM_SEARCH_VALIDATION_PROMPT`, que pide buscar evidencias actuales y devolver fuentes. No llama al microservicio `evidence-search`; delega la capacidad de busqueda al proveedor/modelo.
 
-En OpenRouter, si `ONLINE_SEARCH_ENABLED=true`, el modelo se transforma con sufijo `:online`. Por ejemplo, `openai/gpt-5-mini` pasa a `openai/gpt-5-mini:online`.
+En OpenRouter, cuando `VALIDATOR_TYPE=2`, el modelo se transforma automaticamente con sufijo `:online`. Por ejemplo, `openai/gpt-5-mini` pasa a `openai/gpt-5-mini:online`.
 
-**Variables clave:** `VALIDATOR_TYPE=2`, `ONLINE_SEARCH_ENABLED=true`, `USE_EVIDENCE_SEARCH=false`, `LLM_SEARCH_VALIDATION_PROMPT`.
+**Variables clave:** `VALIDATOR_TYPE=2`, `LLM_SEARCH_VALIDATION_PROMPT`.
 
 **Uso esperado:** validador con mas contexto temporal que el tipo 1, pero con menos control sobre recuperacion y ranking de fuentes que RAG. Su peso es medio (`0.50`).
 
@@ -99,11 +99,11 @@ En OpenRouter, si `ONLINE_SEARCH_ENABLED=true`, el modelo se transforma con sufi
 
 **Algoritmo:** recuperacion de evidencias + validacion estricta con LLM.
 
-El worker llama a `evidence-search` cuando `USE_EVIDENCE_SEARCH=true`. Ese servicio recibe la asercion enriquecida, construye una politica de busqueda y devuelve evidencias normalizadas. Despues el worker inyecta esas evidencias en el prompt `RAG_EVIDENCE_VALIDATION_PROMPT`.
+El worker llama a `evidence-search` siempre que `VALIDATOR_TYPE=3`. Ese servicio recibe la asercion enriquecida, construye una politica de busqueda y devuelve evidencias normalizadas. Despues el worker inyecta esas evidencias en el prompt `RAG_EVIDENCE_VALIDATION_PROMPT`.
 
 El prompt RAG exige validar solo con las evidencias proporcionadas. Si no hay evidencias suficientes, el comportamiento esperado es `UNKNOWN` o insuficiencia equivalente.
 
-**Variables clave:** `VALIDATOR_TYPE=3`, `USE_EVIDENCE_SEARCH=true`, `EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `RAG_EVIDENCE_VALIDATION_PROMPT`.
+**Variables clave:** `VALIDATOR_TYPE=3`, `EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `RAG_EVIDENCE_VALIDATION_PROMPT`.
 
 **Subcomportamientos RAG:**
 
@@ -165,8 +165,6 @@ La clasificacion real de cada worker se decide por variables de entorno:
 | `MODEL` | Modelo usado por el proveedor. |
 | `API_URL` | Endpoint del proveedor. |
 | `TEMPERATURE` | Temperatura del LLM. |
-| `USE_EVIDENCE_SEARCH` | Activa recuperacion RAG para tipo 3. |
-| `ONLINE_SEARCH_ENABLED` | Activa sufijo `:online` para OpenRouter en tipo 2. |
 | `EVIDENCE_SEARCH_URL` | URL interna del microservicio de evidencias. |
 | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS` | Estrategia de dominios: `NONE`, `LOCAL`, `EXT_OFFICIAL_FIRST` o `EXT_ONLY_OFFICIAL`. |
 

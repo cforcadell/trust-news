@@ -168,7 +168,6 @@ Objetivo: validar una asercion usando evidencias externas gestionadas por TrustN
 Configuracion del worker:
 
 - VALIDATOR_TYPE: "3"
-- USE_EVIDENCE_SEARCH: "true"
 - EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
 
 Flujo:
@@ -190,14 +189,12 @@ Objetivo: usar un modelo con busqueda online propia del proveedor.
 Configuracion:
 
 - VALIDATOR_TYPE: "2"
-- USE_EVIDENCE_SEARCH: "false"
-- ONLINE_SEARCH_ENABLED: "true"
 - AI_PROVIDER: "openrouter"
 - MODEL: "openai/gpt-5-mini"
 
 Comportamiento:
 
-- El worker no llama a evidence-search.
+- El worker no llama a evidence-search; la busqueda online se deriva de `VALIDATOR_TYPE=2`.
 - Para OpenRouter, envia el modelo con sufijo :online.
 - El prompt pide buscar evidencias actuales y devolver fuentes si el proveedor lo permite.
 

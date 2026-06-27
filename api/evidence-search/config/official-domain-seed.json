@@ -1,0 +1,9202 @@
+[
+  {
+    "domain": "imf.org",
+    "url": "https://imf.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldbank.org",
+    "url": "https://worldbank.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "data.worldbank.org",
+    "url": "https://data.worldbank.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "openknowledge.worldbank.org",
+    "url": "https://openknowledge.worldbank.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "oecd.org",
+    "url": "https://oecd.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "data.oecd.org",
+    "url": "https://data.oecd.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "stats.oecd.org",
+    "url": "https://stats.oecd.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bis.org",
+    "url": "https://bis.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ecb.europa.eu",
+    "url": "https://ecb.europa.eu/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bankofengland.co.uk",
+    "url": "https://bankofengland.co.uk/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "federalreserve.gov",
+    "url": "https://federalreserve.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "treasury.gov",
+    "url": "https://treasury.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bea.gov",
+    "url": "https://bea.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bls.gov",
+    "url": "https://bls.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "census.gov",
+    "url": "https://census.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sec.gov",
+    "url": "https://sec.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cftc.gov",
+    "url": "https://cftc.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ftc.gov",
+    "url": "https://ftc.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "irs.gov",
+    "url": "https://irs.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "commerce.gov",
+    "url": "https://commerce.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fincen.gov",
+    "url": "https://fincen.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ustreasury.gov",
+    "url": "https://ustreasury.gov/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eurostat.ec.europa.eu",
+    "url": "https://eurostat.ec.europa.eu/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "finance.ec.europa.eu",
+    "url": "https://finance.ec.europa.eu/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eib.org",
+    "url": "https://eib.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ebrd.com",
+    "url": "https://ebrd.com/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "adb.org",
+    "url": "https://adb.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "afdb.org",
+    "url": "https://afdb.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iadb.org",
+    "url": "https://iadb.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "wto.org",
+    "url": "https://wto.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unctad.org",
+    "url": "https://unctad.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fao.org",
+    "url": "https://fao.org/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "centralbank.ie",
+    "url": "https://centralbank.ie/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bundesbank.de",
+    "url": "https://bundesbank.de/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "banque-france.fr",
+    "url": "https://banque-france.fr/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bde.es",
+    "url": "https://bde.es/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bancaditalia.it",
+    "url": "https://bancaditalia.it/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dnb.nl",
+    "url": "https://dnb.nl/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "riksbank.se",
+    "url": "https://riksbank.se/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "snb.ch",
+    "url": "https://snb.ch/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bankofcanada.ca",
+    "url": "https://bankofcanada.ca/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rba.gov.au",
+    "url": "https://rba.gov.au/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rbnz.govt.nz",
+    "url": "https://rbnz.govt.nz/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "boj.or.jp",
+    "url": "https://boj.or.jp/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bok.or.kr",
+    "url": "https://bok.or.kr/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rbi.org.in",
+    "url": "https://rbi.org.in/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "resbank.co.za",
+    "url": "https://resbank.co.za/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "banxico.org.mx",
+    "url": "https://banxico.org.mx/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bcb.gov.br",
+    "url": "https://bcb.gov.br/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bcentral.cl",
+    "url": "https://bcentral.cl/",
+    "official": true,
+    "category_id": 1,
+    "source_types": [
+      "official",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "olympics.com",
+    "url": "https://olympics.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "paralympic.org",
+    "url": "https://paralympic.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fifa.com",
+    "url": "https://fifa.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "uefa.com",
+    "url": "https://uefa.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fiba.basketball",
+    "url": "https://fiba.basketball/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldathletics.org",
+    "url": "https://worldathletics.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldaquatics.com",
+    "url": "https://worldaquatics.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "world.rugby",
+    "url": "https://world.rugby/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "icc-cricket.com",
+    "url": "https://icc-cricket.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "itftennis.com",
+    "url": "https://itftennis.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "uci.org",
+    "url": "https://uci.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fih.hockey",
+    "url": "https://fih.hockey/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ihf.info",
+    "url": "https://ihf.info/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fivb.com",
+    "url": "https://fivb.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldrowing.com",
+    "url": "https://worldrowing.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "issf-sports.org",
+    "url": "https://issf-sports.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldarchery.sport",
+    "url": "https://worldarchery.sport/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "uww.org",
+    "url": "https://uww.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ijf.org",
+    "url": "https://ijf.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iwf.sport",
+    "url": "https://iwf.sport/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldtaekwondo.org",
+    "url": "https://worldtaekwondo.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bwf.sport",
+    "url": "https://bwf.sport/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ittf.com",
+    "url": "https://ittf.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldtriathlon.org",
+    "url": "https://worldtriathlon.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldskate.org",
+    "url": "https://worldskate.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "isu.org",
+    "url": "https://isu.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fis-ski.com",
+    "url": "https://fis-ski.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ibu.at",
+    "url": "https://ibu.at/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iihf.com",
+    "url": "https://iihf.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "canoeicf.com",
+    "url": "https://canoeicf.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sailing.org",
+    "url": "https://sailing.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "gymnastics.sport",
+    "url": "https://gymnastics.sport/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fei.org",
+    "url": "https://fei.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fia.com",
+    "url": "https://fia.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fim-moto.com",
+    "url": "https://fim-moto.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "wbsc.org",
+    "url": "https://wbsc.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iba.sport",
+    "url": "https://iba.sport/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "worldboxing.org",
+    "url": "https://worldboxing.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "wdsf.org",
+    "url": "https://wdsf.org/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "teamusa.com",
+    "url": "https://teamusa.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "olympic.ca",
+    "url": "https://olympic.ca/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "teamgb.com",
+    "url": "https://teamgb.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "olympics.com.au",
+    "url": "https://olympics.com.au/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "olympic.org.nz",
+    "url": "https://olympic.org.nz/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "franceolympique.com",
+    "url": "https://franceolympique.com/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dosb.de",
+    "url": "https://dosb.de/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "coni.it",
+    "url": "https://coni.it/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "coe.es",
+    "url": "https://coe.es/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "olympic.org.my",
+    "url": "https://olympic.org.my/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "olympic.org.ph",
+    "url": "https://olympic.org.ph/",
+    "official": true,
+    "category_id": 2,
+    "source_types": [
+      "official",
+      "sports_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "un.org",
+    "url": "https://un.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "elections.europa.eu",
+    "url": "https://elections.europa.eu/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "europarl.europa.eu",
+    "url": "https://europarl.europa.eu/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "consilium.europa.eu",
+    "url": "https://consilium.europa.eu/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "commission.europa.eu",
+    "url": "https://commission.europa.eu/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "curia.europa.eu",
+    "url": "https://curia.europa.eu/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nato.int",
+    "url": "https://nato.int/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "osce.org",
+    "url": "https://osce.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "oas.org",
+    "url": "https://oas.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "au.int",
+    "url": "https://au.int/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "asean.org",
+    "url": "https://asean.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "parliament.uk",
+    "url": "https://parliament.uk/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "gov.uk",
+    "url": "https://gov.uk/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "whitehouse.gov",
+    "url": "https://whitehouse.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "congress.gov",
+    "url": "https://congress.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "senate.gov",
+    "url": "https://senate.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "house.gov",
+    "url": "https://house.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "elections.ca",
+    "url": "https://elections.ca/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fec.gov",
+    "url": "https://fec.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eac.gov",
+    "url": "https://eac.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "electoralcommission.org.uk",
+    "url": "https://electoralcommission.org.uk/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "aec.gov.au",
+    "url": "https://aec.gov.au/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "elections.org.za",
+    "url": "https://elections.org.za/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ine.mx",
+    "url": "https://ine.mx/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "elections.govt.nz",
+    "url": "https://elections.govt.nz/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eci.gov.in",
+    "url": "https://eci.gov.in/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "comelec.gov.ph",
+    "url": "https://comelec.gov.ph/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tribunal-electoral.gob.pa",
+    "url": "https://tribunal-electoral.gob.pa/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "onpe.gob.pe",
+    "url": "https://onpe.gob.pe/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "jne.gob.pe",
+    "url": "https://jne.gob.pe/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "registraduria.gov.co",
+    "url": "https://registraduria.gov.co/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cne.gov.co",
+    "url": "https://cne.gov.co/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "servel.cl",
+    "url": "https://servel.cl/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "electoral.gob.ar",
+    "url": "https://electoral.gob.ar/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tse.jus.br",
+    "url": "https://tse.jus.br/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tse.go.cr",
+    "url": "https://tse.go.cr/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "venice.coe.int",
+    "url": "https://venice.coe.int/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "coe.int",
+    "url": "https://coe.int/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "icj-cij.org",
+    "url": "https://icj-cij.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "icc-cpi.int",
+    "url": "https://icc-cpi.int/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ohchr.org",
+    "url": "https://ohchr.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "aceproject.org",
+    "url": "https://aceproject.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "idea.int",
+    "url": "https://idea.int/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ipu.org",
+    "url": "https://ipu.org/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "poderjudicial.es",
+    "url": "https://poderjudicial.es/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tribunalconstitucional.es",
+    "url": "https://tribunalconstitucional.es/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "supremecourt.gov",
+    "url": "https://supremecourt.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "justice.gov",
+    "url": "https://justice.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "state.gov",
+    "url": "https://state.gov/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mofa.go.jp",
+    "url": "https://mofa.go.jp/",
+    "official": true,
+    "category_id": 3,
+    "source_types": [
+      "official",
+      "political_organization",
+      "legal"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "itu.int",
+    "url": "https://itu.int/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iso.org",
+    "url": "https://iso.org/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iec.ch",
+    "url": "https://iec.ch/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nist.gov",
+    "url": "https://nist.gov/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cisa.gov",
+    "url": "https://cisa.gov/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ncsc.gov.uk",
+    "url": "https://ncsc.gov.uk/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "enisa.europa.eu",
+    "url": "https://enisa.europa.eu/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cert.europa.eu",
+    "url": "https://cert.europa.eu/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "uspto.gov",
+    "url": "https://uspto.gov/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "epo.org",
+    "url": "https://epo.org/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "euipo.europa.eu",
+    "url": "https://euipo.europa.eu/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ipo.gov.uk",
+    "url": "https://ipo.gov.uk/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "jpo.go.jp",
+    "url": "https://jpo.go.jp/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "kipo.go.kr",
+    "url": "https://kipo.go.kr/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cnipa.gov.cn",
+    "url": "https://cnipa.gov.cn/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ipindia.gov.in",
+    "url": "https://ipindia.gov.in/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ipaustralia.gov.au",
+    "url": "https://ipaustralia.gov.au/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "innovation.canada.ca",
+    "url": "https://innovation.canada.ca/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "crtc.gc.ca",
+    "url": "https://crtc.gc.ca/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fcc.gov",
+    "url": "https://fcc.gov/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ntia.gov",
+    "url": "https://ntia.gov/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ofcom.org.uk",
+    "url": "https://ofcom.org.uk/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "arcep.fr",
+    "url": "https://arcep.fr/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bnetza.de",
+    "url": "https://bnetza.de/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "agcom.it",
+    "url": "https://agcom.it/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cnmc.es",
+    "url": "https://cnmc.es/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "anatel.gov.br",
+    "url": "https://anatel.gov.br/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tra.gov.ae",
+    "url": "https://tra.gov.ae/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "imda.gov.sg",
+    "url": "https://imda.gov.sg/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "acma.gov.au",
+    "url": "https://acma.gov.au/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cert.govt.nz",
+    "url": "https://cert.govt.nz/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cyber.gov.au",
+    "url": "https://cyber.gov.au/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cyber.gc.ca",
+    "url": "https://cyber.gc.ca/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ncsc.govt.nz",
+    "url": "https://ncsc.govt.nz/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bsi.bund.de",
+    "url": "https://bsi.bund.de/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ssi.gouv.fr",
+    "url": "https://ssi.gouv.fr/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "digital-strategy.ec.europa.eu",
+    "url": "https://digital-strategy.ec.europa.eu/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "egi.eu",
+    "url": "https://egi.eu/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "euramet.org",
+    "url": "https://euramet.org/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bipm.org",
+    "url": "https://bipm.org/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "npl.co.uk",
+    "url": "https://npl.co.uk/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ptb.de",
+    "url": "https://ptb.de/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nrc.canada.ca",
+    "url": "https://nrc.canada.ca/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "serpro.gov.br",
+    "url": "https://serpro.gov.br/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "red.es",
+    "url": "https://red.es/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "incibe.es",
+    "url": "https://incibe.es/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nic.br",
+    "url": "https://nic.br/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iana.org",
+    "url": "https://iana.org/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "icann.org",
+    "url": "https://icann.org/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ripe.net",
+    "url": "https://ripe.net/",
+    "official": true,
+    "category_id": 4,
+    "source_types": [
+      "official",
+      "technology"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "who.int",
+    "url": "https://who.int/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "paho.org",
+    "url": "https://paho.org/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ecdc.europa.eu",
+    "url": "https://ecdc.europa.eu/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cdc.gov",
+    "url": "https://cdc.gov/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nih.gov",
+    "url": "https://nih.gov/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fda.gov",
+    "url": "https://fda.gov/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "hhs.gov",
+    "url": "https://hhs.gov/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cms.gov",
+    "url": "https://cms.gov/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "health.gov.au",
+    "url": "https://health.gov.au/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "england.nhs.uk",
+    "url": "https://england.nhs.uk/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nhs.uk",
+    "url": "https://nhs.uk/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nice.org.uk",
+    "url": "https://nice.org.uk/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mhra.gov.uk",
+    "url": "https://mhra.gov.uk/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "santepubliquefrance.fr",
+    "url": "https://santepubliquefrance.fr/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "has-sante.fr",
+    "url": "https://has-sante.fr/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rki.de",
+    "url": "https://rki.de/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "pei.de",
+    "url": "https://pei.de/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ema.europa.eu",
+    "url": "https://ema.europa.eu/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "health.ec.europa.eu",
+    "url": "https://health.ec.europa.eu/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "aemps.gob.es",
+    "url": "https://aemps.gob.es/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "isciii.es",
+    "url": "https://isciii.es/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "salute.gov.it",
+    "url": "https://salute.gov.it/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rivm.nl",
+    "url": "https://rivm.nl/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sciensano.be",
+    "url": "https://sciensano.be/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "folkhalsomyndigheten.se",
+    "url": "https://folkhalsomyndigheten.se/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fhi.no",
+    "url": "https://fhi.no/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "thl.fi",
+    "url": "https://thl.fi/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "health-infobase.canada.ca",
+    "url": "https://health-infobase.canada.ca/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "publichealthontario.ca",
+    "url": "https://publichealthontario.ca/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "hc-sc.gc.ca",
+    "url": "https://hc-sc.gc.ca/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "health.govt.nz",
+    "url": "https://health.govt.nz/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "moh.gov.sg",
+    "url": "https://moh.gov.sg/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "doh.gov.ph",
+    "url": "https://doh.gov.ph/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "moh.gov.my",
+    "url": "https://moh.gov.my/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "moh.gov.sa",
+    "url": "https://moh.gov.sa/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mhlw.go.jp",
+    "url": "https://mhlw.go.jp/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "kdca.go.kr",
+    "url": "https://kdca.go.kr/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nhc.gov.cn",
+    "url": "https://nhc.gov.cn/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mohfw.gov.in",
+    "url": "https://mohfw.gov.in/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "health.gov.za",
+    "url": "https://health.gov.za/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "health.gov.il",
+    "url": "https://health.gov.il/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "salud.gob.mx",
+    "url": "https://salud.gob.mx/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "saude.gov.br",
+    "url": "https://saude.gov.br/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "msal.gob.ar",
+    "url": "https://msal.gob.ar/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "minsal.cl",
+    "url": "https://minsal.cl/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "minsalud.gov.co",
+    "url": "https://minsalud.gov.co/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "minsa.gob.pe",
+    "url": "https://minsa.gob.pe/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "msp.gub.uy",
+    "url": "https://msp.gub.uy/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "afro.who.int",
+    "url": "https://afro.who.int/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "emro.who.int",
+    "url": "https://emro.who.int/",
+    "official": true,
+    "category_id": 5,
+    "source_types": [
+      "official",
+      "healthcare"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ebu.ch",
+    "url": "https://ebu.ch/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bbc.co.uk",
+    "url": "https://bbc.co.uk/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "pbs.org",
+    "url": "https://pbs.org/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "npr.org",
+    "url": "https://npr.org/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cbc.ca",
+    "url": "https://cbc.ca/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "radio-canada.ca",
+    "url": "https://radio-canada.ca/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "abc.net.au",
+    "url": "https://abc.net.au/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sbs.com.au",
+    "url": "https://sbs.com.au/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rnz.co.nz",
+    "url": "https://rnz.co.nz/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tvnz.co.nz",
+    "url": "https://tvnz.co.nz/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nhk.or.jp",
+    "url": "https://nhk.or.jp/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "kbs.co.kr",
+    "url": "https://kbs.co.kr/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rthk.hk",
+    "url": "https://rthk.hk/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mediacorp.sg",
+    "url": "https://mediacorp.sg/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rfi.fr",
+    "url": "https://rfi.fr/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "francetelevisions.fr",
+    "url": "https://francetelevisions.fr/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "arte.tv",
+    "url": "https://arte.tv/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dw.com",
+    "url": "https://dw.com/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "zdf.de",
+    "url": "https://zdf.de/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ard.de",
+    "url": "https://ard.de/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rai.it",
+    "url": "https://rai.it/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rtve.es",
+    "url": "https://rtve.es/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rtp.pt",
+    "url": "https://rtp.pt/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "vrt.be",
+    "url": "https://vrt.be/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nos.nl",
+    "url": "https://nos.nl/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "yle.fi",
+    "url": "https://yle.fi/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "svt.se",
+    "url": "https://svt.se/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nrk.no",
+    "url": "https://nrk.no/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dr.dk",
+    "url": "https://dr.dk/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ruv.is",
+    "url": "https://ruv.is/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "orf.at",
+    "url": "https://orf.at/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "srgssr.ch",
+    "url": "https://srgssr.ch/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rsi.ch",
+    "url": "https://rsi.ch/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bfi.org.uk",
+    "url": "https://bfi.org.uk/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cnc.fr",
+    "url": "https://cnc.fr/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "screenaustralia.gov.au",
+    "url": "https://screenaustralia.gov.au/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nzfilm.co.nz",
+    "url": "https://nzfilm.co.nz/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "telefilm.ca",
+    "url": "https://telefilm.ca/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "creativeeurope.eu",
+    "url": "https://creativeeurope.eu/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "audiovisuel.culture.gouv.fr",
+    "url": "https://audiovisuel.culture.gouv.fr/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "copyright.gov",
+    "url": "https://copyright.gov/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "arts.gov",
+    "url": "https://arts.gov/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "neh.gov",
+    "url": "https://neh.gov/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "artscouncil.org.uk",
+    "url": "https://artscouncil.org.uk/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "canadacouncil.ca",
+    "url": "https://canadacouncil.ca/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "kulturradet.no",
+    "url": "https://kulturradet.no/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "filminstitutet.se",
+    "url": "https://filminstitutet.se/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ica.art",
+    "url": "https://ica.art/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ifacca.org",
+    "url": "https://ifacca.org/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "europeanfilmacademy.org",
+    "url": "https://europeanfilmacademy.org/",
+    "official": true,
+    "category_id": 6,
+    "source_types": [
+      "official",
+      "international_media",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nasa.gov",
+    "url": "https://nasa.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "esa.int",
+    "url": "https://esa.int/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "noaa.gov",
+    "url": "https://noaa.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "usgs.gov",
+    "url": "https://usgs.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nsf.gov",
+    "url": "https://nsf.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "science.nasa.gov",
+    "url": "https://science.nasa.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "jpl.nasa.gov",
+    "url": "https://jpl.nasa.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nifa.usda.gov",
+    "url": "https://nifa.usda.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "science.osti.gov",
+    "url": "https://science.osti.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "arpa-e.energy.gov",
+    "url": "https://arpa-e.energy.gov/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cnrs.fr",
+    "url": "https://cnrs.fr/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "inrae.fr",
+    "url": "https://inrae.fr/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "inria.fr",
+    "url": "https://inria.fr/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mpg.de",
+    "url": "https://mpg.de/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "helmholtz.de",
+    "url": "https://helmholtz.de/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dlr.de",
+    "url": "https://dlr.de/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fraunhofer.de",
+    "url": "https://fraunhofer.de/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ukri.org",
+    "url": "https://ukri.org/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nerc.ukri.org",
+    "url": "https://nerc.ukri.org/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "stfc.ukri.org",
+    "url": "https://stfc.ukri.org/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cern.ch",
+    "url": "https://cern.ch/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ebi.ac.uk",
+    "url": "https://ebi.ac.uk/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "embl.org",
+    "url": "https://embl.org/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eso.org",
+    "url": "https://eso.org/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "almaobservatory.org",
+    "url": "https://almaobservatory.org/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "skao.int",
+    "url": "https://skao.int/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "csiro.au",
+    "url": "https://csiro.au/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ansto.gov.au",
+    "url": "https://ansto.gov.au/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ga.gov.au",
+    "url": "https://ga.gov.au/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bom.gov.au",
+    "url": "https://bom.gov.au/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "niwa.co.nz",
+    "url": "https://niwa.co.nz/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "gns.cri.nz",
+    "url": "https://gns.cri.nz/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "jaxa.jp",
+    "url": "https://jaxa.jp/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "riken.jp",
+    "url": "https://riken.jp/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nims.go.jp",
+    "url": "https://nims.go.jp/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "jamstec.go.jp",
+    "url": "https://jamstec.go.jp/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "kari.re.kr",
+    "url": "https://kari.re.kr/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nrf.re.kr",
+    "url": "https://nrf.re.kr/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "most.gov.cn",
+    "url": "https://most.gov.cn/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cas.cn",
+    "url": "https://cas.cn/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dst.gov.in",
+    "url": "https://dst.gov.in/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "isro.gov.in",
+    "url": "https://isro.gov.in/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "csir.res.in",
+    "url": "https://csir.res.in/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "conicet.gov.ar",
+    "url": "https://conicet.gov.ar/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cnpq.br",
+    "url": "https://cnpq.br/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "embrapa.br",
+    "url": "https://embrapa.br/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fapesp.br",
+    "url": "https://fapesp.br/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "minciencias.gov.co",
+    "url": "https://minciencias.gov.co/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "anid.cl",
+    "url": "https://anid.cl/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "csic.es",
+    "url": "https://csic.es/",
+    "official": true,
+    "category_id": 7,
+    "source_types": [
+      "official",
+      "academic",
+      "statistics"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unesco.org",
+    "url": "https://unesco.org/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "whc.unesco.org",
+    "url": "https://whc.unesco.org/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ich.unesco.org",
+    "url": "https://ich.unesco.org/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "loc.gov",
+    "url": "https://loc.gov/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "archives.gov",
+    "url": "https://archives.gov/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "si.edu",
+    "url": "https://si.edu/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "britishmuseum.org",
+    "url": "https://britishmuseum.org/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nationalgallery.org.uk",
+    "url": "https://nationalgallery.org.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tate.org.uk",
+    "url": "https://tate.org.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "vam.ac.uk",
+    "url": "https://vam.ac.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iwm.org.uk",
+    "url": "https://iwm.org.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bl.uk",
+    "url": "https://bl.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nationalarchives.gov.uk",
+    "url": "https://nationalarchives.gov.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "culture.ec.europa.eu",
+    "url": "https://culture.ec.europa.eu/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "europeana.eu",
+    "url": "https://europeana.eu/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "louvre.fr",
+    "url": "https://louvre.fr/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "musee-orsay.fr",
+    "url": "https://musee-orsay.fr/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "quaibranly.fr",
+    "url": "https://quaibranly.fr/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "culture.gouv.fr",
+    "url": "https://culture.gouv.fr/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bnf.fr",
+    "url": "https://bnf.fr/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dnb.de",
+    "url": "https://dnb.de/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "smb.museum",
+    "url": "https://smb.museum/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bundesarchiv.de",
+    "url": "https://bundesarchiv.de/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rijksmuseum.nl",
+    "url": "https://rijksmuseum.nl/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "kb.nl",
+    "url": "https://kb.nl/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "museodelprado.es",
+    "url": "https://museodelprado.es/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mcu.es",
+    "url": "https://mcu.es/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bne.es",
+    "url": "https://bne.es/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "uffizi.it",
+    "url": "https://uffizi.it/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "beniculturali.it",
+    "url": "https://beniculturali.it/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iccu.sbn.it",
+    "url": "https://iccu.sbn.it/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "culturaitalia.it",
+    "url": "https://culturaitalia.it/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nga.gov",
+    "url": "https://nga.gov/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nma.gov.au",
+    "url": "https://nma.gov.au/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "naa.gov.au",
+    "url": "https://naa.gov.au/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sl.nsw.gov.au",
+    "url": "https://sl.nsw.gov.au/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "tepapa.govt.nz",
+    "url": "https://tepapa.govt.nz/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "natlib.govt.nz",
+    "url": "https://natlib.govt.nz/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nlb.gov.sg",
+    "url": "https://nlb.gov.sg/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nhb.gov.sg",
+    "url": "https://nhb.gov.sg/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nationalmuseum.gov.ph",
+    "url": "https://nationalmuseum.gov.ph/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "museum.go.kr",
+    "url": "https://museum.go.kr/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ndl.go.jp",
+    "url": "https://ndl.go.jp/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bunka.go.jp",
+    "url": "https://bunka.go.jp/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "wdl.org",
+    "url": "https://wdl.org/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "europeanheritageawards.eu",
+    "url": "https://europeanheritageawards.eu/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "historicengland.org.uk",
+    "url": "https://historicengland.org.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "english-heritage.org.uk",
+    "url": "https://english-heritage.org.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nationaltrust.org.uk",
+    "url": "https://nationaltrust.org.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "rct.uk",
+    "url": "https://rct.uk/",
+    "official": true,
+    "category_id": 8,
+    "source_types": [
+      "official",
+      "cultural_institution"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unep.org",
+    "url": "https://unep.org/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unfccc.int",
+    "url": "https://unfccc.int/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ipcc.ch",
+    "url": "https://ipcc.ch/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "wmo.int",
+    "url": "https://wmo.int/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cbd.int",
+    "url": "https://cbd.int/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cites.org",
+    "url": "https://cites.org/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iucn.org",
+    "url": "https://iucn.org/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eea.europa.eu",
+    "url": "https://eea.europa.eu/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "environment.ec.europa.eu",
+    "url": "https://environment.ec.europa.eu/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "epa.gov",
+    "url": "https://epa.gov/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fws.gov",
+    "url": "https://fws.gov/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nps.gov",
+    "url": "https://nps.gov/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fs.usda.gov",
+    "url": "https://fs.usda.gov/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "blm.gov",
+    "url": "https://blm.gov/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dcceew.gov.au",
+    "url": "https://dcceew.gov.au/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ec.gc.ca",
+    "url": "https://ec.gc.ca/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "natural-resources.canada.ca",
+    "url": "https://natural-resources.canada.ca/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "environmentagency.gov.uk",
+    "url": "https://environmentagency.gov.uk/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "naturalengland.org.uk",
+    "url": "https://naturalengland.org.uk/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sepa.org.uk",
+    "url": "https://sepa.org.uk/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nature.scot",
+    "url": "https://nature.scot/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ofb.gouv.fr",
+    "url": "https://ofb.gouv.fr/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ecologie.gouv.fr",
+    "url": "https://ecologie.gouv.fr/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "umweltbundesamt.de",
+    "url": "https://umweltbundesamt.de/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bfn.de",
+    "url": "https://bfn.de/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "miteco.gob.es",
+    "url": "https://miteco.gob.es/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "isprambiente.gov.it",
+    "url": "https://isprambiente.gov.it/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "minambiente.it",
+    "url": "https://minambiente.it/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "pbl.nl",
+    "url": "https://pbl.nl/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "naturvardsverket.se",
+    "url": "https://naturvardsverket.se/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "miljodirektoratet.no",
+    "url": "https://miljodirektoratet.no/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "syke.fi",
+    "url": "https://syke.fi/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mst.dk",
+    "url": "https://mst.dk/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "epa.ie",
+    "url": "https://epa.ie/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bafu.admin.ch",
+    "url": "https://bafu.admin.ch/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "environment.govt.nz",
+    "url": "https://environment.govt.nz/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "doc.govt.nz",
+    "url": "https://doc.govt.nz/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "environment.nsw.gov.au",
+    "url": "https://environment.nsw.gov.au/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "env.go.jp",
+    "url": "https://env.go.jp/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "biodic.go.jp",
+    "url": "https://biodic.go.jp/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mee.gov.cn",
+    "url": "https://mee.gov.cn/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "moef.gov.in",
+    "url": "https://moef.gov.in/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "environment.gov.za",
+    "url": "https://environment.gov.za/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sanbi.org",
+    "url": "https://sanbi.org/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ibama.gov.br",
+    "url": "https://ibama.gov.br/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "icmbio.gov.br",
+    "url": "https://icmbio.gov.br/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "semarnat.gob.mx",
+    "url": "https://semarnat.gob.mx/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mma.gob.cl",
+    "url": "https://mma.gob.cl/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "minambiente.gov.co",
+    "url": "https://minambiente.gov.co/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "minam.gob.pe",
+    "url": "https://minam.gob.pe/",
+    "official": true,
+    "category_id": 9,
+    "source_types": [
+      "official",
+      "environmental_organization"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ilo.org",
+    "url": "https://ilo.org/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unicef.org",
+    "url": "https://unicef.org/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unwomen.org",
+    "url": "https://unwomen.org/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unhcr.org",
+    "url": "https://unhcr.org/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "iom.int",
+    "url": "https://iom.int/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "undp.org",
+    "url": "https://undp.org/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "unhabitat.org",
+    "url": "https://unhabitat.org/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eige.europa.eu",
+    "url": "https://eige.europa.eu/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "fra.europa.eu",
+    "url": "https://fra.europa.eu/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "eurofound.europa.eu",
+    "url": "https://eurofound.europa.eu/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "etf.europa.eu",
+    "url": "https://etf.europa.eu/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "cedefop.europa.eu",
+    "url": "https://cedefop.europa.eu/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dol.gov",
+    "url": "https://dol.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ssa.gov",
+    "url": "https://ssa.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "acf.hhs.gov",
+    "url": "https://acf.hhs.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "acl.gov",
+    "url": "https://acl.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "samhsa.gov",
+    "url": "https://samhsa.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "ed.gov",
+    "url": "https://ed.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "hud.gov",
+    "url": "https://hud.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "va.gov",
+    "url": "https://va.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "benefits.gov",
+    "url": "https://benefits.gov/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "service-public.fr",
+    "url": "https://service-public.fr/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "travail-emploi.gouv.fr",
+    "url": "https://travail-emploi.gouv.fr/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "solidarites.gouv.fr",
+    "url": "https://solidarites.gouv.fr/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "arbeitsagentur.de",
+    "url": "https://arbeitsagentur.de/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "bmas.de",
+    "url": "https://bmas.de/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "sozialministerium.at",
+    "url": "https://sozialministerium.at/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "seg-social.es",
+    "url": "https://seg-social.es/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "inclusion.gob.es",
+    "url": "https://inclusion.gob.es/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mites.gob.es",
+    "url": "https://mites.gob.es/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "lavoro.gov.it",
+    "url": "https://lavoro.gov.it/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "inps.it",
+    "url": "https://inps.it/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "uwv.nl",
+    "url": "https://uwv.nl/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "svb.nl",
+    "url": "https://svb.nl/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "forsakringskassan.se",
+    "url": "https://forsakringskassan.se/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "arbetsformedlingen.se",
+    "url": "https://arbetsformedlingen.se/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "nav.no",
+    "url": "https://nav.no/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "kela.fi",
+    "url": "https://kela.fi/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "borger.dk",
+    "url": "https://borger.dk/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "udbetalingdanmark.dk",
+    "url": "https://udbetalingdanmark.dk/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "citizensinformation.ie",
+    "url": "https://citizensinformation.ie/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "servicesaustralia.gov.au",
+    "url": "https://servicesaustralia.gov.au/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "dss.gov.au",
+    "url": "https://dss.gov.au/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "my.gov.au",
+    "url": "https://my.gov.au/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "msd.govt.nz",
+    "url": "https://msd.govt.nz/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "workandincome.govt.nz",
+    "url": "https://workandincome.govt.nz/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "servicecanada.gc.ca",
+    "url": "https://servicecanada.gc.ca/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "esdc.gc.ca",
+    "url": "https://esdc.gc.ca/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "mom.gov.sg",
+    "url": "https://mom.gov.sg/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  {
+    "domain": "labour.gov.in",
+    "url": "https://labour.gov.in/",
+    "official": true,
+    "category_id": 10,
+    "source_types": [
+      "official",
+      "international_organization",
+      "nonprofit"
+    ],
+    "locations": [
+      {
+        "scope": "global"
+      }
+    ],
+    "languages": [
+      "en"
+    ]
+  }
+]

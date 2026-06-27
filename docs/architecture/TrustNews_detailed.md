@@ -930,10 +930,13 @@ Example configuration:
 APP_MODE=LIGHT
 # APP_MODE=BLOCKCHAIN
 
+VALIDATOR_TYPE=3
+EVIDENCE_SEARCH_URL=http://evidence-search.apis.svc.cluster.local:8074
 EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL
 # EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE
 # EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_OFFICIAL_FIRST
 # EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_ONLY_OFFICIAL
+EVIDENCE_SEARCH_PREFERRED_PROFILE_ID=default
 
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS=86400
 
@@ -966,6 +969,31 @@ CONTRACT_ADDRESS=...
 PRIVATE_KEY=...
 ACCOUNT_ADDRESS=...
 ```
+
+### Validator behavior variables
+
+`VALIDATOR_TYPE` is the source of truth for the validator behavior. `USE_EVIDENCE_SEARCH` and `ONLINE_SEARCH_ENABLED` are no longer configured as environment variables; their effective values are derived from the validator type and may still appear in API/config responses for backward compatibility.
+
+| Variable | Supported values | Activates / controls | Incompatibilities and notes |
+|---|---|---|---|
+| `VALIDATOR_TYPE` | `1`, `2`, `3`, `4`, `5` | Selects the validation algorithm. | Only `1`, `2` and `3` run automatic validation in `validate-asertions`. |
+| `VALIDATOR_TYPE=1` | `LLM_MEMORY_VALIDATION` | LLM memory validation with `LLM_MEMORY_VALIDATION_PROMPT`. | Does not call `evidence-search` and does not enable online model mode. |
+| `VALIDATOR_TYPE=2` | `LLM_SEARCH_VALIDATION` | LLM online-search validation with `LLM_SEARCH_VALIDATION_PROMPT`. | In OpenRouter, the worker sends the model as `MODEL:online` automatically. |
+| `VALIDATOR_TYPE=3` | `RAG_EVIDENCE_VALIDATION` | RAG validation: always calls `EVIDENCE_SEARCH_URL` and injects returned evidences into `RAG_EVIDENCE_VALIDATION_PROMPT`. | Requires `evidence-search` to be reachable. Preferred-domain variables only matter for this type. |
+| `VALIDATOR_TYPE=4` | `DETERMINISTIC_VALIDATION` | Registers/configures a deterministic validator. | No automatic listener/LLM validation is implemented in this worker. |
+| `VALIDATOR_TYPE=5` | `HUMAN` | Registers/configures a human/manual validator. | No automatic listener/LLM validation is implemented in this worker. |
+| `EVIDENCE_SEARCH_URL` | URL | Evidence-search service endpoint. | Used only by `VALIDATOR_TYPE=3`. |
+| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS` | `NONE`, `LOCAL`, `EXT_OFFICIAL_FIRST`, `EXT_ONLY_OFFICIAL` | Evidence source strategy sent to `evidence-search`. | Used only by `VALIDATOR_TYPE=3`; invalid values fail validation. |
+| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE` | `NONE` | Generic evidence search without local preferred-domain scoring. | Does not use `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID`. |
+| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL` | `LOCAL` | Loads MongoDB domain profiles and scores preferred domains locally. | Only valid for RAG/type `3`; uses `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID`. |
+| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_OFFICIAL_FIRST` | `EXT_OFFICIAL_FIRST` | Asks the external provider to prioritize official sources. | Does not use local profile scoring. |
+| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_ONLY_OFFICIAL` | `EXT_ONLY_OFFICIAL` | Asks the external provider to restrict results to official sources when supported. | General fallback search is disabled by code for this mode. |
+| `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID` | String, default `default` | Selects the local MongoDB domain profile. | Used only with `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL`. |
+| `EVIDENCE_SEARCH_MAX_DOMAINS` | Integer, default `8` | Max preferred domains sent in the evidence policy. | Used only by RAG/type `3`. |
+| `EVIDENCE_SEARCH_MAX_SOURCES` | Integer, default `5` | Max evidence results requested by the validator. | Used only by RAG/type `3`. |
+| `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN` | Integer, default `2` | Query fan-out limit. | Used only by RAG/type `3`. |
+| `AI_PROVIDER` | `mistral`, `gemini`, `openrouter`, `grok` | LLM provider for automatic validators. | Automatic types reject unknown providers and `none`. |
+| `MODEL` | Provider-specific model id | LLM model. | With `VALIDATOR_TYPE=2` and OpenRouter, `:online` is appended at request time unless already present. |
 
 Real secrets must never be committed to the repository.
 
@@ -1121,7 +1149,7 @@ It is a flexible automated validation platform that can operate in two ways:
 * **LIGHT mode**, for centralized systems that need fast and simple AI-based validation.
 * **BLOCKCHAIN mode**, for systems that require stronger auditability, integrity and traceability.
 
-It also supports RAG-assisted evidence search controlled by:
+It also supports RAG-assisted evidence search when `VALIDATOR_TYPE=3`. Source strategy is controlled by:
 
 ```env
 EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS

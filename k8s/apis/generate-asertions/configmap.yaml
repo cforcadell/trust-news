@@ -12,6 +12,7 @@ data:
   GEMINI_API_URL: "https://generativelanguage.googleapis.com/v1beta"
 
   AI_PROVIDER: "openrouter"
+  #AI_PROVIDER: "gemini"
   TEMPERATURE: "0.1"
   MAX_ASSERTIONS: "7"
 

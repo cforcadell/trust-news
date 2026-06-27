@@ -54,8 +54,10 @@ def test_build_queries_v2_uses_preferred_domains_and_general_fallback():
 
     queries = evidence.build_queries_v2(enriched_assertion(), domain_resolution, policy)
 
-    assert queries[0].startswith("site:ine.es El paro")
-    assert queries[1].startswith("site:sepe.es El paro")
+    assert queries[0].startswith("(site:ine.es OR site:sepe.es)")
+    assert "site:ine.es" in queries[0]
+    assert "site:sepe.es" in queries[0]
+    assert "El paro en Barcelona" in queries[0]
     assert queries[-1].startswith("El paro")
 
 

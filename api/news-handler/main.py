@@ -127,6 +127,7 @@ NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain:8073")
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions:8071")
 
 IMPORT_URL_TIMEOUT_SECONDS = float(os.getenv("IMPORT_URL_TIMEOUT_SECONDS", "10"))
+IMPORT_URL_RETRIES = int(os.getenv("IMPORT_URL_RETRIES", "2"))
 IMPORT_URL_MAX_REDIRECTS = int(os.getenv("IMPORT_URL_MAX_REDIRECTS", "3"))
 IMPORT_URL_MAX_BYTES = int(os.getenv("IMPORT_URL_MAX_BYTES", str(2 * 1024 * 1024)))
 IMPORT_URL_USER_AGENT = os.getenv("IMPORT_URL_USER_AGENT", "Mozilla/5.0 (compatible; TrustNewsArticleExtractor/1.0)")
@@ -1834,23 +1835,23 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB with pre-generated assertions")
 
-    # Convertir a Assertion
-    from common.models.async_models import Assertion
-    assertions_for_payload = [
-        Assertion(idAssertion=a.idAssertion, text=a.text, categoryId=a.categoryId)
-        for a in req.assertions
-    ]
-
     # Publicar respuesta equivalente a la del generador; el consumidor bifurca por validation_mode.
     try:
         validation_mode = normalize_validation_mode(req.validation_mode)
+        assertions_document = build_assertions_document_v2(
+            text=req.text,
+            assertions=[a.to_enriched() if hasattr(a, "to_enriched") else a for a in req.assertions],
+            mode=validation_mode,
+            provider="news-handler",
+        )
         msg = AssertionsGeneratedResponse(
             action="assertions_generated",
             order_id=order_id,
             payload={
                 "text": req.text,
                 "publisher": "news-handler",
-                "assertions": assertions_for_payload,
+                "assertions": req.assertions,
+                "assertions_document": assertions_document,
                 "validation_mode": validation_mode
             }
         )
@@ -2169,13 +2170,29 @@ def fetch_public_url_text(raw_url: str) -> Tuple[str, str]:
     with requests.Session() as session:
         session.trust_env = False
         for redirect_count in range(IMPORT_URL_MAX_REDIRECTS + 1):
-            resp = session.get(
-                current_url,
-                timeout=IMPORT_URL_TIMEOUT_SECONDS,
-                headers=headers,
-                allow_redirects=False,
-                stream=True,
-            )
+            last_timeout = None
+            for attempt in range(IMPORT_URL_RETRIES + 1):
+                try:
+                    resp = session.get(
+                        current_url,
+                        timeout=IMPORT_URL_TIMEOUT_SECONDS,
+                        headers=headers,
+                        allow_redirects=False,
+                        stream=True,
+                    )
+                    break
+                except requests.exceptions.Timeout as exc:
+                    last_timeout = exc
+                    if attempt >= IMPORT_URL_RETRIES:
+                        raise
+                    time.sleep(min(0.5 * (attempt + 1), 2.0))
+                    logger.warning(
+                        f"Timeout importing URL; retrying | url={current_url} "
+                        f"attempt={attempt + 1}/{IMPORT_URL_RETRIES + 1} "
+                        f"timeout_seconds={IMPORT_URL_TIMEOUT_SECONDS}"
+                    )
+            else:
+                raise last_timeout
 
             if resp.is_redirect or resp.is_permanent_redirect:
                 location = resp.headers.get("Location")

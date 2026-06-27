@@ -31,7 +31,7 @@ from common.models.protocol_models import (
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
 from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
 from common.utils.llm_json import strip_json_markdown
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 
@@ -136,8 +136,6 @@ LLM_SEARCH_VALIDATION_PROMPT = os.getenv("LLM_SEARCH_VALIDATION_PROMPT", "")
 RAG_EVIDENCE_VALIDATION_PROMPT = os.getenv("RAG_EVIDENCE_VALIDATION_PROMPT", "")
 VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.LLM_MEMORY_VALIDATION)))))
-USE_EVIDENCE_SEARCH = os.getenv("USE_EVIDENCE_SEARCH", "false").lower() == "true"
-ONLINE_SEARCH_ENABLED = os.getenv("ONLINE_SEARCH_ENABLED", "false").lower() == "true"
 EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
 EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", "default")
 AUTOMATIC_VALIDATOR_TYPES = {
@@ -190,14 +188,14 @@ class AdminConfigResponse(BaseModel):
     api_key: Optional[str] = None
 
 class AdminConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: Optional[str] = None
     model: Optional[str] = None
     categories: Optional[List[CategoryId]] = None
     api_url: Optional[str] = None
     service_url: Optional[str] = None
     validator_type: Optional[int] = None
-    use_evidence_search: Optional[bool] = None
-    online_search_enabled: Optional[bool] = None
     evidence_search_url: Optional[str] = None
     evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
     evidence_search_preferred_profile_id: Optional[str] = None
@@ -216,6 +214,14 @@ class AIValidator(ABC):
 
 def is_automatic_validator() -> bool:
     return VALIDATOR_TYPE in AUTOMATIC_VALIDATOR_TYPES
+
+
+def uses_evidence_search() -> bool:
+    return VALIDATOR_TYPE == ValidatorType.RAG_EVIDENCE_VALIDATION
+
+
+def uses_online_search() -> bool:
+    return VALIDATOR_TYPE == ValidatorType.LLM_SEARCH_VALIDATION
 
 
 def selected_validation_prompt() -> str:
@@ -299,8 +305,8 @@ def normalize_admin_config_response() -> AdminConfigResponse:
         api_url=API_URL,
         service_url=VALIDATOR_SERVICE_URL or None,
         validator_type=int(VALIDATOR_TYPE),
-        use_evidence_search=USE_EVIDENCE_SEARCH,
-        online_search_enabled=ONLINE_SEARCH_ENABLED,
+        use_evidence_search=uses_evidence_search(),
+        online_search_enabled=uses_online_search(),
         evidence_search_url=EVIDENCE_SEARCH_URL,
         evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
         evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
@@ -463,7 +469,7 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
     return verdict, description, extras, evidence_response
 
 def openrouter_model_for_current_type(model: str) -> str:
-    if VALIDATOR_TYPE == ValidatorType.LLM_SEARCH_VALIDATION and ONLINE_SEARCH_ENABLED and not model.endswith(":online"):
+    if uses_online_search() and not model.endswith(":online"):
         return f"{model}:online"
     return model
 
@@ -485,7 +491,7 @@ def current_evidence_search_policy() -> Dict[str, Any]:
 
 
 def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    if VALIDATOR_TYPE != ValidatorType.RAG_EVIDENCE_VALIDATION or not USE_EVIDENCE_SEARCH:
+    if not uses_evidence_search():
         return [], None
     search_policy = current_evidence_search_policy()
     request_payload = {
@@ -744,7 +750,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "evidence_used": extras.get("evidence_used", []),
             "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
             "evidence_search_response": evidence_response,
-            "search_policy": current_evidence_search_policy() if USE_EVIDENCE_SEARCH else None,
+            "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "correlation_id": payload.correlation_id,
             "execution_status": execution_status,
@@ -840,10 +846,10 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         updated_date=updated_date or VALIDATOR_UPDATED_DATE,
         end_date=end_date,
         status=status,
-        use_evidence_search=USE_EVIDENCE_SEARCH,
+        use_evidence_search=uses_evidence_search(),
         evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
         evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
-        online_search_enabled=ONLINE_SEARCH_ENABLED,
+        online_search_enabled=uses_online_search(),
         evidence_search_url=EVIDENCE_SEARCH_URL,
     )
 
@@ -892,7 +898,7 @@ async def registrar_validacion_internal(
             "sources": extras.get("sources", []),
             "evidence_used": extras.get("evidence_used", []),
             "evidence_search_response": evidence_response,
-            "search_policy": current_evidence_search_policy() if USE_EVIDENCE_SEARCH else None,
+            "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
         }
 
         validation_doc_bytes = json.dumps(
@@ -1114,15 +1120,14 @@ async def update_admin_config(config: AdminConfigUpdate):
     Refresca la configuración IPFS/blockchain cuando cambian los campos públicos del validador.
     """
     global AI_PROVIDER, API_URL, API_KEY, PRIVATE_KEY, ACCOUNT_ADDRESS, VALIDATOR_TYPE, VALIDATOR_SERVICE_URL
-    global USE_EVIDENCE_SEARCH, ONLINE_SEARCH_ENABLED, EVIDENCE_SEARCH_URL, EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
+    global EVIDENCE_SEARCH_URL, EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
     global ai_validator, VALIDATOR_CATEGORIES
+
 
     old_provider = AI_PROVIDER
     old_model = ai_validator.model if ai_validator else os.getenv("MODEL", "none")
     old_validator_type = VALIDATOR_TYPE
     old_service_url = VALIDATOR_SERVICE_URL
-    old_use_evidence_search = USE_EVIDENCE_SEARCH
-    old_online_search_enabled = ONLINE_SEARCH_ENABLED
     old_evidence_search_url = EVIDENCE_SEARCH_URL
     old_use_preferred_domains = current_evidence_search_use_preferred_domains()
     old_preferred_profile_id = current_evidence_search_preferred_profile_id()
@@ -1178,14 +1183,6 @@ async def update_admin_config(config: AdminConfigUpdate):
         VALIDATOR_TYPE = new_validator_type
         set_runtime_env("VALIDATOR_TYPE", int(VALIDATOR_TYPE))
 
-    if config.use_evidence_search is not None:
-        USE_EVIDENCE_SEARCH = config.use_evidence_search
-        set_runtime_env("USE_EVIDENCE_SEARCH", str(USE_EVIDENCE_SEARCH).lower())
-
-    if config.online_search_enabled is not None:
-        ONLINE_SEARCH_ENABLED = config.online_search_enabled
-        set_runtime_env("ONLINE_SEARCH_ENABLED", str(ONLINE_SEARCH_ENABLED).lower())
-
     if config.evidence_search_url is not None:
         EVIDENCE_SEARCH_URL = config.evidence_search_url
         set_runtime_env("EVIDENCE_SEARCH_URL", EVIDENCE_SEARCH_URL)
@@ -1229,8 +1226,6 @@ async def update_admin_config(config: AdminConfigUpdate):
         VALIDATOR_CATEGORIES != old_categories,
         VALIDATOR_TYPE != old_validator_type,
         VALIDATOR_SERVICE_URL != old_service_url,
-        USE_EVIDENCE_SEARCH != old_use_evidence_search,
-        ONLINE_SEARCH_ENABLED != old_online_search_enabled,
         EVIDENCE_SEARCH_URL != old_evidence_search_url,
         current_evidence_search_use_preferred_domains() != old_use_preferred_domains,
         current_evidence_search_preferred_profile_id() != old_preferred_profile_id,
@@ -1297,7 +1292,7 @@ async def publish_blockchain_validation_error(
             "sources": [],
             "evidence_used": [],
             "evidence_search_response": evidence_response,
-            "search_policy": current_evidence_search_policy() if USE_EVIDENCE_SEARCH else None,
+            "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
             "execution_status": ValidationExecutionStatus.ERROR,
             "error": error_details.message,
             "error_details": error_details,

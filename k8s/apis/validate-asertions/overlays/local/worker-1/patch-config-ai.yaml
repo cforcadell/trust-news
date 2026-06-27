@@ -20,13 +20,9 @@ spec:
           value: "http://validate-service-1.apis.svc.cluster.local:8070"
         - name: VALIDATOR_TYPE
           value: "3"
-        - name: USE_EVIDENCE_SEARCH
-          value: "true"
-        - name: ONLINE_SEARCH_ENABLED
-          value: "false"
         - name: EVIDENCE_SEARCH_URL
           value: "http://evidence-search.apis.svc.cluster.local:8074"
         - name: EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
-          value: "NONE"
+          value: "EXT_ONLY_OFFICIAL"
         - name: EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
           value: "default"

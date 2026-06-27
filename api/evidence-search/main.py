@@ -157,8 +157,15 @@ def build_queries_v2(assertion: Dict[str, Any], domain_resolution: Dict[str, Any
     for request in plan["requests"]:
         query = request["query"]
         if request["mode"] == "preferred_domains":
-            for domain in request.get("include_domains") or []:
-                queries.append(f"site:{domain} {query}".strip())
+            domains = [str(domain).strip() for domain in request.get("include_domains") or [] if str(domain).strip()]
+            if domains:
+                if len(domains) == 1:
+                    queries.append(f"site:{domains[0]} {query}".strip())
+                else:
+                    site_terms = " OR ".join(f"site:{domain}" for domain in domains)
+                    queries.append(f"({site_terms}) {query}".strip())
+            else:
+                queries.append(query)
         else:
             queries.append(query)
 

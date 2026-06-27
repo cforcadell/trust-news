@@ -84,7 +84,7 @@ Develop v0.0.11.
 
 - endpoints de recomendación de modelos apirouter economicos OK 
 - cambiar login  skin OK
-- Restylish de FE
+- Restylish de FE OK
 - cambiar resultado validacion con mejoras visuales OK
 - soporte multiidioma (castellano + ingles) OK
 - Nueva monitotizacion de mongodb +  Separacion de usuarios admin/user + uso de appuser en apis OK
@@ -107,13 +107,13 @@ Develop v0.0.11.
 
         - Nueva Configuracion de validadores 
             - levantar 1 validador RAG_EVIDENCE_VALIDATION escuchando a todas las categoria con preferred domains bien configurado. Modelos LLM simples  RAG_EVIDENCE_VALIDATION 
-                - Configurar un profile con muchas más url configuradas
+                - Configurar un profile con muchas más url configuradas OK
             - 2  validadores RAG_EVIDENCE_VALIDATION registrado a todas las categorias sin preferred domains. Modelos LLM simples diferentes que validen las mismas evidencias OK
             
 
 
     - Nuevos validadores con búsqueda online (LLM_SEARCH_VALIDATION) OK
-        diferentes modos de buscar segun variable EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+        diferentes modos de buscar segun variable EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS OK
             LOCAL: Busca en PROFILE de mongo_db dominios precargados en funcion de contexto y pasa a proveedor de busqueda externo (exa y tavily)
             NONE: Delega en exa y tavily la busqueda externa
             EXT_OFFICIAL_FIRST: Delega en exa y tavily la busqueda externa y le dice que primero busque resultados oficiales
@@ -123,19 +123,6 @@ Develop v0.0.11.
 -Estandarizacion de categorias en base a su categoryId a lo largo de toda la cadena
     
 
-Hecho. Añadí el healthcheck y el filtro previo en modo light.
-
-Cambios principales:
-
-validate-asertions ahora expone GET /health en main.py (line 959).
-La config pública del validador incluye service_url, publicada en IPFS/Kafka desde async_models.py (line 194) y main.py (line 702).
-dispatch_light_validation_requests ahora hace healthcheck por validador una sola vez por proceso/orden de validación y cachea el resultado en memoria local de esa ejecución. Si falla, no envía validaciones a ese validador para ninguna aserción: main.py (line 482).
-Añadí VALIDATOR_SERVICE_URL a los overlays local/prod de los workers para apuntar a validate-service-{n}.apis.svc.cluster.local:8070.
-Verificación:
-
-Pasó python3 -m py_compile api/news-handler/main.py api/validate-asertions/main.py api/common/models/async_models.py.
-Nota: tras desplegar, los validators deben publicar/refrescar su config para que news-handler reciba service_url; el startup existente ya publica config cuando arranca el worker.
-    
 
 
 

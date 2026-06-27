@@ -11,7 +11,7 @@
 - `POST /registrar_validador`: sube la configuración del validador a IPFS, registra el validador en el contrato y publica evento de configuración.
 - `POST /desregistrar_validador`: marca configuración como baja, actualiza blockchain, desregistra el validador y publica evento.
 - `GET /admin/config`: devuelve proveedor, modelo, categorías y configuración runtime del validador. `private_key` y `api_key` se devuelven ofuscados como `********`.
-- `PUT /admin/config`: actualiza proveedor/modelo/categorías y permite cambiar `api_url`, `validator_type`, `use_evidence_search`, `online_search_enabled`, `evidence_search_url`, `evidence_search_use_preferred_domains`, `evidence_search_preferred_profile_id`, `private_key`, `account_address` y `api_key`. Si se envía `private_key` o `api_key` como solo asteriscos, se conserva el valor actual. Refresca configuración IPFS y actualiza blockchain cuando cambia el hash público de configuración.
+- `PUT /admin/config`: actualiza proveedor/modelo/categorías y permite cambiar `api_url`, `validator_type`, `evidence_search_url`, `evidence_search_use_preferred_domains`, `evidence_search_preferred_profile_id`, `private_key`, `account_address` y `api_key`. Si se envía `private_key` o `api_key` como solo asteriscos, se conserva el valor actual. Refresca configuración IPFS y actualiza blockchain cuando cambia el hash público de configuración.
 
 ## Daemons
 
@@ -38,8 +38,8 @@ Durante la carga del módulo configura Web3, contrato, proveedor LLM, prompts, c
 - `VALIDATOR_TYPE`: tipo de validador.
 - `VALIDATOR_CATEGORIES`: lista JSON de categorías soportadas.
 - `VALIDATOR_ACTIVE_DATE`, `VALIDATOR_UPDATED_DATE`: metadatos temporales de configuración.
-- `USE_EVIDENCE_SEARCH`: activa integración RAG/evidence-search.
-- `ONLINE_SEARCH_ENABLED`: activa comportamiento de búsqueda online en el prompt/proveedor.
+- `VALIDATOR_TYPE=2`: activa validación online; en OpenRouter añade `:online` al modelo en tiempo de petición.
+- `VALIDATOR_TYPE=3`: activa integración RAG/evidence-search.
 - `EVIDENCE_SEARCH_URL`: URL del servicio evidence-search.
 - `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID`, `EVIDENCE_SEARCH_MAX_DOMAINS`, `EVIDENCE_SEARCH_MAX_SOURCES`, `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN`: política de búsqueda de evidencias.
 - `TEMPERATURE`: temperatura del modelo.

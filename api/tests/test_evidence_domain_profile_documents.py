@@ -25,6 +25,11 @@ spec = importlib.util.spec_from_file_location("init_evidence_search_domains", IN
 init_domains = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(init_domains)
 
+OFFICIAL_GENERATOR = ROOT / "scripts/k8s/apis/generate-official-evidence-domain-profile.py"
+official_spec = importlib.util.spec_from_file_location("generate_official_evidence_domain_profile", OFFICIAL_GENERATOR)
+official_generator = importlib.util.module_from_spec(official_spec)
+official_spec.loader.exec_module(official_generator)
+
 
 class FakeCollection:
     def __init__(self, docs):
@@ -51,13 +56,13 @@ def test_seed_is_one_complete_profile_and_validates_references():
     docs = init_domains.build_profile_documents(profile)
     assert len(docs) == 1
     assert docs[0]["profile_id"] == "default"
-    assert len(docs[0]["domains"]) == 1000
+    assert len(docs[0]["domains"]) == 500
     counts = {category_id: 0 for category_id in CATEGORY_IDS}
     for domain in docs[0]["domains"]:
         for category in domain["categories"]:
             counts[category["category_id"]] += 1
-        assert any(location["scope"] in {"global", "macroregion"} for location in domain["locations"])
-    assert counts == {category_id: 100 for category_id in CATEGORY_IDS}
+        assert any(location["scope"] in {"global", "macroregion", "country", "international_organization"} for location in domain["locations"])
+    assert counts == {category_id: 50 for category_id in CATEGORY_IDS}
 
 
 @pytest.mark.asyncio
@@ -99,3 +104,25 @@ def test_every_category_has_at_least_ten_subcategories():
                 counts[category_id] = counts.get(category_id, 0) + 1
     assert set(counts) == set(CATEGORY_IDS)
     assert min(counts.values()) >= MIN_SUBCATEGORIES_PER_CATEGORY
+
+
+def test_official_profile_generator_rejects_forbidden_domains():
+    assert official_generator.normalize_domain("https://www.wikipedia.org/wiki/Test") is None
+    assert official_generator.normalize_domain("https://news.medium.com/example") is None
+
+
+def test_official_profile_generator_fails_when_category_is_incomplete():
+    configs = seed_configs()
+    seed = [
+        {
+            "domain": "who.int",
+            "url": "https://www.who.int/",
+            "official": True,
+            "category_id": 5,
+            "source_types": ["official", "healthcare"],
+            "locations": [{"scope": "global"}],
+            "languages": ["en"],
+        }
+    ]
+    with pytest.raises(ValueError, match="not contain enough accepted domains"):
+        official_generator.build_profile(seed, configs, 1, False, "official-default")

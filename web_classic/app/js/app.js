@@ -291,6 +291,52 @@ function renderAssertionsProgress(container, message, percent = 0) {
     `;
 }
 
+function normalizeGeneratedAssertion(assertion, fallbackIndex = 0) {
+    const normalized = { ...(assertion || {}) };
+    const assertionId = normalized.idAssertion ?? normalized.assertion_id ?? normalized.id ?? String(fallbackIndex + 1);
+    normalized.idAssertion = String(assertionId);
+    if (normalized.assertion_id == null && /^\d+$/.test(String(assertionId))) {
+        normalized.assertion_id = Number(assertionId);
+    }
+    if (normalized.assertion_index == null) {
+        normalized.assertion_index = Math.max(0, Number(normalized.assertion_id ?? fallbackIndex + 1) - 1);
+    }
+    return normalized;
+}
+
+function generatedAssertionsFromResponse(data) {
+    const payload = data?.payload || data || {};
+    const candidates = [
+        payload.assertions,
+        payload.assertions_document?.assertions,
+        payload.assertionsDocument?.assertions,
+        data?.assertions,
+        data?.assertions_document?.assertions
+    ].filter(Array.isArray);
+
+    const best = candidates.reduce((selected, current) => current.length > selected.length ? current : selected, []);
+    return best.map((assertion, index) => normalizeGeneratedAssertion(assertion, index));
+}
+
+function encodeAssertionDraft(assertion) {
+    try {
+        return encodeURIComponent(JSON.stringify(assertion || {}));
+    } catch (err) {
+        console.warn("No se pudo serializar la aserción generada", err);
+        return "%7B%7D";
+    }
+}
+
+function decodeAssertionDraft(value) {
+    if (!value) return {};
+    try {
+        return JSON.parse(decodeURIComponent(value));
+    } catch (err) {
+        console.warn("No se pudo recuperar la aserción original", err);
+        return {};
+    }
+}
+
 async function generateAssertionsFromText(text) {
     try {
         const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
@@ -311,7 +357,9 @@ async function generateAssertionsFromText(text) {
         if (!response.ok) throw new Error(`Error API: ${response.status}`);
 
         const data = await response.json();
-        return data.payload.assertions || [];
+        const assertions = generatedAssertionsFromResponse(data);
+        console.info(`Aserciones generadas recibidas: ${assertions.length}`);
+        return assertions;
     } catch (err) {
         console.error("Error al generar aserciones:", err);
         alertMessage(t("ui.assertionsServiceError"), "error");
@@ -387,7 +435,7 @@ function renderEditableAssertionsTable(container, assertions) {
                 ${assertions.map((a, index) => {
                     const assertionId = getAssertionId(a, index + 1);
                     return `
-                    <tr data-id="${safeText(assertionId)}">
+                    <tr data-id="${safeText(assertionId)}" data-assertion="${safeText(encodeAssertionDraft(a))}">
                         <td>${safeText(assertionId)}</td>
                         <td contenteditable="true" class="editable-text">${safeText(extractAssertionText(a))}</td>
                         <td>${renderCategorySelect(getAssertionCategory(a) || 1)}</td>
@@ -474,16 +522,25 @@ async function publishWithAssertions() {
     const assertions = [];
     const rows = container.querySelectorAll("tbody tr");
     rows.forEach(row => {
-        const idAssertion = row.dataset.id || crypto.randomUUID(); // Genera ID si no existe
+        const originalAssertion = decodeAssertionDraft(row.dataset.assertion);
+        const idAssertion = row.dataset.id || originalAssertion.idAssertion || originalAssertion.assertion_id || crypto.randomUUID();
         const textCell = row.querySelector(".editable-text");
         const categorySelect = row.querySelector(".category-select");
 
         if (textCell && categorySelect) {
-            assertions.push({
-                idAssertion: idAssertion,
+            const assertion = {
+                ...originalAssertion,
+                idAssertion: String(idAssertion),
                 text: textCell.innerText.trim(),
                 categoryId: parseInt(categorySelect.value)
-            });
+            };
+            if (assertion.assertion_id == null && /^\d+$/.test(String(idAssertion))) {
+                assertion.assertion_id = Number(idAssertion);
+            }
+            if (assertion.assertion_index == null && assertion.assertion_id != null) {
+                assertion.assertion_index = Math.max(0, Number(assertion.assertion_id) - 1);
+            }
+            assertions.push(assertion);
         }
     });
 

@@ -27,15 +27,15 @@ configs = json.load(open(sys.argv[2], encoding="utf-8"))
 assert profile.get("profile_id") == "default"
 assert profile.get("domains")
 domains = profile["domains"]
-assert len(domains) >= 1000, f"default profile requires at least 1000 domains: {len(domains)}"
+assert len(domains) >= 500, f"default profile requires at least 500 domains: {len(domains)}"
 domain_names = [item["domain"] for item in domains]
 assert len(domain_names) == len(set(domain_names)), "default profile contains duplicate domains"
 domain_counts = {category_id: 0 for category_id in range(1, 11)}
 for domain in domains:
-    assert any(location.get("scope") in {"global", "macroregion"} for location in domain.get("locations", [])), f"domain without global/macroregion scope: {domain['domain']}"
+    assert any(location.get("scope") in {"global", "macroregion", "country", "international_organization"} for location in domain.get("locations", [])), f"domain without accepted official scope: {domain['domain']}"
     for category in domain.get("categories", []):
         domain_counts[category["category_id"]] += 1
-assert all(value >= 100 for value in domain_counts.values()), f"default profile requires 100 domains per category: {domain_counts}"
+assert all(value >= 50 for value in domain_counts.values()), f"default profile requires 50 domains per category: {domain_counts}"
 assert {item.get("config_type") for item in configs} == {"subcategories", "location_types", "source_types"}
 subcategories = next(item for item in configs if item["config_type"] == "subcategories")
 counts = {category_id: 0 for category_id in range(1, 11)}
@@ -97,13 +97,13 @@ for (const legacyIndex of ["idx_profile_docs", "uniq_profile_index", "uniq_profi
 profiles.createIndex({profile_id: 1}, {name: "uniq_domain_profile_id", unique: true});
 
 const storedProfile = profiles.findOne({profile_id: profile.profile_id});
-if (!storedProfile || storedProfile.domains.length < 1000) throw new Error("Stored default profile requires at least 1000 domains");
+if (!storedProfile || storedProfile.domains.length < 500) throw new Error("Stored default profile requires at least 500 domains");
 const storedDomainCounts = {};
 for (const domain of storedProfile.domains) {
   for (const category of (domain.categories || [])) storedDomainCounts[category.category_id] = (storedDomainCounts[category.category_id] || 0) + 1;
 }
 for (let categoryId = 1; categoryId <= 10; categoryId++) {
-  if ((storedDomainCounts[categoryId] || 0) < 100) throw new Error("Incomplete stored domains for category_id=" + categoryId);
+  if ((storedDomainCounts[categoryId] || 0) < 50) throw new Error("Incomplete stored domains for category_id=" + categoryId);
 }
 
 const normalization = appDb.getCollection("evidence_normalization_configs");

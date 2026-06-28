@@ -72,6 +72,67 @@ def test_build_queries_v2_skips_site_queries_when_preferred_domains_disabled():
     assert queries[0].startswith("El paro")
 
 
+def test_base_queries_enrich_suggested_queries_with_missing_context_terms():
+    assertion = {
+        "assertion_id": 1,
+        "text": "A measurable public claim.",
+        "context": {
+            "temporal_context": [{"value": "2024", "origin": "inferred"}],
+            "entities": [{"name": "International Agency", "origin": "inferred"}],
+            "locations": [{"name": "Sample Country", "origin": "inferred"}],
+        },
+        "search_hints": {
+            "search_keywords": ["official report"],
+            "suggested_queries": ["measurable public claim"],
+        },
+    }
+
+    queries = evidence.base_queries_for_assertion(assertion)
+
+    assert queries == ["measurable public claim 2024 International Agency Sample Country official report"]
+
+
+def test_context_terms_prioritize_explicit_before_inferred():
+    assertion = {
+        "assertion_id": 1,
+        "text": "A claim with mixed context.",
+        "context": {
+            "temporal_context": [
+                {"value": "2023", "origin": "inferred"},
+                {"value": "2022", "origin": "explicit"},
+            ],
+            "entities": [
+                {"name": "Inferred Entity", "origin": "inferred"},
+                {"name": "Explicit Entity", "origin": "explicit"},
+            ],
+            "locations": [],
+        },
+        "search_hints": {"suggested_queries": ["claim"]},
+    }
+
+    query = evidence.base_queries_for_assertion(assertion)[0]
+
+    assert query.index("2022") < query.index("2023")
+    assert query.index("Explicit Entity") < query.index("Inferred Entity")
+
+
+def test_base_queries_do_not_duplicate_context_already_in_suggested_query():
+    assertion = {
+        "assertion_id": 1,
+        "text": "A dated claim.",
+        "context": {
+            "temporal_context": [{"value": "2024", "origin": "explicit"}],
+            "entities": [{"name": "Known Entity", "origin": "inferred"}],
+            "locations": [],
+        },
+        "search_hints": {"suggested_queries": ["Known Entity dated claim 2024"]},
+    }
+
+    query = evidence.base_queries_for_assertion(assertion)[0]
+
+    assert query == "Known Entity dated claim 2024"
+
+
 def test_evidence_from_source_v2_preserves_domain_resolution_metadata():
     domain_resolution = {
         "preferred_domains": [

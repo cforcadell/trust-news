@@ -55,19 +55,83 @@ cache_collection = None
 
 
 
+def _fold_query_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _origin_rank(item: Dict[str, Any]) -> int:
+    origin = str(item.get("origin") or "unknown").strip().lower()
+    if origin == "explicit":
+        return 0
+    if origin == "inferred":
+        return 1
+    return 2
+
+
+def _context_values(items: Any, field: str) -> List[str]:
+    values: List[tuple[int, str]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get(field) or "").strip()
+        if value and value.lower() != "unknown":
+            values.append((_origin_rank(item), value))
+    values.sort(key=lambda pair: pair[0])
+
+    deduped: List[str] = []
+    seen = set()
+    for _, value in values:
+        folded = _fold_query_text(value)
+        if folded not in seen:
+            deduped.append(value)
+            seen.add(folded)
+    return deduped
+
+
+def contextual_query_terms(assertion: Dict[str, Any]) -> List[str]:
+    """Return assertion context terms ordered so explicit context outranks inferred context."""
+    hints = assertion.get("search_hints") or {}
+    context = assertion.get("context") or {}
+    terms: List[str] = []
+
+    # Time is usually the highest-impact disambiguator for evidence search.
+    terms.extend(_context_values(context.get("temporal_context"), "value"))
+    terms.extend(_context_values(context.get("entities"), "name"))
+    terms.extend(_context_values(context.get("locations"), "name"))
+    terms.extend(str(item).strip() for item in hints.get("search_keywords") or [] if str(item).strip())
+
+    deduped: List[str] = []
+    seen = set()
+    for term in terms:
+        folded = _fold_query_text(term)
+        if folded and folded not in seen:
+            deduped.append(term)
+            seen.add(folded)
+    return deduped
+
+
+def enrich_query_with_context(query: str, assertion: Dict[str, Any], max_terms: int = 8) -> str:
+    """Append missing assertion context to a provider query without replacing model suggestions."""
+    query = str(query or "").strip()
+    folded_query = _fold_query_text(query)
+    missing = [term for term in contextual_query_terms(assertion) if _fold_query_text(term) not in folded_query]
+    if not missing:
+        return query
+    suffix = " ".join(missing[:max_terms])
+    return " ".join(part for part in [query, suffix] if part).strip()
+
+
 def base_queries_for_assertion(assertion: Dict[str, Any]) -> List[str]:
     """Build initial search queries from assertion hints and contextual metadata."""
     # Prefer explicit search suggestions because they are already optimized upstream.
     hints = assertion.get("search_hints") or {}
-    context = assertion.get("context") or {}
     base_queries = [str(q).strip() for q in hints.get("suggested_queries") or [] if str(q).strip()]
 
-    # If no suggestion exists, compose a compact query from text, keywords, time, entities, and locations.
-    if not base_queries:
-        terms = [assertion.get("text", "")] + list(hints.get("search_keywords") or [])
-        terms.extend(item.get("value", "") for item in context.get("temporal_context") or [] if item.get("value"))
-        terms.extend(item.get("name", "") for item in context.get("entities") or [] if item.get("name"))
-        terms.extend(item.get("name", "") for item in context.get("locations") or [] if item.get("name"))
+    # Suggested queries must still carry assertion context so providers can disambiguate.
+    if base_queries:
+        base_queries = [enrich_query_with_context(query, assertion) for query in base_queries]
+    else:
+        terms = [assertion.get("text", "")] + contextual_query_terms(assertion)
         base = " ".join(str(t).strip() for t in terms if str(t).strip())
         base_queries = [base] if base else [assertion.get("text", "")]
 

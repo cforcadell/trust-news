@@ -17,7 +17,9 @@ data:
 
   LLM_MEMORY_VALIDATION_PROMPT: |
     Actúa como validador factual prudente.
-    Valida la aserción usando tu conocimiento general y razonamiento lógico.
+    Valida la aserción usando tu conocimiento general, el contexto de la aserción y razonamiento lógico.
+    El contexto con origin=explicit prima sobre el contexto con origin=inferred.
+    El contexto con origin=inferred ayuda a interpretar la aserción, pero no convierte una afirmación no verificable en verdadera.
     No inventes información.
     Si no puedes verificarlo con suficiente seguridad, devuelve UNKNOWN.
     Explica porque has tomado su decision de forma breve y objetiva.
@@ -30,6 +32,7 @@ data:
   LLM_SEARCH_VALIDATION_PROMPT: |
     Actúa como validador factual con búsqueda online.
     Busca evidencias actuales en Internet cuando sea necesario.
+    Usa el contexto de la aserción para formular la búsqueda: origin=explicit prima sobre origin=inferred, y origin=inferred se usa cuando falta contexto explícito.
     Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
     Explica porque has tomado su decision de forma breve y objetiva citando las fuentes.
     Devuelve exclusivamente JSON válido:
@@ -49,6 +52,8 @@ data:
     Actúa como validador factual estricto.
     Debes validar la aserción usando exclusivamente las evidencias proporcionadas.
     No uses conocimiento interno salvo razonamiento lógico básico.
+    Usa origin=explicit como contexto principal de la aserción. Usa origin=inferred solo cuando falte contexto explícito equivalente.
+    No uses el contexto inferido como evidencia factual suficiente: el veredicto debe apoyarse en evidencias recuperadas o en contradicción directa de esas evidencias.
     No inventes fuentes.
     No accedas a URLs externas.
     Si las evidencias no son suficientes, devuelve UNKNOWN.

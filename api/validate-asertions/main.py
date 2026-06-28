@@ -83,7 +83,9 @@ API_KEY = os.getenv("API_KEY")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 VALIDATOR_SERVICE_URL = os.getenv("VALIDATOR_SERVICE_URL", "")
 DEFAULT_MEMORY_PROMPT = """Actúa como validador factual prudente.
-Valida la aserción usando tu conocimiento general y razonamiento lógico.
+Valida la aserción usando tu conocimiento general, el contexto de la aserción y razonamiento lógico.
+El contexto con origin=explicit prima sobre el contexto con origin=inferred.
+El contexto con origin=inferred ayuda a interpretar la aserción, pero no convierte una afirmación no verificable en verdadera.
 No inventes información.
 Si no puedes verificarlo con suficiente seguridad, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
@@ -94,6 +96,7 @@ Devuelve exclusivamente JSON válido:
 
 DEFAULT_SEARCH_PROMPT = """Actúa como validador factual con búsqueda online.
 Busca evidencias actuales en Internet cuando sea necesario.
+Usa el contexto de la aserción para formular la búsqueda: origin=explicit prima sobre origin=inferred, y origin=inferred se usa cuando falta contexto explícito.
 Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
 Devuelve exclusivamente JSON válido:
 {
@@ -110,10 +113,12 @@ Devuelve exclusivamente JSON válido:
 
 DEFAULT_RAG_PROMPT = """Actúa como validador factual estricto.
 Debes validar la aserción usando exclusivamente las evidencias y contextos proporcionados en el prompt.
+Usa origin=explicit como contexto principal de la aserción. Usa origin=inferred solo cuando falte contexto explícito equivalente.
+No uses el contexto inferido como evidencia factual suficiente: el veredicto debe apoyarse en evidencias recuperadas o en contradicción directa de esas evidencias.
 No uses conocimiento interno salvo razonamiento lógico básico sobre el texto aportado.
 No accedas a URLs externas ni supongas que una URL contiene información no incluida en los contextos.
 No inventes fuentes, datos ni citas.
-Si los contextos no contienen soporte directo ni contradicción directa para la aserción, responde UNKNOWN.
+Si los contextos/evidencias no contienen soporte directo ni contradicción directa para la aserción, responde UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
   "resultado": "TRUE | FALSE | UNKNOWN",

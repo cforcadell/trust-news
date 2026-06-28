@@ -8,6 +8,12 @@
 
 - `POST /extraer`: recibe un texto y un `client_id`, valida cuota `news_generation` en `admin`, llama al proveedor LLM seleccionado, incrementa consumo y devuelve una respuesta `assertions_generated` con documento de aserciones.
 
+## Contexto de validación
+
+La generación de aserciones debe devolver cada aserción con contexto verificable en los campos existentes de `assertions-document-v2`: `context.locations`, `context.entities`, `context.temporal_context`, `search_hints` y `context_confidence`. El contexto que aparece literalmente en la aserción usa `origin=explicit`; el contexto deducido del texto completo de la noticia usa `origin=inferred`. No se añaden comunicaciones nuevas ni cambia el contrato blockchain.
+
+Las `suggested_queries` deben ser autónomas e incorporar el contexto temporal, entidades y lugares necesarios para que `evidence-search` pueda consultar Tavily/Exa con precisión.
+
 ## Daemons
 
 - Consumidor Kafka `consume_and_process`: escucha `INPUT_TOPIC` con `group_id=generate-assertions-group`. Procesa mensajes `generate_assertions`, llama al LLM y publica `assertions_generated` o `assertions_not_generated` en `OUTPUT_TOPIC`.

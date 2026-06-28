@@ -13,7 +13,7 @@ spec:
         - name: AI_PROVIDER
           value: "openrouter"
         - name: MODEL
-          value: "mistralai/mistral-small-24b-instruct-2501"
+          value: "qwen/qwen3-30b-a3b-instruct-2507"
         - name: API_URL
           value: "https://openrouter.ai/api/v1/chat/completions"
         - name: VALIDATOR_SERVICE_URL

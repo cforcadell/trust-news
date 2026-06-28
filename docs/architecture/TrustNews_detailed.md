@@ -451,6 +451,8 @@ python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 
 The evidence-search service builds base queries from the assertion payload.
 
+`generate-asertions` is responsible for enriching each assertion with explicit and inferred context using the existing assertion fields. `origin=explicit` marks context present in the assertion text; `origin=inferred` marks context deduced from the full input document. The blockchain assertion contract is unchanged.
+
 It first tries to use explicit search suggestions generated upstream:
 
 ```json
@@ -467,6 +469,8 @@ It first tries to use explicit search suggestions generated upstream:
   }
 }
 ```
+
+Even when suggested queries exist, evidence-search appends missing temporal, entity, location and keyword context before calling the provider. Explicit context is ordered before inferred context.
 
 If no suggested query exists, the service builds a compact fallback query from:
 

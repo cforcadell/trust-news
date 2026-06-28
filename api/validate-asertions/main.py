@@ -87,7 +87,7 @@ Valida la aserción usando tu conocimiento general, el contexto de la aserción 
 El contexto con origin=explicit prima sobre el contexto con origin=inferred.
 El contexto con origin=inferred ayuda a interpretar la aserción, pero no convierte una afirmación no verificable en verdadera.
 No inventes información.
-Si no puedes verificarlo con suficiente seguridad, devuelve UNKNOWN.
+Si necesitas enlaces o evidencias externas para decidir y no los tienes, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
   "resultado": "TRUE | FALSE | UNKNOWN",
@@ -98,14 +98,23 @@ DEFAULT_SEARCH_PROMPT = """Actúa como validador factual con búsqueda online.
 Busca evidencias actuales en Internet cuando sea necesario.
 Usa el contexto de la aserción para formular la búsqueda: origin=explicit prima sobre origin=inferred, y origin=inferred se usa cuando falta contexto explícito.
 Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
+Explica porque has tomado su decision de forma breve y objetiva usando enlaces concretos.
+No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las fuentes" ni referencias genéricas en descripcion, reason ni evidence_text.
+Si devuelves TRUE o FALSE, sources debe contener al menos un enlace concreto con el fragmento o dato específico que te ha hecho decidir.
+En descripcion menciona el enlace, dominio o título concreto usado, no su índice interno.
+evidence_text debe ser un fragmento breve o dato concreto encontrado en esa URL; no inventes citas ni atribuyas texto no comprobado.
+supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
+Si no encuentras enlaces o fragmentos suficientes para apoyar o contradecir la aserción, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
   "resultado": "TRUE | FALSE | UNKNOWN",
-  "descripcion": "Justificación breve y objetiva",
+  "descripcion": "Justificación breve basada en enlaces concretos",
   "sources": [
     {
       "url": "string",
       "title": "string",
+      "evidence_text": "Fragmento o dato concreto encontrado en ese enlace",
+      "supports": true,
       "reason": "string"
     }
   ]
@@ -119,17 +128,29 @@ No uses conocimiento interno salvo razonamiento lógico básico sobre el texto a
 No accedas a URLs externas ni supongas que una URL contiene información no incluida en los contextos.
 No inventes fuentes, datos ni citas.
 Si los contextos/evidencias no contienen soporte directo ni contradicción directa para la aserción, responde UNKNOWN.
+Explica porque has tomado su decision de forma breve y objetiva usando URLs y fragmentos concretos.
+No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las evidencias" ni referencias genéricas en descripcion, reason ni evidence_text.
+Si devuelves TRUE o FALSE, evidence_used debe contener al menos una evidencia con url y evidence_text.
+En descripcion menciona la URL, dominio o título concreto usado, no su índice interno.
+evidence_text debe ser un fragmento literal breve presente en las evidencias proporcionadas.
+supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
+Usa context_id o chunk_id cuando esté disponible para identificar el trozo exacto.
+No inventes citas ni resumas como si fuera una cita literal.
+Si ninguna evidencia contiene un fragmento directo que apoye o contradiga la aserción, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
   "resultado": "TRUE | FALSE | UNKNOWN",
-  "descripcion": "Justificación breve y objetiva",
+  "descripcion": "Justificación breve basada en URLs y fragmentos concretos",
   "confidence": "HIGH | MEDIUM | LOW",
   "evidence_used": [
     {
       "source_id": "string",
       "context_id": "string",
+      "chunk_id": "string",
       "url": "string",
+      "title": "string",
       "supports": true,
+      "evidence_text": "Fragmento literal breve usado para decidir",
       "reason": "string"
     }
   ]

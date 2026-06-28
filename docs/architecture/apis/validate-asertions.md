@@ -13,6 +13,40 @@
 - `GET /admin/config`: devuelve proveedor, modelo, categorías y configuración runtime del validador. `private_key` y `api_key` se devuelven ofuscados como `********`.
 - `PUT /admin/config`: actualiza proveedor/modelo/categorías y permite cambiar `api_url`, `validator_type`, `evidence_search_url`, `evidence_search_use_preferred_domains`, `evidence_search_preferred_profile_id`, `private_key`, `account_address` y `api_key`. Si se envía `private_key` o `api_key` como solo asteriscos, se conserva el valor actual. Refresca configuración IPFS y actualiza blockchain cuando cambia el hash público de configuración.
 
+## Evidencia de decisión
+
+Los validadores que usan búsqueda online o RAG deben devolver evidencia auditable cuando se decantan por `TRUE` o `FALSE`.
+
+- `VALIDATOR_TYPE=2` (`LLM_SEARCH_VALIDATION`) rellena `sources` con enlaces concretos. Cada entrada debe incluir `url`, `title` si está disponible, `evidence_text`, `supports` y `reason`.
+- `VALIDATOR_TYPE=3` (`RAG_EVIDENCE_VALIDATION`) rellena `evidence_used` usando exclusivamente las evidencias proporcionadas por `evidence-search`. Cada entrada debe incluir `source_id`, `url`, `evidence_text`, `supports`, `reason` y, cuando exista, `context_id` o `chunk_id`.
+- `evidence_text` debe ser el fragmento breve o dato concreto que justifica el veredicto. En RAG debe estar presente literalmente en los contextos aportados al prompt.
+- `supports` indica si la evidencia apoya la aserción: `true` si la confirma, `false` si la contradice. No significa “apoya el veredicto”.
+- `descripcion`, `reason` y `evidence_text` no deben referirse a fuentes genéricas como “fuente 1”, “CONTEXTO 1” o “las evidencias”; deben mencionar enlaces, dominios o títulos concretos y el fragmento usado.
+- Si no hay enlace o fragmento suficiente para confirmar o contradecir la aserción, el validador debe devolver `UNKNOWN`.
+- `VALIDATOR_TYPE=1` (`LLM_MEMORY_VALIDATION`) no inventa enlaces; si necesita evidencias externas para decidir, devuelve `UNKNOWN`.
+
+Ejemplo RAG:
+
+```json
+{
+  "resultado": "TRUE | FALSE | UNKNOWN",
+  "descripcion": "Justificación breve basada en URLs y fragmentos concretos",
+  "confidence": "HIGH | MEDIUM | LOW",
+  "evidence_used": [
+    {
+      "source_id": "source-1",
+      "context_id": "source-1-context-1",
+      "chunk_id": "source-1-chunk-3",
+      "url": "https://example.org/source",
+      "title": "Título de la fuente",
+      "supports": true,
+      "evidence_text": "Fragmento literal breve usado para decidir",
+      "reason": "Por qué el fragmento confirma o contradice la aserción"
+    }
+  ]
+}
+```
+
 ## Daemons
 
 - `BlockchainEventAgent`: escucha eventos `ValidationRequested` del contrato para la cuenta del validador. Recupera el documento desde IPFS, construye el payload de validación, valida la aserción y registra el resultado en blockchain.

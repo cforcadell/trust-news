@@ -3018,14 +3018,91 @@ function renderPreferredDomainsBadge(info) {
 
 function validationEvidenceItems(info = {}) {
     const candidates = [
-        info.sources,
         info.evidence_used,
-        info.evidence_search_response?.evidences,
-        info.payload?.sources,
         info.payload?.evidence_used,
+        info.sources,
+        info.payload?.sources,
+        info.evidence_search_response?.evidences,
         info.payload?.evidence_search_response?.evidences
     ];
     return candidates.find(items => Array.isArray(items) && items.length) || [];
+}
+
+function isGenericEvidenceLabel(value) {
+    const text = String(value || "").trim();
+    return /^source[-_ ]?\d+$/i.test(text) || /^fuente\s*\d+$/i.test(text);
+}
+
+function evidenceUrlHost(url) {
+    try {
+        return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+        return "";
+    }
+}
+
+function firstEvidenceContextText(src = {}) {
+    const contexts = Array.isArray(src.contexts) ? src.contexts : [];
+    const chunks = Array.isArray(src.chunks) ? src.chunks : [];
+    const context = contexts.find(item => item?.text) || chunks.find(item => item?.text);
+    return context?.text || "";
+}
+
+function evidenceDisplayTitle(src = {}, index = 0, url = "") {
+    const title = !isGenericEvidenceLabel(src.title) ? src.title : "";
+    return title
+        || src.domain
+        || src.source_domain
+        || evidenceUrlHost(url)
+        || url
+        || `Evidencia ${index + 1}`;
+}
+
+function evidenceDecisionText(src = {}) {
+    return src.evidence_text
+        || src.quote
+        || src.text
+        || firstEvidenceContextText(src)
+        || src.snippet
+        || src.excerpt
+        || src.content
+        || "";
+}
+
+function evidenceSupportsLabel(value) {
+    if (value === true) return "apoya";
+    if (value === false) return "contradice";
+    return "";
+}
+
+function allValidationEvidenceItems(info = {}) {
+    return [
+        info.evidence_used,
+        info.payload?.evidence_used,
+        info.sources,
+        info.payload?.sources,
+        info.evidence_search_response?.evidences,
+        info.payload?.evidence_search_response?.evidences
+    ].filter(items => Array.isArray(items) && items.length).flat();
+}
+
+function evidenceReferenceLabel(info = {}, sourceNumber = 0) {
+    const wantedSourceId = `source-${sourceNumber}`;
+    const items = allValidationEvidenceItems(info);
+    const source = items.find(item => String(item?.source_id || "").toLowerCase() === wantedSourceId)
+        || items[sourceNumber - 1];
+    if (!source) return "";
+    const url = source.url || source.source_url || "";
+    return evidenceDisplayTitle(source, sourceNumber - 1, url);
+}
+
+function replaceGenericEvidenceReferences(text, info = {}) {
+    if (!text) return "";
+    return String(text).replace(/\b(la\s+)?fuente\s+(\d+)\b/gi, (_match, article, sourceNumber) => {
+        const label = evidenceReferenceLabel(info, Number(sourceNumber));
+        if (!label) return _match;
+        return `${article ? "la " : ""}evidencia "${label}"`;
+    });
 }
 
 function renderEvidenceLinks(info = {}) {
@@ -3034,12 +3111,18 @@ function renderEvidenceLinks(info = {}) {
 
     const rows = items.slice(0, 6).map((src, index) => {
         const url = src.url || src.source_url || "";
-        const title = src.title || src.source_id || src.domain || src.source_domain || url || `Evidencia ${index + 1}`;
-        const reason = src.why_selected || src.reason || src.snippet || src.excerpt || src.content || src.description || "";
+        const title = evidenceDisplayTitle(src, index, url);
+        const excerpt = evidenceDecisionText(src);
+        const reason = src.reason || src.why_selected || src.description || "";
+        const supports = evidenceSupportsLabel(src.supports);
+        const contextId = src.context_id || src.selected_chunk_id || "";
+        const chunkId = src.chunk_id || (Array.isArray(src.included_chunk_ids) ? src.included_chunk_ids.join(", ") : "");
         const meta = [
+            supports,
             src.source_type,
             src.reliability,
-            src.supports,
+            contextId ? `context ${contextId}` : "",
+            chunkId ? `chunk ${chunkId}` : "",
             src.trust_score !== undefined && src.trust_score !== "" ? `trust ${src.trust_score}` : "",
             Array.isArray(src.matched_profiles) && src.matched_profiles.length ? src.matched_profiles.join(", ") : ""
         ].filter(Boolean).join(" · ");
@@ -3047,7 +3130,8 @@ function renderEvidenceLinks(info = {}) {
             <li>
                 <div class="evidence-title">${url ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer">${safeText(title)}</a>` : safeText(title)}</div>
                 ${url ? `<div class="evidence-url">${safeText(url)}</div>` : ""}
-                ${reason ? `<div class="evidence-reason">${safeText(compactText(reason, 220))}</div>` : ""}
+                ${excerpt ? `<div class="evidence-reason"><strong>Fragmento:</strong> ${safeText(compactText(excerpt, 260))}</div>` : ""}
+                ${reason ? `<div class="evidence-reason"><strong>Motivo:</strong> ${safeText(compactText(reason, 220))}</div>` : ""}
                 ${meta ? `<div class="evidence-meta">${safeText(meta)}</div>` : ""}
             </li>
         `;
@@ -3102,6 +3186,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
             const litClass = validationError ? "validation-error-text" : lit === "True" ? "true-news" : lit === "False" ? "false-news" : "partial-news";
             let desc = validationError ? (info.error_details?.message || info.error || info.text || "Validation failed") : (info.text || t("ui.noDescription"));
             if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
+            desc = replaceGenericEvidenceReferences(desc, info);
             const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
             const responseTime = formatDurationSeconds(info.response_time_seconds);
             const validatorTooltip = renderValidatorProviderModelTitle(info);

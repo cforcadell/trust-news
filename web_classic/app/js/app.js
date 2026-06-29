@@ -1201,11 +1201,12 @@ function renderOrderSummary(container, data, events = []) {
     const falsePercent = percentage(summary.validatorVotes.false, totalWeight);
     const unknownPercent = totalWeight > 0 ? Math.max(0, 100 - truePercent - falsePercent) : 0;
     const progressPercent = percentage(summary.completedValidations, summary.totalValidations || summary.completedValidations);
-    const problematic = assertions.filter((assertion, index) => assertionOutcome(data, getAssertionId(assertion, index + 1)) !== "confirmed").slice(0, 3);
-    const statusIcon = summary.statusKey === "verified" ? "✓" : summary.statusKey === "contradicted" ? "×" : summary.statusKey === "pending" ? "…" : "!";
+    const problematic = assertions
+        .map((assertion, index) => ({ assertion, assertionId: getAssertionId(assertion, index + 1) }))
+        .filter(item => assertionOutcome(data, item.assertionId) !== "confirmed")
+        .slice(0, 3);
 
-    const problemRows = problematic.length ? problematic.map((assertion, index) => {
-        const assertionId = getAssertionId(assertion, index + 1);
+    const problemRows = problematic.length ? problematic.map(({ assertion, assertionId }) => {
         const meta = outcomeMeta(assertionOutcome(data, assertionId));
         return `<li><span>${safeText(assertionId)}. ${safeText(compactText(extractAssertionText(assertion), 76))}</span><b class="outcome-badge ${meta.className}">${meta.label}</b></li>`;
     }).join("") : `<li class="no-problems">${safeText(t("ui.noProblematicAssertions"))}</li>`;
@@ -1214,19 +1215,11 @@ function renderOrderSummary(container, data, events = []) {
 
     container.innerHTML = `
         <div class="order-summary">
-            <div class="summary-hero status-${summary.statusKey}">
-                <div class="summary-verdict">
-                    <span class="verdict-icon">${statusIcon}</span>
-                    <div>
-                        <h2>${safeText(summary.statusLabel)}</h2>
-                        <p>${safeText(summary.conclusionText)}</p>
-                    </div>
-                </div>
-                <dl class="order-meta-card">
-                    <div><dt>${t("ui.orderId")}</dt><dd>${shortValue(data.order_id, 30)}</dd></div>
-                    <div><dt>${t("ui.date")}</dt><dd>${formatAnyDate(data.created_at || data.created)}</dd></div>
-                    <div><dt>${t("ui.validationMode")}</dt><dd><span class="mode-badge">${safeText(data.validation_mode || "BLOCKCHAIN")}</span></dd></div>
-                </dl>
+            <div class="summary-meta-strip">
+                <span><b>${t("ui.result")}</b><span class="status-badge status-${summary.statusKey}">${safeText(summary.statusLabel)}</span></span>
+                <span><b>${t("ui.orderId")}</b><span class="meta-value">${shortValue(data.order_id, 30)}</span></span>
+                <span><b>${t("ui.date")}</b><span class="meta-value">${formatAnyDate(data.created_at || data.created)}</span></span>
+                <span><b>${t("ui.validationMode")}</b><span class="mode-badge">${safeText(data.validation_mode || "BLOCKCHAIN")}</span></span>
             </div>
 
             <div class="summary-grid-main">
@@ -1260,7 +1253,6 @@ function renderOrderSummary(container, data, events = []) {
 
             <div class="summary-grid-secondary">
                 <article class="dashboard-card metric-card"><span class="metric-icon confirmed">♙</span><div><small>${t("ui.validationSummary")}</small><strong>${summary.validValidations} valid · ${summary.errorValidations} errors / ${summary.totalValidations || summary.completedValidations}</strong><p>${t("ui.validationsCompleted")}</p><b class="metric-tag">${t("ui.percentCompleted", { percent: progressPercent })}</b></div></article>
-                <article class="dashboard-card metric-card"><span class="metric-icon time">◷</span><div><small>${t("ui.totalValidationTime")}</small><strong>${safeText(summary.validationDuration || t("ui.inProgress"))}</strong><p>${summary.pendingValidations ? t("ui.pendingCount", { count: summary.pendingValidations }) : t("ui.processCompleted")}</p></div></article>
                 <article class="dashboard-card problems-card"><h3>${t("ui.problematicAssertions")}</h3><ol>${problemRows}</ol><button type="button" onclick="activateOrderTab('assertions')">${t("ui.viewAllAssertions")}</button></article>
             </div>
 
@@ -2509,6 +2501,21 @@ function renderConsistencyTable(results) {
 // IMPORTAR NOTICIA
 // =========================================================
 
+function clearNewsForm() {
+    const newsUrl = document.getElementById('newsUrl');
+    const newsText = document.getElementById('newsText');
+    const assertionsContainer = document.getElementById('news-assertions-container');
+    const findResults = document.getElementById('findResults');
+
+    if (newsUrl) newsUrl.value = "";
+    if (newsText) {
+        newsText.value = "";
+        newsText.focus();
+    }
+    if (assertionsContainer) assertionsContainer.innerHTML = "";
+    if (findResults) findResults.innerHTML = "";
+}
+
 async function importarNoticia() {
     const url = document.getElementById('newsUrl').value.trim();
     const newsText = document.getElementById('newsText');
@@ -2618,6 +2625,7 @@ function initializeApp() {
     // 3. News Listeners
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
     document.getElementById('btn-publishNew').addEventListener('click', publishNew);
+    document.getElementById('btn-clearNews')?.addEventListener('click', clearNewsForm);
     document.getElementById('validationMode')?.addEventListener('change', updateValidationModeHelp);
     updateValidationModeHelp();
 

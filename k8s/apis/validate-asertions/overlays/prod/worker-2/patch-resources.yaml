@@ -13,16 +13,22 @@ spec:
       - name: worker
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
         env:
-        - name: VALIDATOR_TYPE
-          value: "1"
         - name: AI_PROVIDER
-          value: "grok"
+          value: "openrouter"
         - name: MODEL
-          value: "llama-3.1-8b-instant"
+          value: "qwen/qwen3-30b-a3b-instruct-2507"
         - name: API_URL
-          value: "https://api.groq.com/openai/v1/chat/completions"
+          value: "https://openrouter.ai/api/v1/chat/completions"
         - name: VALIDATOR_SERVICE_URL
           value: "http://validate-service-2.apis.svc.cluster.local:8070"
+        - name: VALIDATOR_TYPE
+          value: "3"
+        - name: EVIDENCE_SEARCH_URL
+          value: "http://evidence-search.apis.svc.cluster.local:8074"
+        - name: EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+          value: "EXT_OFFICIAL_FIRST"
+        - name: EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
+          value: "default"
         resources:
             requests:
               cpu: "100m"

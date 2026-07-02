@@ -122,6 +122,12 @@ MONGO_DBNAME=newsdb
 MONGO_APP_AUTHSOURCE=newsdb
 ```
 
+`MONGO_APP_USER`/`MONGO_APP_PWD` son las credenciales que usaran las APIs. Deben
+coincidir exactamente con el usuario real creado dentro de MongoDB mediante
+`MONGO_APP_USERNAME`/`MONGO_APP_PASSWORD` en `mongodb.env`. Si el secreto de
+Kubernetes existe pero el usuario no existe en MongoDB, los pods arrancaran con
+`pymongo.errors.OperationFailure: Authentication failed`.
+
 `keycloak-admin.env`:
 
 ```dotenv
@@ -276,6 +282,10 @@ scripts/k8s/init-mongodb-server.sh --dry-run
 scripts/k8s/init-mongodb-server.sh
 ```
 
+Este paso es obligatorio tambien cuando el `mongodb-app-secret` ya existe:
+crea o actualiza dentro de MongoDB el usuario de aplicacion usado por
+`MONGO_APP_USER`, con permisos `readWrite` sobre `MONGO_APP_DATABASE`.
+
 El script:
 
 - crea/actualiza el usuario de aplicacion;
@@ -313,7 +323,17 @@ Verificar peers y bloques:
 kubectl get pods -n blockchain
 kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "net.peerCount"
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
+kubectl exec -it geth-bootnode-0 -n blockchain -- geth attach --exec "net.peerCount"
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "eth.blockNumber"
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "eth.blockNumber"
+kubectl exec -it geth-bootnode-0 -n blockchain -- geth attach --exec "eth.blockNumber"
+```
+
+Verificar transacciones pendientes y recibos:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.getTransactionReceipt("0x5ea06048912ba0cebe91ff428c7058def03cf4e5024c7a5e6b4fd7326f294675")'
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'txpool.status'
 ```
 
 ### 3.3 Desplegar o verificar contrato
@@ -455,17 +475,48 @@ kubectl logs deployment/news-handler -n apis --tail=80
 kubectl logs deployment/evidence-search -n apis --tail=80
 ```
 
+Ejemplo para probar un endpoint directamente dentro del pod, sin instalar nada adicional:
+
+```bash
+kubectl exec -it news-handler-59c79887fd-224k4 -n apis -- /bin/bash
+python3 - <<'PY'
+import requests
+r = requests.get(
+    "http://localhost:8072/validators/cache",
+    params={"recover_ipfs": "false"},
+    headers={"accept": "application/json"},
+)
+print(r.status_code)
+print(r.text)
+PY
+```
+
+```bash
+kubectl exec -it validate-worker-1-5776658d65-9fsh8 -n apis -- /bin/bash
+python3 - <<'PY'
+import requests
+r = requests.get(
+    "http://localhost:8070/health",
+    headers={"accept": "application/json"},
+)
+print(r.status_code)
+print(r.text)
+PY
+```
+
 Probar frontend mediante tunel:
 
 ```bash
-# En Hetzner
+#in hetzner (~/trust-news/scripts/port-forward.sh)
 kubectl port-forward service/frontend-service -n frontend 10443:443
 
-# En local
+# in local vm machine ~/blockchain/hetzner/keys-github (dev)
 ssh -i ./id_rsa_hetzner_deploy -p 2222 \
   -L 9443:127.0.0.1:10443 \
   <usuario>@<hetzner-ip>
 ```
+
+
 
 Abrir:
 

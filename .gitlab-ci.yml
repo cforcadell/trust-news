@@ -1,12 +1,36 @@
 stages:
   - build
+  - preflight
   - deploy
+  - bootstrap
 
 variables:
   PROFILE:
     value: "apis-frontend-prod"
     description: "Perfil de Skaffold"
   DOCKER_BUILDKIT: "1"
+
+.kube_access:
+  before_script:
+    - apk add --no-cache curl openssh-client bash
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - install kubectl /usr/local/bin/
+
+    # SSH tunnel
+    - mkdir -p ~/.ssh
+    - echo "$HETZNER_SSH_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -p 2222 -H $HETZNER_IP >> ~/.ssh/known_hosts
+    - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $HETZNER_USER@$HETZNER_IP
+
+    # kubeconfig
+    - mkdir -p $HOME/.kube
+    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+    - chmod 600 $HOME/.kube/config
+
+    - export KUBECONFIG=$HOME/.kube/config
+    - kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
+    - kubectl config use-context default
 
 # ---------------------------------------------------------
 # BUILD (solo si hay cambios)
@@ -50,6 +74,32 @@ build:
     expire_in: 1 day
 
 # ---------------------------------------------------------
+# PREFLIGHT
+# ---------------------------------------------------------
+check_mongodb_bootstrap:
+  stage: preflight
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  extends: .kube_access
+
+  rules:
+    - if: '$PROFILE == "apis-frontend-prod"'
+
+  script:
+    - echo "Comprobando bootstrap de MongoDB antes de desplegar APIs"
+    - kubectl wait -n infra --for=condition=Ready pod/mongodb-0 --timeout=180s
+    - |
+      kubectl exec mongodb-0 -n infra -- sh -c 'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "${MONGO_APP_DATABASE:-newsdb}" --quiet --eval "
+        const p = db.evidence_domain_profiles.findOne({profile_id: \"default\"});
+        const profiles = db.evidence_domain_profiles.countDocuments({profile_id: \"default\"});
+        const normalization = db.evidence_normalization_configs.countDocuments({});
+        const domains = p && p.domains ? p.domains.length : 0;
+        printjson({profiles, normalization, domains});
+        quit(profiles === 1 && normalization >= 3 && domains >= 500 ? 0 : 1);
+      "'
+
+# ---------------------------------------------------------
 # DEPLOY
 # ---------------------------------------------------------
 deploy:
@@ -58,41 +108,80 @@ deploy:
   tags:
     - hetzner-runner
   needs:
-    - build
+    - job: build
+    - job: check_mongodb_bootstrap
+      optional: true
 
   rules:
     - if: '$CI_PIPELINE_SOURCE == "web"'
     - when: manual
 
   before_script:
-    - apk add --no-cache curl openssh-client bash
+    - !reference [.kube_access, before_script]
     - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
     - install skaffold /usr/local/bin/
-    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-    - install kubectl /usr/local/bin/
-
-    # SSH tunnel
-    - mkdir -p ~/.ssh
-    - echo "$HETZNER_SSH_KEY" > ~/.ssh/id_rsa
-    - chmod 600 ~/.ssh/id_rsa
-    - ssh-keyscan -p 2222 -H $HETZNER_IP >> ~/.ssh/known_hosts
-    - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $HETZNER_USER@$HETZNER_IP
-
-    # kubeconfig
-    - mkdir -p $HOME/.kube
-    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
-    - chmod 600 $HOME/.kube/config
-
-    - export KUBECONFIG=$HOME/.kube/config
-    - kubectl config set-cluster default --server=https://127.0.0.1:6443 --insecure-skip-tls-verify=true
-    - kubectl config use-context default
 
   script:
     - echo "Deploy usando artefactos ya construidos"
     - skaffold deploy --build-artifacts=build.json --profile=$PROFILE
 
     - echo "Verificando rollout"
-    - kubectl rollout status deployment -n apis --timeout=120s || exit 1
+    - |
+      case "$PROFILE" in
+        infra-prod)
+          kubectl rollout status statefulset/mongodb -n infra --timeout=180s
+          ;;
+        blockchain-prod)
+          kubectl rollout status statefulset/geth-miner -n blockchain --timeout=180s
+          ;;
+        apis-frontend-prod)
+          kubectl rollout status deployment -n apis --timeout=120s
+          ;;
+        *)
+          echo "Perfil sin verificacion de rollout especifica: $PROFILE"
+          ;;
+      esac
+
+# ---------------------------------------------------------
+# BOOTSTRAP MONGODB
+# ---------------------------------------------------------
+bootstrap_mongodb:
+  stage: bootstrap
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  extends: .kube_access
+  needs:
+    - job: deploy
+
+  rules:
+    - if: '$PROFILE == "infra-prod"'
+      when: on_success
+    - when: manual
+      allow_failure: true
+
+  before_script:
+    - !reference [.kube_access, before_script]
+    - apk add --no-cache python3
+
+  script:
+    - echo "Esperando MongoDB"
+    - kubectl rollout status statefulset/mongodb -n infra --timeout=180s
+    - scripts/k8s/init-mongodb-server.sh --dry-run
+    - |
+      if kubectl exec mongodb-0 -n infra -- sh -c 'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "${MONGO_APP_DATABASE:-newsdb}" --quiet --eval "
+        const p = db.evidence_domain_profiles.findOne({profile_id: \"default\"});
+        const profiles = db.evidence_domain_profiles.countDocuments({profile_id: \"default\"});
+        const normalization = db.evidence_normalization_configs.countDocuments({});
+        const domains = p && p.domains ? p.domains.length : 0;
+        printjson({profiles, normalization, domains});
+        quit(profiles === 1 && normalization >= 3 && domains >= 500 ? 0 : 42);
+      "'; then
+        echo "MongoDB ya esta inicializado"
+      else
+        echo "MongoDB incompleto o vacio; ejecutando bootstrap"
+        scripts/k8s/init-mongodb-server.sh
+      fi
 
 # ---------------------------------------------------------
 # ROLLBACK automático si falla

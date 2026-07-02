@@ -275,7 +275,13 @@ kubectl rollout status statefulset/mongodb -n infra --timeout=180s
 kubectl get pods -n infra
 ```
 
-Despues de MongoDB, ejecutar siempre el bootstrap idempotente:
+Despues de MongoDB, ejecutar siempre el bootstrap idempotente. En GitLab CI,
+el job `bootstrap_mongodb` se ejecuta automaticamente tras `deploy` cuando
+`PROFILE=infra-prod`; tambien queda disponible como job manual de recuperacion.
+Antes de desplegar `PROFILE=apis-frontend-prod`, el job `check_mongodb_bootstrap`
+falla el pipeline si falta el perfil `default` o las taxonomias de normalizacion.
+
+Si se hace a mano desde el servidor:
 
 ```bash
 scripts/k8s/init-mongodb-server.sh --dry-run

@@ -336,6 +336,211 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.ge
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'txpool.status'
 ```
 
+### 3.2.1 Diagnostico: transacciones pendientes en RPC que no se minan
+
+En produccion/Hetzner puede ocurrir que los validadores `validate-worker-*` se queden bloqueados durante el arranque en:
+
+```text
+INFO: Waiting for application startup.
+Inicio update_validator_config_blockchain -> ipfs_config_hash: ...
+Transaccion enviada: 0x...
+```
+
+Y que nunca aparezca:
+
+```text
+INFO: Application startup complete.
+INFO: Uvicorn running on http://0.0.0.0:8070
+```
+
+La causa observada fue que la transaccion enviada por el validador al nodo RPC quedo en el `txpool` del RPC, pero no llego al minero.
+
+Comprobar el `txpool` del RPC:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'txpool.status'
+```
+
+Salida problematica:
+
+```text
+{
+  pending: 10,
+  queued: 0
+}
+```
+
+Comprobar el `txpool` del minero:
+
+```bash
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'txpool.status'
+```
+
+Salida problematica:
+
+```text
+{
+  pending: 0,
+  queued: 0
+}
+```
+
+Comprobar el receipt de una transaccion pendiente:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.getTransactionReceipt("TX_HASH")'
+```
+
+Salida problematica:
+
+```text
+null
+```
+
+Este caso indica que:
+
+- el RPC recibe transacciones;
+- el minero no las recibe;
+- por tanto, la transaccion no se mina;
+- los validadores quedan bloqueados esperando el receipt;
+- el puerto HTTP del validador puede no abrirse porque FastAPI sigue en `Waiting for application startup`.
+
+Comprobar numero de peers:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'net.peerCount'
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'net.peerCount'
+kubectl exec -it geth-bootnode-0 -n blockchain -- geth attach --exec 'net.peerCount'
+```
+
+Caso observado:
+
+```text
+rpc: 1
+miner: 1
+bootnode: 2
+```
+
+Aunque los tres nodos esten en el mismo bloque:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.blockNumber'
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'eth.blockNumber'
+kubectl exec -it geth-bootnode-0 -n blockchain -- geth attach --exec 'eth.blockNumber'
+```
+
+El problema puede seguir existiendo si RPC y miner solo estan conectados al bootnode, no entre ellos.
+
+Confirmar los peers reales sin usar arrow functions, porque la consola JS de `geth attach` puede no soportar `=>`:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.peers.map(function(p){ return p.name + " " + p.network.remoteAddress })'
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'admin.peers.map(function(p){ return p.name + " " + p.network.remoteAddress })'
+```
+
+Caso observado:
+
+```text
+["Geth/... 10.42.0.56:30303"]
+```
+
+Si `10.42.0.56` es `geth-bootnode-0`, queda confirmada esta topologia incorrecta:
+
+```text
+rpc   ---> bootnode
+miner ---> bootnode
+```
+
+Y falta la conexion directa:
+
+```text
+rpc <--> miner
+```
+
+Solucion manual temporal con `admin.addPeer()`:
+
+```bash
+kubectl get pods -n blockchain -o wide
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'admin.nodeInfo.enode'
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.nodeInfo.enode'
+```
+
+Conectar RPC hacia miner:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.addPeer("ENODE_DEL_MINER")'
+```
+
+Opcionalmente, conectar miner hacia RPC:
+
+```bash
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'admin.addPeer("ENODE_DEL_RPC")'
+```
+
+Ejemplo real observado:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.addPeer("enode://2902482757cd755c3e5fdb6632b23cfd3205140843211aa11fd20c5fe7809e717ff323d1c3e94e9e02eb7818dea8a8309d748937f7719c73d6c11f35d21946cb@10.42.0.54:30305")'
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'admin.addPeer("enode://e57a9ffb627bcb8808e77d15b84457cd2b9e61d9354cb13157888e5916fb005d44bc2d87b4eaedbaeed87fb08d28344aadd4a6f2a9a9131d8dae0e0792c769da@10.42.0.55:30304")'
+```
+
+Validar que ambos nodos tienen dos peers:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'net.peerCount'
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'net.peerCount'
+```
+
+Resultado esperado:
+
+```text
+2
+2
+```
+
+Comprobar que la transaccion pendiente ya se mina:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.getTransactionReceipt("TX_HASH")'
+```
+
+Resultado esperado:
+
+```text
+{
+  blockNumber: ...,
+  status: "0x1",
+  ...
+}
+```
+
+Comprobar de nuevo el `txpool`:
+
+```bash
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'txpool.status'
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'txpool.status'
+```
+
+Una vez minadas las transacciones pendientes, reiniciar los validadores:
+
+```bash
+kubectl rollout restart deployment validate-worker-1 -n apis
+kubectl rollout restart deployment validate-worker-2 -n apis
+kubectl rollout restart deployment validate-worker-3 -n apis
+kubectl rollout status deployment validate-worker-1 -n apis
+kubectl rollout status deployment validate-worker-2 -n apis
+kubectl rollout status deployment validate-worker-3 -n apis
+```
+
+Logs esperados:
+
+```text
+INFO: Application startup complete.
+INFO: Uvicorn running on http://0.0.0.0:8070
+```
+
+Importante: `admin.addPeer()` es una solucion manual y no persistente. Si se reinician los pods de blockchain, puede perderse y habra que repetir el procedimiento.
+
 ### 3.3 Desplegar o verificar contrato
 
 Si el contrato de la version estable ya existe, conservar la direccion actual y comprobar bytecode:

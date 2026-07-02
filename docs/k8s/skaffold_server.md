@@ -1,22 +1,106 @@
 # Despliegue Trust News en Hetzner
 
-## Orden de inicialización de un entorno nuevo
+Este documento es el runbook operativo para el servidor Hetzner. Mantiene en un unico sitio:
 
-El orden recomendado evita que las APIs arranquen contra una base de datos o un contrato incompletos:
+- instalacion inicial de un entorno vacio;
+- actualizacion normal desde GitLab CI usando la rama `postTFM`;
+- verificaciones y operaciones de recuperacion.
 
-1. Crear namespaces y secretos.
-2. Desplegar `infra-prod` y esperar a MongoDB, Kafka e IPFS.
-3. Inicializar MongoDB con usuarios, índices, taxonomías y preferred domains.
-4. Desplegar la blockchain privada.
-5. Desplegar `TrustNews` e inicializar/verificar las categorías on-chain.
-6. Configurar `CONTRACT_ADDRESS` en las APIs y desplegar `apis-prod`.
-7. Crear clientes/cuotas de negocio mediante `admin`; no deben incluirse como datos fijos del bootstrap.
+El despliegue local paso a paso sigue documentado en [`skaffold-v2.md`](skaffold-v2.md). En Hetzner se usan los perfiles `*-prod` de `skaffold.yaml` y los secretos se crean fuera del repo.
 
-## Inicialización general de MongoDB
+## 0. Fuentes de verdad y estrategia
 
-### Secretos requeridos
+- La rama publicada en GitHub `main` se toma como ultima base estable de Hetzner.
+- Los cambios nuevos se suben a GitLab en la rama `postTFM`.
+- GitLab CI despliega contra el cluster de Hetzner con `.gitlab-ci.yml`.
+- Los perfiles productivos son:
+  - `setup`: namespaces.
+  - `infra-prod`: MongoDB, Kafka, IPFS, Keycloak, mongo-express, logs.
+  - `blockchain-prod`: red privada geth.
+  - `apis-frontend-prod`: APIs y frontend.
 
-El secreto `mongodb-secret` del namespace `infra` debe contener:
+Antes de desplegar una actualizacion importante, sincronizar `postTFM` con la base estable:
+
+```bash
+git fetch origin main
+git checkout postTFM
+git merge origin/main
+# resolver conflictos si aparecen
+git push gitlab postTFM
+```
+
+Si el remoto `origin` o `gitlab` no coinciden con tu checkout local, verificar primero:
+
+```bash
+git remote -v
+git branch -vv
+```
+
+## 1. Variables y accesos requeridos
+
+### 1.1 Servidor y cluster
+
+En el servidor Hetzner debe existir:
+
+- Kubernetes/k3s funcional.
+- `kubectl` configurado para administrar el cluster.
+- Acceso SSH por el puerto `2222` para el usuario de despliegue.
+- GitLab Runner con tag `hetzner-runner`.
+- Docker disponible para el job `build` de GitLab, normalmente con acceso al socket Docker del host.
+- Pull secret de GitLab Registry en los namespaces que descargan imagenes privadas.
+
+### 1.2 Variables CI/CD en GitLab
+
+Definir como variables protegidas/enmascaradas del proyecto GitLab:
+
+```dotenv
+HETZNER_IP=<ip-publica-hetzner>
+HETZNER_USER=<usuario-ssh>
+HETZNER_SSH_KEY=<private-key-ssh>
+KUBECONFIG_DATA=<base64-del-kubeconfig>
+PROFILE=apis-frontend-prod
+```
+
+`CI_REGISTRY`, `CI_REGISTRY_IMAGE`, `CI_REGISTRY_USER` y `CI_REGISTRY_PASSWORD` los aporta GitLab.
+
+Para generar `KUBECONFIG_DATA` desde una maquina que ya tenga kubeconfig valido:
+
+```bash
+base64 -w0 ~/.kube/config
+```
+
+El job `deploy` abre un tunel SSH local `127.0.0.1:6443 -> Hetzner:127.0.0.1:6443` y fuerza el cluster de kubeconfig a `https://127.0.0.1:6443`. Si el API server no escucha ahi en Hetzner, ajustar `.gitlab-ci.yml` o el kubeconfig.
+
+Nota sobre rollback: el job `rollback` actual no abre el tunel SSH. Si `KUBECONFIG_DATA` depende del tunel a `127.0.0.1:6443`, hacer rollback manual desde el servidor o replicar en ese job el mismo bloque SSH del job `deploy`.
+
+## 2. Preparar secretos Kubernetes
+
+Ejecutar en el servidor, desde un directorio privado fuera del repo. No versionar estos `.env`.
+
+### 2.1 Helper idempotente
+
+```bash
+apply_secret() {
+  local namespace="$1"
+  local name="$2"
+  local file="$3"
+  kubectl create secret generic "$name" \
+    --from-env-file="$file" \
+    -n "$namespace" \
+    --dry-run=client -o yaml | kubectl apply -f -
+}
+```
+
+### 2.2 Namespaces
+
+```bash
+kubectl apply -f k8s/namespaces.yaml
+kubectl get ns blockchain infra apis frontend
+```
+
+### 2.3 Secretos de infraestructura
+
+`mongodb.env` debe contener:
 
 ```dotenv
 MONGO_INITDB_ROOT_USERNAME=<root-user>
@@ -26,76 +110,232 @@ MONGO_APP_PASSWORD=<application-password>
 MONGO_APP_DATABASE=newsdb
 ```
 
-`mongodb-app-secret` en `apis` debe usar el mismo usuario, contraseña y base de datos de aplicación. No se deben versionar estos valores.
+`mongodb-app.env` debe contener las claves que leen las APIs:
 
-El fichero [`k8s/infra/mongodb/init-users.js`](../../k8s/infra/mongodb/init-users.js) montado en `/docker-entrypoint-initdb.d` crea el usuario de aplicación automáticamente, pero Mongo solo ejecuta estos scripts cuando `/data/db` está vacío. No basta para restauraciones, PVC reutilizados o actualizaciones de configuración.
+```dotenv
+MONGO_APP_USER=<application-user>
+MONGO_APP_PWD=<application-password>
+MONGO_APP_HOST=mongodb.infra.svc.cluster.local
+MONGO_APP_PORT=27017
+MONGO_APP_DATABASE=newsdb
+MONGO_DBNAME=newsdb
+MONGO_APP_AUTHSOURCE=newsdb
+```
 
-### Bootstrap idempotente después de desplegar infra
+`keycloak-admin.env`:
 
-Desde la raíz del repositorio en el servidor:
+```dotenv
+
+ADMIN_USER=<admin-user>
+ADMIN_PASSWORD=<admin-password>
+DB_USER=<user_app_db> 
+DB_PASSWORD=<pwd_app_db>
+
+
+```
+
+`keycloak-db.env`:
+
+```dotenv
+ADMIN_USER=<user_admin>
+ADMIN_PASSWORD=<user_pwd> 
+DB_USER=<user_app_db>  
+DB_PASSWORD=<pwd_app_db>
+
+```
+
+`mongo-express.env`:
+
+```dotenv
+ME_CONFIG_BASICAUTH_USERNAME=<user>
+ME_CONFIG_BASICAUTH_PASSWORD=<password>
+```
+
+Crear/aplicar:
 
 ```bash
-kubectl apply -k k8s/infra/mongodb/overlays/prod
-kubectl rollout status statefulset/mongodb -n infra --timeout=180s
+apply_secret infra mongodb-secret mongodb.env
+apply_secret apis mongodb-app-secret mongodb-app.env
+apply_secret infra keycloak-admin-secret keycloak-admin.env
+apply_secret infra keycloak-db-secret keycloak-db.env
+apply_secret infra mongo-express-secret mongo-express.env
+```
 
+TLS de Keycloak, si se usa el secreto referenciado por el overlay:
+
+```bash
+kubectl create secret tls keycloak-tls-secret \
+  --cert=./tls-keycloak.crt \
+  --key=./tls-keycloak.key \
+  -n infra \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+### 2.4 Secretos blockchain y APIs
+
+`ethereum.env` debe contener las claves usadas por geth en `ethereum-secrets` segun el overlay de blockchain.
+
+`generate-asertions.env` debe contener al menos la clave del proveedor activo. Con la configuracion actual el proveedor por defecto es OpenRouter:
+
+```dotenv
+OPENROUTER_API_KEY=<token>
+# opcional si cambias proveedor/modelo por env:
+# GEMINI_API_KEY=<token>
+# MISTRAL_API_KEY=<token>
+```
+
+`search.env` para `evidence-search`:
+
+```dotenv
+API_KEY_PROVIDER=<exa-o-tavily-api-key>
+```
+
+Con la configuracion actual `SEARCH_PROVIDER=exa` y `SEARCH_API_URL=https://api.exa.ai/search` estan en el ConfigMap.
+
+`news-chain.env`:
+
+```dotenv
+PRIVATE_KEY=<private-key-de-account-address>
+```
+
+`worker-1.env`, `worker-2.env`, `worker-3.env`:
+
+```dotenv
+PRIVATE_KEY=<validator-private-key>
+ACCOUNT_ADDRESS=<validator-address>
+API_KEY=<llm-provider-api-key>
+```
+
+Crear/aplicar:
+
+```bash
+apply_secret blockchain ethereum-secrets ethereum.env
+apply_secret apis api-keys generate-asertions.env
+apply_secret apis search-secret search.env
+apply_secret apis news-chain-secrets news-chain.env
+apply_secret apis validator-secret-1 worker-1.env
+apply_secret apis validator-secret-2 worker-2.env
+apply_secret apis validator-secret-3 worker-3.env
+```
+
+### 2.5 Frontend TLS
+
+El overlay `k8s/frontend` genera `frontend-tls` desde:
+
+```text
+web_classic/certs/fullchain.pem
+web_classic/certs/privkey.pem
+```
+
+En Hetzner deben existir esos ficheros antes de ejecutar `apis-frontend-prod`, o se debe crear el secreto `frontend-tls` manualmente y ajustar el overlay para no regenerarlo.
+
+### 2.6 Pull secret del GitLab Registry
+
+Crear un Deploy Token o usar credenciales con permiso `read_registry`. Repetir en los namespaces que descargan imagenes privadas:
+
+```bash
+for ns in apis infra frontend blockchain; do
+  kubectl create secret docker-registry gitlab-pull-secret \
+    --docker-server=registry.gitlab.com \
+    --docker-username=<gitlab-deploy-token-user> \
+    --docker-password=<gitlab-deploy-token-password> \
+    --docker-email=<email> \
+    --namespace="$ns" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+  kubectl patch serviceaccount default \
+    -n "$ns" \
+    -p '{"imagePullSecrets":[{"name":"gitlab-pull-secret"}]}'
+done
+```
+
+## 3. Instalacion inicial de un entorno vacio
+
+Usar este flujo solo para una instalacion nueva o una reconstruccion controlada. No borra PVCs por defecto.
+
+### 3.1 Desplegar infra
+
+Desde GitLab, lanzar pipeline manual sobre `postTFM` con:
+
+```dotenv
+PROFILE=infra-prod
+```
+
+O desde el servidor, si se despliega manualmente:
+
+```bash
+skaffold deploy -p infra-prod --default-repo registry.gitlab.com/cforcadell/tfm
+kubectl rollout status statefulset/mongodb -n infra --timeout=180s
+kubectl get pods -n infra
+```
+
+Despues de MongoDB, ejecutar siempre el bootstrap idempotente:
+
+```bash
 scripts/k8s/init-mongodb-server.sh --dry-run
 scripts/k8s/init-mongodb-server.sh
 ```
 
-El script [`scripts/k8s/init-mongodb-server.sh`](../../scripts/k8s/init-mongodb-server.sh):
+El script:
 
-- crea o actualiza el usuario de aplicación;
-- crea los índices generales de `news`, `clients_quotas`, `events` y `validations`;
-- reemplaza solamente el perfil `default` en `evidence_domain_profiles`;
-- elimina los documentos e índices del antiguo modelo `profile_index/profile_subset` para ese perfil;
-- hace upsert de los tres documentos de `evidence_normalization_configs`;
-- crea los índices de `evidence_search_cache` y limpia la caché por defecto.
+- crea/actualiza el usuario de aplicacion;
+- crea indices de `news`, `clients_quotas`, `events`, `validations` y `evidence_search_cache`;
+- reemplaza solo el perfil `default` de `evidence_domain_profiles`;
+- inserta/actualiza `evidence_normalization_configs`;
+- limpia por defecto la cache `evidence_search_cache`.
 
-Los seeds versionados son:
-
-```text
-api/evidence-search/config/evidence-domain-profile-default.json
-api/evidence-search/config/evidence-normalization-configs.json
-```
-
-Para conservar la caché —normalmente no es recomendable después de cambiar perfiles—:
-
-```bash
-scripts/k8s/init-mongodb-server.sh --keep-cache
-```
-
-Para indicar otro namespace o pod:
-
-```bash
-scripts/k8s/init-mongodb-server.sh --namespace infra --pod mongodb-0
-```
-
-El script usa el cliente `mongo` que ya existe dentro del pod y las credenciales del propio secreto; no requiere exponer el puerto 27017 ni instalar `pymongo` en el servidor.
-
-### Verificación MongoDB
+Verificacion esperada del perfil actual:
 
 ```bash
 kubectl exec -it mongodb-0 -n infra -- sh -c \
   'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$MONGO_APP_DATABASE" --quiet --eval "const p=db.evidence_domain_profiles.findOne({profile_id: \"default\"}); printjson({profiles: db.evidence_domain_profiles.countDocuments({profile_id: \"default\"}), normalization: db.evidence_normalization_configs.countDocuments({}), domains: p ? p.domains.length : 0})"'
 ```
 
-Resultado esperado:
+Resultado esperado en esta version:
 
 ```text
 profiles: 1
 normalization: 3
-domains: 8
+domains: 500
 ```
 
-Los servicios también recrean sus índices al arrancar. El script de bootstrap los crea anticipadamente para detectar duplicados o problemas de permisos antes de desplegar las APIs.
+### 3.2 Desplegar blockchain
 
-## Inicialización de categorías blockchain
+Lanzar pipeline manual con:
 
-Las categorías no se guardan en MongoDB. Su fuente de verdad es el contrato `TrustNews`; `api/common/category_catalog.py` es el espejo backend y debe coincidir con [`smart-contracts/config/categories.json`](../../smart-contracts/config/categories.json).
+```dotenv
+PROFILE=blockchain-prod
+```
 
-### Contrato nuevo
+Verificar peers y bloques:
 
-El despliegue ya registra las diez categorías. La clave no se escribe en `hardhat.config.js`; se proporciona mediante `DEPLOYER_PRIVATE_KEY`:
+```bash
+kubectl get pods -n blockchain
+kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "net.peerCount"
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "eth.blockNumber"
+```
+
+### 3.3 Desplegar o verificar contrato
+
+Si el contrato de la version estable ya existe, conservar la direccion actual y comprobar bytecode:
+
+```bash
+export CONTRACT_ADDRESS=0x<direccion-trust-news>
+kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- \
+  geth attach --exec "eth.getCode('$CONTRACT_ADDRESS')"
+```
+
+Si se despliega contrato nuevo, abrir tunel al RPC desde tu maquina de trabajo:
+
+```bash
+ssh -i ./id_rsa_hetzner_deploy -p 2222 \
+  -L 8565:localhost:8555 \
+  <usuario>@<hetzner-ip> \
+  -t "kubectl port-forward pod/geth-rpc-endpoint-0 -n blockchain 8555:8555"
+```
+
+En otra terminal:
 
 ```bash
 cd smart-contracts
@@ -105,11 +345,9 @@ npx hardhat run scripts/deployGeth.js --network cloudGeth
 unset DEPLOYER_PRIVATE_KEY
 ```
 
-Anotar la dirección mostrada y configurarla como `CONTRACT_ADDRESS` en los componentes que consumen el contrato.
+Guardar la direccion mostrada como `CONTRACT_ADDRESS`.
 
-### Contrato ya desplegado o despliegue interrumpido
-
-El inicializador es idempotente: crea categorías ausentes, deja intactas las correctas y falla si un ID existente tiene otro nombre. Debe ejecutarse con la cuenta propietaria del contrato:
+Inicializar o verificar categorias on-chain. Es idempotente si se usa el propietario del contrato:
 
 ```bash
 cd smart-contracts
@@ -117,350 +355,260 @@ export CONTRACT_ADDRESS=0x<direccion-trust-news>
 read -rsp "Contract owner private key: " DEPLOYER_PRIVATE_KEY && echo
 export DEPLOYER_PRIVATE_KEY
 npx hardhat run scripts/initCategories.js --network cloudGeth
-# Repetir para verificar idempotencia: debe mostrar diez entradas "unchanged".
 npx hardhat run scripts/initCategories.js --network cloudGeth
 unset DEPLOYER_PRIVATE_KEY
 ```
 
-Si aparece `Signer ... is not contract owner`, hay que usar la clave privada de la cuenta que desplegó el contrato. Si aparece un `mismatch`, no se debe continuar: `addCategory` no permite modificar una categoría existente y hay que corregir la red/contrato seleccionado o desplegar uno nuevo.
+La segunda ejecucion debe mostrar las diez categorias como `unchanged`. Si hay `mismatch`, no continuar: el contrato no corresponde a la version esperada o las categorias no coinciden con `smart-contracts/config/categories.json`.
 
-## Reejecución y recuperación
+### 3.4 Actualizar direccion de contrato antes de APIs
 
-- `initCategories.js` se puede repetir siempre que se use el propietario y el mismo contrato.
-- `init-mongodb-server.sh` preserva noticias, validaciones, eventos, cuotas y perfiles distintos de `default`.
-- El bootstrap Mongo reemplaza el perfil `default` y las taxonomías por las versiones del repositorio.
-- Los scripts de `/docker-entrypoint-initdb.d` no se vuelven a ejecutar con un PVC existente; usar siempre el bootstrap explícito tras restaurar o actualizar.
-- Antes de cambiar datos productivos, realizar backup del PVC o `mongodump`.
+Los overlays prod contienen la direccion en estos ficheros:
 
----
-
-**Just one shot execution**
-```bash infra inside server 
-scripts/k8s/create-namespaces.sh
-
-secrets/create-secrets.sh
-
-touch worker-1.env worker-2.env worker-3.env generate-asertions.env news-chain.env mongodb-app.env mongodb.env gateway.env keycloak.env ethereum.env
-chmod 600 *.env
-
-kubectl create secret generic validator-secret-1 --from-env-file=worker-1.env -n apis
-kubectl create secret generic validator-secret-2 --from-env-file=worker-2.env -n apis
-kubectl create secret generic validator-secret-3 --from-env-file=worker-3.env -n apis
-
-kubectl create secret generic api-keys --from-env-file=generate-asertions.env -n apis
-
-kubectl create secret generic news-chain-secrets --from-env-file=news-chain.env -n apis
-
-kubectl create secret generic mongodb-app-secret --from-env-file=mongodb-app.env -n apis
-
-kubectl create secret generic gate-config --from-env-file=gateway.env -n apis
-
-
-kubectl create secret generic mongodb-secret --from-env-file=mongodb.env -n infra
-
-kubectl create secret generic keycloak-admin-secret --from-env-file=keycloak.env -n infra
-
-kubectl create secret generic ethereum-secrets  --from-env-file=ethereum.env -n blockchain
-
-#create gitlab secrets
-
-create-secrets-gitlab.sh*
-
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username=gitlab+deploy-token-13012600 \
-  --docker-password= \
-  --docker-email=cforcadell@gmail.com \
-  --namespace=apis
-
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username=gitlab+deploy-token-13012600 \
-  --docker-password= \
-  --docker-email=cforcadell@gmail.com \
-  --namespace=infra
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username=gitlab+deploy-token-13012600 \
-  --docker-password= \
-  --docker-email=cforcadell@gmail.com \
-  --namespace=blockchain
-kubectl create secret docker-registry gitlab-pull-secret \
-  --docker-server=registry.gitlab.com \
-  --docker-username=gitlab+deploy-token-13012600 \
-  --docker-password= \
-  --docker-email=cforcadell@gmail.com \
-  --namespace=frontend
-
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=apis
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=infra
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=blockchain
-
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "gitlab-pull-secret"}]}' \
-  --namespace=frontend
-
-
-
-#inside secrets folder
-kubectl create secret tls keycloak-tls-secret \
-  --cert=./tls-keycloak.crt \
-  --key=./tls-keycloak.key \
-  -n infra
-
-
-#kubectl create secret tls frontend-tls \
-#  --cert=./web_classic/certs/fullchain.pem \
-#  --key=./web_classic/certs/privkey.pem \
-#  -n frontend
-
-```
-**Deploy blockchain resources**
-#use apipeline with PROFILE=blockchain-prod and check peers
-
-kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "net.peerCount"
-
-kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
-
-**Deploy contract using ssh tunnel**
-
-
-```bash blockchain ~/blockchain/hetzner/keys-github
-ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 8565:localhost:8555 sysadmin@135.181.80.57 -t "kubectl port-forward pod/geth-rpc-endpoint-0 -n blockchain 8555:8555"
-
-
+```text
+k8s/apis/news-chain/overlays/prod/kustomization.yaml
+k8s/apis/validate-asertions/overlays/prod/worker-1/kustomization.yaml
+k8s/apis/validate-asertions/overlays/prod/worker-2/kustomization.yaml
+k8s/apis/validate-asertions/overlays/prod/worker-3/kustomization.yaml
 ```
 
-La red `cloudGeth` ya está definida en `hardhat.config.js`. Mantener el túnel abierto y proporcionar la cuenta mediante entorno:
+Antes de desplegar `apis-frontend-prod`, cambiar todos los `CONTRACT_ADDRESS` si se ha desplegado contrato nuevo. Confirmar tambien que `ACCOUNT_ADDRESS` de `news-chain` coincide con la cuenta de `news-chain.env`.
+
+Si el contrato ABI cambia, regenerar el artefacto y confirmar que existe:
 
 ```bash
 cd smart-contracts
-read -rsp "Deployer private key: " DEPLOYER_PRIVATE_KEY && echo
-export DEPLOYER_PRIVATE_KEY
-npx hardhat run scripts/deployGeth.js --network cloudGeth
-unset DEPLOYER_PRIVATE_KEY
-
-# Guardar la dirección mostrada como CONTRACT_ADDRESS en las APIs.
+npx hardhat compile
+test -f artifacts/contracts/TrustNews.sol/TrustNews.json
 ```
 
-```bash blockchain inside server
+### 3.5 Desplegar APIs y frontend
 
-kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
+Lanzar pipeline manual con:
 
-eth.sendTransaction({
-  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
-  to: "0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b",
-  value: web3.toWei(10, "ether")
-})
-
-
-eth.sendTransaction({
-  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
-  to: "4504a1d4047583164919ae40c37c4f4c5b854bbb",
-  value: web3.toWei(10, "ether")
-})
-
-
-eth.sendTransaction({
-  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
-  to: "edbef53fc17dde65bf303b3d4983afb7028eb6eb",
-  value: web3.toWei(10, "ether")
-})
-
-
-eth.sendTransaction({
-  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
-  to: "be794abf86d173ddcfe937c6d8d739bdc4e94165",
-  value: web3.toWei(10, "ether")
-})
-
-
-eth.sendTransaction({
-  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
-  to: "42d488d0393fd1d6b72bb424db28dd7eb5e06737",
-  value: web3.toWei(10, "ether")
-})
-
-#check contract
-kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'eth.getCode("0x9eA62eb7944349C407B307025644E47bF22F8bCc")'
+```dotenv
+PROFILE=apis-frontend-prod
 ```
 
+Verificar rollouts:
 
-```bash infra
+```bash
+kubectl get pods -n apis
+kubectl get pods -n frontend
+kubectl rollout status deployment/gateway -n apis --timeout=180s
+kubectl rollout status deployment/news-handler -n apis --timeout=180s
+kubectl rollout status deployment/evidence-search -n apis --timeout=180s
+kubectl rollout status deployment/frontend-web -n frontend --timeout=180s
+```
 
-#use pipeliney  profile infra-prod
+## 4. Actualizacion normal desde GitLab CI
 
+Usar este flujo para desplegar commits ya subidos a `postTFM`.
 
-kubectl get pods -n infra
+### 4.1 Preflight local
 
+```bash
+git checkout postTFM
+git fetch origin main
+git merge origin/main
+git status --short
+```
 
-kubectl logs -n infra -f kafka-0
+Comprobar si el cambio toca contrato o overlays de contrato:
 
+```bash
+git diff --name-only origin/main...HEAD | grep -E 'smart-contracts|k8s/apis/.*/overlays/prod/.*/kustomization.yaml|k8s/apis/news-chain/overlays/prod/kustomization.yaml' || true
+```
 
-#si al parar los pods a replicas=0 o eliminar los statefuls quedan pvcs
+Si toca contrato, repetir las secciones 3.3 y 3.4 antes de desplegar APIs.
+
+Subir a GitLab:
+
+```bash
+git push gitlab postTFM
+```
+
+### 4.2 Ejecutar pipeline
+
+En GitLab:
+
+1. Abrir `Build > Pipelines > Run pipeline`.
+2. Branch: `postTFM`.
+3. Variable `PROFILE=apis-frontend-prod`.
+4. Ejecutar `build` y luego `deploy`.
+
+El job `build` genera `build.json` con las imagenes exactas. El job `deploy` ejecuta:
+
+```bash
+skaffold deploy --build-artifacts=build.json --profile=$PROFILE
+```
+
+El pipeline solo construye automaticamente si hay cambios en `api/**`, `web_classic/**`, `skaffold.yaml` o `k8s/apis/**`; para cambios de docs, infra, blockchain o certificados puede ser necesario ejecutar el job manualmente.
+
+### 4.3 Verificacion despues de CI
+
+```bash
+kubectl get pods -n apis -o wide
+kubectl get pods -n frontend -o wide
+kubectl logs deployment/gateway -n apis --tail=80
+kubectl logs deployment/news-handler -n apis --tail=80
+kubectl logs deployment/evidence-search -n apis --tail=80
+```
+
+Probar frontend mediante tunel:
+
+```bash
+# En Hetzner
+kubectl port-forward service/frontend-service -n frontend 10443:443
+
+# En local
+ssh -i ./id_rsa_hetzner_deploy -p 2222 \
+  -L 9443:127.0.0.1:10443 \
+  <usuario>@<hetzner-ip>
+```
+
+Abrir:
+
+```text
+https://localhost:9443/
+https://localhost:9443/backend/docs
+```
+
+## 5. Keycloak y cuotas
+
+Acceder a Keycloak:
+
+```text
+https://localhost:9443/auth/admin/master/console/
+```
+
+Configuracion minima:
+
+- Realm: `TrustNews`.
+- Cliente frontend: `TrustNewsWeb`.
+  - Root URL: URL publica del frontend.
+  - Valid redirect URIs: `<frontend-url>/*`.
+  - Web Origins: URL publica del frontend, o `*` solo para pruebas.
+- Cliente backend: `TrustNewsApi`.
+  - Client authentication: ON.
+  - Service accounts roles: ON.
+  - Guardar el client secret para clientes externos.
+
+Obtener token de prueba:
+
+```bash
+curl -k -X POST https://localhost:9443/auth/realms/TrustNews/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=TrustNewsApi" \
+  -d "client_secret=<secret>"
+```
+
+Admin/quotas mediante tunel:
+
+```bash
+# En Hetzner
+kubectl port-forward service/admin-service -n apis 7400:8400
+
+# En local
+ssh -i ./id_rsa_hetzner_deploy -p 2222 \
+  -L 7400:127.0.0.1:7400 \
+  <usuario>@<hetzner-ip>
+```
+
+Abrir:
+
+```text
+http://127.0.0.1:7400/docs
+```
+
+Las cuotas/clientes de negocio se crean por API de admin; no deben formar parte del bootstrap fijo.
+
+## 6. Operacion y recuperacion
+
+### 6.1 Reinicios conservando PVCs
+
+```bash
+kubectl scale deployment --all --replicas=0 -n apis
+kubectl scale deployment --all --replicas=1 -n apis
+
+kubectl scale statefulset --all --replicas=0 -n infra
+kubectl scale statefulset --all --replicas=1 -n infra
+
+kubectl scale statefulset --all --replicas=0 -n blockchain
+kubectl scale statefulset --all --replicas=1 -n blockchain
+```
+
+### 6.2 Rollback manual
+
+```bash
+kubectl rollout undo deployment/gateway -n apis
+kubectl rollout undo deployment/news-handler -n apis
+kubectl rollout undo deployment/evidence-search -n apis
+kubectl rollout undo deployment/frontend-web -n frontend
+kubectl rollout status deployment/gateway -n apis --timeout=180s
+```
+
+### 6.3 Limpieza destructiva de PVCs
+
+Solo para reconstruccion completa. Hacer backup antes.
+
+```bash
 kubectl get pvc -n infra
+kubectl get pvc -n blockchain
+
 kubectl delete pvc ipfs-storage-ipfs-0 -n infra
 kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
-
+kubectl delete pvc bootnode-data-geth-bootnode-0 -n blockchain
+kubectl delete pvc miner-data-geth-miner-0 -n blockchain
+kubectl delete pvc rpc-data-geth-rpc-endpoint-0 -n blockchain
 ```
 
+### 6.4 Mongo Express
 
-
-```bash tunnel vmlinux home-> apis c
-#ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57 "kubectl port-forward pod/frontend-web-75b7d945cb-bg2bh -n frontend 10443:443 --address 0.0.0.0"
-
-#in hetzner (~/trust-news/scripts/port-forward.sh)
-kubectl port-forward service/frontend-service -n frontend 10443:443
-
-# in local vm machine ~/blockchain/hetzner/keys-github (dev)
-ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 9443:127.0.0.1:10443 sysadmin@135.181.80.57
-
-
-https://localhost:9443/
-
-https://localhost:9443/backend/docs
-
-
+```bash
+kubectl port-forward --address 0.0.0.0 -n infra svc/mongo-express 8081:8081
 ```
 
-kubectl get pods -n infra
-**start/stop pods**
-```bash 
+Abrir:
 
-kubectl scale statefulset --all --replicas=0 -n infra blockchain 
-kubectl scale statefulset --all --replicas=1 -n infra blockchain 
-
-```
-**keycloak**
-```bash 
-https://localhost:9443/auth/admin/master/console/
-
-
-
-Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
-
-Nombre: TrustNews.
-
-Crea el Cliente para la Web (Frontend):
-
-Clients -> Create client.
-
-ClientID: TrustNewsWeb.
-
-Root URL: https://localhost:9443 (o la URL de tu frontend).
-Valid redirect: https://localhost:9443/*
-
-Web Origins: * (para evitar problemas de CORS en desarrollo).
-
-Crea el Cliente para los Backends Públicos (Lo que pediste al inicio):
-
-Clients -> Create client.
-
-ClientID: TrustNewsApi.
-
-Client Authentication: Ponlo en ON.
-
-Authorization: Ponlo en OFF.
-
-Authentication Flow: Marca solo Service accounts roles (desmarca el resto). 
-
-Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
-
-En realm settings (TrustNews)
-Frontend URL: https://localhost:9443/auth/ ¿?¿?¿?¿?
-
-Craer usuario p federetad identity
-
-#get token
-curl -k -X POST https://localhost:9443/auth/realms/TrustNews/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials" -d "client_id=TrustNewsApi" -d "client_secret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-
-
-
-
+```text
+http://localhost:8081
 ```
 
+### 6.5 Grafana/Loki
 
-**grafana**
-```bash tunnel grafana ~/blockchain/hetzner/keys-github. Si ocupado abrir terminal en hetzner y matar proceso netstat -nap | grep 10443
-ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 3300:127.0.0.1:3300 sysadmin@135.181.80.57 "kubectl port-forward pod/grafana-7964997b9b-skqjw -n infra 3000:3000 --address 0.0.0.0"
-
-http://localhost:3300/
-
-
-
-#Add datasource in grafana: http://loki.infra.svc.cluster.local:3100
-
-Explore + Run query
-
-#change inside hetzner. ex: bootnode
-kubectl edit statefulset geth-bootnode -n blockchain
+```bash
+kubectl port-forward service/grafana -n infra 3300:3000
 ```
 
+Datasource Loki:
 
+```text
+http://loki.infra.svc.cluster.local:3100
+```
 
-```bash problemas de connection refused en descargar imágenes (Ej: python:3.11-slim )
+### 6.6 Imagenes base con pull rate limit
+
+Si Docker falla descargando imagenes base conocidas:
+
+```bash
 docker pull mirror.gcr.io/library/python:3.11-slim
-
 docker tag mirror.gcr.io/library/python:3.11-slim python:3.11-slim
 ```
 
-**admin & quotas**
-```bash admin
-#in hetzner (scripts/port-forward.sh)
-kubectl port-forward service/admin-service -n apis 7400:8400
+## 7. Checklist rapido
 
-#~/blockchain/hetzner/keys-github (dev)
-ssh -i ./id_rsa_hetzner_deploy -p 2222 -L 0.0.0.0:7400:127.0.0.1:7400 sysadmin@135.181.80.57
+Antes de `apis-frontend-prod`:
 
-http://127.0.0.1:7400/docs 
-
-
-Ex: craeate user 
-http://localhost:7400/clients
-  {
-    "name": "cforcadellm",
-    "limits": {
-      "news_generation": 99999999,
-      "blockchain_validation": 99999999
-    },
-    "consumed": {
-      "news_generation": 0,
-      "blockchain_validation": 0
-    },
-    "status": "Active",
-    "active_date": "2026-05-01T09:59:08.903000",
-    "deactivate_date": null,
-    "client_id": "user_e96fcb10-25a3-4773-88e0-86452cf3d309"
-  }
-
-
-Ex: craeate API KEY (get sub from existing token)
-http://localhost:7400/clients
-
-  {
-    "name": "Test Quota Client",
-    "limits": {
-      "news_generation": 2,
-      "blockchain_validation": 2
-    },
-    "consumed": {
-      "news_generation": 2,
-      "blockchain_validation": 2
-    },
-    "status": "Active",
-    "active_date": "2026-04-30T18:22:40.269000",
-    "deactivate_date": null,
-    "client_id": "TrustNewsApi_<id_API>"
-  }
-```
+- `postTFM` contiene la base de `origin/main`.
+- `mongodb-app-secret`, `api-keys`, `search-secret`, `news-chain-secrets` y `validator-secret-{1,2,3}` existen en `apis`.
+- `mongodb-secret`, `keycloak-admin-secret`, `keycloak-db-secret` y `mongo-express-secret` existen en `infra`.
+- `ethereum-secrets` existe en `blockchain`.
+- `gitlab-pull-secret` esta asociado al service account de `apis`, `infra`, `frontend` y `blockchain`.
+- `frontend-tls` existe o los certificados estan disponibles para el generator de `k8s/frontend`.
+- `CONTRACT_ADDRESS` en overlays prod coincide con el contrato desplegado.
+- `initCategories.js` se ha ejecutado y la segunda ejecucion no cambia nada.
+- `scripts/k8s/init-mongodb-server.sh` se ha ejecutado despues de levantar MongoDB.
+- El pipeline GitLab usa `PROFILE=apis-frontend-prod` para actualizaciones normales.

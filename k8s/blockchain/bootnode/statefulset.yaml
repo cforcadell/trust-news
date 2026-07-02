@@ -40,10 +40,10 @@ spec:
           resources:
             requests:
               cpu: "200m"
-              memory: "256Mi"
+              memory: "1Gi"
             limits:
               cpu: "400m"
-              memory: "512Mi"
+              memory: "2Gi"
           env:
           - name: POD_IP
             valueFrom:

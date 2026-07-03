@@ -56,7 +56,7 @@ kubectl logs mongodb-0 -n infra
 kubectl exec -it mongodb-0 -n infra -- mongo -u root -p XXXXXXXX --authenticationDatabase admin
 ```
 
-kubectl exec -it mongodb-0 -n infra -- mongo -u root -p cforcadellm --authenticationDatabase admin
+kubectl exec -it mongodb-0 -n infra -- mongo -u root -p <root-password> --authenticationDatabase admin
 
 **ipfs**
 ```bash
@@ -223,7 +223,7 @@ http://localhost:8060/docs
 kind load docker-image tfm-news-chain:latest --name trust-news
 
 kubectl create secret generic news-chain-secrets \
-  --from-literal=PRIVATE_KEY='xxxxxxxxxxxxxxxxxxxxxxxx' \
+  --from-literal=PRIVATE_KEY=<private-key> \
   -n apis
 
 kubectl create configmap news-chain-contract \
@@ -351,5 +351,5 @@ kubectl port-forward --address 0.0.0.0 svc/grafana 3000:80 -n infra
 
 http://192.168.56.108:3000/
 
-admin/admin and changepassword
+<grafana-user>/<grafana-password> and change password
 ```

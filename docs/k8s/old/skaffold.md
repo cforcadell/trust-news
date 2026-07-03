@@ -311,7 +311,7 @@ FE Users
 Create new keycloak user
 Use admin/Clients to define user quota and create inside mondogb: user_<keycloak_user_id>
   {
-    "name": "cforcadellm",
+    "name": "<client-name>",
     "limits": {
       "news_generation": 99999999,
       "blockchain_validation": 99999999
@@ -367,7 +367,7 @@ http://127.0.0.1:8400/docs
 ```
 ```bash  get mongodb data
 
-kubectl exec -it mongodb-0 -n infra -- mongo -u root -p cforcadellm --authenticationDatabase admin
+kubectl exec -it mongodb-0 -n infra -- mongo -u root -p <root-password> --authenticationDatabase admin
 > use newsdb
 > show collections
 events

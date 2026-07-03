@@ -456,7 +456,7 @@ Ejemplo:
 
 ```json
 {
-  "name": "cforcadellm",
+  "name": "<client-name>",
   "limits": {
     "news_generation": 99999999,
     "blockchain_validation": 99999999
@@ -573,7 +573,7 @@ Verificacion esperada: una asercion SOCIAL/DEMOGRAPHICS de Catalunya debe ordena
 ### 10.1 Entrar A Mongo
 
 ```bash
-kubectl exec -it mongodb-0 -n infra -- mongo -u root -p cforcadellm --authenticationDatabase admin
+kubectl exec -it mongodb-0 -n infra -- mongo -u root -p <root-password> --authenticationDatabase admin
 ```
 
 Dentro de Mongo:

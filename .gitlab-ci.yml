@@ -18,14 +18,14 @@ variables:
 
     # SSH tunnel
     - mkdir -p ~/.ssh
-    - echo "$HETZNER_SSH_KEY" > ~/.ssh/id_rsa
+    - printf '%s' "$HETZNER_SSH_KEY_B64" | base64 -d > ~/.ssh/id_rsa
     - chmod 600 ~/.ssh/id_rsa
     - ssh-keyscan -p 2222 -H $HETZNER_IP >> ~/.ssh/known_hosts
     - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $HETZNER_USER@$HETZNER_IP
 
     # kubeconfig
     - mkdir -p $HOME/.kube
-    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+    - printf '%s' "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
     - chmod 600 $HOME/.kube/config
 
     - export KUBECONFIG=$HOME/.kube/config
@@ -198,7 +198,7 @@ rollback:
   before_script:
     - apk add --no-cache kubectl curl
     - mkdir -p $HOME/.kube
-    - echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+    - printf '%s' "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
     - export KUBECONFIG=$HOME/.kube/config
 
   script:

@@ -52,13 +52,19 @@ Variables CI/CD protegidas/enmascaradas del proyecto GitLab:
 ```dotenv
 HETZNER_IP=<ip-publica-hetzner>
 HETZNER_USER=<usuario-ssh>
-HETZNER_SSH_KEY=<private-key-ssh>
+HETZNER_SSH_KEY_B64=<private-key-ssh-en-base64-sin-saltos-de-linea>
 KUBECONFIG_DATA=<base64-del-kubeconfig>
 PROFILE=apis-frontend-prod
 ```
 
 `CI_REGISTRY`, `CI_REGISTRY_IMAGE`, `CI_REGISTRY_USER` y
 `CI_REGISTRY_PASSWORD` los aporta GitLab.
+
+Generar `HETZNER_SSH_KEY_B64` desde la clave privada SSH de despliegue:
+
+```bash
+base64 -w0 id_rsa_hetzner_deploy
+```
 
 Generar `KUBECONFIG_DATA` desde una maquina con kubeconfig valido:
 

@@ -15,13 +15,26 @@ variables:
     - apk add --no-cache curl openssh-client bash
     - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
     - install kubectl /usr/local/bin/
+    - |
+      missing=0
+      for var in HETZNER_IP HETZNER_USER HETZNER_SSH_KEY_B64 KUBECONFIG_DATA; do
+        eval "value=\${$var:-}"
+        if [ -z "$value" ]; then
+          echo "ERROR: CI/CD variable $var is empty or unavailable in this pipeline."
+          missing=1
+        fi
+      done
+      if [ "$missing" -ne 0 ]; then
+        echo "Check GitLab Settings > CI/CD > Variables and whether the branch/tag is protected."
+        exit 1
+      fi
 
     # SSH tunnel
     - mkdir -p ~/.ssh
     - printf '%s' "$HETZNER_SSH_KEY_B64" | base64 -d > ~/.ssh/id_rsa
     - chmod 600 ~/.ssh/id_rsa
-    - ssh-keyscan -p 2222 -H $HETZNER_IP >> ~/.ssh/known_hosts
-    - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 $HETZNER_USER@$HETZNER_IP
+    - ssh-keyscan -p 2222 -H "$HETZNER_IP" >> ~/.ssh/known_hosts
+    - ssh -i ~/.ssh/id_rsa -p 2222 -o ExitOnForwardFailure=yes -f -N -L 6443:127.0.0.1:6443 "$HETZNER_USER@$HETZNER_IP"
 
     # kubeconfig
     - mkdir -p $HOME/.kube

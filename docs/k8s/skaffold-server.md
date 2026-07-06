@@ -60,6 +60,12 @@ PROFILE=apis-frontend-prod
 `CI_REGISTRY`, `CI_REGISTRY_IMAGE`, `CI_REGISTRY_USER` y
 `CI_REGISTRY_PASSWORD` los aporta GitLab.
 
+Si una variable marcada como `Protected` aparece vacia en el pipeline, comprobar
+que la rama o tag que ejecuta el pipeline tambien esta protegida. Para el flujo
+actual, `postTFM` debe estar en `Settings > Repository > Protected branches` si
+las variables de despliegue son `Protected`. Revisar tambien el `Environment
+scope`: usar `*` salvo que el job declare explicitamente un environment.
+
 Generar `HETZNER_SSH_KEY_B64` desde la clave privada SSH de despliegue:
 
 ```bash

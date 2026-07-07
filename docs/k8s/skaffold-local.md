@@ -185,13 +185,37 @@ kubectl get pods -n frontend
 kubectl logs -n apis -f
 ```
 
-Si no se levanta el port-forward:
+El frontend ya no termina TLS ni proxifica `/backend` o `/auth`; esas rutas las publica Traefik mediante los manifiestos de `k8s/ingress`. En `kind`, Traefik debe estar instalado en el cluster antes de usar la entrada HTTPS local:
 
 ```bash
-kubectl port-forward svc/frontend-service -n frontend 7443:443
+helm repo add traefik https://traefik.github.io/charts
+helm repo update
+
+helm upgrade --install traefik traefik/traefik \
+  --namespace kube-system \
+  --set ingressClass.enabled=true \
+  --set ingressClass.isDefaultClass=true \
+  --set providers.kubernetesIngress.enabled=true \
+  --set providers.kubernetesCRD.enabled=true
 ```
 
-URLs locales:
+Comprobar que el controlador esta listo:
+
+```bash
+kubectl rollout status deployment/traefik -n kube-system
+kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik
+kubectl get ingress -A
+```
+
+Despues de levantar `./skaffold dev -p apis-frontend`, abrir el tunel local hacia Traefik:
+
+```bash
+kubectl port-forward --address 0.0.0.0 -n kube-system svc/traefik 7443:443
+```
+
+Mantener ese `port-forward` activo mientras se use la entrada web. Usar `https://localhost:7443` como `traefik-host`; el navegador puede mostrar aviso por certificado local.
+
+URLs mediante Traefik:
 
 ```text
 https://localhost:7443/
@@ -199,11 +223,7 @@ https://localhost:7443/backend/docs
 https://localhost:7443/auth/admin/master/console/
 ```
 
-Si se accede desde VM con mapeo de host:
-
-```text
-https://192.168.56.108:7443/
-```
+No usar el port-forward directo al Service del frontend para validar la aplicacion completa: `kubectl port-forward svc/frontend-service -n frontend 7080:80` solo sirve los estaticos y deja fuera `/backend` y `/auth`.
 
 Ver nginx del frontend:
 
@@ -230,10 +250,10 @@ Decodificar un valor:
 echo "<valor-base64>" | base64 --decode
 ```
 
-Keycloak sin nginx:
+Keycloak via Traefik:
 
 ```bash
-kubectl port-forward svc/keycloak --address 0.0.0.0 -n infra 7443:8443
+kubectl port-forward --address 0.0.0.0 -n kube-system svc/traefik 7443:443
 ```
 
 Comprobacion:

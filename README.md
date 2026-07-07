@@ -239,10 +239,10 @@ Main local URLs:
 
 | Service | URL |
 |---|---|
-| Frontend | `https://localhost:7443` |
-| Keycloak Admin | `https://localhost:7443/auth/admin/master/console/` |
+| Frontend | `https://<traefik-host>` |
+| Keycloak Admin | `https://<traefik-host>/auth/admin/master/console/` |
 | Admin API | `http://localhost:8400/docs` |
-| Gateway | `http://localhost:8500/docs` |
+| Gateway | `https://<traefik-host>/backend/docs` |
 | Evidence Search | `http://localhost:8074/docs` |
 | News Handler | `http://localhost:8072/docs` |
 | News Chain | `http://localhost:8073/docs` |

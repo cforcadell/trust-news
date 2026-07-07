@@ -19,7 +19,7 @@ spec:
         image: gateway
         imagePullPolicy: IfNotPresent  # Importante para usar la imagen local
         ports:
-        - containerPort: 8071
+        - containerPort: 8500
         envFrom:
         - configMapRef:
             name: gateway-config

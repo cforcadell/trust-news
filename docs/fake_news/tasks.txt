@@ -121,9 +121,10 @@ Develop v0.0.11.
 
     - en modo light no enviar validacion si los validadores no responden a health chechk Pte Test
 -Estandarizacion de categorias en base a su categoryId a lo largo de toda la cadena
-- Generador de aserciones
-    - Eliminamos más de un hecho en la misma asercion
-    - Usamos solo las categorias standard
+- Generador de aserciones OK
+    - Eliminamos más de un hecho en la misma asercion OK
+    - Usamos solo las categorias standard OK
+- Usamos trtaefik como ingress tanto para local como para prod
     
 
 

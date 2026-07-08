@@ -185,7 +185,7 @@ kubectl get pods -n frontend
 kubectl logs -n apis -f
 ```
 
-El frontend ya no termina TLS ni proxifica `/backend` o `/auth`; esas rutas las publica Traefik mediante los manifiestos de `k8s/ingress`. En `kind`, Traefik debe estar instalado en el cluster antes de usar la entrada HTTPS local:
+El frontend ya no termina TLS ni proxifica `/backend` o `/auth`; esas rutas las publica Traefik mediante los manifiestos de `k8s/ingress`. El overlay local de ingress genera `trustnews-origin-tls` desde `web_classic/certs/fullchain.pem` y `web_classic/certs/privkey.pem`; en prod/Hetzner ese secret se crea manualmente segun el runbook server. En `kind`, Traefik debe estar instalado en el cluster antes de usar la entrada HTTPS local:
 
 ```bash
 helm repo add traefik https://traefik.github.io/charts

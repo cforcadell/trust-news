@@ -90,9 +90,11 @@ Hetzner:127.0.0.1:6443` y fuerza el cluster de kubeconfig a
 Ejecutar en el servidor, desde un directorio privado fuera del repo. No
 versionar estos `.env`.
 
-### 2.1 Helper idempotente
+### 2.1 Helpers idempotentes
 
-Usar `apply_secret` en lugar de borrar y recrear secrets manualmente:
+Usar `apply_secret` en lugar de borrar y recrear secrets manualmente. El
+certificado TLS de Traefik usa un helper separado porque debe ser un secret de
+tipo `kubernetes.io/tls`, no un secret generic desde `.env`.
 
 ```bash
 apply_secret() {
@@ -104,13 +106,32 @@ apply_secret() {
     -n "$namespace" \
     --dry-run=client -o yaml | kubectl apply -f -
 }
+
+apply_tls_secret() {
+  local namespace="$1"
+  local name="$2"
+  local file="$3"
+
+  set -a
+  . "$file"
+  set +a
+
+  test -f "$TLS_CERT_FILE"
+  test -f "$TLS_KEY_FILE"
+
+  kubectl create secret tls "$name" \
+    --cert="$TLS_CERT_FILE" \
+    --key="$TLS_KEY_FILE" \
+    -n "$namespace" \
+    --dry-run=client -o yaml | kubectl apply -f -
+}
 ```
 
 ### 2.2 Namespaces
 
 ```bash
 kubectl apply -f k8s/namespaces.yaml
-kubectl get ns blockchain infra apis frontend
+kubectl get ns blockchain infra apis frontend kube-system
 ```
 
 ### 2.3 Inventario obligatorio de secrets
@@ -136,6 +157,7 @@ secrets.
 | `infra` | `keycloak-db-secret` | `keycloak-db.env` |
 | `infra` | `mongo-express-secret` | `mongo-express.env` |
 | `blockchain` | `ethereum-secrets` | `ethereum.env` |
+| `kube-system` | `trustnews-origin-tls` | `tls-origin.env` |
 
 Crear o actualizar todos los secrets:
 
@@ -157,6 +179,8 @@ apply_secret infra keycloak-db-secret keycloak-db.env
 apply_secret infra mongo-express-secret mongo-express.env
 
 apply_secret blockchain ethereum-secrets ethereum.env
+
+apply_tls_secret kube-system trustnews-origin-tls tls-origin.env
 ```
 
 ### 2.4 Parametros requeridos por env file
@@ -253,6 +277,18 @@ API_KEY=<informar>
 PRIVATE_KEY=<informar>
 ```
 
+`tls-origin.env`:
+
+```dotenv
+TLS_CERT_FILE=/ruta/privada/fullchain.pem
+TLS_KEY_FILE=/ruta/privada/privkey.pem
+```
+
+No incluir el contenido PEM dentro de `tls-origin.env`; este fichero solo debe
+referenciar rutas privadas presentes en el servidor desde el que se ejecuta el
+helper. En modo tunel puede ser un certificado temporal. En modo publico debe
+ser valido para el dominio real, salvo que `cert-manager` gestione el secret.
+
 ### 2.5 Notas de coherencia de MongoDB
 
 `MONGO_APP_USER`/`MONGO_APP_PWD` de `mongodb-app.env` son las credenciales que
@@ -272,11 +308,25 @@ Por eso, despues de levantar MongoDB, ejecutar siempre el bootstrap:
 
 ### 2.6 Traefik, TLS de borde y pull secret
 
-K3s publica HTTPS mediante Traefik. El frontend ya no genera ni monta `frontend-tls`: su Nginx interno solo sirve estaticos por HTTP dentro del cluster y Traefik enruta `/`, `/backend` y `/auth` por el entrypoint `websecure`.
+K3s publica HTTPS mediante Traefik. El frontend ya no genera ni monta
+`frontend-tls`: su Nginx interno solo sirve estaticos por HTTP dentro del
+cluster y Traefik enruta `/`, `/backend` y `/auth` por el entrypoint
+`websecure`.
 
-Mientras no exista dominio definitivo, `k8s/ingress/base/kustomization.yaml` genera el secret `trustnews-origin-tls` en `kube-system` usando los certificados historicos de `web_classic/certs/fullchain.pem` y `web_classic/certs/privkey.pem`. `k8s/ingress/base/tls-store.yaml` configura ese secret como certificado por defecto de Traefik.
+`k8s/ingress/base/tls-store.yaml` configura `trustnews-origin-tls` como
+certificado por defecto de Traefik. En Hetzner/prod ese secret debe crearse antes
+de desplegar `apis-frontend-prod` con `apply_tls_secret`; `k8s/ingress/base/kustomization.yaml`
+ya no genera certificados desde ficheros versionados del repo. El overlay local
+si puede generar `trustnews-origin-tls` desde `web_classic/certs/*` para mantener
+comodo el flujo de desarrollo.
 
-Los Ingress estan restringidos a `websecure` con `traefik.ingress.kubernetes.io/router.entrypoints: websecure` y `traefik.ingress.kubernetes.io/router.tls: "true"`; no se publican estas rutas por HTTP plano. Cuando exista dominio real, Keycloak debe publicar un issuer coherente con la URL publica real (`KC_HOSTNAME_URL`) y el Gateway debe validar esa misma URL con `KEYCLOAK_SERVER_HOSTNAME`, `KEYCLOAK_SERVER_PORT` y `KEYCLOAK_SERVER_PATH`.
+Los Ingress estan restringidos a `websecure` con
+`traefik.ingress.kubernetes.io/router.entrypoints: websecure` y
+`traefik.ingress.kubernetes.io/router.tls: "true"`; no se publican estas rutas
+por HTTP plano. Cuando exista dominio real, Keycloak debe publicar un issuer
+coherente con la URL publica real (`KC_HOSTNAME_URL`) y el Gateway debe validar
+esa misma URL con `KEYCLOAK_SERVER_HOSTNAME`, `KEYCLOAK_SERVER_PORT` y
+`KEYCLOAK_SERVER_PATH`.
 
 Crear un Deploy Token o usar credenciales con permiso `read_registry`. Repetir
 en los namespaces que descargan imagenes privadas:
@@ -299,13 +349,68 @@ done
 
 ---
 
-### 2.7 Configurar dominio y TLS
+### 2.7 Publicacion HTTPS: tunel primero, dominio despues
 
-Los manifiestos de `k8s/ingress/overlays/prod` ya habilitan HTTPS en Traefik con el certificado temporal heredado de Nginx, pero se han dejado sin `host` para no acoplar el repo a un dominio provisional. Cuando exista el dominio publico y el certificado definitivo, sustituir esta configuracion temporal antes de abrir el servicio a clientes.
+Los manifiestos de `k8s/ingress/overlays/prod` ya habilitan HTTPS en Traefik,
+pero se mantienen sin `host` para soportar la fase inicial sin dominio. El flujo
+operativo queda dividido en dos fases: validacion cerrada por tunel SSH y
+publicacion posterior con dominio, WAF y puertos HTTP(S) abiertos.
 
-#### 2.7.1 Elegir estrategia de URL
+#### 2.7.1 Despliegue cerrado con tunel SSH
 
-Estrategia recomendada inicial, menor cambio funcional:
+Usar esta fase mientras solo este abierto `2222/tcp` en Hetzner. GitLab CI ya
+usa SSH por `2222` para abrir el tunel al API server de Kubernetes
+`127.0.0.1:6443`; para validar la aplicacion web se abre otro tunel hacia
+Traefik.
+
+Mantener los valores productivos actuales de issuer local:
+
+```text
+KC_HOSTNAME_URL=https://localhost:9443/auth
+KC_HOSTNAME_ADMIN_URL=https://localhost:9443/auth
+KEYCLOAK_SERVER_HOSTNAME=https://localhost
+KEYCLOAK_SERVER_PORT=9443
+KEYCLOAK_SERVER_PATH=auth
+```
+
+Abrir el tunel desde la maquina de trabajo:
+
+```bash
+ssh -i ./id_rsa_hetzner_deploy -p 2222 \
+  -L 9443:127.0.0.1:9443 \
+  <usuario>@<hetzner-ip> \
+  -t "kubectl port-forward --address 127.0.0.1 -n kube-system svc/traefik 9443:443"
+```
+
+Mantener esa sesion abierta mientras se validan las rutas:
+
+```bash
+curl -k -I https://localhost:9443/
+curl -k -I https://localhost:9443/backend/docs
+curl -k -I https://localhost:9443/auth/realms/TrustNews/.well-known/openid-configuration
+```
+
+Validar tambien desde navegador:
+
+```text
+https://localhost:9443/
+https://localhost:9443/backend/docs
+https://localhost:9443/auth/admin/master/console/
+```
+
+En esta fase el navegador puede mostrar aviso por certificado temporal. Lo
+importante es que el issuer de Keycloak y el Gateway coincidan exactamente:
+
+```text
+https://localhost:9443/auth/realms/TrustNews
+```
+
+No abrir `80/tcp` ni `443/tcp` al trafico publico durante esta fase.
+
+#### 2.7.2 Despliegue publico con dominio
+
+Cuando el dominio este decidido, pasar a una URL publica estable. Estrategia
+recomendada inicial, menor cambio funcional:
 
 ```text
 https://trustnews.example.com/          -> frontend
@@ -313,7 +418,8 @@ https://trustnews.example.com/backend   -> gateway
 https://trustnews.example.com/auth      -> keycloak
 ```
 
-Esta estrategia mantiene el contrato actual del frontend (`/backend` y `/auth`). Es la opcion mas segura para la primera migracion a Traefik.
+Esta estrategia mantiene el contrato actual del frontend (`/backend` y
+`/auth`). Es la opcion mas segura para la primera migracion a Traefik.
 
 Estrategia futura, mas limpia para SaaS:
 
@@ -323,32 +429,66 @@ https://api.trustnews.example.com       -> gateway
 https://auth.trustnews.example.com      -> keycloak
 ```
 
-No usar subdominios hasta revisar el frontend, `root_path=/backend`, CORS, redirects OIDC y el issuer de Keycloak.
+No usar subdominios hasta revisar el frontend, `root_path=/backend`, CORS,
+redirects OIDC y el issuer de Keycloak.
 
-#### 2.7.2 DNS y firewall
-
-Crear un registro `A` o `CNAME` hacia la IP publica que recibe Traefik o hacia el balanceador de Hetzner:
+Crear un registro `A` o `CNAME` hacia la IP publica que recibe Traefik o hacia
+el balanceador de Hetzner:
 
 ```text
 trustnews.example.com -> <ip-publica-o-load-balancer>
 ```
 
-En el firewall de Hetzner, abrir solo `80/tcp` y `443/tcp` hacia el borde HTTP. Mantener SSH restringido y no publicar directamente `Gateway`, `Keycloak`, `MongoDB`, `Kafka`, `IPFS` ni RPC blockchain.
+En el firewall de Hetzner, abrir solo `80/tcp` y `443/tcp` hacia el borde HTTP.
+Mantener SSH restringido a `2222/tcp` y no publicar directamente `Gateway`,
+`Keycloak`, `MongoDB`, `Kafka`, `IPFS` ni RPC blockchain.
 
-#### 2.7.3 TLS: estado actual y opciones definitivas
+#### 2.7.3 WAF obligatorio antes de abrir 80/443
 
-Estado actual sin dominio: Traefik usa `trustnews-origin-tls` como certificado por defecto mediante `TLSStore`. Ese secret se genera desde:
+No abrir `80/tcp` ni `443/tcp` a trafico general sin un WAF delante del borde
+HTTP. El WAF debe estar activo antes de mover usuarios o clientes externos al
+dominio real.
 
-```text
-web_classic/certs/fullchain.pem
-web_classic/certs/privkey.pem
+Opcion recomendada para la primera exposicion publica: Cloudflare delante del
+dominio, con WAF gestionado, rate limiting, proteccion basica de bots y TLS en
+modo `Full strict` cuando el origen tenga certificado valido.
+
+Opcion in-cluster: desplegar un WAF compatible con OWASP CRS, por ejemplo
+ModSecurity/Coraza, delante de Traefik o como proxy intermedio. Esta opcion da
+mas control, pero introduce mas operacion y debe probarse con el login OIDC y
+las APIs antes de abrir trafico.
+
+Controles minimos requeridos:
+
+- bloquear metodos HTTP no esperados;
+- limitar tamano maximo de request body;
+- aplicar rate limit a `/auth`, `/backend` y endpoints de token/login;
+- activar reglas OWASP CRS en modo deteccion antes de bloquear;
+- registrar eventos WAF y revisar falsos positivos;
+- restringir el origen para que el trafico publico llegue por el WAF cuando sea posible.
+
+#### 2.7.4 TLS: estado temporal y opciones definitivas
+
+Estado temporal sin dominio: Traefik usa `trustnews-origin-tls` como
+certificado por defecto mediante `TLSStore`. Crear o actualizar ese secret con:
+
+```bash
+apply_tls_secret kube-system trustnews-origin-tls tls-origin.env
 ```
 
-Esto permite probar HTTPS ya, pero el navegador puede mostrar aviso si el certificado no coincide con la IP, hostname o dominio usado. Para pruebas usar `https://<traefik-host>/` y, si aplica, aceptar el certificado temporal.
+Esto permite probar HTTPS por tunel, pero el navegador puede mostrar aviso si el
+certificado no coincide con `localhost`, IP o dominio usado.
 
-Opcion A, simple con Cloudflare o balanceador externo: TLS termina fuera del cluster y Traefik puede seguir usando HTTPS interno con certificado de origen. Con Cloudflare, usar modo `Full strict` cuando el origen tenga certificado valido.
+Opcion A, simple con Cloudflare o balanceador externo: TLS termina fuera del
+cluster y Traefik puede seguir usando HTTPS interno con certificado de origen.
+Con Cloudflare, usar modo `Full strict` cuando el origen tenga certificado
+valido.
 
-Opcion B, recomendada en cluster: `cert-manager` emite un certificado para Traefik. Para dominio unico con paths y varios namespaces, evitar crear tres secretos TLS distintos para el mismo host. Preferir un certificado por defecto de Traefik mediante `TLSStore`, o mover a subdominios cuando se quiera un secreto por namespace.
+Opcion B, recomendada en cluster: `cert-manager` emite un certificado para
+Traefik. Para dominio unico con paths y varios namespaces, evitar crear tres
+secretos TLS distintos para el mismo host. Preferir un certificado por defecto
+de Traefik mediante `TLSStore`, o mover a subdominios cuando se quiera un
+secreto por namespace.
 
 Ejemplo de `ClusterIssuer` de Let us Encrypt para Traefik:
 
@@ -395,20 +535,10 @@ spec:
     secretName: trustnews-origin-tls
 ```
 
-Despues, sustituir el certificado temporal por el definitivo. Si se usa `cert-manager`, mantener `TLSStore` apuntando al secret definitivo:
+Si se usa `cert-manager`, no actualizar manualmente `trustnews-origin-tls` con
+`apply_tls_secret`; dejar que `cert-manager` sea el unico propietario del secret.
 
-```yaml
-apiVersion: traefik.io/v1alpha1
-kind: TLSStore
-metadata:
-  name: default
-  namespace: kube-system
-spec:
-  defaultCertificate:
-    secretName: trustnews-origin-tls
-```
-
-Los Ingress ya deben conservar estas anotaciones Traefik:
+Los Ingress deben conservar estas anotaciones Traefik:
 
 ```yaml
 metadata:
@@ -423,9 +553,10 @@ En `gateway-ingress` conservar tambien la anotacion del middleware:
 traefik.ingress.kubernetes.io/router.middlewares: apis-gateway-strip-backend-prefix@kubernetescrd
 ```
 
-#### 2.7.4 Fijar host en los Ingress
+#### 2.7.5 Fijar host en los Ingress
 
-Cuando el dominio este decidido, actualizar `k8s/ingress/overlays/prod` para que los tres Ingress tengan el mismo `host` si se usa dominio unico:
+Cuando el dominio este decidido, actualizar `k8s/ingress/overlays/prod` para
+que los tres Ingress tengan el mismo `host` si se usa dominio unico:
 
 ```yaml
 spec:
@@ -451,11 +582,14 @@ k8s/ingress/base/gateway-ingress.yaml    path /backend
 k8s/ingress/base/keycloak-ingress.yaml   path /auth
 ```
 
-Para no tocar `base`, crear parches en `k8s/ingress/overlays/prod` y referenciarlos desde su `kustomization.yaml`. Mantener `base` sin dominio permite reutilizarlo en local/integracion.
+Para no tocar `base`, crear parches en `k8s/ingress/overlays/prod` y
+referenciarlos desde su `kustomization.yaml`. Mantener `base` sin dominio
+permite reutilizarlo en local/integracion.
 
-#### 2.7.5 Alinear Keycloak y Gateway
+#### 2.7.6 Alinear Keycloak y Gateway
 
-El dominio publico cambia el issuer de los tokens. Antes de desplegar, alinear Keycloak y Gateway.
+El dominio publico cambia el issuer de los tokens. Antes de desplegar, alinear
+Keycloak y Gateway.
 
 En `k8s/infra/keycloak/overlays/prod/kustomization.yaml`:
 
@@ -482,24 +616,29 @@ configMapGenerator:
     - KEYCLOAK_SERVER_PATH="auth"
 ```
 
-El issuer esperado por Gateway debe coincidir exactamente con el issuer real de Keycloak:
+El issuer esperado por Gateway debe coincidir exactamente con el issuer real de
+Keycloak:
 
 ```text
 https://trustnews.example.com:443/auth/realms/TrustNews
 ```
 
-Si se decide omitir `:443` en el issuer, ajustar tambien la construccion del issuer en `api/gateway/main.py`; no mezclar formatos.
+Si se decide omitir `:443` en el issuer, ajustar tambien la construccion del
+issuer en `api/gateway/main.py`; no mezclar formatos.
 
-#### 2.7.6 Orden de despliegue recomendado
+#### 2.7.7 Orden de despliegue recomendado para apertura publica
 
-1. Crear DNS y verificar que resuelve a Traefik o al balanceador.
-2. Instalar/configurar `cert-manager` y validar primero con Let us Encrypt staging, o preparar el certificado definitivo si se gestiona fuera del cluster.
-3. Sustituir el certificado temporal `web_classic/certs/*` por el certificado definitivo o hacer que `TLSStore` apunte al secret emitido por `cert-manager`.
-4. Anadir `host` a `k8s/ingress/overlays/prod` y mantener TLS en `websecure`.
-5. Actualizar `KC_HOSTNAME_URL` y variables del Gateway.
-6. Desplegar `infra-prod` para aplicar Keycloak si cambia su ConfigMap.
-7. Desplegar `apis-frontend-prod`.
-8. Verificar:
+1. Validar primero la aplicacion completa por tunel SSH segun la seccion 2.7.1.
+2. Instalar/configurar el WAF y dejarlo en modo deteccion si aplica.
+3. Crear DNS y verificar que resuelve al WAF, a Traefik o al balanceador.
+4. Instalar/configurar `cert-manager` y validar primero con Let us Encrypt staging, o preparar el certificado definitivo si se gestiona fuera del cluster.
+5. Hacer que `TLSStore` apunte al secret definitivo, manteniendo el nombre `trustnews-origin-tls` si no hay motivo para cambiarlo.
+6. Anadir `host` a `k8s/ingress/overlays/prod` y mantener TLS en `websecure`.
+7. Actualizar `KC_HOSTNAME_URL` y variables del Gateway.
+8. Desplegar `infra-prod` para aplicar Keycloak si cambia su ConfigMap.
+9. Desplegar `apis-frontend-prod`.
+10. Abrir `80/tcp` y `443/tcp` solo cuando WAF, TLS, DNS e issuer esten verificados.
+11. Verificar:
 
 ```bash
 kubectl get ingress -A
@@ -510,9 +649,10 @@ curl -I https://trustnews.example.com/backend/docs
 curl -I https://trustnews.example.com/auth/realms/TrustNews/.well-known/openid-configuration
 ```
 
-9. Probar login frontend, token refresh, llamada al Gateway, client credentials B2B y logout.
+12. Probar login frontend, token refresh, llamada al Gateway, client credentials B2B y logout.
 
-No abrir el servicio a clientes hasta que el issuer de Keycloak, el certificado TLS y las redirecciones OIDC esten verificados con el dominio final.
+No abrir el servicio a clientes hasta que el issuer de Keycloak, el certificado
+TLS, las redirecciones OIDC y el WAF esten verificados con el dominio final.
 
 ---
 
@@ -724,19 +864,38 @@ kubectl logs deployment/news-handler -n apis --tail=80
 kubectl logs deployment/evidence-search -n apis --tail=80
 ```
 
-Probar entrada publica mediante Traefik:
+Probar entrada HTTPS mediante Traefik:
 
 ```bash
 kubectl get ingress -A
 kubectl get svc -n kube-system traefik
+kubectl get secret trustnews-origin-tls -n kube-system
 ```
 
-Abrir usando el dominio o IP que apunte a Traefik:
+Si se esta en modo tunel, abrir primero:
+
+```bash
+ssh -i ./id_rsa_hetzner_deploy -p 2222 \
+  -L 9443:127.0.0.1:9443 \
+  <usuario>@<hetzner-ip> \
+  -t "kubectl port-forward --address 127.0.0.1 -n kube-system svc/traefik 9443:443"
+```
+
+Y validar:
 
 ```text
-https://<traefik-host>/
-https://<traefik-host>/backend/docs
-https://<traefik-host>/auth/admin/master/console/
+https://localhost:9443/
+https://localhost:9443/backend/docs
+https://localhost:9443/auth/admin/master/console/
+```
+
+Si ya se abrio el despliegue publico con dominio, validar usando el dominio
+final:
+
+```text
+https://trustnews.example.com/
+https://trustnews.example.com/backend/docs
+https://trustnews.example.com/auth/admin/master/console/
 ```
 
 Si solo se quiere comprobar que los estaticos del frontend responden, se puede abrir un port-forward interno, pero no valida Gateway ni Keycloak porque esas rutas ya no las proxifica Nginx:
@@ -807,7 +966,9 @@ Antes de `apis-frontend-prod`:
 - Los secrets del inventario obligatorio existen en `apis`, `infra` y `blockchain`.
 - `gitlab-pull-secret` esta asociado al service account de `apis`, `infra`, `frontend` y `blockchain`.
 - Traefik esta activo y los Ingress de `frontend`, `apis` e `infra` aparecen en `kubectl get ingress -A`.
-- HTTPS por Traefik responde con el certificado temporal actual o, si ya existe dominio publico, con `host`, certificado definitivo, `KC_HOSTNAME_URL` y variables de issuer del Gateway alineados segun la seccion 2.7.
+- `trustnews-origin-tls` existe en `kube-system` o esta gestionado por `cert-manager`.
+- En modo tunel, HTTPS por Traefik responde en `https://localhost:9443` y Keycloak/Gateway mantienen issuer `localhost:9443`.
+- En modo publico, WAF esta instalado, `80/tcp` y `443/tcp` estan abiertos solo hacia el borde HTTP, y `host`, certificado definitivo, `KC_HOSTNAME_URL` y variables de issuer del Gateway estan alineados segun la seccion 2.7.
 - `CONTRACT_ADDRESS` en overlays prod coincide con el contrato desplegado.
 - `initCategories.js` se ha ejecutado y la segunda ejecucion no cambia nada.
 - `scripts/k8s/init-mongodb-server.sh` se ha ejecutado despues de levantar MongoDB.

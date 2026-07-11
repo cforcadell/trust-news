@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+secretGenerator:
+  - name: trustnews-origin-tls
+    namespace: kube-system
+    type: kubernetes.io/tls
+    files:
+      - tls.crt=../../../../web_classic/certs/fullchain.pem
+      - tls.key=../../../../web_classic/certs/privkey.pem

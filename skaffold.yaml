@@ -35,6 +35,33 @@ profiles:
           - k8s/blockchain/overlays/local
 
   # ---------------------------------------------------------
+  # PERFIL: INFRA BASIC
+  # ---------------------------------------------------------
+  - name: infra-basic
+    build:
+      artifacts:
+          - image: keycloak
+            context: keycloak
+            docker: {dockerfile: Dockerfile}
+    manifests:
+      rawYaml:
+        - k8s/infra/kafka/*.yaml
+        #- k8s/infra/kafdrop/*.yaml
+        - k8s/infra/ipfs/*.yaml
+        #- k8s/infra/fluent-bit/*.yaml
+        #- k8s/infra/frontend-logs/*.yaml
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
+          - k8s/infra/mongodb/overlays/local
+          - k8s/infra/mongo-express/overlays/local
+          - k8s/infra/keycloak/overlays/local
+
+    portForward:
+      #- {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
+      #- {resourceType: service, resourceName: kafdrop, namespace: infra, port: 9000, localPort: 9000, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: mongo-express, namespace: infra, port: 8081, localPort: 8081, address: "0.0.0.0"}
+  # ---------------------------------------------------------
   # PERFIL: INFRA
   # ---------------------------------------------------------
   - name: infra
@@ -45,8 +72,8 @@ profiles:
             docker: {dockerfile: Dockerfile}
     manifests:
       rawYaml:
-        #- k8s/infra/zookeeper/*.yaml
         - k8s/infra/kafka/*.yaml
+        - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
         - k8s/infra/frontend-logs/*.yaml
@@ -54,10 +81,13 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/local
+          - k8s/infra/mongo-express/overlays/local
           - k8s/infra/keycloak/overlays/local
 
     portForward:
       - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: kafdrop, namespace: infra, port: 9000, localPort: 9000, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: mongo-express, namespace: infra, port: 8081, localPort: 8081, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND
@@ -85,6 +115,10 @@ profiles:
           context: api
           docker: {dockerfile: ipfs/Dockerfile}
           sync: {infer: ["**/*.py"]}
+        - image: evidence-search
+          context: api
+          docker: {dockerfile: evidence-search/Dockerfile}
+          sync: {infer: ["**/*.py"]}
         - image: gateway
           context: api
           docker: {dockerfile: gateway/Dockerfile}
@@ -104,26 +138,30 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
 
+          - k8s/apis/mongodb-app/overlays/local
           - k8s/apis/generate-asertions/overlays/local
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
           - k8s/apis/validate-asertions/overlays/local/worker-3
+          - k8s/apis/evidence-search/overlays/local
           - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain/overlays/local
           - k8s/apis/gateway/overlays/local
           - k8s/apis/admin/overlays/local
           - k8s/frontend
+          - k8s/ingress/overlays/local
     portForward:
       - {resourceType: service, resourceName: generate-asertions, namespace: apis, port: 8071, localPort: 8071}
       - {resourceType: service, resourceName: validate-service-1, namespace: apis, port: 8070, localPort: 8070}
       - {resourceType: service, resourceName: validate-service-2, namespace: apis, port: 8070, localPort: 8069}
       - {resourceType: service, resourceName: validate-service-3, namespace: apis, port: 8070, localPort: 8068}
       - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
+      - {resourceType: service, resourceName: evidence-search, namespace: apis, port: 8074, localPort: 8074}
       - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
       - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
       - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
       - {resourceType: service, resourceName: gateway, namespace: apis, port: 8500, localPort: 8500}
-      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 7443, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 80, localPort: 7080, address: "0.0.0.0"}
 
   # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN PROD
@@ -146,8 +184,8 @@ profiles:
             docker: {dockerfile: Dockerfile}
     manifests:
       rawYaml:
-        #- k8s/infra/zookeeper/*.yaml
         - k8s/infra/kafka/*.yaml
+        - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
         - k8s/infra/frontend-logs/*.yaml
@@ -155,6 +193,7 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/prod 
+          - k8s/infra/mongo-express/overlays/prod
           - k8s/infra/keycloak/overlays/prod
 
   # ---------------------------------------------------------
@@ -183,6 +222,10 @@ profiles:
           context: api
           docker: {dockerfile: ipfs/Dockerfile}
           sync: {infer: ["**/*.py"]}
+        - image: evidence-search
+          context: api
+          docker: {dockerfile: evidence-search/Dockerfile}
+          sync: {infer: ["**/*.py"]}
         - image: gateway
           context: api
           docker: {dockerfile: gateway/Dockerfile}
@@ -201,15 +244,21 @@ profiles:
       kustomize:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
+          - k8s/apis/mongodb-app/overlays/prod
           - k8s/apis/generate-asertions/overlays/prod 
           - k8s/apis/validate-asertions/overlays/prod/worker-1 
           - k8s/apis/validate-asertions/overlays/prod/worker-2
           - k8s/apis/validate-asertions/overlays/prod/worker-3
+          - k8s/apis/evidence-search/overlays/prod
           - k8s/apis/news-handler/overlays/prod
           - k8s/apis/news-chain/overlays/prod
           - k8s/apis/gateway/overlays/prod
           - k8s/apis/admin/overlays/prod
           - k8s/frontend
+          # Traefik/K3s HTTPS edge routes. Keep host/final certificate
+          # details in k8s/ingress/overlays/prod once the public domain is known.
+          # See docs/k8s/skaffold-server.md#27-configurar-dominio-y-tls.
+          - k8s/ingress/overlays/prod
     portForward:
       - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
-      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 443, localPort: 10443, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 80, localPort: 10080, address: "0.0.0.0"}

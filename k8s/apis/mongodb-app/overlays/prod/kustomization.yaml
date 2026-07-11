@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apis
+
+# Production creates mongodb-app-secret outside the repository, for example:
+# kubectl create secret generic mongodb-app-secret \
+#   --from-env-file=mongodb-app.env \
+#   -n apis

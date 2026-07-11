@@ -14,11 +14,21 @@ spec:
         # Definimos cuánta CPU y RAM reserva y cuál es su límite máximo
         env:
         - name: AI_PROVIDER
-          value: "gemini"
+          value: "openrouter"
         - name: MODEL
-          value: "gemini-2.5-flash"
+          value: "mistralai/mistral-small-24b-instruct-2501"
         - name: API_URL
-          value: "https://generativelanguage.googleapis.com/v1beta"
+          value: "https://openrouter.ai/api/v1/chat/completions"
+        - name: VALIDATOR_SERVICE_URL
+          value: "http://validate-service-3.apis.svc.cluster.local:8070"
+        - name: VALIDATOR_TYPE
+          value: "3"
+        - name: EVIDENCE_SEARCH_URL
+          value: "http://evidence-search.apis.svc.cluster.local:8074"
+        - name: EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+          value: "LOCAL"
+        - name: EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
+          value: "default"
         resources:
             requests:
               cpu: "100m"

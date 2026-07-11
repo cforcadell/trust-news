@@ -16,9 +16,19 @@ spec:
         - name: AI_PROVIDER
           value: "openrouter"
         - name: MODEL
-          value: "arcee-ai/trinity-large-preview:free"
+          value: "meta-llama/llama-3.1-8b-instruct"
         - name: API_URL
           value: "https://openrouter.ai/api/v1/chat/completions"
+        - name: VALIDATOR_SERVICE_URL
+          value: "http://validate-service-1.apis.svc.cluster.local:8070"
+        - name: VALIDATOR_TYPE
+          value: "3"
+        - name: EVIDENCE_SEARCH_URL
+          value: "http://evidence-search.apis.svc.cluster.local:8074"
+        - name: EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+          value: "EXT_ONLY_OFFICIAL"
+        - name: EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
+          value: "default"
         resources:
             requests:
               cpu: "100m"

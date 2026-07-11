@@ -5,6 +5,10 @@ import json
 import asyncio
 import logging
 import hashlib
+import re
+import ipaddress
+import socket
+from urllib.parse import urljoin, urlparse
 import requests
 import httpx
 import time # Añadir import de time
@@ -12,9 +16,9 @@ import lxml.html
 
 from bs4 import BeautifulSoup
 from typing import Any, Dict, List, Optional, Tuple
-from common.hash_utils import hash_text_to_multihash,hash_text_to_hash
+from common.utils.hash_utils import hash_text_to_multihash,hash_text_to_hash
 from fastapi import FastAPI, HTTPException, Query,APIRouter
-from pydantic import BaseModel, ValidationError,HttpUrl
+from pydantic import ValidationError
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -22,10 +26,11 @@ from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 from readability import Document
 from loguru import logger
-from common.veredicto import Validacion
-from common.async_models import (
+from common.models.veredicto import Validacion
+from common.models.async_models import (
     GenerateAssertionsRequest,
     AssertionsGeneratedResponse,
+    AssertionsNotGeneratedResponse,
     UploadIpfsRequest,
     IpfsUploadedResponse,
     RegisterBlockchainRequest,
@@ -43,7 +48,40 @@ from common.async_models import (
     ExtractTextRequest,
     PreGeneratedAssertion,
     PublishWithAssertionsRequest,
-    PublishRequest
+    PublishRequest,
+    ValidatorConfigEvent,
+    ValidatorConfig,
+    ValidatorWithValidationsResponse,
+    ValidationMode,
+    ValidationExecutionStatus,
+    LightValidationRequest,
+    LightValidationResponse,
+    ValidatorType,
+    default_validator_type_weights,
+)
+from common.utils.kafka_contracts import (
+    ACTION_TO_MODEL_RESPONSE,
+    DEFAULT_KAFKA_BOOTSTRAP,
+    DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS,
+    DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN,
+    DEFAULT_TOPIC_REQUESTS_GENERATE,
+    DEFAULT_TOPIC_REQUESTS_IPFS,
+    DEFAULT_TOPIC_REQUESTS_VALIDATE,
+    DEFAULT_TOPIC_RESPONSES,
+    kafka_security_kwargs as build_kafka_security_kwargs,
+)
+from common.models.order_models import EventRecord as EventModel
+from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
+from common.utils.ipfs_client import get_ipfs_text
+from common.utils.scoring import calculate_order_assertion_results as calculate_order_assertion_results_common
+from common.utils.validator_registry import light_validators_for_category
+from common.utils.mongo import build_mongo_uri_from_env
+from common.models.protocol_models import (
+    AssertionsDocumentV2,
+    EnrichedAssertion,
+    SourceDocumentStorage,
+    build_assertions_document_v2,
+    build_assertion_validation_payload_v2,
 )
 
 # =========================================================
@@ -57,21 +95,28 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("fake-news-orchestrator")
 
-KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", DEFAULT_KAFKA_BOOTSTRAP)
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
 KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
 KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
 KAFKA_MECHANISM = os.getenv("KAFKA_MECHANISM", "PLAIN")
 
-TOPIC_REQUESTS_GENERATE = os.getenv("TOPIC_REQUESTS_GENERATE", "fake_news_requests_generate")
-TOPIC_REQUESTS_IPFS = os.getenv("TOPIC_REQUESTS_IPFS", "fake_news_requests_ipfs")
-TOPIC_REQUESTS_BLOCKCHAIN = os.getenv("TOPIC_REQUESTS_BLOCKCHAIN", "fake_news_requests_blockchain")
-TOPIC_REQUESTS_VALIDATE = os.getenv("TOPIC_REQUESTS_VALIDATE", "fake_news_requests_validate")
-TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
+TOPIC_REQUESTS_GENERATE = os.getenv("TOPIC_REQUESTS_GENERATE", DEFAULT_TOPIC_REQUESTS_GENERATE)
+TOPIC_REQUESTS_IPFS = os.getenv("TOPIC_REQUESTS_IPFS", DEFAULT_TOPIC_REQUESTS_IPFS)
+TOPIC_REQUESTS_BLOCKCHAIN = os.getenv("TOPIC_REQUESTS_BLOCKCHAIN", DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN)
+TOPIC_REQUESTS_VALIDATE = os.getenv("TOPIC_REQUESTS_VALIDATE", DEFAULT_TOPIC_REQUESTS_VALIDATE)
+TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", DEFAULT_TOPIC_RESPONSES)
+TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS)
+TOPIC_LIGHT_VALIDATION_RESPONSES = os.getenv("TOPIC_LIGHT_VALIDATION_RESPONSES", DEFAULT_TOPIC_RESPONSES)
+LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS = float(os.getenv("LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS", "2.0"))
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017")
-MONGO_DBNAME = os.getenv("MONGO_DBNAME", "tfm")
+MONGO_URI = build_mongo_uri_from_env()
+MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "orders")
+MONGO_EVENTS_COLLECTION = os.getenv("MONGO_EVENTS_COLLECTION", "events")
+MONGO_VALIDATIONS_COLLECTION = os.getenv("MONGO_VALIDATIONS_COLLECTION", "validations")
+MONGO_CONFIG_COLLECTION = os.getenv("MONGO_CONFIG_COLLECTION", "config")
+VALIDATOR_TYPE_WEIGHTS_CONFIG_ID = "validator_type_weights"
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 
@@ -79,6 +124,14 @@ ADMIN_URL = os.getenv("ADMIN_URL", "http://admin:8000")
 
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
 NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain:8073")
+GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions:8071")
+
+IMPORT_URL_TIMEOUT_SECONDS = float(os.getenv("IMPORT_URL_TIMEOUT_SECONDS", "10"))
+IMPORT_URL_RETRIES = int(os.getenv("IMPORT_URL_RETRIES", "2"))
+IMPORT_URL_MAX_REDIRECTS = int(os.getenv("IMPORT_URL_MAX_REDIRECTS", "3"))
+IMPORT_URL_MAX_BYTES = int(os.getenv("IMPORT_URL_MAX_BYTES", str(2 * 1024 * 1024)))
+IMPORT_URL_USER_AGENT = os.getenv("IMPORT_URL_USER_AGENT", "Mozilla/5.0 (compatible; TrustNewsArticleExtractor/1.0)")
+
 
 
 # =========================================================
@@ -90,29 +143,85 @@ consumer: Optional[AIOKafkaConsumer] = None
 mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 orders_collection = None
+validators_cache = {}
 order_locks = {}
+orders_collection = None
+events_collection = None
+validations_collection = None
+config_collection = None
+validator_type_weights = default_validator_type_weights()
 
 
-class EventModel(BaseModel):
-    action: str
-    topic: str
-    timestamp: str
-    payload: dict
+
+def assertion_to_enriched(assertion: Any, index: int = 0) -> EnrichedAssertion:
+    raw = assertion.model_dump() if hasattr(assertion, "model_dump") else dict(assertion or {})
+    assertion_id = raw.pop("idAssertion")
+    raw["assertion_id"] = assertion_id
+    raw["assertion_index"] = int(assertion_id) - 1
+    return EnrichedAssertion(**raw)
+
+
+def assertion_dump_for_news(assertion: EnrichedAssertion) -> dict:
+    item = assertion.model_dump(mode="json")
+    item["idAssertion"] = str(assertion.assertion_id)
+    item.pop("assertion_id", None)
+    item.pop("assertion_index", None)
+    return item
+
+
+def assertions_document_from_generation(parsed_payload: Any, text: str, mode: ValidationMode) -> AssertionsDocumentV2:
+    generated_doc = getattr(parsed_payload, "assertions_document", None)
+    if generated_doc:
+        return generated_doc if isinstance(generated_doc, AssertionsDocumentV2) else AssertionsDocumentV2(**generated_doc)
+    assertions = getattr(parsed_payload, "assertions", []) or []
+    return build_assertions_document_v2(
+        text=text,
+        assertions=[assertion_to_enriched(a, i) for i, a in enumerate(assertions)],
+        mode=mode,
+        provider=getattr(parsed_payload, "publisher", "generate-asertions"),
+    )
+
+
+def assert_no_order_id_in_protocol_document(document: AssertionsDocumentV2) -> None:
+    dumped = document.model_dump(mode="json", exclude_none=True)
+    if "order_id" in json.dumps(dumped, ensure_ascii=False):
+        raise ValueError("assertions-document-v2 for IPFS must not contain order_id")
+
+
+def protocol_assertions_for_mongo(document: AssertionsDocumentV2) -> list:
+    return [assertion_dump_for_news(a) for a in document.assertions]
+
+
+def chain_assertions_for_contract(document: AssertionsDocumentV2) -> list:
+    return [a.to_chain_assertion() for a in document.assertions]
+
+
+def minimal_document_for_order(text: str, assertions: list) -> dict:
+    return {
+        "text": text,
+        "assertions": assertions,
+    }
+
+
+def build_assertions_document_from_order(order_doc: dict) -> AssertionsDocumentV2:
+    return build_assertions_document_v2(
+        text=order_doc.get("text", ""),
+        assertions=order_doc.get("assertions", []) or [],
+        mode=normalize_validation_mode(order_doc.get("validation_mode", ValidationMode.BLOCKCHAIN)),
+        provider="news-handler",
+    )
 
 # =========================================================
 # Helpers DB & Kafka security
 # =========================================================
 def kafka_security_kwargs():
-    kwargs = {}
-    if KAFKA_SECURITY_PROTOCOL:
-        kwargs["security_protocol"] = KAFKA_SECURITY_PROTOCOL
-    if KAFKA_MECHANISM:
-        kwargs["sasl_mechanism"] = KAFKA_MECHANISM
-    if KAFKA_USERNAME:
-        kwargs["sasl_plain_username"] = KAFKA_USERNAME
-    if KAFKA_PASSWORD:
-        kwargs["sasl_plain_password"] = KAFKA_PASSWORD
-    return kwargs
+    return build_kafka_security_kwargs(
+        KAFKA_SECURITY_PROTOCOL,
+        KAFKA_MECHANISM,
+        KAFKA_USERNAME,
+        KAFKA_PASSWORD,
+        logger,
+    )
 
 async def save_order_doc(order_doc: dict):
     global orders_collection
@@ -125,30 +234,441 @@ async def update_order(order_id: str, update: dict):
     if "$push" in update:
         mongo_update["$push"] = update.pop("$push")
 
+    if "$unset" in update:
+        mongo_update["$unset"] = update.pop("$unset")
+
     if "$set" in update:
         mongo_update["$set"] = update.pop("$set")
     elif update:
         mongo_update["$set"] = update
 
+    # 🔍 DEBUG: Log update operation
+    if "$set" in mongo_update and "post_id" in mongo_update["$set"]:
+        post_id = mongo_update["$set"]["post_id"]
+        logger.debug(f"🔄 Updating order {order_id} with post_id={post_id} (type={type(post_id).__name__})")
+    
     result = await orders_collection.update_one({"order_id": order_id}, mongo_update)
+    
     if result.matched_count == 0:
-        logger.error(f"Order {order_id} not found in MongoDB")
+        logger.error(f"❌ Order {order_id} not found in MongoDB - update FAILED")
+    elif result.modified_count > 0:
+        logger.debug(f"✅ Order {order_id} updated successfully (modified_count={result.modified_count})")
+    else:
+        logger.debug(f"⚠️ Order {order_id} matched but not modified (modified_count=0)")
 
 async def get_order_doc(order_id: str) -> Optional[dict]:
     doc = await orders_collection.find_one({"order_id": order_id})
     return doc
 
 async def get_order_id_by_post_id(post_id: str) -> Optional[str]:
-    doc = await orders_collection.find_one({"postId": post_id})
+    query_post_id = int(post_id) if str(post_id).isdigit() else post_id
+    doc = await orders_collection.find_one({"post_id": query_post_id})
     return doc["order_id"] if doc else None
+
+
+async def load_validator_type_weights():
+    global validator_type_weights
+    defaults = default_validator_type_weights()
+    try:
+        document = await config_collection.find_one({"_id": VALIDATOR_TYPE_WEIGHTS_CONFIG_ID})
+        configured = (document or {}).get("weights") or {}
+        validator_type_weights = {
+            name: float(configured.get(name, default_weight))
+            for name, default_weight in defaults.items()
+        }
+        logger.info(f"Validator type weights loaded: {validator_type_weights}")
+    except Exception as e:
+        validator_type_weights = defaults
+        logger.warning(f"Could not load validator type weights; using defaults: {e}")
+    return validator_type_weights
+
+
+async def load_validators_cache_from_chain():
+    """On startup asks news-chain validators function and cache validators."""
+    global validators_cache
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(f"{NEWS_CHAIN_URL}/blockchain/validators", params={"recover_ipfs": True})
+            resp.raise_for_status()
+            data = resp.json()
+        validators = data.get("validators", [])
+        previous_cache = validators_cache or {}
+        refreshed_cache = {}
+        for validator in validators:
+            validator_hash = str(validator.get("validator", "")).lower()
+            if not validator_hash:
+                continue
+            previous = previous_cache.get(validator_hash, {})
+            config = validator.get("config") or {}
+            validator_type = validator.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
+            refreshed_cache[validator_hash] = {
+                **validator,
+                "validator_type": validator_type,
+                "reputation": float(validator.get("reputation", 1.0) or 1.0),
+                "metrics_reset_at": previous.get("metrics_reset_at")
+            }
+        validators_cache = refreshed_cache
+        logger.info(f"✅ Validators cache loaded from news-chain: {len(validators_cache)} validators")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load validators cache from news-chain: {e}")
+
+
+async def update_validator_cache_from_event(payload: dict):
+    """Listen validator config events and keep the local cache coherent for BLOCKCHAIN and LIGHT flows."""
+    global validators_cache
+    validator = str(payload.get("validator", ""))
+    if not validator:
+        return
+
+    if validators_cache is None:
+        validators_cache = {}
+
+    if not validators_cache:
+        try:
+            await load_validators_cache_from_chain()
+            logger.info("✅ Validators cache initialized before applying validator config event")
+        except Exception as e:
+            logger.warning(f"⚠️ Validators cache could not be initialized from chain before event: {e}")
+
+    existing = validators_cache.get(validator.lower(), {})
+    incoming_categories = payload.get("categories")
+    if incoming_categories is None:
+        incoming_categories = existing.get("categories", [])
+
+    config = payload.get("config") or existing.get("config") or {}
+    validator_type = payload.get("validator_type") or existing.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
+    validators_cache[validator.lower()] = {
+        **existing,
+        "validator": validator,
+        "ipfs_hash": payload.get("ipfs_hash", existing.get("ipfs_hash")),
+        "config": config,
+        "categories": incoming_categories or [],
+        "validator_type": validator_type,
+        "reputation": float(payload.get("reputation", existing.get("reputation", 1.0)) or 1.0),
+        "updated_at": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "metrics_reset_at": payload.get("metrics_reset_at") or existing.get("metrics_reset_at"),
+        "source": payload.get("source", existing.get("source", "validator-event"))
+    }
+    logger.info(
+        f"✅ Validators cache updated from event | validator={validator} "
+        f"categories={validators_cache[validator.lower()].get('categories', [])}"
+    )
+
+
+def get_cached_validator_config(validator: str) -> Optional[dict]:
+    if not validator:
+        return None
+    return validators_cache.get(str(validator).lower())
+
+
+def parse_iso_datetime(value) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def validator_stats_since(validator: dict) -> Optional[datetime]:
+    return parse_iso_datetime((validator or {}).get("metrics_reset_at"))
+
+
+def datetime_to_event_ms(value: Optional[datetime]) -> Optional[int]:
+    if not value:
+        return None
+    return int(value.timestamp() * 1000)
+
+
+async def find_validation_request_timestamp_ms(order_id: str, id_assertion: str, id_validator: str) -> Optional[int]:
+    assertion_id = str(id_assertion or "")
+    query = {
+        "order_id": order_id,
+        "action": {"$in": ["request_validation", "validation_requested", "light_validation_request"]},
+        "$or": [
+            {"payload.idValidator": {"$regex": f"^{re.escape(str(id_validator or ''))}$", "$options": "i"}},
+            {"payload.validator_id": {"$regex": f"^{re.escape(str(id_validator or ''))}$", "$options": "i"}},
+        ],
+        "payload.idAssertion": assertion_id
+    }
+    event = await events_collection.find_one(query, {"timestamp": 1}, sort=[("timestamp", 1)])
+    timestamp = (event or {}).get("timestamp")
+    if isinstance(timestamp, (int, float)):
+        return int(timestamp)
+    if isinstance(timestamp, str):
+        parsed = parse_iso_datetime(timestamp)
+        return datetime_to_event_ms(parsed)
+    return None
+
+
+async def calculate_validation_response_time_seconds(order_id: str, id_assertion: str, id_validator: str, response_ms: int) -> Optional[float]:
+    request_ms = await find_validation_request_timestamp_ms(order_id, id_assertion, id_validator)
+    if request_ms is None:
+        return None
+    return max(0.0, round((response_ms - request_ms) / 1000.0, 3))
+
+
+async def get_validator_stats(validator: str, since: Optional[datetime] = None) -> dict:
+    """Count requests/responses for the current validator configuration window."""
+    validator_filter = {"$regex": f"^{re.escape(str(validator or ''))}$", "$options": "i"}
+    since_ms = datetime_to_event_ms(since)
+
+    request_query = {
+        "action": {"$in": ["request_validation", "validation_requested", "light_validation_request"]},
+        "$or": [
+            {"payload.idValidator": validator_filter},
+            {"payload.validator_id": validator_filter},
+        ]
+    }
+    if since_ms is not None:
+        request_query["timestamp"] = {"$gte": since_ms}
+    requests_sent = await events_collection.count_documents(request_query)
+
+    validation_query = {"idValidator": validator_filter, "execution_status": ValidationExecutionStatus.COMPLETED.value}
+    if since is not None:
+        validation_query["created_at"] = {"$gte": since.isoformat()}
+    successful_responses = await validations_collection.count_documents(validation_query)
+
+    avg_response_time_seconds = None
+    pipeline = [
+        {"$match": {**validation_query, "response_time_seconds": {"$type": "number"}}},
+        {"$group": {"_id": None, "avg": {"$avg": "$response_time_seconds"}}}
+    ]
+    async for row in validations_collection.aggregate(pipeline):
+        avg_response_time_seconds = round(float(row.get("avg", 0)), 3)
+
+    return {
+        "requests_sent": requests_sent,
+        "successful_responses": successful_responses,
+        "avg_response_time_seconds": avg_response_time_seconds
+    }
+
+
+async def enrich_validator_for_ui(validator: dict) -> dict:
+    enriched = dict(validator)
+    validator_hash = enriched.get("validator", "")
+    enriched["stats"] = await get_validator_stats(validator_hash, validator_stats_since(enriched))
+    enriched.setdefault("categories", [])
+    return enriched
+
+
+def validator_summary_for_ui(validator: dict) -> dict:
+    summary = dict(validator)
+    config = summary.get("config") or {}
+    summary.setdefault("categories", [])
+    summary["validator_type"] = summary.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
+    summary["reputation"] = float(summary.get("reputation", 1.0) or 1.0)
+    summary.pop("stats", None)
+    return summary
+
+
+def attach_validator_config_snapshots(order: dict) -> dict:
+    validations = order.get("validations") or {}
+    if not isinstance(validations, dict):
+        return order
+
+    for validators_by_assertion in validations.values():
+        if not isinstance(validators_by_assertion, dict):
+            continue
+        for validator_hash, validation in validators_by_assertion.items():
+            if not isinstance(validation, dict) or validation.get("validator_config"):
+                continue
+            validator_config = get_cached_validator_config(validator_hash)
+            if validator_config:
+                validation["validator_config"] = validator_summary_for_ui(validator_config)
+    return order
+
+
+def normalize_validation_mode(value) -> ValidationMode:
+    if isinstance(value, ValidationMode):
+        return value
+    return ValidationMode(str(value or ValidationMode.BLOCKCHAIN.value).upper())
+
+
+def get_light_validators_for_category(category_id: int) -> List[dict]:
+    return light_validators_for_category(validators_cache.values(), category_id)
+
+def calculate_order_assertion_results(order: dict) -> dict:
+    return calculate_order_assertion_results_common(
+        order,
+        get_cached_validator_config,
+        validator_type_weights,
+    )
+
+
+def light_document_for_order(order_id: str, assertions_document: AssertionsDocumentV2) -> dict:
+    assertions_list = protocol_assertions_for_mongo(assertions_document)
+    return minimal_document_for_order(assertions_document.post.original_text, assertions_list)
+
+
+def validator_healthcheck_url(validator: dict) -> Optional[str]:
+    config = validator.get("config") or {}
+    explicit_health_url = (
+        validator.get("healthcheck_url")
+        or validator.get("health_url")
+        or config.get("healthcheck_url")
+        or config.get("health_url")
+    )
+    if explicit_health_url:
+        return str(explicit_health_url)
+
+    service_url = (
+        validator.get("service_url")
+        or validator.get("validator_service_url")
+        or config.get("service_url")
+        or config.get("validator_service_url")
+    )
+    if not service_url:
+        return None
+    return f"{str(service_url).rstrip('/')}/health"
+
+
+async def light_validator_is_healthy(validator: dict, health_cache: Dict[str, bool]) -> bool:
+    validator_id = str(validator.get("validator") or "")
+    cache_key = validator_id.lower()
+    if cache_key in health_cache:
+        return health_cache[cache_key]
+
+    health_url = validator_healthcheck_url(validator)
+    if not health_url:
+        logger.warning(f"[LIGHT] Validator has no service_url/healthcheck_url; skipping validator={validator_id}")
+        health_cache[cache_key] = False
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS) as client:
+            resp = await client.get(health_url)
+        is_healthy = 200 <= resp.status_code < 300
+    except Exception as e:
+        logger.warning(f"[LIGHT] Validator healthcheck failed; skipping validator={validator_id} url={health_url} error={e}")
+        health_cache[cache_key] = False
+        return False
+
+    if not is_healthy:
+        logger.warning(
+            f"[LIGHT] Validator healthcheck not OK; skipping validator={validator_id} "
+            f"url={health_url} status={resp.status_code}"
+        )
+    health_cache[cache_key] = is_healthy
+    return is_healthy
+
+
+async def dispatch_light_validation_requests(order_id: str, text: str, assertions_document: AssertionsDocumentV2, client_id: Optional[str] = None):
+    validators_info = []
+    validation_requests = {}
+    no_validator_assertions = []
+    total_pending = 0
+    validator_health_cache: Dict[str, bool] = {}
+
+    for index, assertion in enumerate(assertions_document.assertions):
+        assertion_id = str(assertion.assertion_id)
+        category_id = assertion.categoryId
+        assertion_text = assertion.text
+        candidate_validators = get_light_validators_for_category(category_id)
+        validators = [
+            validator
+            for validator in candidate_validators
+            if await light_validator_is_healthy(validator, validator_health_cache)
+        ]
+        validator_ids = [str(v.get("validator")) for v in validators]
+
+        validators_info.append({
+            "idAssertion": assertion_id,
+            "validatorAddresses": validator_ids,
+            "text": assertion_text,
+            "categoryId": category_id,
+            "subcategory": assertion.subcategory,
+            "reputation": {str(v.get("validator")): float(v.get("reputation", 1.0) or 1.0) for v in validators},
+        })
+        validation_requests[assertion_id] = validator_ids
+
+        if not validator_ids:
+            no_validator_assertions.append(assertion_id)
+            logger.warning(f"[LIGHT] No active validators for category | order_id={order_id} assertion={assertion_id} category={category_id}")
+            continue
+
+        for validator_id in validator_ids:
+            correlation_id = f"{order_id}:{assertion_id}:{validator_id}"
+            payload_v2 = build_assertion_validation_payload_v2(
+                mode=ValidationMode.LIGHT,
+                assertion=assertion,
+                storage=SourceDocumentStorage.INLINE,
+                post_id=None,
+                cid=None,
+                order_id=order_id,
+            )
+            msg = LightValidationRequest(
+                order_id=order_id,
+                payload={
+                    "order_id": order_id,
+                    "postId": None,
+                    "validation_mode": ValidationMode.LIGHT,
+                    "assertion_index": assertion.assertion_index,
+                    "idAssertion": assertion_id,
+                    "assertion_text": assertion_text,
+                    "categoryId": category_id,
+                    "validator_id": validator_id,
+                    "original_text": text,
+                    "client_id": client_id,
+                    "correlation_id": correlation_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "assertion_validation_payload": payload_v2,
+                }
+            )
+            await producer.send_and_wait(TOPIC_LIGHT_VALIDATION_REQUESTS, msg.model_dump_json().encode("utf-8"))
+            await log_event(order_id, msg.action, TOPIC_LIGHT_VALIDATION_REQUESTS, msg.payload.model_dump(mode="json"))
+            logger.info(f"[news-handler] mode=LIGHT publishing assertion-validation-payload-v2 assertion_id={assertion_id}")
+            total_pending += 1
+
+    status = "VALIDATION_PENDING" if total_pending else "NO_VALIDATORS_AVAILABLE"
+    await update_order(order_id, {
+        "$set": {
+            "validators": validators_info,
+            "validation_requests": validation_requests,
+            "validators_pending": total_pending,
+            "assertions_without_validator": no_validator_assertions,
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+    })
+    return total_pending
+
+
+async def start_light_flow(order_id: str, text: str, assertions_document: AssertionsDocumentV2, client_id: Optional[str] = None):
+    logger.info(f"[LIGHT] Starting lightweight validation flow | order_id={order_id}")
+    logger.info(f"[LIGHT] Skipping IPFS and blockchain publication | order_id={order_id}")
+    assertions_list = protocol_assertions_for_mongo(assertions_document)
+    document = minimal_document_for_order(text, assertions_list)
+    await update_order(order_id, {
+        "$set": {
+            "validation_mode": ValidationMode.LIGHT.value,
+            "assertions": assertions_list,
+            "document": document,
+            "cid": None,
+            "tx_hash": None,
+            "hash_text": hash_text_to_multihash(text).digest,
+            "status": "DOCUMENT_CREATED",
+            "validations": {},
+            "validation_requests": {},
+            "validators": [],
+            "validators_pending": 0,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        },
+        "$unset": {"assertions_document_cid": ""}
+    })
+    logger.info(f"[LIGHT] Generated assertions-document-v2 | order_id={order_id} count={len(assertions_list)}")
+    await dispatch_light_validation_requests(order_id, text, assertions_document, client_id)
+
 # ===========================
 # Helpers para hashes
 # ===========================
 def ipfs_get_text(cid: str) -> str:
-    url = f"{IPFS_FASTAPI_URL}/ipfs/{cid}"
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-    return r.text
+    return get_ipfs_text(IPFS_FASTAPI_URL, cid)
 
 async def get_order_lock(order_id: str):
     if order_id not in order_locks:
@@ -164,7 +684,7 @@ async def log_event(order_id: str, action: str, topic: str, payload: dict):
         logger.warning(f"Evento con order_id vacío ignorado: action={action}, topic={topic}")
         return
 
-    events_col = db["events"]
+    events_col = events_collection
     
     # 🚨 CAMBIO CLAVE: Usar time.time() * 1000 para obtener la marca de tiempo UNIX absoluta en milisegundos
     current_ms_timestamp = int(time.time() * 1000) 
@@ -179,22 +699,27 @@ async def log_event(order_id: str, action: str, topic: str, payload: dict):
     await events_col.insert_one(event_doc)
     logger.info(f"[{order_id}] 🟢 Evento '{action}' registrado en MongoDB ({topic}).")
 
-async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: Validacion, tx_hash: str, payload: dict):
+async def log_validation(order_id: str, post_id: str, id_assertion: str, id_validator: str, approval: Optional[Validacion], tx_hash: str, payload: dict, execution_status: ValidationExecutionStatus, response_time_seconds: Optional[float] = None):
     global db
     if not order_id:
         logger.warning(f"Intento de log_validation sin order_id, ignorado.")
         return
 
-    validations_col = db["validations"]
+    validations_col = validations_collection
     val_doc = {
         "order_id": order_id,
         "postId": post_id,
         "idAssertion": id_assertion,
         "idValidator": id_validator,
         "approval": approval,
+        "execution_status": execution_status.value,
+        "error": payload.get("error"),
+        "error_details": payload.get("error_details"),
         "tx_hash": tx_hash,
         "payload": payload,
-        "timestamp": asyncio.get_event_loop().time()
+        "timestamp": asyncio.get_event_loop().time(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "response_time_seconds": response_time_seconds
     }
     await validations_col.insert_one(val_doc)
     logger.info(f"[{order_id}] 🟢 Validación registrada en MongoDB (Assertion={id_assertion}, Validator={id_validator}).")
@@ -203,24 +728,11 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
 # Función auxiliar para consultar cuotas
 # =========================================================
 async def fetch_client_quotas(client_id: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{ADMIN_URL}/clients/{client_id}")
-        if resp.status_code == 404:
-            raise HTTPException(status_code=403, detail="Client quotas not found")
-        resp.raise_for_status()
-        return resp.json()
-    
-    
+    return await fetch_admin_client_quotas(ADMIN_URL, client_id)
+
+
 async def update_client_consumed(client_id: str, field: str, new_value: int):
-    async with httpx.AsyncClient() as client:
-        payload = {
-            "consumed": {
-                field: new_value
-            }
-        }
-        # Hacemos PATCH para actualizar solo ese campo en concreto
-        resp = await client.patch(f"{ADMIN_URL}/clients/{client_id}", json=payload)
-        resp.raise_for_status()
+    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value)
 
 # ===========================
 # manejo blockchain
@@ -259,13 +771,6 @@ async def handle_blockchain_request(order_id: str, text: str, cid: str, assertio
 # =========================================================
 # Procesador genérico de mensajes Kafka (reutilizable)
 # =========================================================
-ACTION_TO_MODEL_RESPONSE = {
-    "assertions_generated": AssertionsGeneratedResponse,
-    "ipfs_uploaded": IpfsUploadedResponse,
-    "blockchain_registered": BlockchainRegisteredResponse,
-    "validation_completed": ValidationCompletedResponse,
-    "request_validation": RequestValidationRequest
-}
 
 async def process_kafka_message(data: dict):
     """
@@ -278,6 +783,17 @@ async def process_kafka_message(data: dict):
         if not action :
             logger.warning("⚠️ Mensaje Kafka sin 'action' ")
             return
+        if action == "new_validator_config":
+            payload = data.get("payload", {}) if isinstance(data.get("payload"), dict) else {}
+            try:
+                parsed_event = ValidatorConfigEvent(**data)
+                payload = parsed_event.payload.model_dump()
+            except ValidationError as e:
+                logger.warning(f"⚠️ Validator config event failed schema validation, applying raw payload: {e}")
+            await update_validator_cache_from_event(payload)
+            await log_event("validator-config", action, TOPIC_RESPONSES, payload)
+            return
+
 
         # ============================================================
         # 🔁 Resolver order_id a partir de postId si no viene informado
@@ -341,9 +857,17 @@ async def process_kafka_message(data: dict):
             if not doc:
                 return
 
-            assertions = parsed.payload.assertions or []
-            assertions_list = [a.model_dump() if isinstance(a, Assertion) else a for a in assertions]
+            validation_mode = normalize_validation_mode(doc.get("validation_mode", getattr(parsed.payload, "validation_mode", ValidationMode.BLOCKCHAIN)))
+            assertions_document = assertions_document_from_generation(parsed.payload, doc.get("text", ""), validation_mode)
+            assertions_list = protocol_assertions_for_mongo(assertions_document)
+            chain_assertions = chain_assertions_for_contract(assertions_document)
             num_assertions = len(assertions_list)
+
+            if validation_mode == ValidationMode.LIGHT:
+                await start_light_flow(order_id, doc.get("text", ""), assertions_document, doc.get("client_id"))
+                return
+
+            logger.info(f"[BLOCKCHAIN] Using existing blockchain validation flow | order_id={order_id}")
             
             # 🟢 Control de cuotas de seguridad final (antes de enviar al workflow pesado de IPFS/Blockchain)
             client_id = doc.get("client_id")
@@ -373,32 +897,22 @@ async def process_kafka_message(data: dict):
                     logger.error(f"[{order_id}] ❌ Error validando cuotas desde el worker: {e}")
                     return
 
-            # Crear documento tipado (usamos DocModel/MetadataModel para validar si quieres)
-            try:
-                metadata = MetadataModel(generated_by="news-handler", timestamp=asyncio.get_event_loop().time())
-                document_model = DocModel(
-                    order_id=order_id,
-                    text=doc.get("text", ""),
-                    assertions=assertions_list,
-                    metadata=metadata
-                )
-                document = document_model.model_dump()
-            except ValidationError as e:
-                logger.exception(f"[{order_id}] Error validando Document model: {e}")
-                # Caemos de forma tolerante: construimos document crudo
-                document = {
-                    "order_id": order_id,
-                    "text": doc.get("text", ""),
-                    "assertions": assertions_list,
-                    "metadata": {"generated_by": "news-handler", "timestamp": asyncio.get_event_loop().time()}
-                }
-
+            assert_no_order_id_in_protocol_document(assertions_document)
+            document = minimal_document_for_order(doc.get("text", ""), assertions_list)
             await update_order(order_id, {
-                "assertions": assertions_list,
-                "document": document,
-                "status": "DOCUMENT_CREATED"
+                "$set": {
+                    "assertions": assertions_list,
+                    "document": document,
+                    "status": "DOCUMENT_CREATED",
+                    "validations": {},
+                    "validation_requests": {},
+                    "validators": [],
+                    "validators_pending": 0,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             })
-            logger.info(f"[{order_id}] 📄 Documento y aserciones guardadas en MongoDB.")
+            logger.info(f"[news-handler] mode=BLOCKCHAIN uploading minimal document to IPFS")
+            logger.info(f"[news-handler] verified IPFS document does not contain order_id")
 
             # Enviar upload_ipfs request usando UploadIpfsRequest
             try:
@@ -416,6 +930,28 @@ async def process_kafka_message(data: dict):
             await update_order(order_id, {"status": "IPFS_PENDING"})
 
         # ================================================================
+        # 1B assertions_not_generated
+        # ================================================================
+        elif action == "assertions_not_generated":
+            doc = await get_order_doc(order_id)
+            if not doc:
+                return
+
+            await update_order(order_id, {
+                "status": "ASSERTIONS_NOT_AVAILABLE",
+                "assertions_error": {
+                    "provider": parsed.payload.publisher,
+                    "error": parsed.payload.error,
+                    "attempts": parsed.payload.attempts
+                }
+            })
+            logger.warning(
+                f"[{order_id}] ASSERTIONS_NOT_AVAILABLE tras "
+                f"{parsed.payload.attempts} intentos con {parsed.payload.publisher}: "
+                f"{parsed.payload.error}"
+            )
+
+        # ================================================================
         # 2️⃣ ipfs_uploaded
         # ================================================================
         elif action == "ipfs_uploaded":
@@ -429,15 +965,23 @@ async def process_kafka_message(data: dict):
                 logger.warning(f"[{order_id}] ⚠️ Documento no encontrado para IPFS update.")
                 return
 
+            if not doc or "assertions" not in doc:
+                logger.error(f"[{order_id}] ❌ Documento incompleto para IPFS update.")
+                return
+
             await update_order(order_id, {
-                "cid": cid,
-                "status": "IPFS_UPLOADED"
+                "$set": {
+                    "cid": cid,
+                    "status": "IPFS_UPLOADED"
+                },
+                "$unset": {"assertions_document_cid": ""}
             })
             logger.info(f"[{order_id}] ✅ IPFS subido con CID={cid}")
+            logger.info(f"[news-handler] mode=BLOCKCHAIN ipfs_cid={cid}")
 
-            # Generar request a blockchain (emulado o real)
-            await handle_blockchain_request(order_id, doc.get("text", ""), cid, doc.get("assertions", []))
-            await update_order(order_id, {"status": "BLOCKCHAIN_PENDING"})
+            chain_assertions = chain_assertions_for_contract(build_assertions_document_from_order(doc))
+            await handle_blockchain_request(order_id, doc.get("text", ""), cid, chain_assertions)
+            await update_order(order_id, {"$set": {"status": "BLOCKCHAIN_PENDING"}})
             logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain enviada (emulada o real según configuración).")
 
         # ================================================================
@@ -445,10 +989,22 @@ async def process_kafka_message(data: dict):
         # ================================================================
         elif action == "blockchain_registered":
             payload = parsed.payload.model_dump()
-            postId = payload.get("postId")
+            raw_post_id = payload.get("postId")
+            # 🔍 CRITICAL: Convert postId to int immediately to avoid type mismatch
+            try:
+                postId = int(raw_post_id) if raw_post_id is not None else None
+                logger.debug(f"[{order_id}] 📊 blockchain_registered received postId={postId} (type={type(postId).__name__})")
+            except (ValueError, TypeError) as e:
+                logger.error(f"[{order_id}] ❌ Failed to convert postId to int: {raw_post_id} - {e}")
+                postId = None
+            
             tx_hash = payload.get("tx_hash")
             hash_text = payload.get("hash_text")
             assertions_payload = payload.get("assertions", [])
+
+            if postId is None:
+                logger.error(f"[{order_id}] ❌ blockchain_registered payload missing postId or invalid type, aborting update.")
+                return
 
             if not assertions_payload:
                 logger.warning(f"[{order_id}] ⚠️ blockchain_registered sin assertions, abortando.")
@@ -488,16 +1044,23 @@ async def process_kafka_message(data: dict):
                     "categoryId": category_id
                 })
 
-            await update_order(order_id, {
-                "validators": validators_info,
-                "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
-                "status": "VALIDATION_PENDING",
-                "postId": postId,
-                "tx_hash": tx_hash,
-                "hash_text": hash_text
-            })
-
-            logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones).")
+            # 🔍 DEBUG: Log before update
+            update_payload = {
+                "$set": {
+                    "validators": validators_info,
+                    "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
+                    "status": "VALIDATION_PENDING",
+                    "post_id": postId,
+                    "tx_hash": tx_hash,
+                    "hash_text": hash_text
+                },
+                "$unset": {"assertions_document_cid": ""}
+            }
+            logger.debug(f"[{order_id}] 📤 Updating order with post_id={postId} (type={type(postId).__name__}), status=VALIDATION_PENDING")
+            
+            await update_order(order_id, update_payload)
+            
+            logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones). post_id={postId} type={type(postId).__name__}")
 
         # ================================================================
         # 4 request_validation  
@@ -601,16 +1164,95 @@ async def process_kafka_message(data: dict):
         # ================================================================
         # 5 validation_completed
         # ================================================================
+        elif action == "light_validation_completed":
+            payload = parsed.payload.model_dump()
+            id_val = payload.get("validator_id")
+            id_assert = str(payload.get("idAssertion"))
+            execution_status = ValidationExecutionStatus(payload["execution_status"])
+            approval_raw = payload.get("verdict")
+            status_val = Validacion(approval_raw) if execution_status == ValidationExecutionStatus.COMPLETED else None
+            description = payload.get("description", "")
+            category_id = payload.get("categoryId")
+            correlation_id = payload.get("correlation_id")
+            error = payload.get("error")
+
+            logger.info(f"[LIGHT] Validation response received | order_id={order_id} assertion={id_assert} validator={id_val} verdict={status_val}")
+
+            if not id_val or not id_assert:
+                logger.warning(f"[LIGHT] validation response without validator/assertion | order_id={order_id}")
+                return
+
+            lock = await get_order_lock(order_id)
+            async with lock:
+                doc = await get_order_doc(order_id)
+                if not doc:
+                    logger.warning(f"[LIGHT] Order not found for validation response | order_id={order_id}")
+                    return
+
+                if normalize_validation_mode(doc.get("validation_mode")) != ValidationMode.LIGHT:
+                    logger.warning(f"[LIGHT] Ignoring LIGHT response for non-LIGHT order | order_id={order_id}")
+                    return
+
+                validations = doc.get("validations", {})
+                validations.setdefault(id_assert, {})
+                if id_val in validations[id_assert]:
+                    logger.info(f"[LIGHT] Duplicate validation ignored | order_id={order_id} assertion={id_assert} validator={id_val}")
+                    return
+
+                response_ms = int(time.time() * 1000)
+                response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
+                validator_config_snapshot = get_cached_validator_config(id_val)
+                validations[id_assert][id_val] = {
+                    "approval": status_val,
+                    "text": description,
+                    "tx_hash": None,
+                    "validator_alias": (validator_config_snapshot or {}).get("config", {}).get("name", ""),
+                    "validator_config": validator_config_snapshot,
+                    "validation_mode": ValidationMode.LIGHT.value,
+                    "categoryId": category_id,
+                    "correlation_id": correlation_id,
+                    "sources": payload.get("sources", []),
+                    "evidence_used": payload.get("evidence_used", []),
+                    "evidence_search_response": payload.get("evidence_search_response"),
+                    "search_policy": payload.get("search_policy"),
+                    "confidence": payload.get("confidence"),
+                    "execution_status": execution_status.value,
+                    "error": error,
+                    "error_details": payload.get("error_details"),
+                    "response_time_seconds": response_time_seconds
+                }
+                await update_order(order_id, {"$set": {"validations": validations, "updated_at": datetime.now(timezone.utc).isoformat()}})
+                validation_payload = {**payload, "validator_config": validator_config_snapshot}
+                validation_payload.pop("assertion_index", None)
+                await log_validation(order_id, order_id, id_assert, id_val, status_val, None, validation_payload, execution_status, response_time_seconds)
+
+                validators_cfg = doc.get("validators", [])
+                total_pending = 0
+                for v in validators_cfg:
+                    aid = str(v.get("idAssertion"))
+                    expected = set(v.get("validatorAddresses") or [])
+                    done = set(validations.get(aid, {}).keys())
+                    total_pending += len(expected - done)
+
+                await update_order(order_id, {"$set": {"validators_pending": total_pending}})
+                if total_pending == 0:
+                    has_errors = any(
+                        item.get("execution_status") == ValidationExecutionStatus.ERROR.value
+                        for assertion_validations in validations.values()
+                        for item in assertion_validations.values()
+                    )
+                    terminal_status = "VALIDATED_WITH_ERRORS" if has_errors else "VALIDATED"
+                    await update_order(order_id, {"$set": {"status": terminal_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
+                    logger.info(f"[LIGHT] All validation responses completed | order_id={order_id} status={terminal_status}")
+
         elif action == "validation_completed":
             payload = parsed.payload.model_dump()
             postId = str(payload.get("postId", ""))
             id_val = payload.get("idValidator")
             id_assert = str(payload.get("idAssertion"))
+            execution_status = ValidationExecutionStatus(payload["execution_status"])
             approval_raw = payload.get("approval")
-            try:
-                status_val = Validacion(approval_raw)
-            except Exception:
-                status_val = Validacion(approval_raw) if approval_raw else None
+            status_val = Validacion(approval_raw) if execution_status == ValidationExecutionStatus.COMPLETED else None
 
             assertion_text = payload.get("text", "")
             tx_hash = payload.get("tx_hash", "")
@@ -649,18 +1291,31 @@ async def process_kafka_message(data: dict):
                     except Exception as e:
                         logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
 
+                response_ms = int(time.time() * 1000)
+                response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
+                validator_config_snapshot = get_cached_validator_config(id_val)
+
                 validations[id_assert][id_val] = {
                     "approval": status_val,
                     "text": assertion_text,
                     "tx_hash": tx_hash,
-                    "validator_alias": validator_alias
+                    "validator_alias": validator_alias,
+                    "validator_config": validator_config_snapshot,
+                    "sources": payload.get("sources", []),
+                    "evidence_used": payload.get("evidence_used", []),
+                    "evidence_search_response": payload.get("evidence_search_response"),
+                    "search_policy": payload.get("search_policy"),
+                    "execution_status": execution_status.value,
+                    "error": payload.get("error"),
+                    "error_details": payload.get("error_details"),
+                    "response_time_seconds": response_time_seconds
                 }
 
                 await update_order(order_id, {"$set": {"validations": validations}})
                 logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
 
                 # Registrar validación en colección 'validations'
-                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, payload)
+                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, {**payload, "validator_config": validator_config_snapshot}, execution_status, response_time_seconds)
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0
@@ -678,8 +1333,14 @@ async def process_kafka_message(data: dict):
                 logger.info(f"[{order_id}] 📊 Validadores pendientes totales: {total_pending}")
 
                 if total_pending == 0:
-                    await update_order(order_id, {"$set": {"status": "VALIDATED"}})
-                    logger.info(f"[{order_id}] 🎯 Todas las validaciones completadas. Noticia VALIDADA.")
+                    has_errors = any(
+                        item.get("execution_status") == ValidationExecutionStatus.ERROR.value
+                        for assertion_validations in validations.values()
+                        for item in assertion_validations.values()
+                    )
+                    terminal_status = "VALIDATED_WITH_ERRORS" if has_errors else "VALIDATED"
+                    await update_order(order_id, {"$set": {"status": terminal_status}})
+                    logger.info(f"[{order_id}] 🎯 Todas las validaciones finalizadas. Estado={terminal_status}.")
                 else:
                     logger.info(f"[{order_id}] 🕓 Aún quedan {total_pending} validaciones pendientes.")
 
@@ -698,13 +1359,14 @@ async def consume_responses_loop():
 
     consumer = AIOKafkaConsumer(
         TOPIC_RESPONSES,
+        TOPIC_LIGHT_VALIDATION_RESPONSES,
         bootstrap_servers=KAFKA_BROKER,
         group_id="fake-news-orchestrator-group",
         auto_offset_reset="earliest",
         **kafka_security_kwargs()
     )
     await consumer.start()
-    logger.info(f"Kafka consumer subscribed to {TOPIC_RESPONSES}")
+    logger.info(f"Kafka consumer subscribed to {TOPIC_RESPONSES} and {TOPIC_LIGHT_VALIDATION_RESPONSES}")
 
     try:
         async for msg in consumer:
@@ -1114,17 +1776,20 @@ async def publish_new(req: PublishRequest, client_id: str):
         "order_id": order_id,
         "text": req.text,
         "client_id": client_id, # 🔑 Guardar el client_id para luego
-        "status": "CREATED"
+        "status": "CREATED",
+        "validation_mode": normalize_validation_mode(req.validation_mode).value,
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
 
-    # Publicar petición a generar aserciones con GenerateAssertionsRequest
+    # LIGHT y BLOCKCHAIN comparten la solicitud/respuesta de aserciones por Kafka.
     try:
+        validation_mode = normalize_validation_mode(req.validation_mode)
         msg = GenerateAssertionsRequest(
             action="generate_assertions",
             order_id=order_id,
-            payload={"text": req.text}
+            payload={"text": req.text, "validation_mode": validation_mode}
         )
         await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
@@ -1134,7 +1799,7 @@ async def publish_new(req: PublishRequest, client_id: str):
         raise HTTPException(status_code=500, detail="Internal validation error")
 
     await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"})
-    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
+    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED", "validation_mode": normalize_validation_mode(req.validation_mode).value}
 
 @app.post("/publishWithAssertions", status_code=202)
 async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
@@ -1163,41 +1828,45 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         "text": req.text,
         "assertions": [a.dict() for a in req.assertions],
         "client_id": client_id, # 🔑
-        "status": "ASSERTIONS_REQUESTED"
+        "status": "ASSERTIONS_REQUESTED",
+        "validation_mode": normalize_validation_mode(req.validation_mode).value,
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     await save_order_doc(order_doc)
     logger.info(f"[{order_id}] Order saved in MongoDB with pre-generated assertions")
 
-    # Convertir a Assertion
-    from common.async_models import Assertion
-    assertions_for_payload = [
-        Assertion(idAssertion=a.idAssertion, text=a.text, categoryId=a.categoryId)
-        for a in req.assertions
-    ]
-
-    # Publicar mensaje
+    # Publicar respuesta equivalente a la del generador; el consumidor bifurca por validation_mode.
     try:
+        validation_mode = normalize_validation_mode(req.validation_mode)
+        assertions_document = build_assertions_document_v2(
+            text=req.text,
+            assertions=[a.to_enriched() if hasattr(a, "to_enriched") else a for a in req.assertions],
+            mode=validation_mode,
+            provider="news-handler",
+        )
         msg = AssertionsGeneratedResponse(
             action="assertions_generated",
             order_id=order_id,
             payload={
                 "text": req.text,
                 "publisher": "news-handler",
-                "assertions": assertions_for_payload
+                "assertions": req.assertions,
+                "assertions_document": assertions_document,
+                "validation_mode": validation_mode
             }
         )
-        
+
         await update_client_consumed(client_id, "news_generation", cons_news - 1)
         logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
-        
+
         await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
-        #await log_event(order_id, msg.action, TOPIC_RESPONSES, msg.payload.model_dump())
     except ValidationError as e:
         logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")
 
-    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED"}
+    current = await get_order_doc(order_id)
+    return {"order_id": order_id, "status": (current or {}).get("status", "ASSERTIONS_REQUESTED"), "validation_mode": normalize_validation_mode(req.validation_mode).value}
 
 @app.get("/orders/{order_id}")
 async def get_order(
@@ -1222,6 +1891,9 @@ async def get_order(
         order["created"] = "Format Error"
 
     order["_id"] = str(order_object_id)
+    attach_validator_config_snapshots(order)
+    await load_validator_type_weights()
+    order["assertion_results"] = calculate_order_assertion_results(order)
     return order
 
 @app.get("/news/{order_id}/events", response_model=List[EventModel])
@@ -1236,7 +1908,7 @@ async def get_news_events(
         if not order or order.get("client_id") != client_id:
             raise HTTPException(status_code=403, detail="Not authorized to access events for this order")
 
-    cursor = db.events.find({"order_id": order_id}, {"_id": 0})
+    cursor = events_collection.find({"order_id": order_id}, {"_id": 0})
     events = await cursor.to_list(length=100)
 
     if not events:
@@ -1276,6 +1948,116 @@ async def list_news(
 
     return news_list
 
+
+@app.get("/validators/cache")
+async def list_validators_cache(
+    recover_ipfs: bool = Query(True, description="Refresh from blockchain/news-chain before returning cache")
+):
+    """New list validators cache endpoint that gets blockchain validators and recovers IPFS data."""
+    if recover_ipfs:
+        await load_validators_cache_from_chain()
+    validators = [validator_summary_for_ui(v) for v in validators_cache.values()]
+    return {"validators": validators}
+
+
+@app.get("/validators/cache/{validator_hash}")
+async def get_validator_cache(validator_hash: str):
+    validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        await load_validators_cache_from_chain()
+        validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        raise HTTPException(status_code=404, detail="Validator not found in cache")
+    return await enrich_validator_for_ui(validator)
+
+
+@app.get("/validators/cache/{validator_hash}/validations")
+async def get_validator_with_validations_cache(
+    validator_hash: str,
+    provider: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    include_validations: bool = Query(False, description="Optional parameter, default no, to recover validations made"),
+    include_order_link: bool = Query(False, description="Optional parameter, default no, to include order_id link information"),
+    client_id: Optional[str] = Query(None, description="ID del cliente"),
+    admin: bool = Query(True, description="Indica si es administrador")
+):
+    validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        await load_validators_cache_from_chain()
+        validator = get_cached_validator_config(validator_hash)
+    if not validator:
+        raise HTTPException(status_code=404, detail="Validator not found in cache")
+    validator = await enrich_validator_for_ui(validator)
+
+    config = validator.get("config") or {}
+    if provider and str(config.get("provider", "")).lower() != provider.lower():
+        raise HTTPException(status_code=404, detail="Validator provider does not match filter")
+    if model and str(config.get("model", "")).lower() != model.lower():
+        raise HTTPException(status_code=404, detail="Validator model does not match filter")
+
+    validations = []
+    if include_validations:
+        query = {"idValidator": validator_hash}
+        if not admin and client_id:
+            allowed_orders = await orders_collection.distinct("order_id", {"client_id": client_id})
+            query["order_id"] = {"$in": allowed_orders}
+        cursor = validations_collection.find(query, {"_id": 0}).sort("timestamp", -1)
+        validations = await cursor.to_list(length=1000)
+        if include_order_link:
+            for item in validations:
+                item["order_link"] = f"/orders/{item.get('order_id')}" if item.get("order_id") else None
+        order_ids = list({item.get("order_id") for item in validations if item.get("order_id")})
+        orders_by_id = {}
+        if order_ids:
+            orders_cursor = orders_collection.find(
+                {"order_id": {"$in": order_ids}},
+                {"_id": 0, "order_id": 1, "text": 1, "assertions": 1, "validators": 1}
+            )
+            async for order in orders_cursor:
+                orders_by_id[order.get("order_id")] = order
+        for item in validations:
+            order = orders_by_id.get(item.get("order_id"), {})
+            assertion_id = str(item.get("idAssertion", ""))
+            assertion = next(
+                (
+                    a for a in order.get("assertions", [])
+                    if str(a.get("idAssertion")) == assertion_id
+                ),
+                None
+            )
+            validator_assertion = next(
+                (
+                    a for a in order.get("validators", [])
+                    if str(a.get("idAssertion")) == assertion_id
+                ),
+                None
+            )
+            item["assertion_text"] = (
+                (assertion or {}).get("text")
+                or (validator_assertion or {}).get("text")
+                or (item.get("payload") or {}).get("assertion_text")
+                or (item.get("payload") or {}).get("text")
+                or ""
+            )
+            item["categoryId"] = (
+                (assertion or {}).get("categoryId")
+                or (validator_assertion or {}).get("categoryId")
+            )
+            order_text = order.get("text", "")
+            if isinstance(order_text, dict):
+                order_text = order_text.get("text", "")
+            item["order_text"] = order_text or ""
+
+    return {
+        "validator": validator_hash,
+        "ipfs_hash": validator.get("ipfs_hash"),
+        "config": config,
+        "categories": validator.get("categories", []),
+        "stats": validator.get("stats", {}),
+        "validations": validations,
+    }
+
+
 @app.post("/find-order-by-text")
 async def find_order_by_text(request: PublishRequest):
     global orders_collection
@@ -1313,6 +2095,135 @@ async def find_order_by_text(request: PublishRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+def _is_public_ip(ip: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return parsed.is_global and not (parsed.is_multicast or parsed.is_reserved)
+
+
+def _validate_import_url(raw_url: str) -> str:
+    url = str(raw_url).strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Solo se permiten URLs http o https.")
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="La URL debe incluir un host válido.")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="No se permiten credenciales embebidas en la URL.")
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        resolved = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="No se pudo resolver el host de la URL.")
+
+    resolved_ips = {item[4][0] for item in resolved}
+    if not resolved_ips or any(not _is_public_ip(ip) for ip in resolved_ips):
+        raise HTTPException(status_code=400, detail="La URL apunta a una red no permitida.")
+    return url
+
+
+def _is_supported_import_content_type(content_type: str) -> bool:
+    media_type = (content_type or "").split(";", 1)[0].strip().lower()
+    return media_type in {
+        "",
+        "text/html",
+        "text/plain",
+        "application/xhtml+xml",
+        "application/xml",
+        "text/xml",
+    }
+
+
+def _read_limited_response_body(resp: requests.Response) -> str:
+    content_length = resp.headers.get("Content-Length")
+    if content_length:
+        try:
+            if int(content_length) > IMPORT_URL_MAX_BYTES:
+                raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.")
+        except ValueError:
+            pass
+
+    chunks = []
+    total = 0
+    for chunk in resp.iter_content(chunk_size=65536):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > IMPORT_URL_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.")
+        chunks.append(chunk)
+
+    body = b"".join(chunks)
+    encoding = resp.encoding or resp.apparent_encoding or "utf-8"
+    return body.decode(encoding, errors="replace")
+
+
+def fetch_public_url_text(raw_url: str) -> Tuple[str, str]:
+    headers = {"User-Agent": IMPORT_URL_USER_AGENT, "Accept": "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1"}
+    current_url = _validate_import_url(raw_url)
+
+    with requests.Session() as session:
+        session.trust_env = False
+        for redirect_count in range(IMPORT_URL_MAX_REDIRECTS + 1):
+            last_timeout = None
+            for attempt in range(IMPORT_URL_RETRIES + 1):
+                try:
+                    resp = session.get(
+                        current_url,
+                        timeout=IMPORT_URL_TIMEOUT_SECONDS,
+                        headers=headers,
+                        allow_redirects=False,
+                        stream=True,
+                    )
+                    break
+                except requests.exceptions.Timeout as exc:
+                    last_timeout = exc
+                    if attempt >= IMPORT_URL_RETRIES:
+                        raise
+                    time.sleep(min(0.5 * (attempt + 1), 2.0))
+                    logger.warning(
+                        f"Timeout importing URL; retrying | url={current_url} "
+                        f"attempt={attempt + 1}/{IMPORT_URL_RETRIES + 1} "
+                        f"timeout_seconds={IMPORT_URL_TIMEOUT_SECONDS}"
+                    )
+            else:
+                raise last_timeout
+
+            if resp.is_redirect or resp.is_permanent_redirect:
+                location = resp.headers.get("Location")
+                resp.close()
+                if not location:
+                    raise HTTPException(status_code=502, detail="Redirección sin cabecera Location.")
+                if redirect_count >= IMPORT_URL_MAX_REDIRECTS:
+                    raise HTTPException(status_code=400, detail="Demasiadas redirecciones al acceder a la URL.")
+                current_url = _validate_import_url(urljoin(current_url, location))
+                continue
+
+            if resp.status_code != 200:
+                status_code = resp.status_code if 400 <= resp.status_code < 600 else 502
+                resp.close()
+                raise HTTPException(status_code=status_code, detail="No se pudo acceder a la URL.")
+
+            content_type = resp.headers.get("Content-Type", "")
+            if not _is_supported_import_content_type(content_type):
+                resp.close()
+                raise HTTPException(status_code=415, detail="La URL no devuelve contenido HTML/texto soportado.")
+
+            final_url = _validate_import_url(resp.url or current_url)
+            try:
+                html = _read_limited_response_body(resp)
+            finally:
+                resp.close()
+            return final_url, html
+
+    raise HTTPException(status_code=400, detail="No se pudo completar la descarga de la URL.")
+
+
 @app.post(
     "/extract_text_from_url",
     response_model=ExtractedTextResponse,
@@ -1324,33 +2235,45 @@ def extract_text_from_url(request: ExtractTextRequest):
     y retorna el título y el texto del artículo principal usando Readability.
     """
     
-    url = request.url
-    HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ArticleExtractor/1.0)"}
-    TIMEOUT_SECONDS = 15
+    url = str(request.url)
     
     try:
-        resp = requests.get(url, timeout=TIMEOUT_SECONDS, headers=HEADERS)
+        fetched_url, html = fetch_public_url_text(url)
         
-        if resp.status_code != 200:
-            logger.warning(f"Error HTTP {resp.status_code} al acceder a la URL: {url}")
-            raise HTTPException(status_code=resp.status_code, detail=f"No se pudo acceder a la URL.")
-        
-        doc = Document(resp.text)
-        title = doc.title()
-        main_content_html = doc.summary()
-        
-        if not main_content_html:
-            raise ValueError("No se pudo identificar el contenido principal.")
+        doc = Document(html)
+        title = (doc.title() or "").strip()
+        main_content_html = doc.summary() or ""
+        clean_text = ""
 
-        root = lxml.html.fromstring(main_content_html)
-        clean_text = root.text_content().strip()
-        lines = [line.strip() for line in clean_text.splitlines() if line.strip()]
-        final_clean_text = "\n".join(lines)
-        
-        if not final_clean_text:
-            raise ValueError("El texto extraído está vacío.")
+        if main_content_html:
+            root = lxml.html.fromstring(main_content_html)
+            clean_text = root.text_content().strip()
 
-        return ExtractedTextResponse(url=str(url), title=title, text=final_clean_text)
+        if not clean_text:
+            soup = BeautifulSoup(html, "html.parser")
+            for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form", "noscript"]):
+                tag.decompose()
+
+            title = title or (soup.title.get_text(" ", strip=True) if soup.title else "")
+            candidates = soup.find_all(["article", "main"]) or [soup.body or soup]
+            paragraphs = []
+            for candidate in candidates:
+                paragraphs.extend(
+                    p.get_text(" ", strip=True)
+                    for p in candidate.find_all(["p", "h1", "h2", "li"])
+                )
+            clean_text = "\n".join(line for line in paragraphs if len(line) > 40)
+
+        lines = [re.sub(r"\s+", " ", line).strip() for line in clean_text.splitlines() if line.strip()]
+        final_clean_text = "\n".join(dict.fromkeys(lines))
+
+        if len(final_clean_text) < 80:
+            raise ValueError("No se pudo extraer suficiente texto útil de la URL.")
+
+        return ExtractedTextResponse(url=fetched_url, title=title or fetched_url, text=final_clean_text)
+
+    except HTTPException:
+        raise
 
     except requests.exceptions.Timeout:
         logger.error(f"Timeout al acceder a URL: {url}")
@@ -1358,11 +2281,11 @@ def extract_text_from_url(request: ExtractTextRequest):
     
     except requests.RequestException as e:
         logger.error(f"Error de conexión accediendo a URL {url}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error de conexión: {e}")
+        raise HTTPException(status_code=502, detail="Error de conexión accediendo a la URL.")
     
     except ValueError as e:
         logger.warning(f"Error de extracción para {url}: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e))
     
     except Exception as e:
         logger.error(f"Error inesperado al procesar {url}: {e}")
@@ -1432,22 +2355,31 @@ async def check_order_consistency(
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
-    global producer, consumer, mongo_client, db, orders_collection
+    global producer, consumer, mongo_client, db, orders_collection, events_collection, validations_collection, config_collection, validators_cache
 
     # MongoDB
     mongo_client = AsyncIOMotorClient(MONGO_URI)
     db = mongo_client[MONGO_DBNAME]
     orders_collection = db[MONGO_COLLECTION]
+    events_collection = db[MONGO_EVENTS_COLLECTION]
+    validations_collection = db[MONGO_VALIDATIONS_COLLECTION]
+    config_collection = db[MONGO_CONFIG_COLLECTION]
     logger.info(f"MongoDB connected at {MONGO_COLLECTION}")
 
     # Crear índices útiles
     try:
-        await db["events"].create_index([("order_id", 1)])
-        await db["events"].create_index([("action", 1)])
-        await db["validations"].create_index([("order_id", 1)])
+        await events_collection.create_index([("order_id", 1)])
+        await events_collection.create_index([("action", 1)])
+        await validations_collection.create_index([("order_id", 1)])
+        await validations_collection.create_index([("idValidator", 1)])
+        await validations_collection.create_index([("idValidator", 1), ("order_id", 1)])
+        await validations_collection.create_index([("order_id", 1), ("idAssertion", 1), ("idValidator", 1)], unique=True)
         logger.info("MongoDB indexes for events and validations ensured")
     except Exception as e:
         logger.warning(f"Could not create indexes: {e}")
+
+    await load_validator_type_weights()
+    await load_validators_cache_from_chain()
 
     # Kafka producer
     producer = AIOKafkaProducer(

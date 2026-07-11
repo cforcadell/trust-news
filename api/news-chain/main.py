@@ -4,11 +4,9 @@ import uuid
 import hashlib
 import logging
 import asyncio
-import base58
-import requests
 import ast
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ValidationError
 from dotenv import load_dotenv
@@ -17,15 +15,16 @@ from web3.middleware import geth_poa_middleware
 
 from aiokafka import AIOKafkaProducer
 
-from common.blockchain import send_signed_tx, wait_for_receipt_blocking
-from common.hash_utils import (
+from common.category_catalog import CATEGORY_IDS
+from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking
+from common.utils.hash_utils import (
     safe_multihash_to_tuple,
     multihash_to_base58,
     multihash_to_base58_dict,
     hash_text_to_multihash,
     safe_hex,
 )
-from common.async_models import (
+from common.models.async_models import (
     Multihash,
     Assertion,
     RegisterBlockchainRequest,
@@ -34,7 +33,21 @@ from common.async_models import (
     RequestValidationPayload,
     ValidationCompletedPayload,
     RequestValidationRequest,
-    ValidationCompletedResponse
+    ValidationCompletedResponse,
+    ValidatorConfig,
+    ValidatorConfigEvent,
+    ValidatorConfigEventPayload,
+    ValidatorType,
+    ValidationExecutionStatus,
+)
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN, DEFAULT_TOPIC_RESPONSES
+from common.utils.ipfs_client import get_ipfs_text, get_ipfs_json
+from common.models.protocol_models import (
+    AssertionsDocumentV2,
+    SourceDocumentStorage,
+    ValidationMode,
+    build_assertions_document_v2,
+    build_assertion_validation_payload_v2,
 )
 
 
@@ -53,9 +66,9 @@ ACCOUNT_ADDRESS = Web3.to_checksum_address(os.getenv("ACCOUNT_ADDRESS"))
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 CONTRACT_ABI_PATH = os.getenv("CONTRACT_ABI_PATH", "TrustNews.json")
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
-KAFKA_REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "request_validation")
-KAFKA_RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "validation_completed")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP)
+KAFKA_REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN)
+KAFKA_RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES)
 
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
 
@@ -94,43 +107,49 @@ except Exception as e:
 # Helpers
 # =========================================================
 def ipfs_get_text(cid: str) -> str:
-    """
-    Descarga texto desde IPFS vía tu gateway FastAPI.
-    Añade logging detallado para diagnóstico.
-    """
     try:
-        url = f"{IPFS_FASTAPI_URL}/ipfs/{cid}"
-        logger.info(f"🌍 IPFS GET → URL: {url}")
-
-        r = requests.get(url, timeout=10)
-
-        logger.info(
-            f"📡 IPFS response | status={r.status_code} "
-            f"content_length={len(r.content)} bytes"
-        )
-
-        # Si no es 200, logueamos body para diagnóstico
-        if r.status_code != 200:
-            logger.warning(
-                f"⚠️ IPFS error response body: {r.text[:500]}"
-            )
-
-        r.raise_for_status()
-
-        logger.info(
-            f"✅ IPFS OK | CID={cid} | first_100_chars={r.text[:100]}"
-        )
-
-        return r.text
-
-    except requests.exceptions.RequestException as e:
-        logger.exception(f"❌ Error HTTP accediendo a IPFS | cid={cid} | {e}")
-        return None
-
+        return get_ipfs_text(IPFS_FASTAPI_URL, cid)
     except Exception as e:
-        logger.exception(f"❌ Error inesperado en ipfs_get_text | cid={cid} | {e}")
+        logger.exception(f"❌ Error accediendo a IPFS | cid={cid} | {e}")
         return None
 
+
+
+
+def ipfs_get_json(cid: str) -> Optional[dict]:
+    try:
+        return get_ipfs_json(IPFS_FASTAPI_URL, cid)
+    except Exception as e:
+        logger.warning(f"No se pudo parsear JSON de IPFS | cid={cid}: {e}")
+        return None
+
+
+def normalize_validator_config(cid: str) -> Optional[ValidatorConfig]:
+    data = ipfs_get_json(cid)
+    if not data:
+        return None
+    try:
+        return ValidatorConfig(**data)
+    except Exception as e:
+        logger.warning(f"Config de validador no cumple modelo | cid={cid}: {e}")
+        return None
+
+
+def get_validator_categories(validator_address: str) -> List[Dict[str, Any]]:
+    """Return the category ids/names where a validator is registered."""
+    categories = []
+    try:
+        checksum = Web3.to_checksum_address(validator_address)
+        for category_id in sorted(CATEGORY_IDS):
+            validators = contract.functions.getValidatorsByCategory(category_id).call()
+            if any(str(v).lower() == checksum.lower() for v in validators):
+                categories.append({
+                    "id": category_id,
+                    "name": contract.functions.categories(category_id).call()
+                })
+    except Exception as e:
+        logger.warning(f"No se pudieron recuperar categorías del validador {validator_address}: {e}")
+    return categories
 
 
 def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
@@ -404,13 +423,16 @@ def get_info_by_postid(post_id: int):
                         reputation_val = v[2]
                         veredict_val = v[3]
                         cid = v[4]
+                        validator_ipfs_config = v[5] if len(v) > 5 else None
+                        validator_ipfs_hash = multihash_to_base58(validator_ipfs_config) if validator_ipfs_config else None
 
                         validation_entry = {
                             "validatorAddress": validator_addr,
                             "domain": domain_val,
                             "reputation": reputation_val,
                             "veredict": veredict_val,
-                            "cid": multihash_to_base58(cid)
+                            "cid": multihash_to_base58(cid),
+                            "validator_ipfs_hash": validator_ipfs_hash
                         }
                         validations.append(validation_entry)
 
@@ -438,6 +460,61 @@ def get_info_by_postid(post_id: int):
 
 
 
+@app.get("/blockchain/validators")
+def get_validators_with_config(recover_ipfs: bool = Query(True)):
+    """Returns validators with their ipfs_hashes and optionally recovers the IPFS config."""
+    try:
+        addresses, ipfs_configs = contract.functions.getValidatorsWithConfig().call()
+        validators = []
+        for idx, address in enumerate(addresses):
+            cid = multihash_to_base58(ipfs_configs[idx]) if idx < len(ipfs_configs) else None
+            config = normalize_validator_config(cid) if recover_ipfs and cid else None
+            config_dump = config.model_dump(mode="json") if config else None
+            validators.append({
+                "validator": safe_hex(address),
+                "ipfs_hash": cid,
+                "validator_type": (config_dump or {}).get("type", int(ValidatorType.LLM_MEMORY_VALIDATION)),
+                "reputation": 1.0,
+                "config": config_dump,
+                "categories": get_validator_categories(address)
+            })
+        return {"result": True, "validators": validators}
+    except Exception as e:
+        logger.exception(f"❌ Error al recuperar validadores: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/blockchain/validators/{validator_address}")
+def get_validator_config(validator_address: str, recover_ipfs: bool = Query(True)):
+    """Returns one validator with its ipfs_hash and optionally recovers the IPFS config."""
+    try:
+        checksum = Web3.to_checksum_address(validator_address)
+        val_info = contract.functions.validators(checksum).call()
+        exists = val_info[2] if len(val_info) > 2 else False
+        if not exists:
+            raise HTTPException(status_code=404, detail="Validator not found")
+        cid = multihash_to_base58(val_info[3]) if len(val_info) > 3 else None
+        config = normalize_validator_config(cid) if recover_ipfs and cid else None
+        config_dump = config.model_dump(mode="json") if config else None
+        return {
+            "result": True,
+            "validator": {
+                "validator": checksum,
+                "domain": val_info[0],
+                "reputation": 1.0,
+                "validator_type": (config_dump or {}).get("type", int(ValidatorType.LLM_MEMORY_VALIDATION)),
+                "ipfs_hash": cid,
+                "config": config_dump,
+                "categories": get_validator_categories(checksum)
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"❌ Error al recuperar validador {validator_address}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # =========================================================
 # AGENTE: LISTENER DE EVENTOS BLOCKCHAIN (VALIDATIONS)
@@ -453,6 +530,7 @@ async def blockchain_event_listener():
     # Pre-cargamos eventos (más eficiente)
     validation_requested_event = contract.events.ValidationRequested()
     validation_submitted_event = contract.events.ValidationSubmitted()
+    new_validator_config_event = contract.events.NewValidatorConfig()
 
     try:
         while True:
@@ -490,6 +568,34 @@ async def blockchain_event_listener():
                             # 🔥 FILTRO 2: solo logs de tu contrato
                             if log["address"].lower() != CONTRACT_ADDRESS.lower():
                                 continue
+
+                            # =================================================
+                            # NewValidatorConfig
+                            # =================================================
+                            try:
+                                ev = new_validator_config_event.process_log(log)
+                                validator = str(ev["args"]["validator"])
+                                ipfs_hash = multihash_to_base58_dict(ev["args"]["ipfsConfig"])
+                                config = normalize_validator_config(ipfs_hash)
+                                logger.info(f"📨 NewValidatorConfig | validator={validator} ipfs_hash={ipfs_hash} tx={tx_hash}")
+
+                                msg = ValidatorConfigEvent(
+                                    payload=ValidatorConfigEventPayload(
+                                        validator=validator,
+                                        ipfs_hash=ipfs_hash,
+                                        config=config,
+                                    )
+                                )
+                                await producer.send_and_wait(
+                                    KAFKA_RESPONSE_TOPIC,
+                                    msg.model_dump_json(exclude_none=True).encode(),
+                                )
+                                continue
+                            except Exception as e:
+                                if "event signature did not match" in str(e):
+                                    pass
+                                else:
+                                    logger.error(f"❌ Error procesando NewValidatorConfig: {str(e)}")
 
                             # =================================================
                             # ValidationRequested
@@ -534,52 +640,49 @@ async def blockchain_event_listener():
 
                                 post_json = json.loads(ipfs_content)
                                 logger.info("🧩 JSON parseado correctamente desde IPFS")
-                                
-                                content_obj = json.loads(post_json.get("content", "{}"))
+                                if isinstance(post_json, dict) and post_json.get("schema_version") == "assertions-document-v2":
+                                    content_obj = post_json
+                                elif isinstance(post_json, dict) and "assertions" in post_json and "text" in post_json:
+                                    content_obj = post_json
+                                else:
+                                    content_obj = json.loads(post_json.get("content", "{}"))
 
-                                # ------------------------------------------------
-                                # Buscar assertion correspondiente
-                                # ------------------------------------------------
-                                assertions = content_obj.get("assertions", [])
-                                logger.info(f"🔍 Total assertions encontradas en documento: {len(assertions)}")
-
-                                assertion = next(
-                                    (
-                                        a for a in assertions
-                                        if int(a.get("idAssertion", 0)) == assertion_index
-                                    ),
-                                    None,
-                                )
-
-                                if not assertion:
-                                    logger.warning(
-                                        f"⚠️ Assertion no encontrada en documento | "
-                                        f"post={post_id} assertion={assertion_index}"
+                                if isinstance(content_obj, dict) and "assertions" in content_obj and "post" not in content_obj:
+                                    logger.info(f"[news-chain] detected minimal document shape from IPFS cid={cid_post}, reconstructing AssertionsDocumentV2")
+                                    assertions_document = build_assertions_document_v2(
+                                        text=content_obj.get("text", ""),
+                                        assertions=content_obj.get("assertions", []),
+                                        mode=ValidationMode.BLOCKCHAIN,
+                                        provider="news-handler",
                                     )
+                                else:
+                                    assertions_document = AssertionsDocumentV2(**content_obj)
+                                logger.info(f"[news-chain] loaded assertions-document-v2 from IPFS cid={cid_post}")
+
+                                assertion = next((item for item in assertions_document.assertions if int(item.assertion_index) == int(assertion_index - 1)), None)
+                                if assertion is None:
+                                    logger.warning(f"⚠️ Assertion no encontrada en documento | post={post_id} assertion_index={assertion_index - 1}")
                                     continue
 
-                                logger.info(f"✅ Assertion localizada correctamente | assertion={assertion_index}")
-
-                                text = assertion.get("text", "")
-                                if not text:
-                                    logger.warning(
-                                        f"⚠️ Assertion sin texto | "
-                                        f"post={post_id} assertion={assertion_index}"
-                                    )
-                                    continue
-
-                                logger.info(
-                                    f"📝 Texto assertion obtenido ({len(text)} chars) | "
-                                    f"assertion={assertion_index}"
+                                payload_v2 = build_assertion_validation_payload_v2(
+                                    mode="BLOCKCHAIN",
+                                    assertion=assertion,
+                                    storage=SourceDocumentStorage.IPFS,
+                                    post_id=post_id,
+                                    cid=cid_post,
+                                    order_id=None,
                                 )
+                                logger.info(f"[news-chain] built assertion-validation-payload-v2 assertion_id={assertion.assertion_id}")
 
                                 msg = RequestValidationRequest(
                                     order_id="",
                                     payload=RequestValidationPayload(
                                         postId=post_id,
                                         idValidator=validator,
-                                        idAssertion=str(assertion_index),
-                                        text=text,
+                                        idAssertion=str(assertion.assertion_id),
+                                        text=assertion.text,
+                                        assertion_validation_payload=payload_v2,
+                                        source_document_cid=cid_post,
                                     ),
                                 )
                                 
@@ -594,9 +697,7 @@ async def blockchain_event_listener():
                                 )
                                 
                                 logger.info(
-                                    f"🚀 Mensaje enviado a Kafka correctamente | "
-                                    f"topic={KAFKA_RESPONSE_TOPIC} "
-                                    f"post={post_id} assertion={assertion_index}"
+                                    f"[news-chain] forwarding blockchain event to Kafka post_id={post_id} assertion_index={assertion_index - 1}"
                                 )
                                 continue  # Si se procesó como ValidationRequested, no intentamos ValidationSubmitted
 
@@ -656,6 +757,10 @@ async def blockchain_event_listener():
                                         validator_alias=validation_json.get(
                                             "validator_alias", ""
                                         ),
+                                        sources=validation_json.get("sources") or [],
+                                        evidence_used=validation_json.get("evidence_used") or [],
+                                        evidence_search_response=validation_json.get("evidence_search_response"),
+                                        execution_status=ValidationExecutionStatus.COMPLETED,
                                     ),
                                 )
 

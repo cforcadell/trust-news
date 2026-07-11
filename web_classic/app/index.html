@@ -4,148 +4,204 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trust News</title>
-    <link rel="stylesheet" href="css/style.css"> 
+    <link rel="stylesheet" href="css/style.css?v=20260613-process-widgets-2">
     <link rel="icon" type="image/png" href="img/fake_news_v3.png">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/auth/js/keycloak.js"></script>
 </head>
 <body>
 
 <aside id="sidebar">
     <div id="sidebar-header" class="sidebar-header">
-        <h1>Trust News</h1>
+        <div class="brand-mark">TN</div>
+        <div class="brand-copy">
+            <h1>Trust News</h1>
+            <span data-i18n="brand.subtitle">Verification Console</span>
+        </div>
     </div>
-
-    <div style="height: 15px;"></div>
 
     <nav class="sidebar-nav">
         <div class="menu-group">
-            <h2 class="menu-title">Verificación News</h2>
+            <h2 class="menu-title" data-i18n="nav.verification">Verificación News</h2>
             <div class="submenu">
-                <button class="nav-btn active" onclick="showSection('news')">Nueva Verificación Automática</button>
-                <button class="nav-btn" onclick="showSection('orders')">Listado de Órdenes</button>
-                <button class="nav-btn" onclick="showSection('order')">Buscar Órdenes</button>
-                <button class="nav-btn" onclick="showSection('consistency')">Comprobar Consistencia</button>
+                <button class="nav-btn active" onclick="showSection('news')"><span>✦</span><span data-i18n="nav.newVerification">Nueva Verificación Automática</span></button>
+                <button class="nav-btn" onclick="showSection('orders')"><span>▦</span><span data-i18n="nav.orders">Listado de Órdenes</span></button>
+                <button class="nav-btn" onclick="showSection('order')"><span>⌕</span><span data-i18n="nav.searchOrders">Buscar Órdenes</span></button>
+                <button class="nav-btn" onclick="showSection('consistency')"><span>☑</span><span data-i18n="nav.consistency">Comprobar Consistencia</span></button>
             </div>
         </div>
 
         <div class="menu-group">
-            <h2 class="menu-title">Explorador</h2>
+            <h2 class="menu-title" data-i18n="nav.explorer">Explorador</h2>
             <div class="submenu">
-                <button class="nav-btn" onclick="showSection('ipfs')">Buscar Documento (IPFS)</button>
-                <button class="nav-btn" onclick="showSection('tx')">Buscar Transacciones</button>
-                <button class="nav-btn" onclick="showSection('blocks')">Buscar Bloques</button>
-                <button class="nav-btn" onclick="showSection('contract')">Buscar Post (Contract)</button>
+                <button class="nav-btn" onclick="showSection('ipfs')"><span>◎</span><span data-i18n="nav.ipfs">Buscar Documento (IPFS)</span></button>
+                <button class="nav-btn" onclick="showSection('tx')"><span>↗</span><span data-i18n="nav.tx">Buscar Transacciones</span></button>
+                <button class="nav-btn" onclick="showSection('blocks')"><span>◫</span><span data-i18n="nav.blocks">Buscar Bloques</span></button>
+                <button class="nav-btn" onclick="showSection('contract')"><span>⌘</span><span data-i18n="nav.contract">Buscar Post (Contract)</span></button>
+                <button class="nav-btn" onclick="showSection('validators')"><span>◇</span><span data-i18n="nav.validators">Validadores</span></button>
             </div>
         </div>
     </nav>
+
+    <button class="sidebar-cta" onclick="showSection('news')" data-i18n="nav.cta">+ Verificar nuevo contenido</button>
 </aside>
 
 <main id="main">
     <header class="top-header">
-        <div class="header-content">
+        <div class="header-title">
+            <span class="eyebrow">TRUSTNEWS</span>
+            <strong data-i18n="header.title">Consola de verificación</strong>
+        </div>
+        <div class="header-actions">
             <div id="statusBar" class="status-toast"></div>
+            <label class="language-control"><span data-i18n="header.language">Idioma</span><select id="languageSelector" aria-label="Idioma" data-i18n-aria-label="header.language"><option value="es">Castellano</option><option value="en">English</option></select></label>
+            <span id="sessionBadge" class="session-badge" data-i18n="header.protectedSession">● Sesión protegida</span>
+            <button id="btn-logout" class="btn-logout" type="button" data-i18n="header.logout">Salir</button>
         </div>
     </header>
 
     <div class="content-wrapper">
-        
-        <section id="news" class="active card">
-            <h2>Verificación y Búsqueda de Noticias</h2>
-
-            <div class="news-import-container input-group">
-                <input type="text" id="newsUrl" placeholder="Escribe la URL a importar">
-                <button id="btn-importarNew" class="btn-primary">Importar Noticia</button>
+        <section id="news" class="active card page-card">
+            <div class="page-head compact-head">
+                <div>
+                    <span class="section-kicker" data-i18n="sections.verification">Verificación</span>
+                    <h2 data-i18n="sections.newVerification">Nueva Verificación Automática</h2>
+                    <p data-i18n="sections.newVerificationHelp">Importa una URL o pega el texto de una noticia para generar aserciones y publicar la orden.</p>
+                </div>
             </div>
 
-            <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar."></textarea>
-            
-            <div class="action-bar" style="margin-top: 15px; margin-bottom: 20px;">
-                <button id="btn-generateAssertions" class="btn-secondary">Generar Aserciones</button>
-                <button id="btn-publishNew" class="btn-primary">Publicar Noticia</button>
+            <div class="news-grid">
+                <div class="news-main">
+                    <div class="news-import-container input-group">
+                        <input type="text" id="newsUrl" placeholder="URL de la noticia a importar" data-i18n-placeholder="sections.newsUrl">
+                        <button id="btn-importarNew" class="btn-secondary" data-i18n="sections.importNews">Importar Noticia</button>
+                    </div>
+
+                    <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar." data-i18n-placeholder="sections.newsText"></textarea>
+
+                    <div class="validation-mode-panel">
+                        <label for="validationMode" data-i18n="ui.validationModeLabel">Modo de validación</label>
+                        <select id="validationMode" name="validation_mode">
+                            <option value="BLOCKCHAIN" selected>Blockchain</option>
+                            <option value="LIGHT">Light</option>
+                        </select>
+                        <div class="mode-help">
+                            <span data-mode-help="BLOCKCHAIN" data-i18n="ui.blockchainHelp">Validación completa con trazabilidad blockchain e IPFS</span>
+                            <span data-mode-help="LIGHT" data-i18n="ui.lightHelp" hidden>Validación rápida sin publicación en blockchain/IPFS</span>
+                        </div>
+                    </div>
+
+                    <div class="action-bar sticky-actions">
+                        <button id="btn-generateAssertions" class="btn-secondary" data-i18n="sections.generateAssertions">Generar Aserciones</button>
+                        <button id="btn-publishNew" class="btn-primary" data-i18n="sections.publishNews">Publicar Noticia</button>
+                        <button id="btn-clearNews" class="btn-tertiary" data-i18n="sections.clearNews">Limpiar noticia</button>
+                    </div>
+                </div>
             </div>
 
-            <div id="news-assertions-container" class="mt-4"></div>
+            <div id="news-assertions-container" class="mt-4 dynamic-panel"></div>
             <table id="findResults"></table>
         </section>
 
-        <section id="orders" class="card">
-            <h2>Historial de Órdenes</h2>
-            <div id="ordersTopBar" style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px;">
-                <button id="btn-listOrders" class="btn-secondary">Refrescar Listado</button>
-                
-                <div id="admin-view-container" style="display: none; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="chk-viewAll" style="cursor: pointer;">
-                    <label for="chk-viewAll" style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">
-                        Ver órdenes de todos los clientes (Admin)
-                    </label>
+        <section id="orders" class="card page-card">
+            <div class="page-head">
+                <div>
+                    <span class="section-kicker" data-i18n="sections.orders">Órdenes</span>
+                    <h2 data-i18n="sections.orderHistory">Historial de Órdenes</h2>
+                    <p data-i18n="sections.orderHistoryHelp">Consulta el estado agregado de las verificaciones y accede al detalle de cada orden.</p>
+                </div>
+                <div id="ordersTopBar" class="toolbar">
+                    <button id="btn-listOrders" class="btn-secondary" data-i18n="sections.refreshList">Refrescar Listado</button>
+                    <div id="admin-view-container" class="admin-toggle">
+                        <input type="checkbox" id="chk-viewAll">
+                        <label for="chk-viewAll" data-i18n="sections.viewAllOrders">Ver órdenes de todos los clientes (Admin)</label>
+                    </div>
                 </div>
             </div>
-            <div id="listFixedDetailsContainer"></div> 
+            <div id="listFixedDetailsContainer"></div>
             <div id="listOrderTabs" class="tabs"></div>
-            <div id="listTabContent"></div> 
+            <div id="listTabContent" class="table-shell"></div>
         </section>
 
-        <section id="order" class="card">
-            <h2>Buscar Orden Específica</h2>
-            <div id="orderTopBar" class="input-group">
-                <input type="text" id="orderId" placeholder="Introduce el order_id"/>
-                <button id="btn-findOrder" class="btn-primary">Buscar Order</button>
+        <section id="order" class="card page-card detail-page">
+            <div class="order-search-header">
+                <label for="orderId" data-i18n="sections.searchOrder">Buscar Orden Específica</label>
+                <div id="orderTopBar" class="input-group search-row">
+                    <input type="text" id="orderId" placeholder="Introduce el order_id" data-i18n-placeholder="sections.orderId">
+                    <button id="btn-findOrder" class="btn-primary" data-i18n="sections.findOrder">Buscar Orden</button>
+                </div>
+                <button type="button" class="btn-secondary order-back-button" onclick="showSection('orders')" data-i18n="ui.backToSearch">← Volver al buscador</button>
             </div>
-            <div id="fixedDetailsContainer"></div> 
             <div id="orderTabs" class="tabs"></div>
-            <div id="tabContent"></div> 
+            <div id="fixedDetailsContainer" class="order-polling-state" aria-live="polite"></div>
+            <div id="tabContent" class="tab-shell"></div>
         </section>
 
-        <section id="consistency" class="card">
-            <h2>Check de Integridad con Ethereum</h2>
-            <div class="input-group">
-                <input type="text" id="orderIdCons" placeholder="Introduce order Id"/>
-                <button id="btn-checkConsistency" class="btn-primary">Comprobar Consistencia</button>
+        <section id="consistency" class="card page-card compact-tool">
+            <div class="page-head compact-head"><div><span class="section-kicker" data-i18n="sections.integrity">Integridad</span><h2 data-i18n="sections.integrityCheck">Check de Integridad con Ethereum</h2></div></div>
+            <div class="input-group search-row">
+                <input type="text" id="orderIdCons" placeholder="Introduce order Id" data-i18n-placeholder="sections.orderIdPlaceholder">
+                <button id="btn-checkConsistency" class="btn-primary" data-i18n="sections.checkConsistency">Comprobar Consistencia</button>
             </div>
-            <table id="postConsistency"></table>
+            <div class="table-shell"><table id="postConsistency"></table></div>
         </section>
 
-        <section id="ipfs" class="card">
-            <h2>Búsqueda en IPFS</h2>
-            <div class="input-group">
-                <input type="text" id="ipfsHash" placeholder="Introduce IPFS hash"/>
-                <button id="btn-findIpfs" class="btn-primary">Buscar IPFS</button>
+        <section id="ipfs" class="card page-card compact-tool">
+            <div class="page-head compact-head"><div><span class="section-kicker">IPFS</span><h2 data-i18n="sections.ipfsSearch">Búsqueda en IPFS</h2></div></div>
+            <div class="input-group search-row">
+                <input type="text" id="ipfsHash" placeholder="Introduce IPFS hash" data-i18n-placeholder="sections.ipfsHash">
+                <button id="btn-findIpfs" class="btn-primary" data-i18n="sections.findIpfs">Buscar IPFS</button>
             </div>
-            <table id="ipfsTable"></table>
+            <div class="table-shell"><table id="ipfsTable"></table></div>
         </section>
 
-        <section id="tx" class="card">
-            <h2>Consulta de Transacciones</h2>
-            <div class="input-group">
-                <input type="text" id="txHash" placeholder="Introduce transaction hash (ej: 0x55d2817a...)"/>
-                <button id="btn-findTx" class="btn-primary">Buscar Transacción</button>
+        <section id="tx" class="card page-card compact-tool">
+            <div class="page-head compact-head"><div><span class="section-kicker">Blockchain</span><h2 data-i18n="sections.txQuery">Consulta de Transacciones</h2></div></div>
+            <div class="input-group search-row">
+                <input type="text" id="txHash" placeholder="Introduce transaction hash (ej: 0x55d2817a...)" data-i18n-placeholder="sections.txHash">
+                <button id="btn-findTx" class="btn-primary" data-i18n="sections.findTx">Buscar Transacción</button>
             </div>
-            <table id="txTable"></table>
+            <div class="table-shell"><table id="txTable"></table></div>
         </section>
 
-        <section id="blocks" class="card">
-            <h2>Consulta de Bloques</h2>
-            <div class="input-group">
-                <input type="text" id="blockId" placeholder="Introduce block number o hash"/>
-                <button id="btn-findBlock" class="btn-primary">Buscar Bloque</button>
+        <section id="blocks" class="card page-card compact-tool">
+            <div class="page-head compact-head"><div><span class="section-kicker">Blockchain</span><h2 data-i18n="sections.blockQuery">Consulta de Bloques</h2></div></div>
+            <div class="input-group search-row">
+                <input type="text" id="blockId" placeholder="Introduce block number o hash" data-i18n-placeholder="sections.blockId">
+                <button id="btn-findBlock" class="btn-primary" data-i18n="sections.findBlock">Buscar Bloque</button>
             </div>
-            <table id="blockTable"></table>
+            <div class="table-shell"><table id="blockTable"></table></div>
         </section>
 
-        <section id="contract" class="card">
-            <h2>Smart Contract (Post)</h2>
-            <div class="input-group">
-                <input type="text" id="postId" placeholder="Introduce post Id"/>
-                <button id="btn-findPost" class="btn-primary">Buscar Post</button>
+
+
+        <section id="validators" class="card page-card compact-tool">
+            <div class="page-head compact-head">
+                <div>
+                    <span class="section-kicker" data-i18n="sections.validatorsKicker">Validators</span>
+                    <h2 data-i18n="sections.validators">Validadores</h2>
+                    <p data-i18n="sections.validatorsHelp">Listado de validadores registrados en blockchain con configuración IPFS y detalle de validaciones.</p>
+                </div>
+                <div class="toolbar">
+                    <button id="btn-listValidators" class="btn-secondary" data-i18n="sections.refreshValidators">Refrescar Validadores</button>
+                </div>
             </div>
-            <table id="postTable"></table>
+            <div id="validatorsTableContainer" class="table-shell"></div>
+            <div id="validatorDetailContainer" class="details-shell dynamic-content"></div>
         </section>
 
+        <section id="contract" class="card page-card compact-tool">
+            <div class="page-head compact-head"><div><span class="section-kicker">Smart Contract</span><h2 data-i18n="ui.smartContractPost">Smart Contract (Post)</h2></div></div>
+            <div class="input-group search-row">
+                <input type="text" id="postId" placeholder="Introduce post Id" data-i18n-placeholder="sections.postId">
+                <button id="btn-findPost" class="btn-primary" data-i18n="sections.findPost">Buscar Post</button>
+            </div>
+            <div class="table-shell"><div id="postTable"></div></div>
+        </section>
     </div>
 </main>
 
-<script src="js/app.js"></script>
-
+<script src="js/i18n.js"></script>
+<script src="js/app.js?v=20260613-process-widgets-2"></script>
 </body>
 </html>

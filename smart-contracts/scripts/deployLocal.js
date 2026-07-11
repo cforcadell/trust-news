@@ -16,18 +16,7 @@ async function main() {
   // --------------------------------------------------
   // Registrar categorías de noticias
   // --------------------------------------------------
-  const categories = [
-    { id: 1, name: "ECONOMÍA" },
-    { id: 2, name: "DEPORTES" },
-    { id: 3, name: "POLÍTICA" },
-    { id: 4, name: "TECNOLOGÍA" },
-    { id: 5, name: "SALUD" },
-    { id: 6, name: "ENTRETENIMIENTO" },
-    { id: 7, name: "CIENCIA" },
-    { id: 8, name: "CULTURA" },
-    { id: 9, name: "MEDIO AMBIENTE" },
-    { id: 10, name: "SOCIAL" },
-  ];
+  const categories = require("../config/categories.json");
 
   for (const cat of categories) {
     await (await trustNews.addCategory(cat.id, cat.name)).wait();

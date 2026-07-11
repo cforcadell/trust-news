@@ -28,6 +28,7 @@ contract TrustNews {
         string domain;
         uint256 reputation;
         bool exists;
+        Multihash ipfsConfig;
     }
 
     struct Multihash {
@@ -62,6 +63,7 @@ contract TrustNews {
         uint256 reputation;
         evaluation veredict;
         Multihash document;
+        Multihash validatorIpfsConfig;
     }
 
     struct AsertionView {
@@ -76,6 +78,8 @@ contract TrustNews {
     mapping(address => Validator) public validators;
     mapping(address => uint256[]) public validatorCategories;
     mapping(uint256 => address[]) public validatorsByCategory;
+    address[] public validatorsIndex;
+    mapping(address => bool) private validatorsIndexExists;
 
     mapping(uint256 => string) public categories;
 
@@ -109,6 +113,11 @@ contract TrustNews {
         uint256  postId,
         Multihash hash_ipfs,
         address[][] validatorAddressesByAsertion
+    );
+
+    event NewValidatorConfig(
+        address indexed validator,
+        Multihash ipfsConfig
     );
 
 
@@ -209,7 +218,8 @@ contract TrustNews {
                     domain: val.domain,
                     reputation: val.reputation,
                     veredict: v.veredict,
-                    document: v.document
+                    document: v.document,
+                    validatorIpfsConfig: val.ipfsConfig
                 });
             }
 
@@ -234,7 +244,8 @@ contract TrustNews {
 
     function registerValidator(
         string memory domain,
-        uint256[] memory categoryIds
+        uint256[] memory categoryIds,
+        Multihash memory ipfsConfig
     ) public {
         require(!validators[msg.sender].exists, "Already validator");
         require(bytes(domain).length != 0, "Invalid domain");
@@ -243,8 +254,14 @@ contract TrustNews {
         validators[msg.sender] = Validator({
             domain: domain,
             reputation: 0,
-            exists: true
+            exists: true,
+            ipfsConfig: ipfsConfig
         });
+
+        if (!validatorsIndexExists[msg.sender]) {
+            validatorsIndex.push(msg.sender);
+            validatorsIndexExists[msg.sender] = true;
+        }
 
         validatorCategories[msg.sender] = categoryIds;
 
@@ -252,6 +269,41 @@ contract TrustNews {
             uint256 catId = categoryIds[i];
             require(bytes(categories[catId]).length != 0, "Category not exists");
             validatorsByCategory[catId].push(msg.sender);
+        }
+
+        emit NewValidatorConfig(msg.sender, ipfsConfig);
+    }
+
+    function updateValidatorConfig(Multihash memory ipfsConfig) public {
+        require(validators[msg.sender].exists, "Not validator");
+        validators[msg.sender].ipfsConfig = ipfsConfig;
+        emit NewValidatorConfig(msg.sender, ipfsConfig);
+    }
+
+    function getValidatorsWithConfig()
+        public
+        view
+        returns (address[] memory validatorAddresses, Multihash[] memory ipfsConfigs)
+    {
+        uint256 activeCount = 0;
+
+        for (uint256 i = 0; i < validatorsIndex.length; i++) {
+            if (validators[validatorsIndex[i]].exists) {
+                activeCount++;
+            }
+        }
+
+        validatorAddresses = new address[](activeCount);
+        ipfsConfigs = new Multihash[](activeCount);
+
+        uint256 out = 0;
+        for (uint256 i = 0; i < validatorsIndex.length; i++) {
+            address validatorAddress = validatorsIndex[i];
+            if (validators[validatorAddress].exists) {
+                validatorAddresses[out] = validatorAddress;
+                ipfsConfigs[out] = validators[validatorAddress].ipfsConfig;
+                out++;
+            }
         }
     }
 
@@ -273,8 +325,12 @@ contract TrustNews {
             }
         }
 
+        Multihash memory lastConfig = validators[msg.sender].ipfsConfig;
+
         delete validatorCategories[msg.sender];
         delete validators[msg.sender];
+
+        emit NewValidatorConfig(msg.sender, lastConfig);
     }
 
     function getValidatorsByCategory(uint256 categoryId)

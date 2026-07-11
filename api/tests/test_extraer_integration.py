@@ -2,7 +2,6 @@ import os
 import time
 import pytest
 import requests
-import jwt
 import urllib3
 import logging
 
@@ -18,43 +17,8 @@ logger = logging.getLogger(__name__)
 # URLs de los servicios
 API_GENERATION_URL = os.getenv("API_GENERATION_URL", "http://127.0.0.1:8071")
 ADMIN_URL = os.getenv("ADMIN_URL", "http://127.0.0.1:8400") # URL del Admin de Cuotas
-KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token")
 
 # Credenciales
-AUTH_CLIENT_ID = os.getenv("AUTH_CLIENT_ID", "TrustNewsApi")
-AUTH_CLIENT_SECRET = os.getenv("AUTH_CLIENT_SECRET", "glFlzU7E6j25b6N9WAVAf2Y4xWd2opMz")
-
-# ==============================================================================
-# Fixtures
-# ==============================================================================
-
-@pytest.fixture(scope="session")
-def auth_token():
-    """Obtiene el token Bearer desde Keycloak"""
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": AUTH_CLIENT_ID,
-        "client_secret": AUTH_CLIENT_SECRET
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    response = requests.post(KEYCLOAK_URL, data=payload, headers=headers, verify=False)
-    assert response.status_code == 200, f"Error Keycloak: {response.text}"
-    return response.json()["access_token"]
-
-@pytest.fixture(scope="session")
-def computed_client_id(auth_token):
-    """Calcula el client_id extrayéndolo del JWT"""
-    unverified_claims = jwt.decode(auth_token, options={"verify_signature": False})
-    sub = unverified_claims.get("sub", "unknown_sub")
-    token_client_id = unverified_claims.get("client_id")
-    return f"{token_client_id}_{sub}" if token_client_id else f"user_{sub}"
-
-@pytest.fixture(scope="session")
-def api_session(auth_token):
-    """Sesión HTTP con el token inyectado en la cabecera"""
-    session = requests.Session()
-    session.headers.update({"Authorization": f"Bearer {auth_token}"})
-    return session
 
 # ==============================================================================
 # Tests

@@ -54,31 +54,16 @@ async function main() {
   // -------------------------------
   // Registrar categorías
   // -------------------------------
-  const categories = [
-    { id: 1, name: "ECONOMÍA" },
-    { id: 2, name: "DEPORTES" },
-    { id: 3, name: "POLÍTICA" },
-    { id: 4, name: "TECNOLOGÍA" },
-    { id: 5, name: "SALUD" },
-    { id: 6, name: "ENTRETENIMIENTO" },
-    { id: 7, name: "CIENCIA" },
-    { id: 8, name: "CULTURA" },
-    { id: 9, name: "MEDIO AMBIENTE" },
-    { id: 10, name: "SOCIAL" },
-  ];
+  const categories = require("../config/categories.json");
 
   console.log("\n⏳ Registrando categorías...");
   for (const cat of categories) {
-    try {
-      const tx = await trustNews.addCategory(cat.id, cat.name, {
-        gasLimit: 5_000_000,
-        gasPrice: ethers.parseUnits("1", "gwei")
-      });
-      if (tx.wait) await tx.wait();
-      console.log(`   ✅ Categoria [${cat.id}] ${cat.name} registrada`);
-    } catch (error) {
-      console.error(`   ❌ Error registrando categoría [${cat.id}] ${cat.name}:`, error.message);
-    }
+    const tx = await trustNews.addCategory(cat.id, cat.name, {
+      gasLimit: 5_000_000,
+      gasPrice: ethers.parseUnits("1", "gwei")
+    });
+    await tx.wait();
+    console.log(`   ✅ Categoria [${cat.id}] ${cat.name} registrada`);
   }
 
   // -------------------------------

@@ -1,0 +1,1319 @@
+[
+  {
+    "config_type": "subcategories",
+    "version": 2,
+    "enabled": true,
+    "items": [
+      {
+        "id": "DEMOGRAPHICS",
+        "name": "Demographics",
+        "aliases": [
+          "demografia",
+          "demografía"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "POPULATION",
+        "name": "Population",
+        "aliases": [
+          "poblacion",
+          "población"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "EDUCATION",
+        "name": "Education",
+        "aliases": [
+          "educacion",
+          "educación"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MIGRATION",
+        "name": "Migration",
+        "aliases": [
+          "migracion",
+          "migración"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "GENERAL",
+        "name": "General",
+        "aliases": [],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "LABOUR",
+        "name": "Labour",
+        "aliases": [
+          "empleo",
+          "employment"
+        ],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "INFLATION",
+        "name": "Inflation",
+        "aliases": [
+          "inflacion",
+          "inflación"
+        ],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "PUBLIC_FINANCE",
+        "name": "Public finance",
+        "aliases": [],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "REGULATION",
+        "name": "Regulation",
+        "aliases": [
+          "regulacion"
+        ],
+        "category_ids": [
+          1,
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MARKETS",
+        "name": "Markets",
+        "aliases": [
+          "mercados"
+        ],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "BUSINESS",
+        "name": "Business",
+        "aliases": [
+          "empresas"
+        ],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MACROECONOMICS",
+        "name": "Macroeconomics",
+        "aliases": [],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "EU_POLICY",
+        "name": "EU policy",
+        "aliases": [],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "INSTITUTIONS",
+        "name": "Institutions",
+        "aliases": [
+          "instituciones"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "LEGAL",
+        "name": "Legal",
+        "aliases": [
+          "ley",
+          "legislacion"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "PUBLIC_ADMINISTRATION",
+        "name": "Public administration",
+        "aliases": [],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "INTERNATIONAL",
+        "name": "International",
+        "aliases": [
+          "internacional"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "GOVERNMENT",
+        "name": "Government",
+        "aliases": [
+          "gobierno"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ELECTIONS",
+        "name": "Elections",
+        "aliases": [
+          "elecciones"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "TRADE",
+        "name": "Trade",
+        "aliases": [
+          "comercio"
+        ],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "HOUSING",
+        "name": "Housing market",
+        "aliases": [
+          "mercado inmobiliario",
+          "vivienda"
+        ],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ENERGY_ECONOMICS",
+        "name": "Energy economics",
+        "aliases": [
+          "economía energética"
+        ],
+        "category_ids": [
+          1
+        ],
+        "enabled": true
+      },
+      {
+        "id": "FOOTBALL",
+        "name": "Football",
+        "aliases": [
+          "fútbol"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "BASKETBALL",
+        "name": "Basketball",
+        "aliases": [
+          "baloncesto"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "TENNIS",
+        "name": "Tennis",
+        "aliases": [
+          "tenis"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CYCLING",
+        "name": "Cycling",
+        "aliases": [
+          "ciclismo"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MOTORSPORTS",
+        "name": "Motorsports",
+        "aliases": [
+          "automovilismo",
+          "motociclismo"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ATHLETICS",
+        "name": "Athletics",
+        "aliases": [
+          "atletismo"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SWIMMING",
+        "name": "Swimming",
+        "aliases": [
+          "natación"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "OLYMPICS",
+        "name": "Olympics",
+        "aliases": [
+          "juegos olímpicos"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SPORTS_GOVERNANCE",
+        "name": "Sports governance",
+        "aliases": [
+          "gestión deportiva"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "OTHER_SPORTS",
+        "name": "Other sports",
+        "aliases": [
+          "otros deportes"
+        ],
+        "category_ids": [
+          2
+        ],
+        "enabled": true
+      },
+      {
+        "id": "DIPLOMACY",
+        "name": "Diplomacy",
+        "aliases": [
+          "diplomacia"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "DEFENCE",
+        "name": "Defence",
+        "aliases": [
+          "defensa"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "HUMAN_RIGHTS",
+        "name": "Human rights",
+        "aliases": [
+          "derechos humanos"
+        ],
+        "category_ids": [
+          3
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ARTIFICIAL_INTELLIGENCE",
+        "name": "Artificial intelligence",
+        "aliases": [
+          "inteligencia artificial",
+          "ia"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CYBERSECURITY",
+        "name": "Cybersecurity",
+        "aliases": [
+          "ciberseguridad"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SOFTWARE",
+        "name": "Software",
+        "aliases": [],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "HARDWARE",
+        "name": "Hardware",
+        "aliases": [],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "TELECOMMUNICATIONS",
+        "name": "Telecommunications",
+        "aliases": [
+          "telecomunicaciones"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "DATA_PRIVACY",
+        "name": "Data privacy",
+        "aliases": [
+          "privacidad de datos"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "DIGITAL_PLATFORMS",
+        "name": "Digital platforms",
+        "aliases": [
+          "plataformas digitales"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ROBOTICS",
+        "name": "Robotics",
+        "aliases": [
+          "robótica"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SPACE_TECH",
+        "name": "Space technology",
+        "aliases": [
+          "tecnología espacial"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "TECH_POLICY",
+        "name": "Technology policy",
+        "aliases": [
+          "política tecnológica"
+        ],
+        "category_ids": [
+          4
+        ],
+        "enabled": true
+      },
+      {
+        "id": "PUBLIC_HEALTH",
+        "name": "Public health",
+        "aliases": [
+          "salud pública"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "DISEASES",
+        "name": "Diseases",
+        "aliases": [
+          "enfermedades"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MEDICINE",
+        "name": "Medicine",
+        "aliases": [
+          "medicina"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MENTAL_HEALTH",
+        "name": "Mental health",
+        "aliases": [
+          "salud mental"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "NUTRITION",
+        "name": "Nutrition",
+        "aliases": [
+          "nutrición"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "HEALTHCARE",
+        "name": "Healthcare",
+        "aliases": [
+          "atención sanitaria"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "PHARMACEUTICALS",
+        "name": "Pharmaceuticals",
+        "aliases": [
+          "farmacéutica"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "EPIDEMIOLOGY",
+        "name": "Epidemiology",
+        "aliases": [
+          "epidemiología"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MEDICAL_RESEARCH",
+        "name": "Medical research",
+        "aliases": [
+          "investigación médica"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "HEALTH_POLICY",
+        "name": "Health policy",
+        "aliases": [
+          "política sanitaria"
+        ],
+        "category_ids": [
+          5
+        ],
+        "enabled": true
+      },
+      {
+        "id": "FILM",
+        "name": "Film",
+        "aliases": [
+          "cine"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "TELEVISION",
+        "name": "Television",
+        "aliases": [
+          "televisión"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MUSIC",
+        "name": "Music",
+        "aliases": [
+          "música"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CELEBRITIES",
+        "name": "Celebrities",
+        "aliases": [
+          "famosos",
+          "celebridades"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "GAMING",
+        "name": "Gaming",
+        "aliases": [
+          "videojuegos"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "STREAMING",
+        "name": "Streaming",
+        "aliases": [],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "PERFORMING_ARTS",
+        "name": "Performing arts",
+        "aliases": [
+          "artes escénicas"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MEDIA_INDUSTRY",
+        "name": "Media industry",
+        "aliases": [
+          "industria audiovisual"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "AWARDS",
+        "name": "Awards",
+        "aliases": [
+          "premios"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "FASHION",
+        "name": "Fashion",
+        "aliases": [
+          "moda"
+        ],
+        "category_ids": [
+          6
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SCIENTIFIC_RESEARCH",
+        "name": "Scientific research",
+        "aliases": [
+          "investigación científica"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "PHYSICS",
+        "name": "Physics",
+        "aliases": [
+          "física"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CHEMISTRY",
+        "name": "Chemistry",
+        "aliases": [
+          "química"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "BIOLOGY",
+        "name": "Biology",
+        "aliases": [
+          "biología"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ASTRONOMY",
+        "name": "Astronomy",
+        "aliases": [
+          "astronomía"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "EARTH_SCIENCE",
+        "name": "Earth science",
+        "aliases": [
+          "ciencias de la tierra"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MATHEMATICS",
+        "name": "Mathematics",
+        "aliases": [
+          "matemáticas"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ARCHAEOLOGY",
+        "name": "Archaeology",
+        "aliases": [
+          "arqueología"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SCIENCE_POLICY",
+        "name": "Science policy",
+        "aliases": [
+          "política científica"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SCIENTIFIC_INNOVATION",
+        "name": "Scientific innovation",
+        "aliases": [
+          "innovación científica"
+        ],
+        "category_ids": [
+          7
+        ],
+        "enabled": true
+      },
+      {
+        "id": "LITERATURE",
+        "name": "Literature",
+        "aliases": [
+          "literatura"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "HISTORY",
+        "name": "History",
+        "aliases": [
+          "historia"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CULTURAL_HERITAGE",
+        "name": "Cultural heritage",
+        "aliases": [
+          "patrimonio cultural"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "MUSEUMS",
+        "name": "Museums",
+        "aliases": [
+          "museos"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "VISUAL_ARTS",
+        "name": "Visual arts",
+        "aliases": [
+          "artes visuales"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "LANGUAGE",
+        "name": "Language",
+        "aliases": [
+          "lengua",
+          "idioma"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "TRADITIONS",
+        "name": "Traditions",
+        "aliases": [
+          "tradiciones"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "RELIGION",
+        "name": "Religion",
+        "aliases": [
+          "religión"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ARCHITECTURE",
+        "name": "Architecture",
+        "aliases": [
+          "arquitectura"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CULTURAL_POLICY",
+        "name": "Cultural policy",
+        "aliases": [
+          "política cultural"
+        ],
+        "category_ids": [
+          8
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CLIMATE_CHANGE",
+        "name": "Climate change",
+        "aliases": [
+          "cambio climático"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "BIODIVERSITY",
+        "name": "Biodiversity",
+        "aliases": [
+          "biodiversidad"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "POLLUTION",
+        "name": "Pollution",
+        "aliases": [
+          "contaminación"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "CONSERVATION",
+        "name": "Conservation",
+        "aliases": [
+          "conservación"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "RENEWABLE_ENERGY",
+        "name": "Renewable energy",
+        "aliases": [
+          "energías renovables"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "WATER",
+        "name": "Water",
+        "aliases": [
+          "agua"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "WASTE",
+        "name": "Waste",
+        "aliases": [
+          "residuos"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "FORESTS",
+        "name": "Forests",
+        "aliases": [
+          "bosques"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "OCEANS",
+        "name": "Oceans",
+        "aliases": [
+          "océanos"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "ENVIRONMENTAL_POLICY",
+        "name": "Environmental policy",
+        "aliases": [
+          "política ambiental"
+        ],
+        "category_ids": [
+          9
+        ],
+        "enabled": true
+      },
+      {
+        "id": "SOCIAL_HOUSING",
+        "name": "Social housing",
+        "aliases": [
+          "vivienda social"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "INEQUALITY",
+        "name": "Inequality",
+        "aliases": [
+          "desigualdad"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "POVERTY",
+        "name": "Poverty",
+        "aliases": [
+          "pobreza"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "FAMILY",
+        "name": "Family",
+        "aliases": [
+          "familia"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      },
+      {
+        "id": "GENDER",
+        "name": "Gender",
+        "aliases": [
+          "género"
+        ],
+        "category_ids": [
+          10
+        ],
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "config_type": "location_types",
+    "version": 2,
+    "enabled": true,
+    "scopes": [
+      {
+        "id": "global",
+        "name": "Global",
+        "aliases": [
+          "worldwide",
+          "mundial"
+        ],
+        "enabled": true
+      },
+      {
+        "id": "country",
+        "name": "Country",
+        "aliases": [
+          "pais",
+          "país"
+        ],
+        "enabled": true
+      },
+      {
+        "id": "region",
+        "name": "Region",
+        "aliases": [
+          "regional"
+        ],
+        "enabled": true
+      },
+      {
+        "id": "international_organization",
+        "name": "International organization",
+        "aliases": [
+          "organizacion internacional"
+        ],
+        "enabled": true
+      },
+      {
+        "id": "macroregion",
+        "name": "Macroregion",
+        "aliases": [
+          "continent",
+          "continental",
+          "macroregion",
+          "macrorregión"
+        ],
+        "enabled": true
+      }
+    ],
+    "organizations": [
+      {
+        "id": "EU",
+        "name": "European Union",
+        "aliases": [
+          "Union Europea",
+          "Unión Europea",
+          "UE"
+        ],
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "config_type": "source_types",
+    "version": 2,
+    "enabled": true,
+    "items": [
+      {
+        "id": "official",
+        "name": "Official",
+        "aliases": [
+          "government",
+          "gubernamental"
+        ],
+        "default_trust_score": 1,
+        "enabled": true
+      },
+      {
+        "id": "statistics",
+        "name": "Statistics",
+        "aliases": [
+          "statistical",
+          "estadistica",
+          "estadística"
+        ],
+        "default_trust_score": 0.95,
+        "enabled": true
+      },
+      {
+        "id": "international_organization",
+        "name": "International organization",
+        "aliases": [],
+        "default_trust_score": 0.9,
+        "enabled": true
+      },
+      {
+        "id": "legal",
+        "name": "Legal",
+        "aliases": [],
+        "default_trust_score": 0.9,
+        "enabled": true
+      },
+      {
+        "id": "news_agency",
+        "name": "News agency",
+        "aliases": [
+          "agencia de noticias"
+        ],
+        "default_trust_score": 0.85,
+        "enabled": true
+      },
+      {
+        "id": "international_media",
+        "name": "International media",
+        "aliases": [],
+        "default_trust_score": 0.75,
+        "enabled": true
+      },
+      {
+        "id": "unknown",
+        "name": "Unknown",
+        "aliases": [],
+        "default_trust_score": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "corporate",
+        "name": "Corporate",
+        "aliases": [
+          "company",
+          "empresa"
+        ],
+        "default_trust_score": 0.65,
+        "enabled": true
+      },
+      {
+        "id": "technology",
+        "name": "Technology",
+        "aliases": [
+          "tecnología"
+        ],
+        "default_trust_score": 0.72,
+        "enabled": true
+      },
+      {
+        "id": "sports_organization",
+        "name": "Sports organization",
+        "aliases": [
+          "organización deportiva"
+        ],
+        "default_trust_score": 0.8,
+        "enabled": true
+      },
+      {
+        "id": "political_organization",
+        "name": "Political organization",
+        "aliases": [
+          "organización política"
+        ],
+        "default_trust_score": 0.7,
+        "enabled": true
+      },
+      {
+        "id": "healthcare",
+        "name": "Healthcare institution",
+        "aliases": [
+          "institución sanitaria"
+        ],
+        "default_trust_score": 0.85,
+        "enabled": true
+      },
+      {
+        "id": "academic",
+        "name": "Academic",
+        "aliases": [
+          "académica",
+          "universidad"
+        ],
+        "default_trust_score": 0.9,
+        "enabled": true
+      },
+      {
+        "id": "cultural_institution",
+        "name": "Cultural institution",
+        "aliases": [
+          "institución cultural"
+        ],
+        "default_trust_score": 0.82,
+        "enabled": true
+      },
+      {
+        "id": "environmental_organization",
+        "name": "Environmental organization",
+        "aliases": [
+          "organización ambiental"
+        ],
+        "default_trust_score": 0.82,
+        "enabled": true
+      },
+      {
+        "id": "nonprofit",
+        "name": "Nonprofit",
+        "aliases": [
+          "sin ánimo de lucro",
+          "ong"
+        ],
+        "default_trust_score": 0.8,
+        "enabled": true
+      }
+    ]
+  }
+]

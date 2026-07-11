@@ -26,6 +26,16 @@ spec:
               memory: "512Mi"
           ports:
             - containerPort: 27017
+          startupProbe:
+            tcpSocket:
+              port: 27017
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: 27017
+            periodSeconds: 5
+            failureThreshold: 3
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
@@ -37,9 +47,30 @@ spec:
                 secretKeyRef:
                   name: mongodb-secret
                   key: MONGO_INITDB_ROOT_PASSWORD
+            - name: MONGO_APP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGO_APP_USERNAME
+            - name: MONGO_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGO_APP_PASSWORD
+            - name: MONGO_APP_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGO_APP_DATABASE
           volumeMounts:
             - name: mongodb-storage
               mountPath: /data/db
+            - name: mongodb-init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: mongodb-init-scripts
+          configMap:
+            name: mongodb-init-scripts
   volumeClaimTemplates:
     - metadata:
         name: mongodb-storage

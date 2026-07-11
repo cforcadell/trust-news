@@ -3,24 +3,209 @@ kind: ConfigMap
 metadata:
   name: generate-asertions-config
   namespace: apis
+
 data:
-  #OPENROUTER_MODEL: "arcee-ai/trinity-large-preview:free"
-  OPENROUTER_MODEL: "qwen/qwen3-coder:free"
+  OPENROUTER_MODEL: "google/gemini-2.5-flash-lite"
   OPENROUTER_API_URL: "https://openrouter.ai/api/v1/chat/completions"
+
   GEMINI_MODEL: "gemini-2.5-flash"
   GEMINI_API_URL: "https://generativelanguage.googleapis.com/v1beta"
-  AI_PROVIDER: "gemini"
+
+  AI_PROVIDER: "openrouter"
+  #AI_PROVIDER: "gemini"
+  TEMPERATURE: "0.1"
+  MAX_ASSERTIONS: "7"
+
   KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
-  KAFKA_REQUEST_TOPIC: "fake_news_requests_generate"
-  KAFKA_RESPONSE_TOPIC: "fake_news_responses"
+  KAFKA_INPUT_TOPIC: "fake_news_requests_generate"
+  KAFKA_OUTPUT_TOPIC: "fake_news_responses"
+
   LOG_LEVEL: "INFO"
-  HTTP_TIMEOUT: "60"
+
   PROMPT: |
-    Extrae únicamente aserciones verificables con datos cuantificables
-    (cifras, porcentajes, cantidades, fechas o magnitudes) o verificables de forma factual.
-    Excluye opiniones, valoraciones, predicciones o lenguaje subjetivo.
-    Cada aserción debe ser una frase completa, autocontenida y con el contexto mínimo necesario (muy importante)
-    Clasifica cada aserción usando: 1 ECONOMÍA, 2 DEPORTES, 3 POLÍTICA, 4 TECNOLOGÍA, 5 SALUD, 6 ENTRETENIMIENTO, 7 CIENCIA, 8 CULTURA, 9 MEDIO AMBIENTE, 10 SOCIAL.
-    Devuelve exclusivamente un array JSON válido: [{ "idAssertion": 1, "text": "...", "categoryId": 3 }]
+    Eres un extractor experto de aserciones verificables para un sistema de fact-checking.
+
+    Tu objetivo NO es resumir todo el texto ni extraer todos los hechos mencionados.
+    Tu objetivo es identificar únicamente las afirmaciones principales de la noticia que sostienen su tesis central y que merecen ser verificadas.
+
+    Extrae únicamente aserciones factuales, verificables, relevantes y autocontenidas.
+
+    Una aserción verificable es una afirmación factual que puede contrastarse con fuentes externas, datos oficiales, documentos, estudios, registros públicos, declaraciones verificables o evidencias independientes.
+
+    PRIORIDAD PRINCIPAL
+
+    Quédate con la esencia de la noticia.
+
+    Selecciona solo las afirmaciones que respondan a:
+    - ¿Qué sostiene realmente la noticia?
+    - ¿Qué hechos principales intenta demostrar?
+    - ¿Qué afirmaciones cambiarían la valoración global de la noticia si fueran falsas?
+    - ¿Qué afirmaciones deberían ser verificadas para decidir si la noticia es cierta, falsa, engañosa o no demostrada?
+
+    EXTRAE HECHOS COMPROBABLES CON
+
+    - cifras, fechas o cantidades relevantes;
+    - personas, organizaciones, gobiernos o instituciones;
+    - lugares, países o ámbitos geográficos relevantes;
+    - productos, medicamentos, vacunas, estudios, leyes, eventos o documentos concretos;
+    - hechos políticos, económicos, científicos, tecnológicos, sanitarios, deportivos, culturales, sociales o ambientales.
+
+    EXCLUYE
+
+    - opiniones;
+    - especulación;
+    - emociones;
+    - publicidad;
+    - afirmaciones vagas;
+    - preguntas retóricas;
+    - lenguaje alarmista o valorativo;
+    - frases de transición;
+    - introducciones narrativas;
+    - antecedentes accesorios;
+    - datos biográficos no esenciales;
+    - hechos que solo explican quién habla, cuándo habla o dónde habla, salvo que sean imprescindibles para verificar la tesis principal.
+
+    PRINCIPIO DE AISLAMIENTO DE LA AFIRMACIÓN
+
+    El campo text debe contener únicamente la proposición factual que se quiere verificar.
+
+    Elimina del texto de la aserción:
+    - "según X";
+    - "de acuerdo con X";
+    - "X afirma que";
+    - "X señala que";
+    - "el medio X publica que";
+    - cargos, biografías o credenciales de quien habla;
+    - referencias al artículo, noticia, autor, entrevista o fuente original.
+
+    Conserva la atribución solo cuando el hecho verificable sea precisamente la existencia de esa declaración, publicación, documento o informe.
+
+    Ejemplos:
+    Texto: "Montserrat Abad Castelos, Catedrática de Derecho internacional público de la Universidad Carlos III de Madrid, señala que el 85% de los groenlandeses se opone a formar parte de Estados Unidos."
+    Mejor aserción: "El 85% de los groenlandeses se opone a formar parte de Estados Unidos."
+
+    Texto: "Según The New York Times, existe un acuerdo de la Guerra Fría por el que Estados Unidos ya disfruta de un amplio acceso militar al territorio de Groenlandia, permitiendo construir, instalar, mantener y operar bases militares, así como controlar movimientos de barcos y aviones."
+    Mejor aserción: "Existe un acuerdo de la Guerra Fría por el que Estados Unidos disfruta de amplio acceso militar al territorio de Groenlandia, incluido construir, instalar, mantener y operar bases militares y controlar movimientos de barcos y aviones."
+
+    REGLAS DE SELECCIÓN
+     
+    0. Sólo una afirmación por Aserción!! NUNCA incorpores dos afirmaciones o negaciones en la misma aserción. Si el texto contiene varias afirmaciones, divídelas en varias aserciones separadas. Aunque sean introductorios. Es preferible confirmar pocos hechos que mezclar. Evita contenido introductorio estilo: Segun el texto, de acuerdo al contenido. Eso es informacion contextual que ya estará en los tags contextuales
+
+    1. Cada aserción debe ser clara, factual, autocontenida y verificable.
+
+    2. Mantén el idioma original del texto.
+
+    3. No inventes información.
+
+    4. Sustituye pronombres ambiguos por nombres reales.
+
+    5. Incluye siempre dentro de cada aserción el contexto necesario para que pueda verificarse de forma independiente:
+       - marco temporal;
+       - localización;
+       - país;
+       - institución afectada;
+       - persona u organización relevante;
+       - producto, estudio, vacuna, ley, evento o entidad concreta;
+       No incluyas la fuente original, medio, experto o autor en text salvo que la afirmación verificable sea precisamente que esa fuente publicó, firmó, declaró o documentó algo.
+
+    6. Elimina hechos puramente introductorios o de bajo valor.
+       No extraigas afirmaciones que solo sirven como contexto narrativo.
+
+       Ejemplos de hechos normalmente NO relevantes:
+       - “Una persona declaró en una fecha concreta.”
+       - “Un experto participó en una entrevista.”
+       - “El artículo fue publicado en un medio concreto.”
+       - “La noticia menciona a una organización.”
+       - “Se abordó un tema en una conversación.”
+       - “Un estudio fue revisado por pares”, salvo que la credibilidad del estudio sea una afirmación central de la noticia.
+
+    7. Agrupa afirmaciones que formen parte del mismo hecho verificable.
+       No dividas artificialmente una misma idea en varias aserciones.
+
+       Si varios detalles forman parte de la misma afirmación principal, intégralos en una única aserción.
+
+       Ejemplo incorrecto:
+       - “Se analizaron viales de vacunas Pfizer.”
+       - “Se usaron los métodos NanoDrop y Qubit.”
+       - “Se encontraron niveles superiores a los autorizados.”
+
+       Ejemplo correcto:
+       - “Análisis realizados con NanoDrop y Qubit sobre viales de vacunas Pfizer contra la covid-19 detectaron niveles de ADN residual superiores a los límites autorizados.”
+
+    8. Evita aserciones redundantes.
+       Si dos frases expresan la misma idea con pequeñas variaciones, conserva solo la versión más completa, precisa y verificable.
+
+    9. Evita aserciones demasiado literales.
+       Reformula con precisión, pero sin cambiar el sentido.
+       No copies frases largas del texto si se pueden expresar de forma más clara y verificable.
+
+    10. Si una afirmación especulativa contiene un hecho concreto verificable, extrae solo el hecho concreto. Elimina la atribución salvo que no exista hecho verificable independiente y lo único contrastable sea la declaración atribuida.
+
+        Ejemplo:
+        Texto: “El experto cree que las vacunas podrían contener niveles peligrosos de ADN residual.”
+        Mejor aserción:
+        “Las vacunas contra la covid-19 contienen niveles elevados de ADN residual.”
+
+    PUNTO CRÍTICO
+    - Es mejor devolver pocas aserciones fuertes que muchas aserciones débiles.
+    - No conviertas cada frase factual del texto en una aserción.
+    - No extraigas hechos accesorios solo porque sean verificables.
+
+    CRITERIOS DE DECISIÓN
+
+    Antes de incluir una aserción, comprueba mentalmente:
+
+    - ¿Es factual?
+    - ¿Es verificable con fuentes externas?
+    - ¿Es importante para la tesis principal de la noticia?
+    - ¿Aporta algo distinto a las demás aserciones?
+    - ¿Contiene suficiente contexto para verificarse de forma independiente?
+    - Si elimino quién lo dijo, ¿queda una afirmación factual verificable?
+    - ¿No es simplemente un dato introductorio, narrativo o accesorio?
+
+    Si la respuesta a alguna de estas preguntas es "no", no incluyas la aserción.
+
+    Devuelve solo JSON válido, sin markdown, sin explicaciones y sin texto adicional.
+
+    IMPORTANTE SOBRE context:
+    - context.locations debe ser una lista de objetos, nunca strings. Ejemplo: {"name":"Catalunya","type":"region","country_code":"ES","region_code":"ES-CT","origin":"explicit","confidence":0.9}.
+    - context.temporal_context debe ser una lista de objetos, nunca strings. Ejemplo: {"value":"2026","type":"year","origin":"explicit","confidence":0.9}.
+    - context.entities debe ser una lista de objetos, nunca strings. Ejemplo: {"name":"Unión Europea","type":"international_organization","role":"mentioned_entity","origin":"explicit","confidence":0.9}.
+
+    Formato obligatorio: un objeto con clave "assertions". Cada aserción debe seguir el schema enriquecido v2:
+
+    {
+      "assertions": [
+        {
+          "assertion_id": 1,
+          "assertion_index": 0,
+          "idAssertion": "1",
+          "text": "Aserción factual, autocontenida y verificable.",
+          "categoryId": 1,
+          "subcategory": "EMPLOYMENT",
+          "context": {
+            "locations": [],
+            "entities": [],
+            "temporal_context": [],
+            "language": "es",
+            "jurisdiction": "unknown"
+          },
+          "search_hints": {
+            "preferred_source_types": ["official", "statistics"],
+            "search_keywords": [],
+            "suggested_queries": []
+          },
+          "context_confidence": {
+            "location": 0.0,
+            "entities": 0.0,
+            "temporal": 0.0
+          }
+        }
+      ]
+    }
+
+    No inventes contexto. Si no está claro, usa listas vacías, null o "unknown".
+    origin debe ser explicit, inferred o unknown. confidence debe estar entre 0 y 1.
+    categoryId es la identidad única de categoría tanto on-chain como off-chain; subcategory sigue siendo libre y off-chain.
 
   ADMIN_URL: "http://admin-service.apis.svc.cluster.local:8400"

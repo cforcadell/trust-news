@@ -5,6 +5,8 @@ ENV KC_HTTP_RELATIVE_PATH=/auth
 ENV KC_HEALTH_ENABLED=true
 ENV KC_PROXY_HEADERS=xforwarded
 
+COPY themes /opt/keycloak/themes
+
 RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:24.0

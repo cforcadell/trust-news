@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 from pydantic import ValidationError
 
 # Importar modelos comunes
-from common.async_models import UploadIpfsRequest, IpfsUploadedResponse, Metadata, Document 
+from common.models.async_models import UploadIpfsRequest, IpfsUploadedResponse, Metadata, Document
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_IPFS, DEFAULT_TOPIC_RESPONSES
 
 # -----------------------------
 # Configuración inicial
@@ -36,9 +37,9 @@ logger = logging.getLogger("ipfs-agent")
 # -----------------------------
 # Variables de configuración
 # -----------------------------
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
-REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", "upload_ipfs") # Topic ajustado
-RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", "ipfs_responses") # Topic ajustado
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP)
+REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", DEFAULT_TOPIC_REQUESTS_IPFS)
+RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES)
 MAX_RETRIES = 10
 RETRY_DELAY = 3
 
@@ -168,22 +169,22 @@ async def consume_and_process():
                     logger.warning(f"[{order_id}] Ignorando mensaje con action inesperada: {action}")
                     continue
 
-                # 2. Reconstruir el documento para añadir la metadata
-                doc: Document = request_model.payload.document
-                
-                # Se utiliza el modelo Metadata definido en common
-                current_metadata = Metadata(
-                    generated_by="ipfs-agent",
-                    timestamp=time.time()
-                )
-                
-                # Aseguramos que la metadata se actualice en el objeto Document
-                doc.metadata = current_metadata
-                
-                # 3. Serializar y subir a IPFS
-                # Usamos model_dump_json para obtener un JSON serializado de Pydantic
-                document_bytes = doc.model_dump_json(exclude_none=True, by_alias=True).encode("utf-8")
-                filename = f"{order_id}.json"
+                # 2. Serializar documento. Los documentos protocolarios v2 se suben
+                # sin inyectar metadata operativa ni order_id.
+                doc = request_model.payload.document
+                if isinstance(doc, dict):
+                    if doc.get("schema_version") == "assertions-document-v2" and "order_id" in json.dumps(doc, ensure_ascii=False):
+                        raise ValueError("assertions-document-v2 uploaded to IPFS must not contain order_id")
+                    document_bytes = json.dumps(doc, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                    filename = f"assertions-document-v2-{uuid.uuid4()}.json"
+                else:
+                    current_metadata = Metadata(
+                        generated_by="ipfs-agent",
+                        timestamp=time.time()
+                    )
+                    doc.metadata = current_metadata
+                    document_bytes = doc.model_dump_json(exclude_none=True, by_alias=True).encode("utf-8")
+                    filename = f"{order_id}.json"
                 
                 cid = await upload_to_ipfs(document_bytes, filename)
 

@@ -17,7 +17,7 @@ configMapGenerator:
   namespace: apis
   behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
   literals:
-    - CONTRACT_ADDRESS="0x9eA62eb7944349C407B307025644E47bF22F8bCc"
+    - CONTRACT_ADDRESS="0x928E691aF55fF3530127BcA7E06e35f3F9a77CF6"
 
 # Leemos tu archivo .env local para generar el secreto
 # secretGenerator:

@@ -13,5 +13,11 @@ secretGenerator:
   envs:
     - mongodb.env
 
+configMapGenerator:
+- name: mongodb-init-scripts
+  namespace: infra
+  files:
+    - init-users.js=../../init-users.js
+
 generatorOptions:
   disableNameSuffixHash: true

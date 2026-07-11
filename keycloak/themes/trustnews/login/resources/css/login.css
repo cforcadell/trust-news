@@ -1,0 +1,481 @@
+:root {
+  --tn-bg-base: #070d1a;
+  --tn-bg-surface: rgba(15, 23, 42, 0.92);
+  --tn-bg-elevated: rgba(17, 24, 39, 0.96);
+  --tn-text-primary: #f8fafc;
+  --tn-text-secondary: #9db2d5;
+  --tn-text-muted: #64748b;
+  --tn-accent-color: #22d3ee;
+  --tn-accent-green: #10d69a;
+  --tn-accent-red: #ff5b6e;
+  --tn-border-color: rgba(148, 163, 184, 0.18);
+  --tn-border-strong: rgba(34, 211, 238, 0.32);
+  --tn-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+}
+
+html,
+body,
+.login-pf {
+  min-height: 100%;
+  background: var(--tn-bg-base);
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--tn-text-primary);
+}
+
+.login-pf body,
+body.login-pf {
+  background:
+    linear-gradient(rgba(34, 211, 238, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.045) 1px, transparent 1px),
+    radial-gradient(circle at 90% 12%, rgba(34, 211, 238, 0.18), transparent 26%),
+    radial-gradient(circle at 16% 0%, rgba(16, 214, 154, 0.12), transparent 24%),
+    var(--tn-bg-base);
+  background-size: 44px 44px, 44px 44px, auto, auto, auto;
+}
+
+.login-pf-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 32px;
+}
+
+.login-pf-page-header {
+  width: min(440px, 100%);
+  margin: 0 auto;
+}
+
+#kc-header {
+  width: 100%;
+  color: var(--tn-text-primary);
+  margin: 0;
+}
+
+#kc-header-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--tn-text-primary);
+  font-size: 0;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+}
+
+#kc-header-wrapper::before {
+  content: "TN";
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #04111d;
+  background: linear-gradient(135deg, var(--tn-accent-color), var(--tn-accent-green));
+  box-shadow: 0 18px 40px rgba(16, 214, 154, 0.18);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+#kc-header-wrapper::after {
+  content: "Trust News";
+  color: var(--tn-text-primary);
+  font-size: 1.55rem;
+  font-weight: 900;
+}
+
+.login-pf-page .card-pf,
+.card-pf {
+  width: min(440px, 100%);
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 30px;
+  background: linear-gradient(145deg, rgba(15, 23, 42, .94), rgba(7, 13, 26, .98));
+  border: 1px solid var(--tn-border-color);
+  border-radius: 22px;
+  box-shadow: var(--tn-shadow);
+  color: var(--tn-text-primary);
+}
+
+.login-pf-page .card-pf,
+.login-pf-page .card-pf .card-pf-body,
+.login-pf-page .card-pf #kc-content,
+.login-pf-page .card-pf #kc-form,
+.login-pf-page .card-pf #kc-form-wrapper {
+  background: transparent;
+}
+
+#kc-page-title {
+  margin: 0 0 18px;
+  color: var(--tn-text-primary);
+  font-size: 1.55rem;
+  font-weight: 900;
+  line-height: 1.1;
+  text-align: left;
+}
+
+#kc-page-title::before {
+  content: "TRUSTNEWS";
+  display: block;
+  margin-bottom: 8px;
+  color: var(--tn-accent-color);
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: .18em;
+}
+
+#kc-content,
+#kc-form,
+#kc-form-wrapper,
+#kc-info {
+  color: var(--tn-text-secondary);
+}
+
+
+.login-pf-page .pf-v5-c-login,
+.login-pf-page .pf-v5-c-login__container {
+  width: 100%;
+  min-height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.login-pf-page .pf-v5-c-login__main,
+.login-pf-page .pf-v5-c-login__main-header,
+.login-pf-page .pf-v5-c-login__main-body,
+.login-pf-page .pf-v5-c-login__main-footer,
+.login-pf-page #kc-content-wrapper {
+  width: min(440px, 100%);
+  max-width: 440px;
+  background: transparent !important;
+  color: var(--tn-text-primary);
+}
+
+.login-pf-page .pf-v5-c-login__main {
+  padding: 0;
+  box-shadow: none;
+}
+
+.login-pf-page .pf-v5-c-login__main-body,
+.login-pf-page .pf-v5-c-login__main-header {
+  padding: 0;
+}
+
+.login-pf-page .card-pf,
+.login-pf-page .pf-v5-c-login__main-body {
+  background: linear-gradient(145deg, rgba(15, 23, 42, .94), rgba(7, 13, 26, .98)) !important;
+  border: 1px solid var(--tn-border-color) !important;
+  border-radius: 22px !important;
+  box-shadow: var(--tn-shadow) !important;
+}
+
+.login-pf-page .pf-v5-c-login__main-body {
+  padding: 30px !important;
+}
+
+.pf-v5-c-title,
+.pf-c-title,
+#kc-page-title {
+  color: var(--tn-text-primary) !important;
+}
+
+.pf-v5-c-form__label-text,
+.pf-c-form__label-text {
+  color: #dbeafe !important;
+}
+
+.login-pf-page .card-pf * {
+  border-color: var(--tn-border-color);
+}
+
+#kc-form-login,
+#kc-reset-password-form,
+#kc-register-form {
+  display: grid;
+  gap: 14px;
+}
+
+#kc-form-login .form-group,
+#kc-reset-password-form .form-group,
+#kc-register-form .form-group {
+  margin-bottom: 0;
+}
+
+#kc-form-buttons {
+  margin-top: 10px;
+}
+
+#kc-form-buttons input,
+#kc-form-buttons button {
+  width: 100%;
+}
+
+.pf-c-form__label,
+.pf-v5-c-form__label,
+.control-label,
+label {
+  color: #dbeafe;
+  font-size: .86rem;
+  font-weight: 800;
+}
+
+.pf-c-form-control,
+.pf-v5-c-form-control,
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  min-height: 46px;
+  border: 1px solid var(--tn-border-color);
+  border-radius: 14px;
+  background: rgba(5, 10, 24, .86);
+  color: var(--tn-text-primary);
+  padding: 12px 14px;
+  font-size: .95rem;
+  outline: none;
+  box-shadow: none;
+}
+
+.pf-c-form-control:focus,
+.pf-v5-c-form-control:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus {
+  border-color: var(--tn-accent-green);
+  box-shadow: 0 0 0 3px rgba(16, 214, 154, .12);
+}
+
+.pf-c-form-control::placeholder,
+.pf-v5-c-form-control::placeholder,
+input::placeholder {
+  color: var(--tn-text-muted);
+}
+
+.pf-c-button.pf-m-primary,
+.pf-v5-c-button.pf-m-primary,
+#kc-login,
+#kc-register,
+#kc-reset-password-form input[type="submit"] {
+  min-height: 46px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--tn-accent-green), #25d0c7);
+  color: #03111f;
+  cursor: pointer;
+  font-weight: 900;
+  box-shadow: 0 18px 40px rgba(16, 214, 154, 0.18);
+}
+
+.pf-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:hover,
+#kc-login:hover,
+#kc-register:hover,
+#kc-reset-password-form input[type="submit"]:hover {
+  background: linear-gradient(135deg, #15f0af, var(--tn-accent-color));
+  color: #03111f;
+}
+
+a,
+.pf-c-button.pf-m-link,
+.pf-v5-c-button.pf-m-link {
+  color: var(--tn-accent-color);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+a:hover,
+.pf-c-button.pf-m-link:hover,
+.pf-v5-c-button.pf-m-link:hover {
+  color: #67e8f9;
+  text-decoration: underline;
+}
+
+#kc-info-wrapper,
+.login-pf-signup {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(56, 189, 248, .18);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  color: var(--tn-text-secondary);
+}
+
+.alert-error,
+.pf-c-alert.pf-m-danger,
+.pf-v5-c-alert.pf-m-danger {
+  border-color: rgba(255, 91, 110, .28);
+  border-radius: 14px;
+  background: rgba(255, 91, 110, .10);
+  color: #ffd3d8;
+}
+
+.alert-success,
+.pf-c-alert.pf-m-success,
+.pf-v5-c-alert.pf-m-success {
+  border-color: rgba(16, 214, 154, .32);
+  border-radius: 14px;
+  background: rgba(16, 214, 154, .12);
+  color: #b8ffe5;
+}
+
+.pf-c-input-group,
+.pf-v5-c-input-group {
+  gap: 8px;
+}
+
+.pf-c-input-group .pf-c-button,
+.pf-v5-c-input-group .pf-v5-c-button {
+  border-radius: 14px;
+  border-color: var(--tn-border-color);
+  background: rgba(30, 41, 59, 0.72);
+  color: var(--tn-text-secondary);
+}
+
+.login-pf-settings {
+  color: var(--tn-text-secondary);
+}
+
+@media (max-width: 640px) {
+  .login-pf-page {
+    padding: 18px;
+  }
+
+  .card-pf {
+    width: 100%;
+    padding: 24px;
+    border-radius: 18px;
+  }
+
+  #kc-header-wrapper::after {
+    font-size: 1.3rem;
+  }
+}
+
+/* White login frame refinement */
+.login-pf-page {
+  justify-content: center !important;
+  gap: 14px !important;
+}
+
+.login-pf-page-header,
+#kc-header {
+  width: min(440px, 100%) !important;
+  margin: 0 auto !important;
+  text-align: center !important;
+}
+
+#kc-header-wrapper {
+  justify-content: center !important;
+  width: 100% !important;
+}
+
+.login-pf-page .card-pf,
+.login-pf-page .pf-v5-c-login__main-body {
+  background: #ffffff !important;
+  border: 2px solid rgba(34, 211, 238, .72) !important;
+  box-shadow:
+    0 0 0 1px rgba(16, 214, 154, .22),
+    0 22px 70px rgba(34, 211, 238, .18),
+    0 18px 45px rgba(0, 0, 0, .30) !important;
+  color: #06101f !important;
+}
+
+#kc-page-title,
+.pf-v5-c-title,
+.pf-c-title {
+  color: #06101f !important;
+}
+
+#kc-page-title::before {
+  color: #0d9488 !important;
+}
+
+.pf-c-form__label,
+.pf-v5-c-form__label,
+.pf-v5-c-form__label-text,
+.pf-c-form__label-text,
+.control-label,
+label {
+  color: #06101f !important;
+  opacity: 1 !important;
+}
+
+#kc-content,
+#kc-form,
+#kc-form-wrapper,
+#kc-info {
+  color: #1f2937 !important;
+}
+
+#kc-login,
+.pf-c-button.pf-m-primary,
+.pf-v5-c-button.pf-m-primary,
+#kc-register,
+#kc-reset-password-form input[type="submit"] {
+  color: #03111f !important;
+  font-weight: 900 !important;
+  text-shadow: none !important;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.login-pf-page-header,
+.login-pf-page .login-pf-page-header,
+#kc-header,
+#kc-header-wrapper {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+}
+
+.login-pf-page .pf-v5-c-login__container,
+.login-pf-page .pf-c-login__container {
+  min-height: 100vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 14px !important;
+}
+
+.login-pf-page .pf-v5-c-login__main,
+.login-pf-page .pf-c-login__main {
+  width: min(440px, 100%) !important;
+  margin: 0 auto !important;
+}
+
+/* Keep branding inside the login frame, not as a detached top header */
+.login-pf-page-header,
+.login-pf-page .login-pf-page-header,
+#kc-header,
+#kc-header-wrapper {
+  display: none !important;
+}
+
+#kc-page-title::before {
+  content: "TN · Trust News" !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  margin: 0 0 18px !important;
+  padding: 8px 12px !important;
+  border-radius: 999px !important;
+  background: rgba(16, 214, 154, .12) !important;
+  border: 1px solid rgba(13, 148, 136, .35) !important;
+  color: #06101f !important;
+  font-size: .88rem !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+#kc-page-title {
+  margin-top: 0 !important;
+}
+

@@ -7,40 +7,103 @@ data:
   # AI_PROVIDER: "openrouter"
   # MODEL: "arcee-ai/trinity-large-preview:free"
   # API_URL: "https://openrouter.ai/api/v1/chat/completions"
-  VALIDATION_PROMPT: |
-    Valida la siguiente aserción de forma factual y objetiva
-    utilizando tu conocimiento general y fuentes públicas conocidas.
 
-    Tu respuesta DEBE ser exclusivamente un objeto JSON válido
-    que se ajuste estrictamente a la siguiente estructura:
+  
 
+  VALIDATOR_TYPE: "1"
+  EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
+  EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS: "NONE"
+  EVIDENCE_SEARCH_PREFERRED_PROFILE_ID: "default"
+
+  LLM_MEMORY_VALIDATION_PROMPT: |
+    Actúa como validador factual prudente.
+    Valida la aserción usando tu conocimiento general, el contexto de la aserción y razonamiento lógico.
+    El contexto con origin=explicit prima sobre el contexto con origin=inferred.
+    El contexto con origin=inferred ayuda a interpretar la aserción, pero no convierte una afirmación no verificable en verdadera.
+    No inventes información.
+    Si necesitas enlaces o evidencias externas para decidir y no los tienes, devuelve UNKNOWN.
+    Explica porque has tomado su decision de forma breve y objetiva.
+    Devuelve exclusivamente JSON válido:
     {
-      \"resultado\": \"TRUE | FALSE | UNKNOWN\",
-      \"descripcion\": \"Justificación clara y detallada del resultado\"
+      "resultado": "TRUE | FALSE | UNKNOWN",
+      "descripcion": "Justificación breve y objetiva"
     }
 
-    Reglas de validación:
-    - Usa TRUE solo si la aserción es claramente correcta según conocimiento ampliamente aceptado.
-    - Usa FALSE solo si la aserción es claramente incorrecta o contradice hechos conocidos.
-    - Usa UNKNOWN si no hay evidencia suficiente, los datos son ambiguos
-      o el hecho no puede verificarse con certeza.
+  LLM_SEARCH_VALIDATION_PROMPT: |
+    Actúa como validador factual con búsqueda online.
+    Busca evidencias actuales en Internet cuando sea necesario.
+    Usa el contexto de la aserción para formular la búsqueda: origin=explicit prima sobre origin=inferred, y origin=inferred se usa cuando falta contexto explícito.
+    Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
+    Explica porque has tomado su decision de forma breve y objetiva usando enlaces concretos.
+    No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las fuentes" ni referencias genéricas en descripcion, reason ni evidence_text.
+    Si devuelves TRUE o FALSE, sources debe contener al menos un enlace concreto con el fragmento o dato específico que te ha hecho decidir.
+    En descripcion menciona el enlace, dominio o título concreto usado, no su índice interno.
+    evidence_text debe ser un fragmento breve o dato concreto encontrado en esa URL; no inventes citas ni atribuyas texto no comprobado.
+    supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
+    Si no encuentras enlaces o fragmentos suficientes para apoyar o contradecir la aserción, devuelve UNKNOWN.
+    Devuelve exclusivamente JSON válido:
+    {
+      "resultado": "TRUE | FALSE | UNKNOWN",
+      "descripcion": "Justificación breve basada en enlaces concretos",
+      "sources": [
+        {
+          "url": "string",
+          "title": "string",
+          "evidence_text": "Fragmento o dato concreto encontrado en ese enlace",
+          "supports": true,
+          "reason": "string"
+        }
+      ]
+    }
 
-    Restricciones:
-    - No incluyas texto fuera del objeto JSON.
-    - No añadas campos adicionales.
-    - No incluyas explicaciones fuera de \"descripcion\".
-    - No utilices formato markdown ni bloques de código.
-    El idioma de la respuesta debe ser el mismo que el de la aserción validada.
-  
+  RAG_EVIDENCE_VALIDATION_PROMPT: |
+    Actúa como validador factual estricto.
+    Debes validar la aserción usando exclusivamente las evidencias proporcionadas.
+    No uses conocimiento interno salvo razonamiento lógico básico.
+    Usa origin=explicit como contexto principal de la aserción. Usa origin=inferred solo cuando falte contexto explícito equivalente.
+    No uses el contexto inferido como evidencia factual suficiente: el veredicto debe apoyarse en evidencias recuperadas o en contradicción directa de esas evidencias.
+    No inventes fuentes.
+    No accedas a URLs externas.
+    Si las evidencias no son suficientes, devuelve UNKNOWN.
+    Explica porque has tomado su decision de forma breve y objetiva usando URLs y fragmentos concretos.
+    No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las evidencias" ni referencias genéricas en descripcion, reason ni evidence_text.
+    Si devuelves TRUE o FALSE, evidence_used debe contener al menos una evidencia con url y evidence_text.
+    En descripcion menciona la URL, dominio o título concreto usado, no su índice interno.
+    evidence_text debe ser un fragmento literal breve presente en las evidencias proporcionadas.
+    supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
+    Usa context_id o chunk_id cuando esté disponible para identificar el trozo exacto.
+    No inventes citas ni resumas como si fuera una cita literal.
+    Si ninguna evidencia contiene un fragmento directo que apoye o contradiga la aserción, devuelve UNKNOWN.
+    Devuelve exclusivamente JSON válido:
+    {
+      "resultado": "TRUE | FALSE | UNKNOWN",
+      "descripcion": "Justificación breve basada en URLs y fragmentos concretos",
+      "confidence": "HIGH | MEDIUM | LOW",
+      "evidence_used": [
+        {
+          "source_id": "string",
+          "context_id": "string",
+          "chunk_id": "string",
+          "url": "string",
+          "title": "string",
+          "supports": true,
+          "evidence_text": "Fragmento literal breve usado para decidir",
+          "reason": "string"
+        }
+      ]
+    }
+
   # Kafka (Namespace infra)
   KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
-  KAFKA_REQUEST_TOPIC: "fake_news_requests_validate"
-  KAFKA_RESPONSE_TOPIC: "fake_news_responses"
+  TOPIC_RESPONSES: "fake_news_responses"
+  TOPIC_LIGHT_VALIDATION_REQUESTS: "fake_news_requests_light_validation"
+
   # Blockchain (Namespace blockchain)
   RPC_URL: "http://geth-rpc-endpoint.blockchain.svc.cluster.local:8555"
-  CONTRACT_ADDRESS: "0x9eA62eb7944349C407B307025644E47bF22F8bCc"
+  CONTRACT_ADDRESS: "0x928E691aF55fF3530127BcA7E06e35f3F9a77CF6"
   CONTRACT_ABI_PATH: "/app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json"
+
   # IPFS (Namespace apis)
   IPFS_API_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"
-  ENABLE_REGISTER_VALIDATOR_STARTUP: "true"
   LOG_LEVEL: "INFO"
+  TEMPERATURE: "0.0"

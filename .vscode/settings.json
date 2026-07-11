@@ -1,0 +1,71 @@
+{
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.git/index.lock": true,
+
+    "**/node_modules/**": true,
+    "**/.venv/**": true,
+    "**/venv/**": true,
+    "**/__pycache__/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.mypy_cache/**": true,
+    "**/.ruff_cache/**": true,
+
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/target/**": true,
+    "**/.terraform/**": true,
+
+    "**/coverage/**": true,
+    "**/logs/**": true,
+    "**/*.log": true
+  },
+
+  "search.exclude": {
+    "**/node_modules/**": true,
+    "**/.venv/**": true,
+    "**/venv/**": true,
+    "**/__pycache__/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.mypy_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/target/**": true,
+    "**/coverage/**": true,
+    "**/logs/**": true,
+    "**/*.log": true
+  },
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/*.pyc": true
+  },
+
+  "git.autorefresh": false,
+  "git.autoRepositoryDetection": "openEditors",
+  "git.detectSubmodules": false,
+  "git.scanRepositories": [],
+
+  "typescript.tsserver.maxTsServerMemory": 1024,
+  "npm.autoDetect": "off",
+
+  "python.analysis.exclude": [
+    "**/node_modules",
+    "**/.venv",
+    "**/venv",
+    "**/__pycache__",
+    "**/dist",
+    "**/build",
+    "**/coverage",
+    "**/logs"
+  ],
+  "python.analysis.indexing": true,
+  "python.analysis.diagnosticMode": "openFilesOnly",
+
+  "extensions.ignoreRecommendations": true
+}

@@ -10,4 +10,5 @@ data:
   KC_HOSTNAME_STRICT_HTTPS: "true"
   KC_HOSTNAME_STRICT: "true"
   KC_PROXY_HEADERS: "xforwarded"
+  KC_SPI_THEME_DEFAULT: "trustnews"
   KC_DB_VENDOR: "postgres" 

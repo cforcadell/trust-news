@@ -2,15 +2,14 @@ import os
 import json
 import asyncio
 import logging
-import re
 import uuid
 import httpx
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import aiohttp
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import ValidationError, BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
 from dotenv import load_dotenv
 
 # Cargar env
@@ -23,12 +22,20 @@ logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)
 logger = logging.getLogger("generate-assertions-worker")
 
 # Importa modelos pydantic
-from common.async_models import (
+from common.models.async_models import (
     GenerateAssertionsRequest,
     AssertionsGeneratedResponse,
+    AssertionsNotGeneratedPayload,
+    AssertionsNotGeneratedResponse,
     Assertion,
     AssertionGeneratedPayload,
+    TextoEntrada,
+    build_assertions_document_v2,
 )
+from common.models.protocol_models import CATEGORY_CATALOG_PROMPT
+from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
+from common.utils.llm_json import extract_chat_content, parse_model_list
 
 # ============================================================
 # Config / constantes (desde env)
@@ -37,9 +44,9 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 logger.info(f"Proveedor de IA seleccionado: {AI_PROVIDER.upper()}")
 
 # Kafka
-BROKER_URL = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", "kafka:9092"))
-INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", os.getenv("ASSERTIONS_REQUEST_TOPIC", "fake_news_requests_generate"))
-OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TOPIC", "fake_news_responses"))
+BROKER_URL = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP))
+INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", os.getenv("ASSERTIONS_REQUEST_TOPIC", DEFAULT_TOPIC_REQUESTS_GENERATE))
+OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", os.getenv("ASSERTIONS_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES))
 
 # Mistral config
 MISTRAL_API_URL = os.getenv("MISTRAL_API_URL", "")
@@ -63,9 +70,32 @@ PROMPT = os.getenv(
     "Pendiente de Configurar "
 )
 
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.1"))
+MAX_ASSERTIONS = int(os.getenv("MAX_ASSERTIONS", "20"))
+
+def build_assertions_prompt(text: str) -> str:
+    return (
+        f"{PROMPT}\n\n"
+        "CATEGORÍAS CANÓNICAS OBLIGATORIAS ALINEADAS CON BLOCKCHAIN:\n"
+        f"{CATEGORY_CATALOG_PROMPT}\n\n"
+        "El campo categoryId DEBE ser uno de esos enteros. "
+        "No devuelvas un campo category, no traduzcas ni inventes categorías.\n\n"
+        "CONTEXTO DE VALIDACIÓN OBLIGATORIO:\n"
+        "- Para cada aserción, rellena context.locations, context.entities y context.temporal_context con el contexto necesario para verificarla.\n"
+        "- Marca origin=\"explicit\" cuando el dato aparece en el texto literal de la aserción.\n"
+        "- Marca origin=\"inferred\" cuando el dato no aparece en la aserción pero se deduce del texto completo de la noticia.\n"
+        "- Si una aserción tiene contexto explícito propio, ese contexto prima sobre cualquier contexto inferido de la noticia.\n"
+        "- No inventes contexto externo al texto proporcionado; usa unknown/listas vacías si no hay base textual suficiente.\n"
+        "- search_hints.search_keywords y search_hints.suggested_queries deben incorporar el contexto temporal, entidades y lugares relevantes para que un buscador externo pueda encontrar evidencias precisas.\n"
+        "- Las queries sugeridas deben ser autónomas: deben poder buscarse sin leer el resto de la noticia.\n\n"
+        f"Texto a analizar:\n{text}\n\n"
+        f"IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones.\n"
+    )
+
 # Timeouts / retries
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+NUM_REINTENTOS = int(os.getenv("NUM_REINTENTOS", os.getenv("MAX_RETRIES", "3")))
+MAX_RETRIES = NUM_REINTENTOS
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))
 
 # ============================================================
@@ -74,18 +104,136 @@ RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))
 app = FastAPI(title="Generate Assertions Worker (Typed)")
 
 # ============================================================
+# Admin config
+# ============================================================
+class ProviderRuntimeConfig(BaseModel):
+    api_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
+class AdminConfigResponse(BaseModel):
+    provider: str
+    prompt: str
+    temperature: float
+    max_assertions: int
+    http_timeout: int
+    num_reintentos: int
+    retry_delay: float
+    admin_url: str
+    mistral: ProviderRuntimeConfig
+    gemini: ProviderRuntimeConfig
+    openrouter: ProviderRuntimeConfig
+
+
+class ProviderRuntimeConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
+class AdminConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Optional[str] = None
+    prompt: Optional[str] = None
+    temperature: Optional[float] = None
+    max_assertions: Optional[int] = None
+    http_timeout: Optional[int] = None
+    num_reintentos: Optional[int] = None
+    retry_delay: Optional[float] = None
+    admin_url: Optional[str] = None
+    mistral: Optional[ProviderRuntimeConfigUpdate] = None
+    gemini: Optional[ProviderRuntimeConfigUpdate] = None
+    openrouter: Optional[ProviderRuntimeConfigUpdate] = None
+
+
+def mask_secret(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    return "*" * 8
+
+
+def is_masked_secret(value: Optional[str]) -> bool:
+    return bool(value) and set(str(value)) == {"*"}
+
+
+def set_runtime_env(name: str, value: Any) -> None:
+    if value is None:
+        return
+    os.environ[name] = str(value)
+
+
+def normalize_provider(value: str) -> str:
+    provider = str(value or "").strip().lower()
+    allowed = {"mistral", "gemini", "openrouter"}
+    if provider not in allowed:
+        raise HTTPException(status_code=400, detail=f"Provider desconocido: {provider}. Valores permitidos: {', '.join(sorted(allowed))}")
+    return provider
+
+
+def normalize_positive_int(name: str, value: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{name} debe ser un entero.")
+    if parsed <= 0:
+        raise HTTPException(status_code=400, detail=f"{name} debe ser mayor que 0.")
+    return parsed
+
+
+def normalize_non_negative_float(name: str, value: float) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{name} debe ser numerico.")
+    if parsed < 0:
+        raise HTTPException(status_code=400, detail=f"{name} no puede ser negativo.")
+    return parsed
+
+
+def normalize_admin_config_response() -> AdminConfigResponse:
+    return AdminConfigResponse(
+        provider=AI_PROVIDER,
+        prompt=PROMPT,
+        temperature=TEMPERATURE,
+        max_assertions=MAX_ASSERTIONS,
+        http_timeout=HTTP_TIMEOUT,
+        num_reintentos=NUM_REINTENTOS,
+        retry_delay=RETRY_DELAY,
+        admin_url=ADMIN_URL,
+        mistral=ProviderRuntimeConfig(
+            api_url=MISTRAL_API_URL,
+            api_key=mask_secret(MISTRAL_API_KEY),
+            model=MISTRAL_MODEL,
+        ),
+        gemini=ProviderRuntimeConfig(
+            api_url=GEMINI_API_URL,
+            api_key=mask_secret(GEMINI_API_KEY),
+            model=GEMINI_MODEL,
+        ),
+        openrouter=ProviderRuntimeConfig(
+            api_url=OPENROUTER_API_URL,
+            api_key=mask_secret(OPENROUTER_API_KEY),
+            model=OPENROUTER_MODEL,
+        ),
+    )
+
+
+# ============================================================
 # Helpers Pydantic JSON Schema
 # ============================================================
 
 def get_assertions_schema() -> dict:
-    """Genera el JSON Schema para List[Assertion] que los LLM deben seguir."""
+    """Genera el JSON Schema para List[Assertion] enriquecidas que los LLM deben seguir."""
     assertion_schema = Assertion.model_json_schema(by_alias=True)
-    
-    # Creamos el esquema para un array de esos objetos
-    return {
-        "type": "array",
-        "items": assertion_schema,
-    }
+    return {"type": "array", "items": assertion_schema}
+
+
+def parse_assertions_content(content) -> List[Assertion]:
+    return parse_model_list(content, Assertion, list_key="assertions", id_field="idAssertion")
 
 # ============================================================
 # Llamada asíncrona a Mistral (aiohttp)
@@ -95,12 +243,13 @@ async def call_mistral(text: str) -> List[Assertion]:
     if not (MISTRAL_API_URL and MISTRAL_API_KEY):
         raise HTTPException(status_code=500, detail="Mistral no está configurado en variables de entorno.")
 
-    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = build_assertions_prompt(text)
+    logger.info(f"[generate-asertions] Mistral prompt:\n{full_prompt}")
     headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MISTRAL_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
-        "temperature": 0.2,
+        "temperature": TEMPERATURE,
         # Solicitar formato estructurado JSON
         "response_format": {"type": "json_object"}
     }
@@ -110,40 +259,19 @@ async def call_mistral(text: str) -> List[Assertion]:
             try:
                 async with session.post(MISTRAL_API_URL, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
                     text_resp = await resp.text()
+                    logger.info(f"[generate-asertions] Mistral response status={resp.status} body:\n{text_resp}")
                     if resp.status != 200:
                         logger.error(f"Mistral status {resp.status}: {text_resp}")
+                        if resp.status in [429, 500, 502, 503, 504]:
+                            raise Exception(f"Error temporal Mistral: {resp.status}")
                         raise HTTPException(status_code=resp.status, detail="Error Mistral")
                     
                     data = await resp.json()
                     
-                    # 1. Extraer el contenido (debe ser un string JSON)
                     try:
-                        content = data["choices"][0]["message"]["content"]
-                    except (KeyError, TypeError):
-                        logger.error(f"Mistral response format unexpected: {data}")
-                        raise ValueError("Estructura de respuesta Mistral inesperada.")
-                    
-                    # 2. Parsear el string JSON a una lista de diccionarios
-                    try:
-                        parsed_list = json.loads(content)
-                        if not isinstance(parsed_list, list):
-                             # Si es un dict, intentar ver si contiene la lista de aserciones.
-                            if isinstance(parsed_list, dict) and "assertions" in parsed_list:
-                                parsed_list = parsed_list["assertions"]
-                            else:
-                                raise ValueError("Mistral no devolvió un array JSON raíz.")
-
-                    except json.JSONDecodeError:
-                        logger.error(f"Mistral devolvió JSON inválido: {content}")
-                        raise ValueError("Respuesta de Mistral no es JSON válido.")
-                    
-                    # 3. Validar y convertir la lista de diccionarios a List[Assertion]
-                    try:
-                        for idx, item in enumerate(parsed_list, start=1):
-                            item["idAssertion"] = str(idx)
-                        return [Assertion(**item) for item in parsed_list]
-                    except ValidationError as e:
-                        logger.error(f"Mistral devolvió un JSON que no cumple el esquema Assertion: {e}")
+                        return parse_assertions_content(extract_chat_content(data))
+                    except (ValueError, ValidationError) as e:
+                        logger.error(f"Mistral devolvió una respuesta inválida: {e}")
                         raise ValueError("Mistral devolvió un JSON con esquema incorrecto.")
 
             except HTTPException:
@@ -164,7 +292,8 @@ async def call_gemini(text: str) -> List[Assertion]:
     if not (GEMINI_API_URL and GEMINI_API_KEY):
         raise HTTPException(status_code=500, detail="Gemini no está configurado en variables de entorno.")
 
-    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = build_assertions_prompt(text)
+    logger.info(f"[generate-asertions] Gemini prompt:\n{full_prompt}")
 
     api_endpoint = f"{GEMINI_API_URL}/models/{GEMINI_MODEL}:generateContent"
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
@@ -175,9 +304,9 @@ async def call_gemini(text: str) -> List[Assertion]:
     payload = {
         "contents": [{"parts": [{"text": full_prompt}]}],
         "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema
+            "temperature": TEMPERATURE,
+            "responseMimeType": "application/json"
+            #,"responseSchema": response_schema
         }
     }
 
@@ -186,33 +315,20 @@ async def call_gemini(text: str) -> List[Assertion]:
             try:
                 async with session.post(api_endpoint, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
                     text_resp = await resp.text()
+                    logger.info(f"[generate-asertions] Gemini response status={resp.status} body:\n{text_resp}")
                     if resp.status != 200:
                         logger.error(f"Gemini status {resp.status}: {text_resp}")
+                        if resp.status in [429, 500, 502, 503, 504]:
+                            raise Exception(f"Error temporal Gemini: {resp.status}")
                         raise HTTPException(status_code=resp.status, detail="Error Gemini")
                     
                     data = await resp.json()
                     
-                    # 1. El JSON esperado contiene candidates -> content -> parts -> text (que es el string JSON)
                     try:
                         json_string = data["candidates"][0]["content"]["parts"][0]["text"]
-                        parsed_list = json.loads(json_string)
-
-                    except (KeyError, IndexError, json.JSONDecodeError) as e:
-                        logger.error(f"Error parsing Gemini response structure or JSON: {e}; raw: {text_resp}")
-                        raise ValueError("Respuesta de Gemini no contiene el JSON esperado.")
-
-                    # 2. Validar y convertir la lista de diccionarios a List[Assertion]
-                    # El LLM ya debería haber garantizado el formato gracias al responseSchema
-                    if not isinstance(parsed_list, list):
-                        raise ValueError("Gemini devolvió un tipo inesperado (no es lista JSON).")
-
-                    try:
-                        for idx, item in enumerate(parsed_list, start=1):
-                            item["idAssertion"] = str(idx)
-                        # Convertimos los dicts resultantes a modelos Pydantic
-                        return [Assertion(**item) for item in parsed_list]
-                    except ValidationError as e:
-                        logger.error(f"Gemini devolvió un JSON que no cumple el esquema Assertion: {e}")
+                        return parse_assertions_content(json_string)
+                    except (KeyError, IndexError, ValueError, ValidationError) as e:
+                        logger.error(f"Gemini devolvió una respuesta inválida: {e}; raw: {text_resp}")
                         raise ValueError("Gemini devolvió un JSON con esquema incorrecto.")
             
             except HTTPException:
@@ -240,9 +356,10 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
         )
 
     # Construir prompt
-    full_prompt = f"{PROMPT}\n\nTexto a analizar:\n{text}"
+    full_prompt = build_assertions_prompt(text)
     if contexto:
         full_prompt += f"\nContexto adicional:\n{contexto}"
+    logger.info(f"[generate-asertions] OpenRouter prompt:\n{full_prompt}")
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -254,7 +371,7 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
     payload = {
         "model": OPENROUTER_MODEL,
         "messages": [{"role": "user", "content": full_prompt}],
-        "temperature": 0.3
+        "temperature": TEMPERATURE
     }
 
     logger.info(f"Llamando a OpenRouter con prompt: {full_prompt[:200]}...")
@@ -270,7 +387,7 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
                 ) as resp:
 
                     text_resp = await resp.text()
-                    logger.debug(f"OpenRouter status: {resp.status}, body: {text_resp[:500]}")
+                    logger.info(f"[generate-asertions] OpenRouter response status={resp.status} body:\n{text_resp}")
 
                     if resp.status != 200:
                         # Si es un error de cuota o temporal, el except Exception lo capturará para reintentar
@@ -281,43 +398,10 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
                     data = await resp.json()
                     
                     try:
-                        content = data["choices"][0]["message"]["content"]
-                    except (KeyError, TypeError):
-                        logger.error(f"Estructura de respuesta inesperada: {data}")
-                        raise ValueError("Estructura de respuesta OpenRouter inesperada.")
-
-                    if not content:
-                        raise ValueError("OpenRouter devolvió contenido vacío.")
-
-                    # --- Lógica de Procesamiento de Contenido ---
-                    parsed_list = []
-
-                    if isinstance(content, list):
-                        parsed_list = content
-                    elif isinstance(content, str):
-                        # 1. Limpieza de Markdown y espacios
-                        # Eliminamos ```json, ``` y cualquier espacio en blanco al inicio/final
-                        clean_content = re.sub(r"```json|```", "", content).strip()
-                        
-                        try:
-                            parsed_list = json.loads(clean_content)
-                            logger.debug(f"JSON parseado correctamente tras limpieza")
-                        except json.JSONDecodeError as je:
-                            logger.error(f"Error al decodificar JSON. Contenido original: {content}")
-                            raise ValueError(f"La respuesta no pudo ser parseada como JSON: {str(je)}")
-                    else:
-                        raise ValueError(f"Tipo de contenido inesperado: {type(content)}")
-
-                    # Validar esquema Assertion y asignar idAssertion
-                    if not isinstance(parsed_list, list):
-                        raise ValueError("El resultado final no es una lista de aserciones.")
-
-                    assertions = []
-                    for idx, item in enumerate(parsed_list, start=1):
-                        # Aseguramos que el idAssertion sea un string consecutivo
-                        item["idAssertion"] = str(idx)
-                        # Asumimos que Assertion es un modelo Pydantic
-                        assertions.append(Assertion(**item))
+                        assertions = parse_assertions_content(extract_chat_content(data))
+                    except (ValueError, ValidationError) as e:
+                        logger.error(f"OpenRouter devolvió una respuesta inválida: {e}")
+                        raise ValueError("OpenRouter devolvió un JSON con esquema incorrecto.")
 
                     logger.info(f"OpenRouter devolvió {len(assertions)} aserciones válidas")
                     return assertions
@@ -349,6 +433,44 @@ async def extract_assertions_from_text(text: str) -> List[Assertion]:
     else:
         return []
 
+
+async def publish_assertions_not_generated(
+    producer: AIOKafkaProducer,
+    order_id: str,
+    text: str,
+    error: str,
+):
+    payload = AssertionsNotGeneratedPayload(
+        text=text,
+        publisher=AI_PROVIDER,
+        error=error,
+        attempts=NUM_REINTENTOS,
+    )
+    response = AssertionsNotGeneratedResponse(
+        action="assertions_not_generated",
+        order_id=order_id,
+        payload=payload,
+    )
+    msg_bytes = response.model_dump_json(exclude_none=True).encode("utf-8")
+    await producer.send_and_wait(OUTPUT_TOPIC, msg_bytes)
+    logger.info(f"[{order_id}] Publicado assertions_not_generated en topic {OUTPUT_TOPIC}")
+
+
+
+
+def build_generated_document(text: str, assertions: List[Assertion], validation_mode) :
+    return build_assertions_document_v2(
+        text=text,
+        assertions=[a.to_enriched() if hasattr(a, "to_enriched") else a for a in assertions],
+        mode=validation_mode,
+        provider=AI_PROVIDER,
+        model={
+            "mistral": MISTRAL_MODEL,
+            "gemini": GEMINI_MODEL,
+            "openrouter": OPENROUTER_MODEL,
+        }.get(AI_PROVIDER),
+    )
+
 # ============================================================
 # Procesar mensaje Kafka entrante
 # ============================================================
@@ -373,22 +495,45 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
         assertion_objs = await extract_assertions_from_text(req.payload.text)
     except HTTPException as he:
         logger.error(f"[{req.order_id}] Error LLM: {he.detail}")
+        try:
+            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(he.detail))
+        except Exception as e:
+            logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {e}")
         return
     except Exception as e:
         logger.exception(f"[{req.order_id}] Error inesperado extrayendo aserciones: {e}")
+        try:
+            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(e))
+        except Exception as publish_error:
+            logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {publish_error}")
         return
 
     # Si la lista está vacía, no hacemos nada más
     if not assertion_objs:
         logger.info(f"[{req.order_id}] No se extrajeron aserciones.")
+        try:
+            await publish_assertions_not_generated(
+                producer,
+                req.order_id,
+                req.payload.text,
+                "No se extrajeron aserciones.",
+            )
+        except Exception as e:
+            logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {e}")
         return
 
     # Construir respuesta tipada (AssertionsGeneratedResponse)
     try:
+        assertions_document = build_generated_document(req.payload.text, assertion_objs, req.payload.validation_mode)
+        logger.info(f"[generate-asertions] generated assertions-document-v2 assertions={len(assertions_document.assertions)}")
+        for assertion in assertions_document.assertions:
+            logger.info(f"[generate-asertions] assertion_id={assertion.assertion_id} categoryId={assertion.categoryId} subcategory={assertion.subcategory} location={[loc.country_code or loc.name for loc in assertion.context.locations]} entities={[ent.name for ent in assertion.context.entities]} temporal={[item.value for item in assertion.context.temporal_context]}")
         payload = AssertionGeneratedPayload(
             text=req.payload.text,
-            assertions=assertion_objs, # Se usa directamente la lista de modelos
-            publisher=AI_PROVIDER
+            assertions=assertion_objs,
+            assertions_document=assertions_document,
+            publisher=AI_PROVIDER,
+            validation_mode=req.payload.validation_mode
         )
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=req.order_id, payload=payload)
     except ValidationError as e:
@@ -446,29 +591,106 @@ async def consume_and_process():
 
 
 async def fetch_client_quotas(client_id: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{ADMIN_URL}/clients/{client_id}")
-        if resp.status_code == 404:
-            raise HTTPException(status_code=403, detail="Client quotas not found")
-        resp.raise_for_status()
-        return resp.json()
+    return await fetch_admin_client_quotas(ADMIN_URL, client_id)
 
 async def update_client_consumed(client_id: str, field: str, new_value: int):
-    async with httpx.AsyncClient() as client:
-        payload = {
-            "consumed": {
-                field: new_value
-            }
-        }
-        # Hacemos PATCH para actualizar solo ese campo en concreto
-        resp = await client.patch(f"{ADMIN_URL}/clients/{client_id}", json=payload)
-        resp.raise_for_status()
+    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value)
 
 # ============================================================
 # Endpoint HTTP 
 # ============================================================
-class TextoEntrada(BaseModel):
-    text: str
+@app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"])
+def get_admin_config():
+    """Consulta la configuracion runtime del generador de aserciones."""
+    return normalize_admin_config_response()
+
+
+@app.put("/admin/config", tags=["Admin"])
+async def update_admin_config(config: AdminConfigUpdate):
+    """Modifica la configuracion runtime del generador de aserciones."""
+    global AI_PROVIDER, PROMPT, TEMPERATURE, MAX_ASSERTIONS, HTTP_TIMEOUT
+    global NUM_REINTENTOS, MAX_RETRIES, RETRY_DELAY, ADMIN_URL
+    global MISTRAL_API_URL, MISTRAL_API_KEY, MISTRAL_MODEL
+    global GEMINI_API_URL, GEMINI_API_KEY, GEMINI_MODEL
+    global OPENROUTER_API_URL, OPENROUTER_API_KEY, OPENROUTER_MODEL
+
+    if config.provider is not None:
+        AI_PROVIDER = normalize_provider(config.provider)
+        set_runtime_env("AI_PROVIDER", AI_PROVIDER)
+
+    if config.prompt is not None:
+        PROMPT = config.prompt
+        set_runtime_env("PROMPT", PROMPT)
+
+    if config.temperature is not None:
+        TEMPERATURE = normalize_non_negative_float("TEMPERATURE", config.temperature)
+        set_runtime_env("TEMPERATURE", TEMPERATURE)
+
+    if config.max_assertions is not None:
+        MAX_ASSERTIONS = normalize_positive_int("MAX_ASSERTIONS", config.max_assertions)
+        set_runtime_env("MAX_ASSERTIONS", MAX_ASSERTIONS)
+
+    if config.http_timeout is not None:
+        HTTP_TIMEOUT = normalize_positive_int("HTTP_TIMEOUT", config.http_timeout)
+        set_runtime_env("HTTP_TIMEOUT", HTTP_TIMEOUT)
+
+    if config.num_reintentos is not None:
+        NUM_REINTENTOS = normalize_positive_int("NUM_REINTENTOS", config.num_reintentos)
+        MAX_RETRIES = NUM_REINTENTOS
+        set_runtime_env("NUM_REINTENTOS", NUM_REINTENTOS)
+        set_runtime_env("MAX_RETRIES", MAX_RETRIES)
+
+    if config.retry_delay is not None:
+        RETRY_DELAY = normalize_non_negative_float("RETRY_DELAY", config.retry_delay)
+        set_runtime_env("RETRY_DELAY", RETRY_DELAY)
+
+    if config.admin_url is not None:
+        ADMIN_URL = config.admin_url
+        set_runtime_env("ADMIN_URL", ADMIN_URL)
+
+    if config.mistral is not None:
+        if config.mistral.api_url is not None:
+            MISTRAL_API_URL = config.mistral.api_url
+            set_runtime_env("MISTRAL_API_URL", MISTRAL_API_URL)
+        if config.mistral.api_key is not None and not is_masked_secret(config.mistral.api_key):
+            MISTRAL_API_KEY = config.mistral.api_key
+            set_runtime_env("MISTRAL_API_KEY", MISTRAL_API_KEY)
+        if config.mistral.model is not None:
+            MISTRAL_MODEL = config.mistral.model
+            set_runtime_env("MISTRAL_MODEL", MISTRAL_MODEL)
+
+    if config.gemini is not None:
+        if config.gemini.api_url is not None:
+            GEMINI_API_URL = config.gemini.api_url
+            set_runtime_env("GEMINI_API_URL", GEMINI_API_URL)
+        if config.gemini.api_key is not None and not is_masked_secret(config.gemini.api_key):
+            GEMINI_API_KEY = config.gemini.api_key
+            set_runtime_env("GEMINI_API_KEY", GEMINI_API_KEY)
+        if config.gemini.model is not None:
+            GEMINI_MODEL = config.gemini.model
+            set_runtime_env("GEMINI_MODEL", GEMINI_MODEL)
+
+    if config.openrouter is not None:
+        if config.openrouter.api_url is not None:
+            OPENROUTER_API_URL = config.openrouter.api_url
+            set_runtime_env("OPENROUTER_API_URL", OPENROUTER_API_URL)
+        if config.openrouter.api_key is not None and not is_masked_secret(config.openrouter.api_key):
+            OPENROUTER_API_KEY = config.openrouter.api_key
+            set_runtime_env("OPENROUTER_API_KEY", OPENROUTER_API_KEY)
+        if config.openrouter.model is not None:
+            OPENROUTER_MODEL = config.openrouter.model
+            set_runtime_env("OPENROUTER_MODEL", OPENROUTER_MODEL)
+
+    logger.info(
+        "Configuracion de generate-asertions actualizada en memoria: "
+        f"provider={AI_PROVIDER.upper()} max_assertions={MAX_ASSERTIONS} temperature={TEMPERATURE}"
+    )
+    return {
+        "status": "ok",
+        "message": "Configuracion actualizada correctamente.",
+        "config": normalize_admin_config_response().model_dump(mode="json"),
+    }
+
 
 @app.post("/extraer")
 async def extraer_texto(
@@ -513,7 +735,8 @@ async def extraer_texto(
         # No bloqueamos el return aunque falle la actualización, para no perjudicar al usuario si la BBDD de cuotas falla puntualmente.
 
     try:
-        payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, publisher=AI_PROVIDER)
+        assertions_document = build_generated_document(text, assertion_objs, "BLOCKCHAIN")
+        payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, assertions_document=assertions_document, publisher=AI_PROVIDER)
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=order_id, payload=payload)
         return response
     except ValidationError as e:

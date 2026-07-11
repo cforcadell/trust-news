@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafdrop
+  namespace: infra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafdrop
+  template:
+    metadata:
+      labels:
+        app: kafdrop
+    spec:
+      containers:
+        - name: kafdrop
+          image: obsidiandynamics/kafdrop:4.0.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9000
+          env:
+            - name: KAFKA_BROKERCONNECT
+              value: "kafka:9092"
+            - name: JVM_OPTS
+              value: "-Xms64m -Xmx256m"
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            limits:
+              memory: "384Mi"
+              cpu: "500m"
+            requests:
+              memory: "128Mi"
+              cpu: "100m"

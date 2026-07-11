@@ -16,7 +16,7 @@ configMapGenerator:
   namespace: apis
   behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
   literals:
-    - CONTRACT_ADDRESS="0x9eA62eb7944349C407B307025644E47bF22F8bCc"
+    - CONTRACT_ADDRESS="0x928E691aF55fF3530127BcA7E06e35f3F9a77CF6"
     - ACCOUNT_ADDRESS="0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b"
 # Reemplaza el comando manual: kubectl create secret generic news-chain-secrets ... Account 0
 # secretGenerator:

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: evidence-search
+  namespace: apis
+spec:
+  type: ClusterIP
+  selector:
+    app: evidence-search
+  ports:
+  - name: http
+    port: 8074
+    targetPort: 8074

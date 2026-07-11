@@ -7,12 +7,12 @@ resources:
   - ../../service.yaml
   - ../../deployment.yaml
 
-# Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
+# Reemplaza el comando manual: kubectl create secret generic mongodb-app-secret ...
 # secretGenerator:
-# - name: mongodb-secret
-#   namespace: infra
+# - name: mongodb-app-secret
+#   namespace: apis
 #   envs:
-#     - prod-mongodb.env
+#     - prod-mongodb-app.env
 patches:
   - path: patch-resources.yaml 
 generatorOptions:

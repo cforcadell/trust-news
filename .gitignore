@@ -56,3 +56,7 @@ smart-contracts/hardhat.config.real.js
 smart-contracts/artifacts/build-info/cad42a9e27863fbf25a1c435ae8dcdd3.json
 smart-contracts/ignition/deployments/chain-12345/artifacts/TokenModule#Token.dbg.json
 smart-contracts/ignition/deployments/chain-12345/artifacts/TokenModule#Token.json
+__pycache__
+*venv*
+*.pyc
+api/validate-asertions/__pycache__/main.cpython-312.pyc

@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+
+# En prod el secreto se crea fuera del repo, por ejemplo:
+# kubectl create secret generic search-secret \
+#   --namespace apis \
+#   --from-env-file=search.env
+#
+# Si se prefiere generarlo con Kustomize desde un fichero local no versionado:
+# secretGenerator:
+#   - name: search-secret
+#     namespace: apis
+#     envs:
+#       - prod-search.env
+
+namespace: apis

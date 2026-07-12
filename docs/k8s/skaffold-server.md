@@ -1,4 +1,4 @@
-# TrustNews Kubernetes - Despliegue server/Hetzner
+# Assermetry Kubernetes - Despliegue server/Hetzner
 
 Runbook operativo para el servidor Hetzner. Los procedimientos compartidos con
 local estan en [`k8s-common.md`](k8s-common.md). Este documento mantiene solo lo
@@ -323,10 +323,8 @@ comodo el flujo de desarrollo.
 Los Ingress estan restringidos a `websecure` con
 `traefik.ingress.kubernetes.io/router.entrypoints: websecure` y
 `traefik.ingress.kubernetes.io/router.tls: "true"`; no se publican estas rutas
-por HTTP plano. Cuando exista dominio real, Keycloak debe publicar un issuer
-coherente con la URL publica real (`KC_HOSTNAME_URL`) y el Gateway debe validar
-esa misma URL con `KEYCLOAK_SERVER_HOSTNAME`, `KEYCLOAK_SERVER_PORT` y
-`KEYCLOAK_SERVER_PATH`.
+por HTTP plano. Keycloak publica el issuer definido por `KC_HOSTNAME_URL` y el
+Gateway valida exactamente esa misma URL mediante `KEYCLOAK_ISSUER_URL`.
 
 Crear un Deploy Token o usar credenciales con permiso `read_registry`. Repetir
 en los namespaces que descargan imagenes privadas:
@@ -351,26 +349,20 @@ done
 
 ### 2.7 Publicacion HTTPS: tunel primero, dominio despues
 
-Los manifiestos de `k8s/ingress/overlays/prod` ya habilitan HTTPS en Traefik,
-pero se mantienen sin `host` para soportar la fase inicial sin dominio. El flujo
-operativo queda dividido en dos fases: validacion cerrada por tunel SSH y
-publicacion posterior con dominio, WAF y puertos HTTP(S) abiertos.
+Los manifiestos activos de `k8s/ingress/overlays/prod` habilitan HTTPS en
+Traefik con `host: localhost`. El despliegue estable sigue cerrado y se valida
+por tunel SSH. Los overlays `prod-domain` contienen la configuracion futura de
+`assermetry.com`, pero Skaffold todavia no los referencia.
 
 #### 2.7.1 Despliegue cerrado con tunel SSH
 
-Usar esta fase mientras solo este abierto `2222/tcp` en Hetzner. GitLab CI ya
-usa SSH por `2222` para abrir el tunel al API server de Kubernetes
-`127.0.0.1:6443`; para validar la aplicacion web se abre otro tunel hacia
-Traefik.
-
-Mantener los valores productivos actuales de issuer local:
+Usar esta fase mientras solo este abierto `2222/tcp` en Hetzner. Mantener la
+configuracion productiva temporal:
 
 ```text
 KC_HOSTNAME_URL=https://localhost:9443/auth
 KC_HOSTNAME_ADMIN_URL=https://localhost:9443/auth
-KEYCLOAK_SERVER_HOSTNAME=https://localhost
-KEYCLOAK_SERVER_PORT=9443
-KEYCLOAK_SERVER_PATH=auth
+KEYCLOAK_ISSUER_URL=https://localhost:9443/auth/realms/TrustNews
 ```
 
 Abrir el tunel desde la maquina de trabajo:
@@ -390,22 +382,13 @@ curl -k -I https://localhost:9443/backend/docs
 curl -k -I https://localhost:9443/auth/realms/TrustNews/.well-known/openid-configuration
 ```
 
-Validar tambien desde navegador:
-
-```text
-https://localhost:9443/
-https://localhost:9443/backend/docs
-https://localhost:9443/auth/admin/master/console/
-```
-
-En esta fase el navegador puede mostrar aviso por certificado temporal. Lo
-importante es que el issuer de Keycloak y el Gateway coincidan exactamente:
+El issuer de Keycloak y el esperado por el Gateway deben coincidir exactamente:
 
 ```text
 https://localhost:9443/auth/realms/TrustNews
 ```
 
-No abrir `80/tcp` ni `443/tcp` al trafico publico durante esta fase.
+No abrir `80/tcp` ni `443/tcp` al trafico de Internet durante esta fase.
 
 #### 2.7.2 Despliegue publico con dominio
 
@@ -413,9 +396,9 @@ Cuando el dominio este decidido, pasar a una URL publica estable. Estrategia
 recomendada inicial, menor cambio funcional:
 
 ```text
-https://trustnews.example.com/          -> frontend
-https://trustnews.example.com/backend   -> gateway
-https://trustnews.example.com/auth      -> keycloak
+https://assermetry.com/          -> frontend
+https://assermetry.com/backend   -> gateway
+https://assermetry.com/auth      -> keycloak
 ```
 
 Esta estrategia mantiene el contrato actual del frontend (`/backend` y
@@ -424,9 +407,9 @@ Esta estrategia mantiene el contrato actual del frontend (`/backend` y
 Estrategia futura, mas limpia para SaaS:
 
 ```text
-https://app.trustnews.example.com       -> frontend
-https://api.trustnews.example.com       -> gateway
-https://auth.trustnews.example.com      -> keycloak
+https://app.assermetry.com       -> frontend
+https://api.assermetry.com       -> gateway
+https://auth.assermetry.com      -> keycloak
 ```
 
 No usar subdominios hasta revisar el frontend, `root_path=/backend`, CORS,
@@ -436,7 +419,7 @@ Crear un registro `A` o `CNAME` hacia la IP publica que recibe Traefik o hacia
 el balanceador de Hetzner:
 
 ```text
-trustnews.example.com -> <ip-publica-o-load-balancer>
+assermetry.com -> <ip-publica-o-load-balancer>
 ```
 
 En el firewall de Hetzner, abrir solo `80/tcp` y `443/tcp` hacia el borde HTTP.
@@ -523,7 +506,7 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-    - trustnews.example.com
+    - assermetry.com
 ---
 apiVersion: traefik.io/v1alpha1
 kind: TLSStore
@@ -555,14 +538,14 @@ traefik.ingress.kubernetes.io/router.middlewares: apis-gateway-strip-backend-pre
 
 #### 2.7.5 Fijar host en los Ingress
 
-Cuando el dominio este decidido, actualizar `k8s/ingress/overlays/prod` para
+Cuando el dominio este decidido, activar `k8s/ingress/overlays/prod-domain` para
 que los tres Ingress tengan el mismo `host` si se usa dominio unico:
 
 ```yaml
 spec:
   ingressClassName: traefik
   rules:
-    - host: trustnews.example.com
+    - host: assermetry.com
       http:
         paths:
           - path: /backend
@@ -582,8 +565,8 @@ k8s/ingress/base/gateway-ingress.yaml    path /backend
 k8s/ingress/base/keycloak-ingress.yaml   path /auth
 ```
 
-Para no tocar `base`, crear parches en `k8s/ingress/overlays/prod` y
-referenciarlos desde su `kustomization.yaml`. Mantener `base` sin dominio
+Para no tocar `base`, usar los parches preparados en `k8s/ingress/overlays/prod-domain` y
+referenciar ese overlay desde Skaffold solo al llegar a la fase de dominio. Mantener `base` sin dominio
 permite reutilizarlo en local/integracion.
 
 #### 2.7.6 Alinear Keycloak y Gateway
@@ -591,7 +574,7 @@ permite reutilizarlo en local/integracion.
 El dominio publico cambia el issuer de los tokens. Antes de desplegar, alinear
 Keycloak y Gateway.
 
-En `k8s/infra/keycloak/overlays/prod/kustomization.yaml`:
+En `k8s/infra/keycloak/overlays/prod-domain/kustomization.yaml`:
 
 ```yaml
 configMapGenerator:
@@ -599,11 +582,11 @@ configMapGenerator:
   namespace: infra
   behavior: merge
   literals:
-    - KC_HOSTNAME_URL="https://trustnews.example.com/auth"
-    - KC_HOSTNAME_ADMIN_URL="https://trustnews.example.com/auth"
+    - KC_HOSTNAME_URL="https://assermetry.com/auth"
+    - KC_HOSTNAME_ADMIN_URL="https://assermetry.com/auth"
 ```
 
-En `k8s/apis/gateway/overlays/prod/kustomization.yaml`:
+En `k8s/apis/gateway/overlays/prod-domain/kustomization.yaml`:
 
 ```yaml
 configMapGenerator:
@@ -611,20 +594,17 @@ configMapGenerator:
   namespace: apis
   behavior: merge
   literals:
-    - KEYCLOAK_SERVER_HOSTNAME="https://trustnews.example.com"
-    - KEYCLOAK_SERVER_PORT="443"
-    - KEYCLOAK_SERVER_PATH="auth"
+    - KEYCLOAK_ISSUER_URL="https://assermetry.com/auth/realms/TrustNews"
 ```
 
 El issuer esperado por Gateway debe coincidir exactamente con el issuer real de
 Keycloak:
 
 ```text
-https://trustnews.example.com:443/auth/realms/TrustNews
+https://assermetry.com/auth/realms/TrustNews
 ```
 
-Si se decide omitir `:443` en el issuer, ajustar tambien la construccion del
-issuer en `api/gateway/main.py`; no mezclar formatos.
+No añadir `:443`: el puerto HTTPS implicito no forma parte del issuer canonico.
 
 #### 2.7.7 Orden de despliegue recomendado para apertura publica
 
@@ -633,8 +613,8 @@ issuer en `api/gateway/main.py`; no mezclar formatos.
 3. Crear DNS y verificar que resuelve al WAF, a Traefik o al balanceador.
 4. Instalar/configurar `cert-manager` y validar primero con Let us Encrypt staging, o preparar el certificado definitivo si se gestiona fuera del cluster.
 5. Hacer que `TLSStore` apunte al secret definitivo, manteniendo el nombre `trustnews-origin-tls` si no hay motivo para cambiarlo.
-6. Anadir `host` a `k8s/ingress/overlays/prod` y mantener TLS en `websecure`.
-7. Actualizar `KC_HOSTNAME_URL` y variables del Gateway.
+6. Cambiar Skaffold a los overlays `prod-domain` y verificar que renderizan `host: assermetry.com` manteniendo TLS en `websecure`.
+7. Verificar `KC_HOSTNAME_URL` y `KEYCLOAK_ISSUER_URL`.
 8. Desplegar `infra-prod` para aplicar Keycloak si cambia su ConfigMap.
 9. Desplegar `apis-frontend-prod`.
 10. Abrir `80/tcp` y `443/tcp` solo cuando WAF, TLS, DNS e issuer esten verificados.
@@ -644,9 +624,9 @@ issuer en `api/gateway/main.py`; no mezclar formatos.
 kubectl get ingress -A
 kubectl get certificate -A
 kubectl get challenge -A
-curl -I https://trustnews.example.com/
-curl -I https://trustnews.example.com/backend/docs
-curl -I https://trustnews.example.com/auth/realms/TrustNews/.well-known/openid-configuration
+curl -I https://assermetry.com/
+curl -I https://assermetry.com/backend/docs
+curl -I https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configuration
 ```
 
 12. Probar login frontend, token refresh, llamada al Gateway, client credentials B2B y logout.
@@ -872,16 +852,7 @@ kubectl get svc -n kube-system traefik
 kubectl get secret trustnews-origin-tls -n kube-system
 ```
 
-Si se esta en modo tunel, abrir primero:
-
-```bash
-ssh -i ./id_rsa_hetzner_deploy -p 2222 \
-  -L 9443:127.0.0.1:9443 \
-  <usuario>@<hetzner-ip> \
-  -t "kubectl port-forward --address 127.0.0.1 -n kube-system svc/traefik 9443:443"
-```
-
-Y validar:
+Si se esta en modo tunel, abrir el tunel de la seccion 2.7.1 y validar:
 
 ```text
 https://localhost:9443/
@@ -893,9 +864,9 @@ Si ya se abrio el despliegue publico con dominio, validar usando el dominio
 final:
 
 ```text
-https://trustnews.example.com/
-https://trustnews.example.com/backend/docs
-https://trustnews.example.com/auth/admin/master/console/
+https://assermetry.com/
+https://assermetry.com/backend/docs
+https://assermetry.com/auth/admin/master/console/
 ```
 
 Si solo se quiere comprobar que los estaticos del frontend responden, se puede abrir un port-forward interno, pero no valida Gateway ni Keycloak porque esas rutas ya no las proxifica Nginx:
@@ -967,7 +938,7 @@ Antes de `apis-frontend-prod`:
 - `gitlab-pull-secret` esta asociado al service account de `apis`, `infra`, `frontend` y `blockchain`.
 - Traefik esta activo y los Ingress de `frontend`, `apis` e `infra` aparecen en `kubectl get ingress -A`.
 - `trustnews-origin-tls` existe en `kube-system` o esta gestionado por `cert-manager`.
-- En modo tunel, HTTPS por Traefik responde en `https://localhost:9443` y Keycloak/Gateway mantienen issuer `localhost:9443`.
+- En modo tunel, HTTPS responde en `https://localhost:9443` y Keycloak/Gateway mantienen el issuer temporal de localhost.
 - En modo publico, WAF esta instalado, `80/tcp` y `443/tcp` estan abiertos solo hacia el borde HTTP, y `host`, certificado definitivo, `KC_HOSTNAME_URL` y variables de issuer del Gateway estan alineados segun la seccion 2.7.
 - `CONTRACT_ADDRESS` en overlays prod coincide con el contrato desplegado.
 - `initCategories.js` se ha ejecutado y la segunda ejecucion no cambia nada.

@@ -80,7 +80,7 @@ configuration.
 
 
 
-Develop v0.0.11.
+Develop v0.0.11. Released
 
 - endpoints de recomendación de modelos apirouter economicos OK 
 - cambiar login  skin OK
@@ -127,13 +127,18 @@ Develop v0.0.11.
 - Usamos trtaefik como ingress tanto para local como para prod
     
 
+Develop v0.0.12. Trustnews --> Assermetry
+- loki persistente
+- Hardering frontend
+- restylish frontend
 
 
 
-Develop v0.0.12.
+
+Develop v0.0.13
 - integración con X/Trhreads
 
-Develop v0.0.13.   Reputation policy
+Develop v0.0.14.   Reputation policy
     - consulta de reputaciones. Consulta de nombre, tipo y reputacion
     - gestión de reputaciones fuera de la cadena. 
         AI defecto reputacion media
@@ -144,11 +149,6 @@ Develop v0.0.13.   Reputation policy
 
 
 
-Develop v0.0.14.
-- integracion con llm dedicado de categoria concreta
-
 Develop v0.0.15.
-- loki persistente
-- Hardering frontend
-- restylish frontend
+- integracion con llm dedicado de categoria concreta
 

@@ -1,4 +1,4 @@
-# TrustNews Kubernetes - Despliegue local
+# Assermetry Kubernetes - Despliegue local
 
 Runbook para entorno local con `kind` y perfiles no productivos de Skaffold.
 Los procedimientos compartidos viven en [`k8s-common.md`](k8s-common.md).

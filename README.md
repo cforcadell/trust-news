@@ -1,9 +1,9 @@
-# TrustNews
+# Assermetry
 
 Automated news verification platform using AI validators, RAG-assisted evidence
 search, MongoDB-backed operational state and optional blockchain auditability.
 
-TrustNews started as a Master Thesis proof of concept and is now maintained as a
+Assermetry started as a Master Thesis proof of concept and is now maintained as a
 post-TFM prototype with Kubernetes/Skaffold deployment runbooks for local and
 server environments.
 
@@ -17,7 +17,7 @@ server environments.
 
 ## Overview
 
-TrustNews decomposes news into atomic assertions, enriches them with optional
+Assermetry decomposes news into atomic assertions, enriches them with optional
 RAG evidence search, validates each assertion with AI-based validator workers
 and stores the resulting workflow state for traceability.
 
@@ -329,7 +329,7 @@ inspect live pods/logs with `kubectl`.
 
 ## Current Limitations
 
-TrustNews is still a research/prototype platform.
+Assermetry is still a research/prototype platform.
 
 Known limitations:
 

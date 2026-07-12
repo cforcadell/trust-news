@@ -2,7 +2,7 @@
 
 ## Descripción
 
-`api/validate-asertions` implementa un validador automático de aserciones. Puede validar por memoria LLM, búsqueda online o RAG con evidencias, registrar/desregistrar el validador en blockchain, publicar su configuración en IPFS y responder a solicitudes de validación tanto desde eventos blockchain como desde Kafka en modo light.
+`api/validate-asertions` implementa un validador automático de aserciones para Assermetry. Puede validar por memoria LLM, búsqueda online o RAG con evidencias, registrar/desregistrar el validador en blockchain, publicar su configuración en IPFS y responder a solicitudes de validación tanto desde eventos blockchain como desde Kafka en modo light.
 
 ## Endpoints
 

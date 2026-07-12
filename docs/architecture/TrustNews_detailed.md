@@ -1,4 +1,4 @@
-# 📰 TrustNews
+# 📰 Assermetry
 
 > **Automated news verification platform using AI validators, RAG-assisted evidence search, IPFS and optional Ethereum auditability**  
 > Post-TFM evolution of the original academic Proof of Concept.
@@ -11,9 +11,9 @@
 
 ---
 
-## 🔍 What is TrustNews?
+## 🔍 What is Assermetry?
 
-**TrustNews** is a prototype platform for automated news verification.
+**Assermetry** is a prototype platform for automated news verification.
 
 It decomposes news content into **atomic, objective assertions**, optionally enriches them with **RAG-based evidence search**, validates each assertion using **AI-based validators** or dedicated validators with their own knowledge base, and persists the process according to one of two operating modes:
 
@@ -46,7 +46,7 @@ Most fact-checking solutions are:
 * Difficult to audit end to end.
 * Focused on full-text judgement instead of structured assertion validation.
 
-TrustNews explores a different approach:
+Assermetry explores a different approach:
 
 * ✅ Assertions instead of full-text validation.
 * ✅ Multiple automated validators.
@@ -106,7 +106,7 @@ Evidence search can use:
 
 ### 4. Dual Operating Mode
 
-TrustNews separates the **validation logic** from the **trust and persistence layer**.
+Assermetry separates the **validation logic** from the **trust and persistence layer**.
 
 This allows the same validation engine to operate in two ways:
 
@@ -134,7 +134,7 @@ In `BLOCKCHAIN` mode, traceability extends to IPFS and Ethereum.
 
 ## ⚙️ Two Operating Modes
 
-TrustNews is not only a blockchain project.
+Assermetry is not only a blockchain project.
 
 It is a flexible validation platform that can operate either as a lightweight centralized validation engine or as a blockchain-auditable verification workflow.
 
@@ -492,7 +492,7 @@ Evidence search is controlled by:
 EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
 ```
 
-This setting defines how TrustNews handles `preferred_domains` before calling the configured evidence-search provider.
+This setting defines how Assermetry handles `preferred_domains` before calling the configured evidence-search provider.
 
 The effective request policy field is:
 
@@ -1102,7 +1102,7 @@ Relevant test areas include:
 
 ## ⚠️ Current Limitations
 
-TrustNews is still a research/prototype platform.
+Assermetry is still a research/prototype platform.
 
 Current limitations include:
 

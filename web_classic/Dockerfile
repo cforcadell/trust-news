@@ -1,4 +1,4 @@
-# Frontend Trust News - HTML + JS + Nginx
+# Frontend Assermetry - HTML + JS + Nginx
 FROM nginx:1.25-alpine
 
 COPY ./app /usr/share/nginx/html

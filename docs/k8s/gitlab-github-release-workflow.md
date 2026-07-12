@@ -1,4 +1,4 @@
-# TrustNews - Flujo GitLab, GitHub y release
+# Assermetry - Flujo GitLab, GitHub y release
 
 Este documento describe el flujo operativo cuando el desarrollo se hace en la
 rama `postTFM`, el despliegue se lanza manualmente desde GitLab CI y despues se

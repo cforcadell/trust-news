@@ -1,6 +1,6 @@
 # Smart Contract Tests
 
-This project contains scripts to compile, deploy, and test the **TrustNews** smart contracts.  
+This project contains scripts to compile, deploy, and test the **Assermetry** smart contracts.  
 **Requires Hardhat to be installed.**
 
 ---

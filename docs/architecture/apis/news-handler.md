@@ -2,7 +2,7 @@
 
 ## Descripción
 
-`api/news-handler` es el orquestador principal del flujo TrustNews. Crea órdenes, persiste su estado en MongoDB, publica solicitudes a Kafka para generar aserciones, subir documentos a IPFS, registrar noticias en blockchain y solicitar validaciones. También consolida las respuestas de esos servicios y expone consultas de órdenes, eventos, validadores y consistencia.
+`api/news-handler` es el orquestador principal del flujo Assermetry. Crea órdenes, persiste su estado en MongoDB, publica solicitudes a Kafka para generar aserciones, subir documentos a IPFS, registrar noticias en blockchain y solicitar validaciones. También consolida las respuestas de esos servicios y expone consultas de órdenes, eventos, validadores y consistencia.
 
 ## Endpoints
 

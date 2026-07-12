@@ -1,4 +1,4 @@
-# TrustNews Kubernetes - Procedimientos comunes
+# Assermetry Kubernetes - Procedimientos comunes
 
 Este documento concentra las partes compartidas por el despliegue local y el
 despliegue en servidor. Los runbooks especificos solo deben mantener lo que
@@ -11,7 +11,7 @@ cambia por entorno:
 
 ## 1. Namespaces
 
-Los namespaces usados por TrustNews son:
+Los namespaces usados por Assermetry son:
 
 ```text
 blockchain
@@ -227,6 +227,11 @@ curl -k -X POST <keycloak-url>/auth/realms/TrustNews/protocol/openid-connect/tok
 
 Las cuotas/clientes de negocio se crean por API de admin; no deben formar parte
 del bootstrap fijo.
+
+- Display name: nombre visible de la aplicacion, por ejemplo `Assermetry`.
+  Keycloak usa este valor en la pantalla de autenticacion (por ejemplo,
+  `Sign in to Assermetry`). Mantener `TrustNews` como nombre tecnico del realm
+  evita cambiar las URLs OIDC, el issuer y la configuracion de los clientes.
 
 ---
 

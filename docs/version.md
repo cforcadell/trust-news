@@ -24,9 +24,11 @@ sera el unico cambio necesario para abrir Assermetry al publico.
 
 ### Estado actual
 
-La version `v0.0.12` esta en la **Fase 0 - Inventario y linea base (en curso)**.
-Existe una version estable en Hetzner accesible mediante tunel SSH, pero todavia
-no se ha activado el dominio publico ni deben cambiarse sus URLs OIDC.
+La version `v0.0.12` ha cerrado la **Fase 0 - Inventario y linea base** y se
+encuentra preparada para iniciar la **Fase 1 - Adaptacion de aplicacion y
+manifests**. Existe una version estable en Hetzner accesible mediante tunel SSH,
+pero todavia no se ha activado el dominio publico ni deben cambiarse sus URLs
+OIDC.
 
 Configuracion activa mientras se completa esta fase:
 
@@ -95,6 +97,16 @@ Tener solo el certificado TLS del servidor no restringe el acceso. El gate
 privado previo a la apertura requiere que Cloudflare Access rechace cualquier
 cliente sin un certificado mTLS valido.
 
+### Regla de oro de seguridad
+
+- El acceso por mTLS debe mantenerse activo durante todas las fases previas a la
+  apertura publica y solo debe retirarse en la **Fase 10** tras el GO/NO-GO.
+- No se debe abrir `443/tcp` al trafico publico general hasta que la Fase 8 haya
+  sido probada con Cloudflare y mTLS.
+- Si aparece una incidencia durante la apertura, el rollback inmediato consiste en
+  reactivar la politica mTLS sin cambiar DNS, Kubernetes, Keycloak ni
+  certificados.
+
 ### Compatibilidad con el despliegue local
 
 La version debe conservar estas reglas:
@@ -144,6 +156,10 @@ salida.
 
 #### Fase 0 - Inventario y linea base
 
+Despliegue en Hetzner: no se despliega nada nuevo; se valida la instalacion
+existente por tunel SSH y se documenta el estado operativo actual antes de tocar
+manifests, DNS o firewall.
+
 1. Confirmar que la version actualmente desplegada en Hetzner es recuperable.
 2. Inventariar imagenes, manifests, PVC, secrets, contrato, categorias, DNS y
    reglas actuales de firewall.
@@ -155,6 +171,10 @@ Criterio de salida: frontend, autenticacion, modos Light y Blockchain, colas,
 IPFS y validadores funcionan antes de introducir el dominio.
 
 #### Fase 1 - Adaptacion de aplicacion y manifests
+
+Despliegue en Hetzner: los cambios de manifests y configuraciones se aplican
+primero en el clúster de Hetzner por tunel SSH, sin activar aun el dominio
+publico.
 
 1. Parametrizar el Gateway con:
 
@@ -184,6 +204,9 @@ tunel continúan funcionando.
 
 #### Fase 2 - Backups y recuperacion
 
+Despliegue en Hetzner: se ejecutan backups y restauraciones sobre el entorno real
+que ya existe en Hetzner y se conservan copias fuera del cluster.
+
 1. Crear y probar restauraciones de MongoDB y PostgreSQL de Keycloak.
 2. Respaldar genesis, keystores, contrasenas Ethereum, direccion y ABI del
    contrato, categorias y configuracion de nodos.
@@ -194,6 +217,9 @@ tunel continúan funcionando.
 Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup.
 
 #### Fase 3 - Dominio, Cloudflare y DNS
+
+Despliegue en Hetzner: no aplica cambio de infraestructura en esta fase; se
+prepara DNS y proxy, pero el origen sigue cerrado por mTLS y firewall.
 
 1. Registrar `assermetry.com` con renovacion automatica, bloqueo de transferencia
    y 2FA.
@@ -207,6 +233,10 @@ Criterio de salida: DNS resuelve a Cloudflare y el origen sigue cerrado al
 trafico general.
 
 #### Fase 4 - Acceso privado por certificado cliente
+
+Despliegue en Hetzner: no aplica cambio de infraestructura; se habilita la
+politica de acceso en Cloudflare y se prueba sin tocar el despliegue del
+cluster.
 
 1. Crear fuera del servidor una CA privada dedicada al acceso temporal.
 2. Emitir un certificado `clientAuth` individual por tester, con validez corta,
@@ -223,6 +253,10 @@ puede revocarse o reactivarse sin redesplegar la aplicacion.
 
 #### Fase 5 - TLS del origen antes de abrir 443
 
+Despliegue en Hetzner: se instala `cert-manager` y se publica el certificado TLS
+origino en el clúster de Hetzner; esta fase no se considera cerrada hasta que el
+certificado esté listo y renovable.
+
 1. Instalar `cert-manager`.
 2. Usar ACME DNS-01 con un token Cloudflare limitado a la zona DNS de
    `assermetry.com`; no usar la API key global.
@@ -237,6 +271,9 @@ Criterio de salida: Traefik presenta un certificado valido para
 `assermetry.com` y Cloudflare puede usar `Full (strict)`.
 
 #### Fase 6 - WAF, restricciones permanentes y observabilidad
+
+Despliegue en Hetzner: se aplican reglas de WAF, rate limiting y observabilidad
+sobre la plataforma ya desplegada en Hetzner.
 
 1. Activar WAF inicialmente en modo deteccion y revisar falsos positivos.
 2. Definir rate limits para login/token, importacion, generacion y publicacion,
@@ -262,6 +299,10 @@ estan activas y observables.
 
 #### Fase 7 - Despliegue definitivo todavia cerrado
 
+Despliegue en Hetzner: es la fase de despliegue definitivo del stack en Hetzner,
+pero el origen sigue cerrado al trafico publico hasta completar la validacion
+final.
+
 1. Desplegar certificados, `TLSStore` y recursos de seguridad.
 2. Cambiar los paths de los perfiles productivos desde `overlays/prod` a
    `overlays/prod-domain` en un cambio revisable y coordinado.
@@ -277,6 +318,10 @@ Criterio de salida: la aplicacion completa usa ya la configuracion final, pero
 el origen todavia no acepta trafico de Internet.
 
 #### Fase 8 - Abrir 443 solo a Cloudflare y probar con mTLS
+
+Despliegue en Hetzner: se abre `443/tcp` solo a Cloudflare desde Hetzner,
+manteniendo el acceso por mTLS activo; este es el primer punto en el que el
+servicio queda accesible de forma limitada al dominio real.
 
 Este es el primer momento en que se modifica el firewall de Hetzner:
 
@@ -310,6 +355,9 @@ sin certificado cliente puede acceder a ningun flujo de usuario.
 
 #### Fase 9 - GO/NO-GO para apertura
 
+Despliegue en Hetzner: no aplica cambio de infraestructura; se valida el estado
+real de la plataforma ya desplegada en Hetzner antes de autorizar la apertura.
+
 La apertura recibe `GO` solo si:
 
 - DNS, proxy Cloudflare y TLS `Full (strict)` son correctos.
@@ -324,6 +372,10 @@ La apertura recibe `GO` solo si:
 Cualquier incumplimiento produce `NO-GO`; no se compensa retirando controles.
 
 #### Fase 10 - Apertura publica, ultimo paso
+
+Despliegue en Hetzner: no aplica cambio de infraestructura; la unica accion de
+apertura es retirar la exigencia de mTLS en Cloudflare Access, manteniendo el
+resto de la configuracion estable.
 
 El unico cambio de apertura es desactivar la politica temporal de Cloudflare
 Access que exige certificado cliente.

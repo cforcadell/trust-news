@@ -1,4 +1,5 @@
 
+
 next version Develop v0.0.8 OK
 - Dockerfile optimizado y securizado OK 
 - Integracion con keycloak OK 
@@ -127,10 +128,16 @@ Develop v0.0.11. Released
 - Usamos trtaefik como ingress tanto para local como para prod
     
 
-Develop v0.0.12. Trustnews --> Assermetry
-- loki persistente
-- Hardering frontend
-- restylish frontend
+Develop v0.0.12 - Exposición controlada de Assermetry en Internet (resumen)
+- Objetivo: publicar Assermetry en https://assermetry.com manteniendo el despliegue local operativo.
+- Estado actual: fase 0 - inventario y línea base en curso; hay una instalación estable en Hetzner accesible por túnel SSH, pero el dominio público y los cambios de OIDC siguen inactivos.
+- Trabajo prioritario:
+  - preparar overlays prod-domain y parametrizar issuer/JWKS para el dominio definitivo;
+  - validar backups/restauración, DNS/Cloudflare, mTLS de cliente, TLS de origen y WAF/observabilidad;
+  - abrir 443 únicamente a Cloudflare y ejecutar GO/NO-GO antes de la apertura pública.
+- Criterio de salida: la plataforma funciona en producción de forma cerrada y segura, con rollback simple y sin exponer servicios internos.
+
+
 
 
 

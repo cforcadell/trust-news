@@ -8,6 +8,7 @@ variables:
   PROFILE:
     value: "apis-frontend-prod"
     description: "Perfil de Skaffold"
+  SKAFFOLD_VERSION: "v2.17.3"
   DOCKER_BUILDKIT: "1"
 
 .kube_access:
@@ -55,6 +56,8 @@ build:
     - hetzner-runner
 
   rules:
+    - if: '$PROFILE =~ /^(cert-manager-prod|origin-tls-staging|origin-tls-prod)$/'
+      when: never
     - changes:
         - api/**
         - web_classic/**
@@ -64,7 +67,7 @@ build:
 
   before_script:
     - apk add --no-cache curl bash
-    - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    - curl -Lo skaffold "https://storage.googleapis.com/skaffold/releases/$SKAFFOLD_VERSION/skaffold-linux-amd64"
     - install skaffold /usr/local/bin/
 
   script:
@@ -122,6 +125,7 @@ deploy:
     - hetzner-runner
   needs:
     - job: build
+      optional: true
     - job: check_mongodb_bootstrap
       optional: true
 
@@ -131,12 +135,24 @@ deploy:
 
   before_script:
     - !reference [.kube_access, before_script]
-    - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    - curl -Lo skaffold "https://storage.googleapis.com/skaffold/releases/$SKAFFOLD_VERSION/skaffold-linux-amd64"
     - install skaffold /usr/local/bin/
 
   script:
-    - echo "Deploy usando artefactos ya construidos"
-    - skaffold deploy --build-artifacts=build.json --profile=$PROFILE
+    - echo "Deploy con Skaffold $SKAFFOLD_VERSION"
+    - |
+      case "$PROFILE" in
+        cert-manager-prod|origin-tls-staging|origin-tls-prod)
+          skaffold deploy --profile="$PROFILE"
+          ;;
+        *)
+          test -f build.json || {
+            echo "ERROR: falta build.json para el perfil $PROFILE"
+            exit 1
+          }
+          skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
+          ;;
+      esac
 
     - echo "Verificando rollout"
     - |
@@ -149,6 +165,11 @@ deploy:
           ;;
         apis-frontend-prod)
           kubectl rollout status deployment -n apis --timeout=120s
+          ;;
+        cert-manager-prod)
+          kubectl rollout status deployment/cert-manager -n cert-manager --timeout=180s
+          kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=180s
+          kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=180s
           ;;
         *)
           echo "Perfil sin verificacion de rollout especifica: $PROFILE"
@@ -216,4 +237,12 @@ rollback:
 
   script:
     - echo "Rollback automático"
-    - kubectl rollout undo deployment -n apis
+    - |
+      case "$PROFILE" in
+        apis-frontend-prod)
+          kubectl rollout undo deployment -n apis
+          ;;
+        *)
+          echo "Sin rollback automático para el perfil $PROFILE; conservar recursos y diagnosticar"
+          ;;
+      esac

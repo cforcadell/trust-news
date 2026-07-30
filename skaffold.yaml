@@ -17,6 +17,14 @@ deploy:
 
 profiles:
   # ---------------------------------------------------------
+  # PERFIL: CERT-MANAGER PROD (K3S/HETZNER)
+  # ---------------------------------------------------------
+  - name: cert-manager-prod
+    manifests:
+      rawYaml:
+        - k8s/cert-manager/vendor/cert-manager-v1.21.0.yaml
+
+  # ---------------------------------------------------------
   # PERFIL: SETUP
   # ---------------------------------------------------------
   - name: setup

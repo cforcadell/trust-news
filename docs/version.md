@@ -17,26 +17,34 @@ Assermetry. Los comandos operativos se mantienen en:
 Publicar la instalacion de Hetzner en `https://assermetry.com`, conservando la
 posibilidad de desplegar y validar la misma aplicacion en local.
 
-La apertura al publico sera el ultimo paso. Antes de ella, el servicio completo
-debe funcionar en el dominio definitivo y el acceso HTTPS por `443/tcp` debe
+La apertura al publico se realizara en la Fase 9. Antes de ella, el servicio
+completo debe funcionar en el dominio definitivo y el acceso HTTPS por
+`443/tcp` debe
 estar restringido mediante un certificado personal mTLS. Retirar esa exigencia
 sera el unico cambio necesario para abrir Assermetry al publico.
 
 ### Estado actual
 
-La version `v0.0.12` ha cerrado la **Fase 0 - Inventario y linea base**. Los
-cambios de repositorio de la **Fase 1 - Adaptacion de aplicacion y manifests**
-estan implementados y renderizados; queda desplegar en Hetzner los cambios
-compatibles con `prod` y repetir las pruebas por tunel para cerrar la fase.
+La version `v0.0.12` ha cerrado la **Fase 0 - Inventario y linea base**, la
+**Fase 1 - Adaptacion de aplicacion y manifests** y la **Fase 2 - Dominio,
+Cloudflare y DNS**. En la Fase 2 se completaron la configuracion tecnica, las
+comprobaciones externas y la verificacion del 2FA en Porkbun y Cloudflare. La
+**Fase 3 - Acceso privado por certificado cliente** esta cerrada: la emision,
+instalacion y validacion funcional del certificado, el gate mTLS y su rollback
+estan completados. Por decision de alcance no se ejecutaron una revocacion real
+ni un certificado de reemplazo; se mantiene el certificado probado durante el
+periodo privado y queda documentado el procedimiento ante incidentes. La
+**Fase 10 - Backups y recuperacion** queda pendiente y sera la ultima fase en
+ejecutarse.
 Existe una version estable en Hetzner accesible mediante tunel SSH, pero todavia
 no se ha activado el dominio publico ni deben cambiarse sus URLs OIDC.
 
-Configuracion activa mientras se completa esta fase:
+Configuracion activa:
 
 ```text
 Local:          https://localhost:7443
 Hetzner/tunel:  https://localhost:9443
-Dominio futuro: https://assermetry.com (inactivo)
+Cloudflare:     https://assermetry.com (proxy activo; origen cerrado)
 ```
 
 Los perfiles Skaffold actuales continúan usando `overlays/local` y
@@ -74,7 +82,7 @@ Navegador o cliente
         |
         | HTTPS + certificado cliente obligatorio durante las pruebas
         v
-Cloudflare Proxy / Access / WAF
+Cloudflare Proxy / Application Security mTLS / WAF
         |
         | HTTPS Full (strict)
         v
@@ -91,19 +99,19 @@ Hay dos certificados con finalidades diferentes:
 
 - El certificado TLS del origen autentica `assermetry.com` y cifra la conexion
   entre Cloudflare y Traefik.
-- El certificado cliente mTLS, emitido por una CA privada, autoriza
-  temporalmente a cada tester antes de la apertura publica.
+- El certificado cliente mTLS, emitido por la CA gestionada de Cloudflare,
+  autoriza temporalmente a cada tester antes de la apertura publica.
 
 Tener solo el certificado TLS del servidor no restringe el acceso. El gate
-privado previo a la apertura requiere que Cloudflare Access rechace cualquier
-cliente sin un certificado mTLS valido.
+privado previo a la apertura requiere una regla WAF de Application Security que
+rechace cualquier cliente sin un certificado mTLS valido.
 
 ### Regla de oro de seguridad
 
 - El acceso por mTLS debe estar activo antes del primer momento en que
-  `443/tcp` sea alcanzable desde Internet, en la **Fase 8**, y mantenerse hasta
-  la apertura publica de la **Fase 10** tras el GO/NO-GO.
-- No se debe abrir `443/tcp` al trafico publico general hasta que la Fase 8 haya
+  `443/tcp` sea alcanzable desde Internet, en la **Fase 7**, y mantenerse hasta
+  la apertura publica de la **Fase 9** tras el GO/NO-GO.
+- No se debe abrir `443/tcp` al trafico publico general hasta que la Fase 7 haya
   sido probada con Cloudflare y mTLS.
 - Si aparece una incidencia durante la apertura, el rollback inmediato consiste en
   reactivar la politica mTLS sin cambiar DNS, Kubernetes, Keycloak ni
@@ -138,9 +146,11 @@ controles:
    las claves por la red interna de Kubernetes.
 3. No se debe añadir `:443` al issuer canonico. Keycloak y Gateway deben producir
    y validar exactamente la misma cadena sin el puerto HTTPS implicito.
-4. El DNS proxificado, Access mTLS y el WAF deben configurarse antes de permitir
-   que Cloudflare alcance el origen. Debe verificarse previamente que el plan de
-   Cloudflare contratado soporta la politica mTLS elegida.
+4. El DNS proxificado, Application Security mTLS y su regla WAF deben
+   configurarse antes de permitir que Cloudflare alcance el origen. En el plan
+   Free se usaran certificados emitidos por la CA gestionada de Cloudflare; la
+   CA propia mediante Cloudflare Access queda descartada porque requiere
+   Enterprise.
 5. El firewall no puede abrir `443/tcp` a `0.0.0.0/0`. Solo aceptara los rangos
    oficiales vigentes de Cloudflare. Esos rangos requieren un procedimiento de
    actualizacion.
@@ -158,24 +168,24 @@ salida.
 
 #### Matriz de despliegue por fase
 
-| Fase | Kubernetes local | Kubernetes Hetzner | Cambio externo |
-| --- | --- | --- | --- |
-| 0 | No | No; se prueba lo ya desplegado | No |
-| 1 | Si, antes de Hetzner | Si, solo con `prod`; `prod-domain` sigue inactivo | No |
-| 2 | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
-| 3 | No | No | Dominio, Cloudflare y DNS |
-| 4 | No | No | CA cliente y Cloudflare Access mTLS |
-| 5 | No | Si, `cert-manager` y certificado del origen | ACME DNS-01 |
-| 6 | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
-| 7 | No; solo renderizado de `prod-domain` | Si, despliegue definitivo con `prod-domain` | No |
-| 8 | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
-| 9 | No | No | Decision GO/NO-GO |
-| 10 | No | No | Retirar mTLS de Cloudflare Access |
+| Fase | Estado | Alcance breve | Kubernetes local | Kubernetes Hetzner | Cambio externo |
+| --- | --- | --- | --- | --- | --- |
+| 0 | **Cerrada** | Inventariar el sistema estable y fijar una linea base funcional y recuperable | No | No; se prueba lo ya desplegado | No |
+| 1 | **Cerrada** | Preparar aplicacion, OIDC, manifests y overlays para el dominio sin activarlo | **OK** | **OK**; solo con `prod`, `prod-domain` sigue inactivo | No |
+| 2 | **Cerrada** | Registrar el dominio, delegar DNS a Cloudflare y asegurar el perimetro inicial | No | No | Dominio, Cloudflare y DNS |
+| 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
+| 4 | **Pendiente; diseño revisado** | Emitir y renovar el certificado TLS del origen sin abrir puertos publicos | No; conservar Secret local y validar render | Si; `cert-manager` y certificado del origen en flujo exclusivo de K3s | Token Cloudflare limitado y ACME DNS-01 |
+| 5 | **Pendiente** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
+| 6 | **Pendiente** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | No; solo renderizado de `prod-domain` | Si, despliegue definitivo con `prod-domain` | No |
+| 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
+| 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
+| 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
+| 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
 
 `No` significa que esa fase no debe provocar un despliegue en ese cluster. Las
 consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
 
-#### Fase 0 - Inventario y linea base
+#### Fase 0 - Inventario y linea base (cerrada)
 
 **Despliegue**
 
@@ -203,7 +213,7 @@ consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
 Criterio de salida: frontend, autenticacion, modos Light y Blockchain, colas,
 IPFS y validadores funcionan antes de introducir el dominio.
 
-#### Fase 1 - Adaptacion de aplicacion y manifests
+#### Fase 1 - Adaptacion de aplicacion y manifests (cerrada)
 
 Finalidad: preparar y verificar la configuracion que necesitara el dominio
 definitivo sin cambiar todavia la identidad OIDC del despliegue activo. En esta
@@ -211,9 +221,16 @@ fase `prod` sigue representando el acceso cerrado por
 `https://localhost:9443`; `prod-domain` representa la configuracion futura de
 `https://assermetry.com`.
 
+**Estado**
+
+- Kubernetes local: **OK**.
+- Kubernetes Hetzner: **OK**.
+- Estado global de la fase: **cerrada** tras completar el despliegue compatible
+  con `prod` y su validacion por tunel en Hetzner.
+
 **Despliegue**
 
-- Kubernetes local: si. Desplegar primero los perfiles locales vigentes y no
+- Kubernetes local: **OK**. Se han desplegado los perfiles locales sin
   sustituirlos por `prod-domain`.
 - Kubernetes Hetzner: si, despues de superar local. Desplegar por tunel solo el
   Gateway, imagenes y manifests compatibles con la configuracion activa `prod`.
@@ -253,8 +270,8 @@ fase `prod` sigue representando el acceso cerrado por
    proxy headers, sin alterar el hostname ni el issuer del `prod` activo. El
    nombre visible `Assermetry` es un atributo del realm almacenado en PostgreSQL,
    no una variable del overlay; dejar preparado su cambio para aplicarlo junto
-   con los clientes OIDC en la Fase 7.
-4. Dejar preparados para la activacion coordinada de la Fase 7 los valores de
+   con los clientes OIDC en la Fase 6.
+4. Dejar preparados para la activacion coordinada de la Fase 6 los valores de
    `TrustNewsWeb`:
 
    ```text
@@ -285,37 +302,20 @@ configuracion futura de `assermetry.com`; la URL JWKS es interna; la
 documentacion del Gateway no existe en los overlays productivos; ningun recurso
 de dominio esta referenciado por Skaffold ni activo en el cluster.
 
-#### Fase 2 - Backups y recuperacion
+#### Fase 2 - Dominio, Cloudflare y DNS (cerrada)
 
-**Despliegue**
+**Estado**
 
-- Kubernetes local: si, pero solo como destino aislado para ensayar la
-  restauracion; no sustituir el entorno local de desarrollo en uso.
-- Kubernetes Hetzner: no redesplegar la aplicacion. Obtener los backups del
-  entorno real. Si se prueba alli una restauracion, usar recursos temporales y
-  PVC o namespaces distintos de produccion.
-
-**Pruebas**
-
-- Verificar cifrado, hash, fecha, tamaño y legibilidad de cada backup fuera del
-  cluster.
-- Restaurar MongoDB y PostgreSQL de Keycloak en el destino aislado y comprobar
-  recuentos, usuarios, clientes OIDC y login.
-- Restaurar o verificar genesis, keystores, contrato, ABI y categorias; comparar
-  direccion y bytecode con la linea base.
-- Ensayar rollback de manifests e imagenes y documentar tiempo, comandos y
-  resultado. Nunca probar una restauracion destructiva sobre los PVC activos.
-
-1. Crear y probar restauraciones de MongoDB y PostgreSQL de Keycloak.
-2. Respaldar genesis, keystores, contrasenas Ethereum, direccion y ABI del
-   contrato, categorias y configuracion de nodos.
-3. Mantener una copia cifrada fuera de Hetzner de secrets Kubernetes, variables
-   CI/CD, claves API, claves Ethereum, secrets OIDC y credenciales Cloudflare.
-4. Ensayar el rollback de manifests e imagenes.
-
-Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup.
-
-#### Fase 3 - Dominio, Cloudflare y DNS
+- Estado tecnico: **OK**.
+- Estado formal: **cerrada**; el 2FA esta activo y verificado en las cuentas de
+  Porkbun y Cloudflare.
+- Kubernetes local y Hetzner no se han redesplegado.
+- El firewall de Hetzner esta aplicado al servidor y no contiene reglas de
+  entrada para `80/tcp` ni `443/tcp`. Solo permite `2222/tcp` e ICMP; el
+  trafico saliente permanece permitido.
+- SSH en `2222/tcp` usa exclusivamente clave publica. El acceso root, las
+  contraseñas y la autenticacion interactiva estan desactivados.
+- La Fase 3 no se ha iniciado.
 
 **Despliegue**
 
@@ -333,6 +333,8 @@ Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup
   minimo 1.2.
 - Confirmar desde una red externa que `80/tcp` y `443/tcp` del origen siguen
   cerrados; no se prueba todavia la aplicacion por el dominio.
+- Verificar la configuracion efectiva de `sshd` y que `authorized_keys`
+  contiene unicamente las claves previstas.
 
 1. Registrar `assermetry.com` con renovacion automatica, bloqueo de transferencia
    y 2FA.
@@ -342,75 +344,296 @@ Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup
 5. No publicar `www` en esta version salvo que se añada y pruebe expresamente la
    redireccion canonica.
 
-Criterio de salida: DNS resuelve a Cloudflare y el origen sigue cerrado al
-trafico general.
+**Resumen de pasos realizados**
 
-#### Fase 4 - Acceso privado por certificado cliente
+1. Se registro `assermetry.com` en Porkbun y se verificaron la renovacion
+   automatica, el bloqueo del dominio, la privacidad de contacto y DNSSEC
+   desactivado. Tambien se verifico el 2FA activo en Porkbun y Cloudflare.
+2. Se creo la zona `assermetry.com` en el plan Free de Cloudflare y se eliminaron
+   los registros importados de aparcamiento, wildcard, `www`, correo y desafios
+   ACME de Porkbun.
+3. Se creo un unico registro `A` para el dominio raiz hacia la IP publica de
+   Hetzner, con proxy de Cloudflare activado y TTL automatico. No se publico
+   `www` ni se configuro correo en esta version.
+4. En Porkbun se sustituyeron los cuatro nameservers originales por los dos
+   asignados por Cloudflare:
+
+   ```text
+   luke.ns.cloudflare.com
+   rosemary.ns.cloudflare.com
+   ```
+
+5. Se verifico la delegacion desde el registro `.com` y mediante los resolvers
+   publicos `1.1.1.1` y `8.8.8.8`. Ambos resolvieron el dominio a direcciones
+   anycast de Cloudflare en lugar de publicar la IP de Hetzner.
+6. Se configuro Cloudflare con modo personalizado `Full (strict)`, Universal SSL
+   y certificado de respaldo activos, `Always Use HTTPS`, TLS minimo 1.2, TLS
+   1.3 y `Automatic HTTPS Rewrites`. HSTS permanece desactivado hasta validar el
+   servicio completo.
+7. Se comprobo desde una red externa que una peticion HTTP recibe una redireccion
+   `301` a HTTPS. Las pruebas con `nc` agotaron el tiempo de espera contra la
+   IP directa de Hetzner en `80/tcp` y `443/tcp`; `nmap -Pn` confirmo ambos
+   puertos como `filtered`.
+8. Se verifico en Hetzner que el firewall esta completamente aplicado al unico
+   servidor asociado. No existen reglas de entrada para `80/tcp` ni
+   `443/tcp`; solo se permiten TCP `2222` e ICMP desde IPv4 e IPv6, y todo el
+   trafico saliente permanece permitido.
+9. `2222/tcp` permanece accesible desde cualquier IP porque el administrador no
+   dispone de una IP publica fija. Se verifico la configuracion efectiva de
+   OpenSSH: `PermitRootLogin no`, `PubkeyAuthentication yes`,
+   `PasswordAuthentication no`, `KbdInteractiveAuthentication no` y
+   `MaxAuthTries 6`. El usuario `sysadmin` tiene una sola clave ED25519 en
+   `authorized_keys`, bajo control exclusivo del administrador.
+10. No se probo la aplicacion mediante el dominio ni se abrio el origen. El
+    certificado TLS del borde de Cloudflare no sustituye al certificado del
+    origen, que se instalara en la Fase 4.
+
+Criterio de salida: **cumplido**. DNS resuelve a Cloudflare, el origen sigue
+filtrado en `80/tcp` y `443/tcp`, SSH solo admite la unica clave autorizada y
+el 2FA esta activo en Porkbun y Cloudflare.
+
+#### Fase 3 - Acceso privado por certificado cliente (cerrada)
+
+La implementacion se hara con **Cloudflare Application Security mTLS**,
+compatible con el plan Free y con certificados emitidos por la CA gestionada de
+Cloudflare. No se usara una CA privada propia ni Cloudflare Access mTLS, porque
+esa modalidad requiere Zero Trust Enterprise.
+
+**Estado**
+
+- Emision, instalacion y prueba funcional del certificado
+  `cforcadell-win11-01`: **completadas**.
+- Asociacion mTLS del hostname y regla WAF temporal: **completadas y activas**.
+- Cobertura con y sin certificado de `/`, `/auth` y `/backend`: **comprobada**.
+- Desactivacion y reactivacion de la regla como rollback de un solo paso:
+  **comprobada**, dejando la regla activa al finalizar.
+- Revocacion real y certificado de reemplazo: **no ejecutados por decision de
+  alcance**; se conserva el certificado probado mientras mTLS sea temporal.
+- Kubernetes no se ha redesplegado y el origen continua cerrado en `80/tcp` y
+  `443/tcp`.
 
 **Despliegue**
 
 - Kubernetes local: no desplegar.
 - Kubernetes Hetzner: no desplegar ni abrir `443/tcp`.
-- Externo: crear la CA, certificados de tester y politica mTLS en Cloudflare
-  Access.
+- Externo: emitir un certificado cliente por tester, asociar
+  `assermetry.com` a mTLS y crear una regla WAF que bloquee certificados
+  ausentes o invalidos.
 
 **Pruebas**
 
-- Verificar localmente cadena de confianza, uso extendido `clientAuth`, fechas y
-  revocabilidad de cada certificado, y probar la importacion del PKCS#12.
-- Confirmar que Cloudflare solo contiene el certificado publico de la CA y que
-  la clave privada no esta en Git, Kubernetes, Hetzner ni Cloudflare.
-- Revisar que la aplicacion Access cubre `assermetry.com/*`, incluidas `/auth` y
-  `/backend`, y que no existe una regla bypass.
-- Comprobar el procedimiento de revocacion y reactivacion de la politica. La
-  prueba HTTP extremo a extremo con y sin certificado se realiza en la Fase 8.
+- Verificar cadena, uso extendido `clientAuth`, fechas e identificador de cada
+  certificado, probar su importacion como PKCS#12 y documentar el procedimiento
+  de revocacion.
+- Confirmar que la clave privada de cada tester se genera y conserva fuera de
+  Git, Kubernetes, Hetzner y Cloudflare.
+- Confirmar que mTLS esta asociado al hostname `assermetry.com` y que la regla
+  WAF cubre todas las rutas, incluidas `/`, `/auth` y `/backend`, sin
+  excepciones ni reglas bypass.
+- Sin certificado, esperar bloqueo de Cloudflare. La regla tambien debe incluir
+  expresamente el estado revocado para que un certificado revocado quede
+  bloqueado si fuese necesario ejecutar ese procedimiento. Con un certificado
+  valido se supera el gate mTLS, aunque el acceso a la aplicacion seguira
+  fallando mientras el origen permanezca cerrado.
+- La prueba HTTP extremo a extremo con la aplicacion se realiza en la Fase 7.
 
-1. Crear fuera del servidor una CA privada dedicada al acceso temporal.
-2. Emitir un certificado `clientAuth` individual por tester, con validez corta,
-   revocacion identificable y exportacion PKCS#12 protegida por contrasena.
-3. No subir la clave privada de la CA a Git, GitLab, Hetzner, Kubernetes ni
-   Cloudflare; Cloudflare solo recibe el certificado publico de la CA.
-4. Crear una aplicacion Cloudflare Access que cubra `assermetry.com/*` y exija
-   certificado cliente valido en todas las rutas, incluidas `/auth` y
-   `/backend`.
-5. Instalar el certificado individual en los dispositivos de prueba.
+1. Inventariar testers y dispositivos. Usar un certificado distinto por
+   dispositivo, con nombre identificable, validez limitada y revocacion
+   individual.
+2. Generar localmente la clave privada y el CSR de cada dispositivo para no
+   entregar la clave privada a Cloudflare.
+3. En `SSL/TLS > Client Certificates`, solicitar a la CA gestionada de
+   Cloudflare la emision del certificado a partir del CSR.
+4. Exportar certificado y clave como PKCS#12 protegido por una contraseña unica
+   e instalarlo en el dispositivo correspondiente.
+5. Asociar el hostname raiz `assermetry.com` a mTLS. No asociar `www`, que
+   permanece fuera de alcance.
+6. Crear una regla WAF temporal con accion `Block` equivalente a:
 
-Criterio de salida: la politica existe antes de que `443/tcp` sea alcanzable y
-puede revocarse o reactivarse sin redesplegar la aplicacion.
+   ```text
+   http.host eq "assermetry.com"
+   and (
+     not cf.tls_client_auth.cert_verified
+     or cf.tls_client_auth.cert_revoked
+   )
+   ```
 
-#### Fase 5 - TLS del origen antes de abrir 443
+7. Probar sin certificado y con certificado valido. Incluir en la regla la
+   condicion de certificado revocado y documentar la revocacion y el reemplazo;
+   su ejecucion real puede reservarse para un incidente cuando el gate sea
+   temporal y exista un unico tester.
+8. Probar que la regla WAF puede desactivarse y reactivarse como rollback de un
+   solo paso, dejandola activa al terminar la fase.
+
+**Resumen de pasos realizados**
+
+1. Se inventario un tester y un dispositivo Windows 11 y se asigno el
+   identificador individual `cforcadell-win11-01`.
+2. La clave privada cifrada y el CSR se generaron localmente fuera del
+   repositorio. Se verifico la autofirma del CSR y su sujeto
+   `CN=cforcadell-win11-01, O=Assermetry, OU=Tester`.
+3. La CA gestionada de Cloudflare emitio un certificado cliente con validez
+   limitada hasta el 5 de agosto de 2028. Se comprobaron sujeto, emisor, fechas,
+   uso extendido `clientAuth` y correspondencia criptografica entre certificado
+   y clave privada.
+4. Se creo un PKCS#12 cifrado y se valido su estructura antes de importarlo en el
+   almacen personal del usuario de Windows. El certificado importado conserva
+   la clave privada y el uso `Client Authentication`.
+5. En Cloudflare se asocio exclusivamente `assermetry.com` a Application
+   Security mTLS; `www` permanece fuera de alcance.
+6. Se creo y activo la regla WAF temporal `Temporary mTLS gate -
+   assermetry.com`, con accion `Block`. La expresion bloquea tanto certificados
+   no verificados como certificados marcados expresamente como revocados.
+7. Sin certificado, `/`, `/auth` y `/backend` devolvieron `403` desde
+   Cloudflare. Con el certificado valido, las tres rutas devolvieron `522`: el
+   gate mTLS fue superado y Cloudflare intento alcanzar el origen, que continua
+   correctamente cerrado.
+8. Se configuro Microsoft Edge para seleccionar automaticamente este certificado
+   solo en `https://assermetry.com`. La prueba en el navegador devolvio `522`,
+   confirmando la presentacion y aceptacion del certificado sin afectar otros
+   dominios.
+9. Se desactivo temporalmente la regla WAF y, tras su propagacion, una peticion
+   sin certificado devolvio `522`. Se reactivo la misma regla y se comprobaron
+   de nuevo `403` sin certificado y `522` con el certificado valido. La regla
+   quedo activa al terminar y el origen permanecio cerrado durante toda la
+   prueba.
+
+**Decisiones y trabajos no realizados**
+
+1. No se genero `cforcadell-win11-02` y no se revoco
+   `cforcadell-win11-01`. Se decidio conservar la credencial ya probada porque
+   existe un unico tester, la clave privada esta cifrada y bajo su control, y
+   mTLS solo se utilizara temporalmente durante las pruebas previas a la apertura
+   publica.
+2. Se acepta el riesgo residual de que una copia de la clave privada y su
+   contraseña permitiria superar el gate mientras este activo. La autenticacion
+   de la aplicacion seguiria siendo una barrera independiente.
+3. Ante perdida, copia o sospecha de compromiso, el procedimiento sera mantener
+   activa la regla WAF, revocar inmediatamente el certificado en Cloudflare,
+   emitir e instalar otro certificado individual y actualizar la seleccion
+   automatica de Edge antes de continuar las pruebas.
+4. La cuenta de Cloudflare y su 2FA son independientes del certificado cliente,
+   por lo que la administracion y revocacion siguen disponibles aunque el
+   certificado deje de funcionar.
+5. Durante la apertura publica se desactivara la regla WAF temporal segun la
+   Fase 9. Una vez finalizado el periodo mTLS se retiraran la politica de Edge,
+   el certificado del almacen de Windows y sus copias privadas cuando ya no sean
+   necesarias.
+6. No se desplego Kubernetes, no se modificaron las URLs OIDC y no se abrieron
+   `80/tcp` ni `443/tcp` en el origen.
+
+Criterio de salida: **cumplido con aceptacion de alcance**. El unico tester
+dispone de un certificado individual valido; las peticiones sin certificado
+quedan bloqueadas; la emision, importacion, cobertura de rutas y reactivacion de
+la regla estan probadas. La revocacion y el reemplazo no se ejecutaron de forma
+destructiva y se sustituyen por el procedimiento de incidente documentado. El
+origen continua cerrado y no se ha redesplegado la aplicacion. La Fase 4 queda
+autorizada como siguiente fase.
+
+#### Fase 4 - TLS del origen antes de abrir 443 (pendiente)
+
+**Estado**
+
+- Diseño revisado contra `docs/deploy/skaffold-local.md`,
+  `docs/deploy/skaffold-server.md`, los perfiles de Skaffold y los overlays de
+  Ingress.
+- Fase no iniciada: no se ha inventariado K3s, instalado `cert-manager`, creado
+  el token Cloudflare ni modificado `trustnews-origin-tls`.
+- El ejemplo HTTP-01 existente en el runbook de servidor no se utilizara. Esta
+  fase usara exclusivamente ACME DNS-01 para mantener cerrados `80/tcp` y
+  `443/tcp`.
+
+**Contrato Kind/K3s**
+
+- `k8s/ingress/base/tls-store.yaml` sigue siendo comun y referencia siempre el
+  Secret `trustnews-origin-tls` de `kube-system`.
+- Kind usa el perfil `apis-frontend`, `host: localhost` y el `secretGenerator`
+  de `k8s/ingress/overlays/local` con los certificados locales existentes. No
+  instala `cert-manager` ni recibe recursos o credenciales de Cloudflare.
+- K3s cerrado usa `apis-frontend-prod`, mantiene temporalmente
+  `host: localhost` y obtiene `trustnews-origin-tls` fuera del overlay. Durante
+  esta fase su gestion pasara del helper manual a `cert-manager`.
+- `prod-domain` conserva `host: assermetry.com`, pero no se activara en
+  Skaffold hasta la Fase 6. La emision DNS-01 es independiente de ese cambio de
+  host.
+- Los recursos ACME se mantendran en manifests/perfiles exclusivos de servidor;
+  no se añadiran al `base` de Ingress ni a perfiles locales.
+- El render local se validara mediante Skaffold, que ya aporta
+  `--load-restrictor=LoadRestrictionsNone`; no se usara `kubectl kustomize`
+  directo para el overlay local porque sus certificados se encuentran fuera del
+  directorio del overlay.
 
 **Despliegue**
 
-- Kubernetes local: no es necesario desplegar `cert-manager` ni el certificado
-  publico; se mantiene el certificado local existente.
-- Kubernetes Hetzner: si. Instalar `cert-manager`, el `Issuer` o `ClusterIssuer`
-  y el `Certificate` del origen sin abrir `443/tcp`.
+- Kubernetes local: no desplegar. Mantener el certificado local actual y
+  comprobar que `skaffold render -p apis-frontend` sigue generando el Secret,
+  los hosts `localhost` y el `TLSStore`.
+- Kubernetes Hetzner: instalar `cert-manager` una sola vez mediante Helm, con
+  version fijada y compatible con la version real de K3s. Desplegar despues los
+  `ClusterIssuer` y `Certificate` declarativos exclusivos de servidor, sin
+  abrir `80/tcp` ni `443/tcp`.
+- Externo: crear un API Token de Cloudflare limitado a la zona
+  `assermetry.com`, con `Zone - DNS - Edit` y `Zone - Zone - Read`. No usar la
+  API key global ni almacenar el token en Git.
 
 **Pruebas**
 
-- Comprobar `Certificate Ready=True`, `Order` y `Challenge` finalizados, y que el
-  Secret `trustnews-origin-tls` pertenece a `cert-manager`.
-- Inspeccionar SAN, emisor, cadena, fechas y clave publica del certificado.
+- Inventariar antes de instalar: versiones de K3s, Kubernetes y Helm;
+  instalaciones previas de `cert-manager`; estado de Traefik, `TLSStore` y
+  `trustnews-origin-tls`; reloj del servidor y acceso saliente a ACME.
+- Comprobar que los pods, webhook y CRD de `cert-manager` estan disponibles
+  antes de crear emisores.
+- Con staging, comprobar `Certificate Ready=True`, `CertificateRequest`,
+  `Order` y `Challenge`, la creacion temporal de `_acme-challenge` y su limpieza.
+- Confirmar que staging usa un Secret temporal no referenciado por el
+  `TLSStore`; nunca debe sobrescribir `trustnews-origin-tls` con una cadena no
+  confiable.
+- Con produccion, inspeccionar SAN `assermetry.com`, emisor, cadena, fechas,
+  clave publica, periodo de renovacion y metadatos del Secret.
 - Mediante tunel o port-forward y SNI `assermetry.com`, comprobar que Traefik
-  presenta ese certificado.
-- Confirmar que una renovacion o emision de prueba DNS-01 no requiere abrir
-  `80/tcp` ni `443/tcp` y que el token Cloudflare solo puede editar la zona DNS.
+  presenta el certificado definitivo sin necesidad de acceso publico al origen.
+- Confirmar que el token no permite administrar otras zonas ni otros productos
+  Cloudflare y que no aparece en manifests, logs, diffs ni salidas compartidas.
+- Renderizar de nuevo `apis-frontend` y `apis-frontend-prod`; el primero debe
+  conservar el Secret local y el segundo no debe generarlo. Renderizar tambien
+  `prod-domain` sin desplegarlo y confirmar `host: assermetry.com`.
+- Repetir la comprobacion externa de que la IP de Hetzner mantiene `80/tcp` y
+  `443/tcp` filtrados.
 
-1. Instalar `cert-manager`.
-2. Usar ACME DNS-01 con un token Cloudflare limitado a la zona DNS de
-   `assermetry.com`; no usar la API key global.
-3. Emitir `assermetry-origin-cert` para `assermetry.com` en `kube-system`,
-   manteniendo `trustnews-origin-tls` como nombre del Secret para evitar cambios
-   innecesarios en `TLSStore`.
-4. Dejar a `cert-manager` como unico propietario del Secret. No ejecutar
-   `apply_tls_secret` sobre un Secret gestionado por `cert-manager`.
-5. Verificar `Certificate Ready=True`, cadena, hostname y renovacion.
+1. Ejecutar el inventario de solo lectura en K3s y fijar una version compatible
+   de `cert-manager`; no instalar si ya existe una instancia administrada.
+2. Preparar manifests declarativos exclusivos de servidor y perfiles de
+   despliegue separados para staging y produccion. No modificar el overlay
+   local ni incluir secretos en el repositorio.
+3. Instalar `cert-manager` en el namespace `cert-manager` mediante Helm con sus
+   CRD y verificar controller, cainjector y webhook.
+4. Crear en Cloudflare el API Token de minimo privilegio para
+   `assermetry.com` y guardarlo como Secret en el namespace requerido por el
+   `ClusterIssuer`. El Secret se crea fuera de Git.
+5. Crear un `ClusterIssuer` de Let us Encrypt staging con solver Cloudflare
+   DNS-01 limitado mediante `dnsZones` a `assermetry.com`.
+6. Emitir `assermetry-origin-cert-staging` en `kube-system` usando un Secret
+   temporal, por ejemplo `trustnews-origin-tls-staging`, y validar el ciclo
+   DNS-01 completo sin conectarlo al `TLSStore`.
+7. Tras superar staging, crear el `ClusterIssuer` de produccion y emitir
+   `assermetry-origin-cert` para `assermetry.com` en `kube-system`, usando
+   `trustnews-origin-tls` como `secretName` definitivo.
+8. Desde ese momento, dejar `trustnews-origin-tls` bajo gestion exclusiva de
+   `cert-manager`. No volver a ejecutar `apply_tls_secret` sobre ese Secret.
+9. Verificar el certificado definitivo y, por tunel con SNI
+   `assermetry.com`, comprobar que Traefik lo presenta desde el `TLSStore`.
+10. Validar los renders Kind/K3s, conservar `prod-domain` inactivo, confirmar el
+    firewall cerrado y actualizar los dos runbooks con la operacion y rollback.
 
-Criterio de salida: Traefik presenta un certificado valido para
-`assermetry.com` y Cloudflare puede usar `Full (strict)`.
+Criterio de salida: Kind sigue funcionando con su certificado local sin
+`cert-manager`; K3s tiene `assermetry-origin-cert` en estado `Ready=True`,
+`trustnews-origin-tls` gestionado exclusivamente por `cert-manager` y Traefik
+presenta una cadena valida para `assermetry.com` mediante tunel y SNI. DNS-01 y
+la renovacion no requieren abrir el origen, que continua filtrado en `80/tcp` y
+`443/tcp`; `prod-domain` permanece sin desplegar hasta la Fase 6 y Cloudflare
+puede mantener `Full (strict)`.
 
-#### Fase 6 - WAF, restricciones permanentes y observabilidad
+#### Fase 5 - WAF, restricciones permanentes y observabilidad (pendiente)
 
 **Despliegue**
 
@@ -447,7 +670,7 @@ Criterio de salida: Traefik presenta un certificado valido para
    /backend/openapi.json
    ```
 
-5. Preparar logs y alertas para Access, WAF, Traefik, Gateway, Keycloak,
+5. Preparar logs y alertas para mTLS, WAF, Traefik, Gateway, Keycloak,
    certificados, reinicios, disco y respuestas 401, 403, 429 y 5xx.
 6. Confirmar que MongoDB, PostgreSQL, Kafka, Kafdrop, Mongo Express, IPFS API,
    RPC Ethereum, admin-service y Kubernetes API no tienen Ingress ni NodePort.
@@ -455,7 +678,7 @@ Criterio de salida: Traefik presenta un certificado valido para
 Criterio de salida: las protecciones que deben sobrevivir a la retirada del mTLS
 estan activas y observables.
 
-#### Fase 7 - Despliegue definitivo todavia cerrado
+#### Fase 6 - Despliegue definitivo todavia cerrado (pendiente)
 
 **Despliegue**
 
@@ -478,7 +701,7 @@ estan activas y observables.
   acceso a administracion y servicios internos.
 - Probar rollback a los overlays `prod` antes de modificar el firewall.
 
-1. Verificar el certificado instalado en la Fase 5 y desplegar `TLSStore` y los
+1. Verificar el certificado instalado en la Fase 4 y desplegar `TLSStore` y los
    recursos de seguridad que lo consumen.
 2. Cambiar los paths de los perfiles productivos desde `overlays/prod` a
    `overlays/prod-domain` en un cambio revisable y coordinado.
@@ -493,7 +716,7 @@ estan activas y observables.
 Criterio de salida: la aplicacion completa usa ya la configuracion final, pero
 el origen todavia no acepta trafico de Internet.
 
-#### Fase 8 - Abrir 443 solo a Cloudflare y probar con mTLS
+#### Fase 7 - Abrir 443 solo a Cloudflare y probar con mTLS (pendiente)
 
 **Despliegue**
 
@@ -501,8 +724,8 @@ el origen todavia no acepta trafico de Internet.
 - Kubernetes Hetzner: no redesplegar Kubernetes salvo que una prueba descubra un
   defecto. Cambiar exclusivamente el firewall para permitir `443/tcp` desde los
   rangos oficiales de Cloudflare.
-- Externo: mantener Cloudflare Access mTLS activo; este es el primer acceso al
-  dominio real.
+- Externo: mantener Application Security mTLS y su regla WAF activos; este es
+  el primer acceso al dominio real.
 
 **Pruebas**
 
@@ -540,12 +763,12 @@ resto    cerrado
    ```
 
 6. Probar desde varias redes, caducidad del certificado cliente, reinicios,
-   dependencias caidas, restauracion y rollback.
+   dependencias caidas, rollback y recuperacion ante fallos.
 
 Criterio de salida: toda la produccion funciona sobre el dominio real y nadie
 sin certificado cliente puede acceder a ningun flujo de usuario.
 
-#### Fase 9 - GO/NO-GO para apertura
+#### Fase 8 - GO/NO-GO para apertura (pendiente)
 
 **Despliegue**
 
@@ -559,10 +782,8 @@ sin certificado cliente puede acceder a ningun flujo de usuario.
   Light, Blockchain, cuotas y dependencias.
 - Repetir pruebas negativas sin certificado, contra la IP directa, rutas
   administrativas, OpenAPI y servicios internos.
-- Revisar evidencias de restauracion, rollback, renovacion TLS, WAF, rate limits,
+- Revisar evidencias de rollback, renovacion TLS, WAF, rate limits,
   logs y alertas; comprobar que el equipo puede reactivar mTLS.
-- No ejecutar una nueva restauracion destructiva: validar la evidencia obtenida
-  en la Fase 2 y repetir solo si ha quedado obsoleta.
 
 La apertura recibe `GO` solo si:
 
@@ -571,20 +792,20 @@ La apertura recibe `GO` solo si:
 - Issuer, redirects, login, refresh, logout y client credentials funcionan.
 - Modos Light y Blockchain, cuotas y servicios dependientes funcionan.
 - Administracion, OpenAPI y servicios internos permanecen bloqueados.
-- Backups, restauracion y rollback han sido probados.
+- El rollback de la apertura ha sido probado.
 - WAF, rate limiting, logs y alertas estan activos.
 - El equipo conoce y ha probado el procedimiento para reactivar el mTLS.
 
 Cualquier incumplimiento produce `NO-GO`; no se compensa retirando controles.
 
-#### Fase 10 - Apertura publica, ultimo paso
+#### Fase 9 - Apertura publica (pendiente)
 
 **Despliegue**
 
 - Kubernetes local: no desplegar.
 - Kubernetes Hetzner: no desplegar ni cambiar firewall, Ingress, Keycloak,
   Gateway, issuer o certificados.
-- Externo: retirar unicamente la exigencia temporal de mTLS en Cloudflare Access.
+- Externo: desactivar unicamente la regla WAF temporal que exige mTLS.
 
 **Pruebas**
 
@@ -598,11 +819,12 @@ Cualquier incumplimiento produce `NO-GO`; no se compensa retirando controles.
   un cliente sin certificado vuelve a quedar bloqueado; retirarlo de nuevo solo
   si la plataforma sigue estable.
 
-El unico cambio de apertura es desactivar la politica temporal de Cloudflare
-Access que exige certificado cliente.
+El unico cambio de apertura es desactivar la regla WAF temporal que bloquea a
+los clientes sin certificado valido. La asociacion mTLS del hostname puede
+mantenerse mientras el certificado cliente deje de ser obligatorio.
 
 No se modifican DNS, proxy, certificado TLS, firewall, Ingress, Keycloak,
-Gateway, issuer, frontend, WAF ni rate limits.
+Gateway, issuer, frontend, las demas reglas WAF ni los rate limits.
 
 Tras retirarla:
 
@@ -613,6 +835,43 @@ Tras retirarla:
 3. Vigilar errores, latencia, WAF y rate limits durante la ventana de apertura.
 4. Si aparece una incidencia, reactivar inmediatamente la exigencia mTLS. Este
    rollback vuelve a cerrar el servicio sin cambios de DNS ni redespliegue.
+
+#### Fase 10 - Backups y recuperacion (pendiente; no implementada)
+
+**Estado**
+
+- Posicion en el plan: **ultima fase de ejecucion**.
+- Estado global de la fase: **pendiente; no implementada**.
+- Las pruebas funcionales actuales no implican que los backups ni los ensayos de
+  restauracion se hayan realizado.
+
+**Despliegue**
+
+- Kubernetes local: si, pero solo como destino aislado para ensayar la
+  restauracion; no sustituir el entorno local de desarrollo en uso.
+- Kubernetes Hetzner: no redesplegar la aplicacion. Obtener los backups del
+  entorno real. Si se prueba alli una restauracion, usar recursos temporales y
+  PVC o namespaces distintos de produccion.
+
+**Pruebas**
+
+- Verificar cifrado, hash, fecha, tamaño y legibilidad de cada backup fuera del
+  cluster.
+- Restaurar MongoDB y PostgreSQL de Keycloak en el destino aislado y comprobar
+  recuentos, usuarios, clientes OIDC y login.
+- Restaurar o verificar genesis, keystores, contrato, ABI y categorias; comparar
+  direccion y bytecode con la linea base.
+- Ensayar rollback de manifests e imagenes y documentar tiempo, comandos y
+  resultado. Nunca probar una restauracion destructiva sobre los PVC activos.
+
+1. Crear y probar restauraciones de MongoDB y PostgreSQL de Keycloak.
+2. Respaldar genesis, keystores, contrasenas Ethereum, direccion y ABI del
+   contrato, categorias y configuracion de nodos.
+3. Mantener una copia cifrada fuera de Hetzner de secrets Kubernetes, variables
+   CI/CD, claves API, claves Ethereum, secrets OIDC y credenciales Cloudflare.
+4. Ensayar el rollback de manifests e imagenes.
+
+Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup.
 
 ### Entregables de v0.0.12
 

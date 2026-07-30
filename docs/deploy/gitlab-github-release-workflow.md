@@ -134,7 +134,7 @@ Abrir:
 
 ```text
 https://localhost:9443/
-https://localhost:9443/backend/docs
+https://localhost:9443/backend/docs -> 404 esperado en produccion
 ```
 
 Ver tambien:

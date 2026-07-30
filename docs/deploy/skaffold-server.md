@@ -378,7 +378,7 @@ Mantener esa sesion abierta mientras se validan las rutas:
 
 ```bash
 curl -k -I https://localhost:9443/
-curl -k -I https://localhost:9443/backend/docs
+test "$(curl -k -sS -o /dev/null -w '%{http_code}' https://localhost:9443/backend/docs)" = 404
 curl -k -I https://localhost:9443/auth/realms/TrustNews/.well-known/openid-configuration
 ```
 
@@ -595,6 +595,13 @@ configMapGenerator:
   behavior: merge
   literals:
     - KEYCLOAK_ISSUER_URL="https://assermetry.com/auth/realms/TrustNews"
+    - GATEWAY_API_DOCS_ENABLED="false"
+```
+
+La URL JWKS completa se mantiene comun en el ConfigMap base y usa la red interna:
+
+```text
+http://keycloak.infra.svc.cluster.local:8080/auth/realms/TrustNews/protocol/openid-connect/certs
 ```
 
 El issuer esperado por Gateway debe coincidir exactamente con el issuer real de
@@ -605,6 +612,11 @@ https://assermetry.com/auth/realms/TrustNews
 ```
 
 No añadir `:443`: el puerto HTTPS implicito no forma parte del issuer canonico.
+
+El display name `Assermetry` del realm y los redirects, post-logout redirects y
+Web Origins de `TrustNewsWeb` se almacenan en PostgreSQL. Preparar sus valores en
+la Fase 1, pero aplicarlos coordinadamente con estos overlays en la Fase 7 para
+no romper antes el acceso por `https://localhost:9443`.
 
 #### 2.7.7 Orden de despliegue recomendado para apertura publica
 
@@ -617,7 +629,8 @@ No añadir `:443`: el puerto HTTPS implicito no forma parte del issuer canonico.
 7. Verificar `KC_HOSTNAME_URL` y `KEYCLOAK_ISSUER_URL`.
 8. Desplegar `infra-prod` para aplicar Keycloak si cambia su ConfigMap.
 9. Desplegar `apis-frontend-prod`.
-10. Abrir `80/tcp` y `443/tcp` solo cuando WAF, TLS, DNS e issuer esten verificados.
+10. Mantener `80/tcp` cerrado y abrir `443/tcp` exclusivamente a los rangos de
+    Cloudflare cuando Access mTLS, WAF, TLS, DNS e issuer esten verificados.
 11. Verificar:
 
 ```bash
@@ -625,7 +638,7 @@ kubectl get ingress -A
 kubectl get certificate -A
 kubectl get challenge -A
 curl -I https://assermetry.com/
-curl -I https://assermetry.com/backend/docs
+test "$(curl -sS -o /dev/null -w '%{http_code}' https://assermetry.com/backend/docs)" = 404
 curl -I https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configuration
 ```
 
@@ -856,7 +869,7 @@ Si se esta en modo tunel, abrir el tunel de la seccion 2.7.1 y validar:
 
 ```text
 https://localhost:9443/
-https://localhost:9443/backend/docs
+https://localhost:9443/backend/docs -> 404 esperado
 https://localhost:9443/auth/admin/master/console/
 ```
 
@@ -865,7 +878,7 @@ final:
 
 ```text
 https://assermetry.com/
-https://assermetry.com/backend/docs
+https://assermetry.com/backend/docs -> 404 esperado
 https://assermetry.com/auth/admin/master/console/
 ```
 

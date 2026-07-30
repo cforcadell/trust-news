@@ -13,6 +13,7 @@ configMapGenerator:
   behavior: merge  
   literals:
     - KEYCLOAK_ISSUER_URL="https://localhost:9443/auth/realms/TrustNews"
+    - GATEWAY_API_DOCS_ENABLED="false"
 
 patches:
   - path: patch-resources.yaml

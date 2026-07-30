@@ -38,6 +38,13 @@ Al arrancar carga `.env`, configura logging, construye URLs internas de microser
 - `NEWS_CHAIN_URL`: URL interna del servicio blockchain.
 - `IPFS_API_URL`: URL interna del servicio IPFS.
 - `GENERATE_ASSERTIONS_URL`: URL interna del generador de aserciones.
-- `KEYCLOAK_SERVER_INNER_URL`: URL interna para consultar certificados JWKS.
-- `KEYCLOAK_SERVER_HOSTNAME`, `KEYCLOAK_SERVER_PORT`, `KEYCLOAK_SERVER_PATH`, `KEYCLOAK_REALM`: componen el issuer esperado del token.
+- `KEYCLOAK_ISSUER_URL`: issuer público exacto que debe contener el token.
+- `KEYCLOAK_JWKS_URL`: URL interna completa usada para descargar las claves
+  públicas de Keycloak. No altera el issuer que se valida.
+- `KEYCLOAK_SERVER_INNER_URL`: compatibilidad con configuraciones antiguas; solo
+  se utiliza para construir la URL JWKS cuando `KEYCLOAK_JWKS_URL` no está
+  definida.
+- `KEYCLOAK_REALM`: realm utilizado por el fallback de configuración local.
+- `GATEWAY_API_DOCS_ENABLED`: habilita `/docs`, `/redoc` y `/openapi.json`.
+  Los overlays productivos lo establecen a `false`.
 - `PORT`: puerto de uvicorn si se ejecuta directamente.

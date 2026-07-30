@@ -11,6 +11,9 @@ data:
   GENERATE_ASSERTIONS_URL: "http://generate-asertions.apis.svc.cluster.local:8071"
   
   # Configuración de Keycloak
-  KEYCLOAK_SERVER_INNER_URL: "http://keycloak.infra.svc.cluster.local:8080/auth"
   KEYCLOAK_REALM: "TrustNews"
   KEYCLOAK_ISSUER_URL: "https://localhost:7443/auth/realms/TrustNews"
+  KEYCLOAK_JWKS_URL: "http://keycloak.infra.svc.cluster.local:8080/auth/realms/TrustNews/protocol/openid-connect/certs"
+
+  # La documentación interactiva solo se mantiene en local.
+  GATEWAY_API_DOCS_ENABLED: "true"

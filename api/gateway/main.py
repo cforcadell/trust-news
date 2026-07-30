@@ -27,9 +27,19 @@ log_level = getattr(logging, log_level_str, logging.INFO)
 logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("api-gateway")
 
+api_docs_enabled = os.getenv("GATEWAY_API_DOCS_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 app = FastAPI(
     title="Unified API Gateway",
     root_path="/backend",
+    docs_url="/docs" if api_docs_enabled else None,
+    redoc_url="/redoc" if api_docs_enabled else None,
+    openapi_url="/openapi.json" if api_docs_enabled else None,
 )
 
 # ============================================================
@@ -40,13 +50,19 @@ NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain.apis.svc.cluster
 IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.local:8060")
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
 
-KEYCLOAK_SERVER_INNER_URL = os.getenv("KEYCLOAK_SERVER_INNER_URL", "http://localhost:8080")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "TrustNews")
 KEYCLOAK_ISSUER_URL = os.getenv(
     "KEYCLOAK_ISSUER_URL",
     f"https://localhost:7443/auth/realms/{KEYCLOAK_REALM}",
 ).rstrip("/")
-KEYCLOAK_CERTS_URL = f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
+KEYCLOAK_SERVER_INNER_URL = os.getenv(
+    "KEYCLOAK_SERVER_INNER_URL",
+    "http://localhost:8080/auth",
+).rstrip("/")
+KEYCLOAK_JWKS_URL = os.getenv(
+    "KEYCLOAK_JWKS_URL",
+    f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs",
+).rstrip("/")
 
 # ============================================================
 # Autenticación (Simple Bearer para Swagger)
@@ -58,7 +74,7 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
     token = auth.credentials
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(KEYCLOAK_CERTS_URL) as resp:
+            async with session.get(KEYCLOAK_JWKS_URL) as resp:
                 if resp.status != 200:
                     raise HTTPException(status_code=500, detail="Error contactando Keycloak")
                 jwks = await resp.json()

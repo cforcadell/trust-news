@@ -158,7 +158,7 @@ secrets.
 | `infra` | `keycloak-db-secret` | `keycloak-db.env` |
 | `infra` | `mongo-express-secret` | `mongo-express.env` |
 | `blockchain` | `ethereum-secrets` | `ethereum.env` |
-| `kube-system` | `trustnews-origin-tls` | `tls-origin.env` |
+| `kube-system` | `trustnews-origin-tls` | `/home/sysadmin/trustnews-origin-ca/tls-origin.env` |
 
 Crear o actualizar todos los secrets:
 
@@ -181,7 +181,7 @@ apply_secret infra mongo-express-secret mongo-express.env
 
 apply_secret blockchain ethereum-secrets ethereum.env
 
-apply_tls_secret kube-system trustnews-origin-tls tls-origin.env
+apply_tls_secret kube-system trustnews-origin-tls "$HOME/trustnews-origin-ca/tls-origin.env"
 ```
 
 ### 2.4 Parametros requeridos por env file
@@ -281,14 +281,66 @@ PRIVATE_KEY=<informar>
 `tls-origin.env`:
 
 ```dotenv
-TLS_CERT_FILE=/ruta/privada/fullchain.pem
-TLS_KEY_FILE=/ruta/privada/privkey.pem
+TLS_CERT_FILE=/home/sysadmin/trustnews-origin-ca/assermetry-origin.pem
+TLS_KEY_FILE=/home/sysadmin/trustnews-origin-ca/assermetry-origin.key
+TLS_CA_FILE=/home/sysadmin/trustnews-origin-ca/cloudflare-origin-ca-rsa-root.pem
 ```
 
 No incluir el contenido PEM dentro de `tls-origin.env`; este fichero solo debe
-referenciar rutas privadas presentes en el servidor desde el que se ejecuta el
-helper. En modo tunel puede ser un certificado temporal. En modo publico debe
-ser un certificado Cloudflare Origin CA valido para el dominio real.
+referenciar las rutas privadas del servidor. En Hetzner, tanto las pruebas por
+tunel como el acceso posterior desde Cloudflare usan este mismo certificado
+Origin CA; el certificado local de Kind se genera exclusivamente en su overlay.
+
+### 2.4.1 Script de Secrets y reinstalacion de TLS en Hetzner
+
+En Hetzner, `~/trust-news/secrets/create-secrets.sh` puede seguir creando los
+Secrets genericos desde sus `.env`. La seccion de `kube-system` debe aplicar el
+certificado Origin CA desde su directorio privado y nunca borrar primero el Secret.
+
+Sustituir la seccion TLS del script por este bloque autocontenido:
+
+```bash
+# Namespace: kube-system
+set -euo pipefail
+TLS_ENV="$HOME/trustnews-origin-ca/tls-origin.env"
+
+test -r "$TLS_ENV"
+
+set -a
+. "$TLS_ENV"
+set +a
+
+test -r "$TLS_CERT_FILE"
+test -r "$TLS_KEY_FILE"
+test -r "$TLS_CA_FILE"
+openssl verify \
+  -CAfile "$TLS_CA_FILE" \
+  "$TLS_CERT_FILE"
+openssl x509 -checkend 2592000 -noout -in "$TLS_CERT_FILE"
+openssl x509 -in "$TLS_CERT_FILE" -noout -ext subjectAltName | \
+  grep -q 'DNS:assermetry.com'
+
+kubectl create secret tls trustnews-origin-tls \
+  --cert="$TLS_CERT_FILE" \
+  --key="$TLS_KEY_FILE" \
+  -n kube-system \
+  --dry-run=client -o yaml | \
+  kubectl apply -f -
+```
+
+No usar `tls-fe.crt`, `tls-fe.key` ni `create-fe-certs.sh` como entrada del TLS
+productivo. El Nginx del frontend sirve HTTP dentro del cluster; Traefik termina
+TLS y consume exclusivamente `kube-system/trustnews-origin-tls`.
+
+Orden para reinstalar desde cero:
+
+1. Crear los namespaces.
+2. Crear o aplicar los Secrets genericos desde `~/trust-news/secrets`.
+3. Restaurar `~/trustnews-origin-ca` y comprobar permisos `700` para el
+   directorio, `600` para la clave y `600` para `tls-origin.env`.
+4. Ejecutar el bloque TLS anterior y comprobar la huella instalada.
+5. Desplegar los perfiles productivos y verificar `TLSStore/default` antes de
+   realizar pruebas por tunel.
 
 ### 2.5 Notas de coherencia de MongoDB
 
@@ -528,14 +580,15 @@ Conservar los ficheros del certificado anterior y su `tls-origin.env` para
 rollback. Preparar un nuevo fichero privado:
 
 ```dotenv
-TLS_CERT_FILE=/ruta/privada/assermetry-origin.pem
-TLS_KEY_FILE=/ruta/privada/assermetry-origin.key
+TLS_CERT_FILE=/home/sysadmin/trustnews-origin-ca/assermetry-origin.pem
+TLS_KEY_FILE=/home/sysadmin/trustnews-origin-ca/assermetry-origin.key
+TLS_CA_FILE=/home/sysadmin/trustnews-origin-ca/cloudflare-origin-ca-rsa-root.pem
 ```
 
 Aplicar mediante el helper idempotente:
 
 ```bash
-apply_tls_secret kube-system trustnews-origin-tls tls-origin.env
+apply_tls_secret kube-system trustnews-origin-tls "$HOME/trustnews-origin-ca/tls-origin.env"
 ```
 
 Comprobar el Secret y el consumidor sin mostrar la clave:
@@ -572,10 +625,17 @@ El resultado debe contener `Verify return code: 0 (ok)`. Repetir frontend,
 Gateway y discovery OIDC por tunel. No activar `prod-domain` ni abrir el
 firewall en esta fase.
 
-Rollback: volver a apuntar `tls-origin.env` a los ficheros anteriores y repetir:
+Rollback: preparar un fichero privado que apunte al material anterior validado:
+
+```dotenv
+TLS_CERT_FILE=/home/sysadmin/trustnews-origin-ca/rollback-20260811T155518Z/tls.crt
+TLS_KEY_FILE=/home/sysadmin/trustnews-origin-ca/rollback-20260811T155518Z/tls.key
+```
+
+Aplicarlo mediante el mismo helper idempotente:
 
 ```bash
-apply_tls_secret kube-system trustnews-origin-tls tls-origin.env
+apply_tls_secret kube-system trustnews-origin-tls "$HOME/trustnews-origin-ca/tls-origin-rollback.env"
 ```
 
 Verificar de nuevo `TLSStore`, huella y pruebas funcionales. La revocacion del

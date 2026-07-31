@@ -34,11 +34,14 @@ instalacion y validacion funcional del certificado, el gate mTLS y su rollback
 estan completados. Por decision de alcance no se ejecutaron una revocacion real
 ni un certificado de reemplazo; se mantiene el certificado probado durante el
 periodo privado y queda documentado el procedimiento ante incidentes. La
-**Fase 4 - TLS del origen antes de abrir 443** esta en curso. El inventario de
-K3s se ha completado. El certificado actual `kube-system/trustnews-origin-tls`
-sigue intacto y el acceso por tunel se valido con frontend `200`, discovery OIDC
-`200` y Gateway alcanzable. La estrategia de la fase es instalar y rotar
-manualmente un certificado Cloudflare Origin CA. La
+**Fase 4 - TLS del origen antes de abrir 443** esta cerrada. El inventario de
+K3s se ha completado y el certificado Cloudflare Origin CA para
+`assermetry.com` esta instalado en `kube-system/trustnews-origin-tls`. Traefik
+lo presenta correctamente y la cadena, el hostname y el SNI se validaron por
+tunel con la raiz Origin CA. Las pruebas funcionales mantienen frontend `200`,
+discovery OIDC `200` y Gateway alcanzable. El origen permanece filtrado en
+`80/tcp` y `443/tcp`. La caducidad esta inventariada y dispone de una alerta
+operativa. La
 **Fase 10 - Backups y recuperacion** queda pendiente y sera la ultima fase en
 ejecutarse.
 Existe una version estable en Hetzner accesible mediante tunel SSH, pero todavia
@@ -179,7 +182,7 @@ salida.
 | 1 | **Cerrada** | Preparar aplicacion, OIDC, manifests y overlays para el dominio sin activarlo | **OK** | **OK**; solo con `prod`, `prod-domain` sigue inactivo | No |
 | 2 | **Cerrada** | Registrar el dominio, delegar DNS a Cloudflare y asegurar el perimetro inicial | No | No | Dominio, Cloudflare y DNS |
 | 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
-| 4 | **En curso** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | No; conservar Secret local y validar render | Origin CA pendiente | Emision manual en Cloudflare |
+| 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
 | 5 | **Pendiente** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
 | 6 | **Pendiente** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | No; solo renderizado de `prod-domain` | Si, despliegue definitivo con `prod-domain` | No |
 | 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
@@ -534,13 +537,13 @@ destructiva y se sustituyen por el procedimiento de incidente documentado. El
 origen continua cerrado y no se ha redesplegado la aplicacion. Este cierre dio
 paso al inicio controlado de la Fase 4.
 
-#### Fase 4 - TLS del origen antes de abrir 443 (en curso)
+#### Fase 4 - TLS del origen antes de abrir 443 (cerrada)
 
 **Decision vigente**
 
-- Se adopta un certificado Cloudflare Origin CA para `assermetry.com`, instalado
-  manualmente en `kube-system/trustnews-origin-tls` y consumido por el
-  `TLSStore` de Traefik.
+- El certificado del origen es un Cloudflare Origin CA para `assermetry.com`,
+  instalado manualmente en `kube-system/trustnews-origin-tls` y consumido por
+  el `TLSStore` de Traefik.
 - Se acepta que la CA no sea publica: las pruebas directas por tunel usaran la
   raiz Origin CA de Cloudflare, mientras que Cloudflare validara el origen en
   modo `Full (strict)`.
@@ -587,6 +590,37 @@ paso al inicio controlado de la Fase 4.
   filtrados. `Full (strict)` se probara cuando Cloudflare pueda alcanzar el
   origen en la Fase 7.
 
+**Evidencias registradas el 2026-08-11**
+
+- Certificado y clave: pareja validada mediante la huella SHA-256 de sus claves
+  publicas.
+- SAN: `DNS:assermetry.com`.
+- Vigencia: `2026-08-11 15:34:00 UTC` - `2028-08-10 15:34:00 UTC`.
+- Huella SHA-256 del certificado:
+  `0A:82:C8:13:C6:BC:CA:ED:EE:C2:83:7B:14:68:1E:20:D5:6A:E5:27:A8:A0:9E:42:D3:5A:90:BF:44:06:1B:7F`.
+- Rollback validado en
+  `/home/sysadmin/trustnews-origin-ca/rollback-20260811T155518Z`; el certificado
+  y la clave anteriores forman pareja.
+- `TLSStore/default` referencia `trustnews-origin-tls` y Traefik permanece
+  `Running`.
+- Validacion por tunel: `Verification: OK` y
+  `Verify return code: 0 (ok)` con SNI y hostname `assermetry.com`.
+- Pruebas funcionales por tunel: frontend `200`, raiz del Gateway `404`
+  esperado y discovery OIDC `200`.
+- Comprobacion externa: conexiones TCP a la IP de Hetzner por `80` y `443`
+  rechazadas (`TcpTestSucceeded: False`).
+- Skaffold `v2.17.3`: perfiles `apis-frontend` y `apis-frontend-prod`
+  renderizados sin conexion al cluster ni despliegue. Local genera su Secret TLS
+  y conserva `localhost`; produccion referencia `trustnews-origin-tls` sin
+  generarlo y conserva `localhost`.
+- Overlays `prod-domain` de Ingress, Gateway y Keycloak renderizados por separado
+  sin desplegar: hosts `assermetry.com`, `KC_HOSTNAME_URL` y
+  `KEYCLOAK_ISSUER_URL` correctos.
+- Alerta de renovacion registrada para el `2028-07-11`, antes de la caducidad
+  del `2028-08-10 15:34:00 UTC`.
+
+**Procedimiento de reinstalacion y rotacion**
+
 1. Emitir en `SSL/TLS > Origin Server` un certificado Origin CA para
    `assermetry.com`, en formato PEM y con una clave privada sin passphrase para
    su uso como Secret TLS de Kubernetes.
@@ -595,7 +629,7 @@ paso al inicio controlado de la Fase 4.
 3. Validar localmente la pareja certificado/clave y preparar `tls-origin.env`
    con rutas a ambos ficheros.
 4. Confirmar que el material anterior esta disponible para rollback y ejecutar
-   `apply_tls_secret kube-system trustnews-origin-tls tls-origin.env`.
+   `apply_tls_secret kube-system trustnews-origin-tls "$HOME/trustnews-origin-ca/tls-origin.env"`.
 5. Verificar el Secret, el `TLSStore` y el certificado presentado por Traefik
    mediante tunel, SNI y la raiz Origin CA de Cloudflare.
 6. Repetir las pruebas funcionales por tunel y mantener el origen cerrado hasta
@@ -603,13 +637,12 @@ paso al inicio controlado de la Fase 4.
 7. Registrar una alerta anterior a `notAfter` y probar documentalmente la
    rotacion y el rollback manuales.
 
-Criterio de salida: Kind conserva su certificado local sin dependencias
-productivas; K3s presenta por tunel un certificado Cloudflare Origin CA valido
+Criterio de salida: **cumplido**. Kind conserva su certificado local sin
+dependencias productivas; K3s presenta por tunel un Cloudflare Origin CA valido
 para `assermetry.com`, instalado manualmente en `trustnews-origin-tls` y
 referenciado por `TLSStore/default`. El certificado anterior permite rollback,
 la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
-`443/tcp`; `prod-domain` permanece sin
-desplegar hasta la Fase 6 y Cloudflare podra usar `Full (strict)`.
+`443/tcp`; `prod-domain` permanece sin desplegar hasta la Fase 6.
 
 #### Fase 5 - WAF, restricciones permanentes y observabilidad (pendiente)
 

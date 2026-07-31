@@ -42,6 +42,7 @@ En el servidor Hetzner debe existir:
 
 - Kubernetes/k3s funcional.
 - `kubectl` configurado para administrar el cluster.
+- Skaffold disponible para aplicar los perfiles productivos.
 - Acceso SSH por el puerto `2222` para el usuario de despliegue.
 - GitLab Runner con tag `hetzner-runner`.
 - Docker disponible para el job `build` de GitLab.
@@ -287,7 +288,7 @@ TLS_KEY_FILE=/ruta/privada/privkey.pem
 No incluir el contenido PEM dentro de `tls-origin.env`; este fichero solo debe
 referenciar rutas privadas presentes en el servidor desde el que se ejecuta el
 helper. En modo tunel puede ser un certificado temporal. En modo publico debe
-ser valido para el dominio real, salvo que `cert-manager` gestione el secret.
+ser un certificado Cloudflare Origin CA valido para el dominio real.
 
 ### 2.5 Notas de coherencia de MongoDB
 
@@ -450,76 +451,136 @@ Controles minimos requeridos:
 - registrar eventos WAF y revisar falsos positivos;
 - restringir el origen para que el trafico publico llegue por el WAF cuando sea posible.
 
-#### 2.7.4 TLS: estado temporal y opciones definitivas
+#### 2.7.4 TLS del origen con Cloudflare Origin CA
 
-Estado temporal sin dominio: Traefik usa `trustnews-origin-tls` como
-certificado por defecto mediante `TLSStore`. Crear o actualizar ese secret con:
+La estrategia productiva usa un certificado Cloudflare Origin CA emitido y
+rotado manualmente. Traefik lo consume desde
+`kube-system/trustnews-origin-tls` mediante `TLSStore/default`.
+
+Esta CA esta pensada para el tramo Cloudflare-origen. Un navegador conectado
+directamente por tunel no confia en ella por defecto; la validacion operativa se
+realiza con la raiz Origin CA correspondiente. El aviso visual por tunel es
+esperado y no afecta a `Full (strict)`.
+
+##### 2.7.4.1 Emitir el certificado
+
+En una maquina de operacion privada, generar la clave y el CSR para evitar que la
+clave privada se genere o almacene en Cloudflare:
+
+```bash
+umask 077
+openssl genpkey -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:3072 \
+  -out assermetry-origin.key
+
+openssl req -new \
+  -key assermetry-origin.key \
+  -out assermetry-origin.csr \
+  -subj '/CN=assermetry.com' \
+  -addext 'subjectAltName=DNS:assermetry.com'
+```
+
+En Cloudflare:
+
+1. Abrir `SSL/TLS > Origin Server > Origin Certificates`.
+2. Seleccionar `Create Certificate`.
+3. Elegir `Use my private key and CSR` y pegar el CSR, nunca la clave.
+4. Confirmar que el unico hostname requerido es `assermetry.com`.
+5. Elegir y registrar el periodo de validez.
+6. Seleccionar formato PEM y guardar el certificado firmado como
+   `assermetry-origin.pem` fuera de Git.
+
+Cloudflare no envia actualmente avisos de expiracion de Origin CA. Registrar
+`notAfter` en el inventario y crear una alerta operativa anterior a esa fecha.
+
+##### 2.7.4.2 Validar antes de instalar
+
+```bash
+chmod 600 assermetry-origin.key assermetry-origin.csr assermetry-origin.pem
+
+openssl x509 -in assermetry-origin.pem -noout \
+  -subject -issuer -dates -fingerprint -sha256 -ext subjectAltName
+
+openssl x509 -in assermetry-origin.pem -pubkey -noout |
+  openssl pkey -pubin -outform PEM |
+  sha256sum
+
+openssl pkey -in assermetry-origin.key -pubout -outform PEM |
+  sha256sum
+```
+
+Las dos ultimas huellas deben ser identicas. El SAN debe incluir exactamente
+`DNS:assermetry.com` y el certificado debe estar vigente. No continuar si falla
+alguna comprobacion.
+
+Descargar tambien la raiz que corresponda al algoritmo elegido. Para RSA:
+
+```text
+https://developers.cloudflare.com/ssl/static/origin_ca_rsa_root.pem
+```
+
+La raiz es publica y sirve solo para validar la cadena; no debe confundirse con
+la clave privada del certificado.
+
+##### 2.7.4.3 Instalar en K3s
+
+Conservar los ficheros del certificado anterior y su `tls-origin.env` para
+rollback. Preparar un nuevo fichero privado:
+
+```dotenv
+TLS_CERT_FILE=/ruta/privada/assermetry-origin.pem
+TLS_KEY_FILE=/ruta/privada/assermetry-origin.key
+```
+
+Aplicar mediante el helper idempotente:
 
 ```bash
 apply_tls_secret kube-system trustnews-origin-tls tls-origin.env
 ```
 
-Esto permite probar HTTPS por tunel, pero el navegador puede mostrar aviso si el
-certificado no coincide con `localhost`, IP o dominio usado.
+Comprobar el Secret y el consumidor sin mostrar la clave:
 
-Opcion A, simple con Cloudflare o balanceador externo: TLS termina fuera del
-cluster y Traefik puede seguir usando HTTPS interno con certificado de origen.
-Con Cloudflare, usar modo `Full strict` cuando el origen tenga certificado
-valido.
+```bash
+kubectl get secret trustnews-origin-tls -n kube-system \
+  -o custom-columns='NAME:.metadata.name,TYPE:.type,CREATED:.metadata.creationTimestamp'
 
-Opcion B, recomendada en cluster: `cert-manager` emite un certificado para
-Traefik. Para dominio unico con paths y varios namespaces, evitar crear tres
-secretos TLS distintos para el mismo host. Preferir un certificado por defecto
-de Traefik mediante `TLSStore`, o mover a subdominios cuando se quiera un
-secreto por namespace.
+kubectl get tlsstore default -n kube-system \
+  -o jsonpath='{.spec.defaultCertificate.secretName}{"\n"}'
 
-Ejemplo de `ClusterIssuer` de Let us Encrypt para Traefik:
-
-```yaml
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: letsencrypt-prod
-spec:
-  acme:
-    email: admin@example.com
-    server: https://acme-v02.api.letsencrypt.org/directory
-    privateKeySecretRef:
-      name: letsencrypt-prod-account-key
-    solvers:
-      - http01:
-          ingress:
-            class: traefik
+kubectl get secret trustnews-origin-tls -n kube-system \
+  -o jsonpath='{.data.tls\.crt}' |
+  base64 -d |
+  openssl x509 -noout -subject -issuer -dates -fingerprint -sha256 -ext subjectAltName
 ```
 
-Ejemplo de certificado por defecto de Traefik en `kube-system`:
+El `TLSStore` debe seguir devolviendo `trustnews-origin-tls`.
 
-```yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: trustnews-origin-cert
-  namespace: kube-system
-spec:
-  secretName: trustnews-origin-tls
-  issuerRef:
-    name: letsencrypt-prod
-    kind: ClusterIssuer
-  dnsNames:
-    - assermetry.com
----
-apiVersion: traefik.io/v1alpha1
-kind: TLSStore
-metadata:
-  name: default
-  namespace: kube-system
-spec:
-  defaultCertificate:
-    secretName: trustnews-origin-tls
+##### 2.7.4.4 Validar por tunel y hacer rollback
+
+Con el tunel `127.0.0.1:9443` activo, validar cadena, SNI y hostname sin `-k`:
+
+```bash
+openssl s_client \
+  -connect 127.0.0.1:9443 \
+  -servername assermetry.com \
+  -verify_hostname assermetry.com \
+  -CAfile origin_ca_rsa_root.pem \
+  -verify_return_error </dev/null
 ```
 
-Si se usa `cert-manager`, no actualizar manualmente `trustnews-origin-tls` con
-`apply_tls_secret`; dejar que `cert-manager` sea el unico propietario del secret.
+El resultado debe contener `Verify return code: 0 (ok)`. Repetir frontend,
+Gateway y discovery OIDC por tunel. No activar `prod-domain` ni abrir el
+firewall en esta fase.
+
+Rollback: volver a apuntar `tls-origin.env` a los ficheros anteriores y repetir:
+
+```bash
+apply_tls_secret kube-system trustnews-origin-tls tls-origin.env
+```
+
+Verificar de nuevo `TLSStore`, huella y pruebas funcionales. La revocacion del
+certificado Origin CA en Cloudflare es irreversible y solo se realiza despues
+del rollback si la clave se ha perdido o comprometido.
 
 Los Ingress deben conservar estas anotaciones Traefik:
 
@@ -554,6 +615,7 @@ spec:
               service:
                 name: gateway
                 port:
+
                   number: 8500
 ```
 
@@ -623,8 +685,10 @@ no romper antes el acceso por `https://localhost:9443`.
 1. Validar primero la aplicacion completa por tunel SSH segun la seccion 2.7.1.
 2. Instalar/configurar el WAF y dejarlo en modo deteccion si aplica.
 3. Crear DNS y verificar que resuelve al WAF, a Traefik o al balanceador.
-4. Instalar/configurar `cert-manager` y validar primero con Let us Encrypt staging, o preparar el certificado definitivo si se gestiona fuera del cluster.
-5. Hacer que `TLSStore` apunte al secret definitivo, manteniendo el nombre `trustnews-origin-tls` si no hay motivo para cambiarlo.
+4. Emitir e instalar manualmente el certificado Cloudflare Origin CA segun la
+   seccion 2.7.4, conservando el certificado anterior para rollback.
+5. Verificar que `TLSStore` apunta a `trustnews-origin-tls` y validar por tunel
+   la cadena, SNI y hostname con la raiz Origin CA correspondiente.
 6. Cambiar Skaffold a los overlays `prod-domain` y verificar que renderizan `host: assermetry.com` manteniendo TLS en `websecure`.
 7. Verificar `KC_HOSTNAME_URL` y `KEYCLOAK_ISSUER_URL`.
 8. Desplegar `infra-prod` para aplicar Keycloak si cambia su ConfigMap.
@@ -635,8 +699,9 @@ no romper antes el acceso por `https://localhost:9443`.
 
 ```bash
 kubectl get ingress -A
-kubectl get certificate -A
-kubectl get challenge -A
+kubectl get secret trustnews-origin-tls -n kube-system
+kubectl get tlsstore default -n kube-system \
+  -o jsonpath='{.spec.defaultCertificate.secretName}{"\n"}'
 curl -I https://assermetry.com/
 test "$(curl -sS -o /dev/null -w '%{http_code}' https://assermetry.com/backend/docs)" = 404
 curl -I https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configuration
@@ -950,7 +1015,10 @@ Antes de `apis-frontend-prod`:
 - Los secrets del inventario obligatorio existen en `apis`, `infra` y `blockchain`.
 - `gitlab-pull-secret` esta asociado al service account de `apis`, `infra`, `frontend` y `blockchain`.
 - Traefik esta activo y los Ingress de `frontend`, `apis` e `infra` aparecen en `kubectl get ingress -A`.
-- `trustnews-origin-tls` existe en `kube-system` o esta gestionado por `cert-manager`.
+- Antes del modo publico, `trustnews-origin-tls` contiene un certificado
+  Cloudflare Origin CA vigente cuyo SAN incluye `assermetry.com`.
+- `TLSStore/default` referencia `trustnews-origin-tls` y la cadena se valida por
+  tunel con SNI y la raiz Origin CA correspondiente.
 - En modo tunel, HTTPS responde en `https://localhost:9443` y Keycloak/Gateway mantienen el issuer temporal de localhost.
 - En modo publico, WAF esta instalado, `80/tcp` y `443/tcp` estan abiertos solo hacia el borde HTTP, y `host`, certificado definitivo, `KC_HOSTNAME_URL` y variables de issuer del Gateway estan alineados segun la seccion 2.7.
 - `CONTRACT_ADDRESS` en overlays prod coincide con el contrato desplegado.

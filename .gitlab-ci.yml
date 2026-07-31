@@ -56,8 +56,6 @@ build:
     - hetzner-runner
 
   rules:
-    - if: '$PROFILE =~ /^(cert-manager-prod|origin-tls-staging|origin-tls-prod)$/'
-      when: never
     - changes:
         - api/**
         - web_classic/**
@@ -141,18 +139,11 @@ deploy:
   script:
     - echo "Deploy con Skaffold $SKAFFOLD_VERSION"
     - |
-      case "$PROFILE" in
-        cert-manager-prod|origin-tls-staging|origin-tls-prod)
-          skaffold deploy --profile="$PROFILE"
-          ;;
-        *)
-          test -f build.json || {
-            echo "ERROR: falta build.json para el perfil $PROFILE"
-            exit 1
-          }
-          skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
-          ;;
-      esac
+      test -f build.json || {
+        echo "ERROR: falta build.json para el perfil $PROFILE"
+        exit 1
+      }
+      skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
 
     - echo "Verificando rollout"
     - |
@@ -165,11 +156,6 @@ deploy:
           ;;
         apis-frontend-prod)
           kubectl rollout status deployment -n apis --timeout=120s
-          ;;
-        cert-manager-prod)
-          kubectl rollout status deployment/cert-manager -n cert-manager --timeout=180s
-          kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=180s
-          kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=180s
           ;;
         *)
           echo "Perfil sin verificacion de rollout especifica: $PROFILE"

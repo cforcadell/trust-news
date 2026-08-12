@@ -192,12 +192,12 @@ Skaffold profiles currently defined in `skaffold.yaml`:
 
 Primary deployment documentation:
 
-- [Common Kubernetes procedures](docs/k8s/k8s-common.md)
-- [Local Skaffold deployment](docs/k8s/skaffold-local.md)
-- [Server/Hetzner deployment](docs/k8s/skaffold-server.md)
-- [GitLab, GitHub and release workflow](docs/k8s/gitlab-github-release-workflow.md)
+- [Common Kubernetes procedures](docs/deploy/k8s-common.md)
+- [Local Skaffold deployment](docs/deploy/skaffold-local.md)
+- [Server/Hetzner deployment](docs/deploy/skaffold-server.md)
+- [GitLab, GitHub and release workflow](docs/deploy/gitlab-github-release-workflow.md)
 
-The previous Kubernetes notes are archived in `docs/k8s/old/`.
+The previous Kubernetes notes are archived in `docs/deploy/old/`.
 
 ---
 
@@ -250,7 +250,7 @@ Main local URLs:
 | Kafdrop | `http://localhost:9000` |
 | Grafana | `http://localhost:3000` |
 
-See [skaffold-local.md](docs/k8s/skaffold-local.md) for the full local runbook.
+See [skaffold-local.md](docs/deploy/skaffold-local.md) for the full local runbook.
 
 ---
 
@@ -269,12 +269,12 @@ Current server workflow:
 
 The repo has both GitHub and GitLab remotes documented in:
 
-- [GitLab, GitHub and release workflow](docs/k8s/gitlab-github-release-workflow.md)
+- [GitLab, GitHub and release workflow](docs/deploy/gitlab-github-release-workflow.md)
 
 Server secrets are created outside the repository from private `.env` files.
 The required Kubernetes secrets and variables are documented in:
 
-- [Server/Hetzner deployment](docs/k8s/skaffold-server.md)
+- [Server/Hetzner deployment](docs/deploy/skaffold-server.md)
 
 ---
 
@@ -311,7 +311,7 @@ python3 -m py_compile <python-file>
 node --check <javascript-file>
 ```
 
-For deployment issues, start with the relevant runbook in `docs/k8s/` and then
+For deployment issues, start with the relevant runbook in `docs/deploy/` and then
 inspect live pods/logs with `kubectl`.
 
 ---

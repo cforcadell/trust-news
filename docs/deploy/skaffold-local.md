@@ -302,7 +302,50 @@ MongoDB, limpieza runtime y colecciones:
 
 ---
 
-## 10. Mantenimiento local
+## 10. Validacion local de la Fase 5
+
+La Fase 5 no aplica reglas Cloudflare ni activa `prod-domain` en local. Se usa
+el perfil `apis-frontend` para validar cualquier cambio de Gateway o Traefik
+antes de llevarlo a Hetzner.
+
+El paso 5.0 es solo de inventario y no requiere redesplegar. Confirmar el render
+local y que no contiene los bloqueos exclusivos de produccion:
+
+```bash
+kubectl kustomize --load-restrictor=LoadRestrictionsNone \
+  k8s/ingress/overlays/local > /tmp/assermetry-ingress-local.yaml
+rg -n 'host: localhost|gateway-strip-backend-prefix' \
+  /tmp/assermetry-ingress-local.yaml
+```
+El paso 5.1 conserva deliberadamente la consola administrativa y el realm
+`master` en local. En produccion, Cloudflare exige mTLS permanentemente en esas
+rutas; no se aplica un `deny` total en Traefik porque impediria tambien la via
+administrativa por tunel. No desplegar `prod` o `prod-domain` sobre Kind para
+probarlo. La prueba real del hostname canonico y el tunel se realiza en las
+Fases 6-7; local conserva las herramientas de desarrollo.
+
+
+Cuando se implementen los pasos 5.1 y 5.2, desplegar de nuevo solo si han
+cambiado Gateway, Traefik o sus manifests:
+
+```bash
+./skaffold dev -p apis-frontend
+kubectl port-forward --address 0.0.0.0 \
+  -n kube-system svc/traefik 7443:443
+```
+
+La matriz de pruebas local de la fase debe cubrir:
+
+- login, refresh, logout, polling y flujos Light y Blockchain;
+- metodos validos y no validos (`405`);
+- cuerpo dentro del limite y por encima del limite (`413`);
+- autenticacion ausente o invalida (`401`);
+- documentacion del Gateway y consola de Keycloak accesibles en local.
+
+No se espera un `429` de Cloudflare en local. Si se añade un limite en el
+Gateway o en Traefik, su `429` se prueba aqui de forma controlada.
+
+## 11. Mantenimiento local
 
 Limpiar imagenes no usadas dentro de nodos kind:
 

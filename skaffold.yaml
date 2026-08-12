@@ -257,7 +257,7 @@ profiles:
           - k8s/frontend
           # Traefik/K3s HTTPS edge routes. Keep host/final certificate
           # details in k8s/ingress/overlays/prod once the public domain is known.
-          # See docs/k8s/skaffold-server.md#27-configurar-dominio-y-tls.
+          # See docs/deploy/skaffold-server.md#27-configurar-dominio-y-tls.
           - k8s/ingress/overlays/prod
     portForward:
       - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}

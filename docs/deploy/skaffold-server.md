@@ -503,6 +503,300 @@ Controles minimos requeridos:
 - registrar eventos WAF y revisar falsos positivos;
 - restringir el origen para que el trafico publico llegue por el WAF cuando sea posible.
 
+En el plan Cloudflare Free no esta disponible la accion `Log` para reglas WAF
+personalizadas. La fase de deteccion se adapta sin abrir el origen: mantener el
+gate mTLS, revisar las muestras de Security Events de las ultimas 24 horas y
+probar cada regla con trafico controlado antes de conservar el bloqueo. El plan
+permite cinco reglas personalizadas y una regla de rate limiting; no repartir
+esa unica regla entre refresh o polling y endpoints costosos sin medir primero
+el trafico legitimo.
+
+#### 2.7.3.1 Fase 5, paso 5.0: inventario sin despliegue
+
+En Cloudflare, abrir la zona `assermetry.com` y registrar sin secretos:
+
+1. `Security > WAF > Managed rules`: estado de `Cloudflare Free Managed
+   Ruleset`.
+2. `Security > WAF > Custom rules`: nombre, expresion resumida, accion y estado
+   de cada regla. Debe seguir activa `Temporary mTLS gate - assermetry.com`.
+3. `Security > WAF > Rate limiting rules`: confirmar si la unica regla
+   disponible esta libre u ocupada.
+4. `Security > Events`: revisar las ultimas 24 horas y anotar servicios,
+   acciones y posibles falsos positivos. En Free son muestras, no un log
+   exhaustivo.
+
+Evidencia registrada el 2026-07-31:
+
+- `Temporary mTLS gate - assermetry.com`: activa, accion `Block`, una de
+  cinco reglas personalizadas y 238 eventos mostrados;
+- rate limiting: cero de una regla, slot libre;
+- `Cloudflare managed ruleset`: `Always active` en
+  `Security > Settings > Web application exploits`; contiene 31 reglas
+  visibles, con firmas generales y otras especificas de WordPress; las diez
+  primeras reglas mostradas tienen accion `Block`;
+- Security Events, filtrado por el Rule ID del gate mTLS y por 24 horas: todas
+  las muestras visibles tienen accion `Block`, servicio `Custom rules`,
+  varios paises y rafagas repetidas desde un mismo origen. No se guardan IP en
+  Git;
+- muestras inspeccionadas: `GET /backend/.git/config`, `GET /.git/config`
+  y `GET /`, todas sobre `assermetry.com` y bloqueadas por el gate. Las dos
+  primeras son reconocimiento hostil. La intencion de `GET /` es
+  indeterminada, pero el bloqueo es correcto durante la fase privada porque no
+  presento un certificado cliente valido. No hay evidencia de bloqueo a un
+  tester autorizado. Incluir `/.git` y archivos sensibles en la proteccion
+  permanente;
+- sustitucion de librerias JavaScript inseguras: activa;
+- modo `I'm under attack`: desactivado.
+
+En Hetzner, sin aplicar manifests, contrastar el estado real:
+
+```bash
+kubectl get ingress -A -o wide
+kubectl get svc -A \
+  -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,TYPE:.spec.type,PORTS:.spec.ports[*].port'
+kubectl get pods -A \
+  -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount'
+kubectl get pvc -A
+kubectl get daemonset fluent-bit -n infra
+kubectl get deployment loki grafana -n infra
+```
+
+El resultado esperado es:
+
+- solo `frontend-ingress`, `gateway-ingress` y `keycloak-ingress`;
+- ningun Service de aplicacion con tipo `NodePort` o `LoadBalancer`;
+- Fluent Bit, Loki y Grafana presentes para la observabilidad in-cluster;
+- ningun cambio en `prod-domain`, DNS, issuer, TLS o firewall.
+
+Resultado contrastado en K3s el 2026-07-31:
+
+- solo existen `gateway-ingress`, `frontend-ingress` y
+  `keycloak-ingress`, todos con `host: localhost`;
+- todos los Services de aplicacion e infraestructura son `ClusterIP`;
+- MongoDB, Keycloak DB, Kafka, Kafdrop, Mongo Express, IPFS, RPC Ethereum y
+  `admin-service` no tienen Ingress ni `NodePort`;
+- el unico Service `LoadBalancer` es Traefik en `80/443`, el borde previsto
+  cuyo acceso publico continua controlado por el firewall externo;
+- no se guardan direcciones del cluster en Git.
+
+Guardar la fecha y el resumen de resultados en
+[`../version.md`](../version.md). No copiar IPs, tokens, certificados ni datos
+personales a Git.
+
+Estado de workloads y volumenes contrastado:
+
+- 29 pods preparados y con cero reinicios, incluido el pod de balanceo de
+  Traefik con sus dos contenedores preparados;
+- siete PVC en estado `Bound` y StorageClass `local-path`: tres de
+  blockchain y cuatro de infraestructura;
+- capacidades declaradas: 2 GiB para el minero y 1 GiB para cada uno de los
+  demas PVC. `kubectl get pvc` no informa del espacio realmente utilizado;
+- Loki y Grafana no tienen PVC en los manifests actuales. Sus datos y
+  configuracion son efimeros;
+- Fluent Bit excluye `kube-system` en su filtro actual, de modo que los logs
+  de Traefik no llegan a Loki.
+
+Las dos ultimas brechas se resolveran en el paso de observabilidad de la Fase 5.
+
+Linea base de recursos y observabilidad:
+
+- Fluent Bit: `1/1`; Loki: `1/1`; Grafana: `1/1`; antiguedad 108 dias;
+- nodo: 5% de CPU y 76% de memoria;
+- disco raiz y almacenamiento `local-path`: 75 GiB totales, 38 GiB usados,
+  35 GiB disponibles y 53% de ocupacion;
+- consumidores destacados en la muestra: los tres nodos Geth suman
+  aproximadamente 1,9 GiB, Kafka 577 MiB y Keycloak 469 MiB;
+- umbrales propuestos: memoria 80% aviso y 90% critico; disco 75% aviso y 85%
+  critico.
+
+Comprobacion de APIs:
+
+- Loki permite consultas y devuelve streams de `apis`, `blockchain` e
+  `infra`;
+- `kube-system` no aparece, como corresponde al filtro que excluye Traefik;
+- `frontend` no aparece en la ventana consultada; puede no haber emitido logs
+  recientes;
+- Grafana responde con base de datos `ok`;
+- una primera consulta a `/ready` mediante el proxy de la API de Kubernetes
+  responde `ServiceUnavailable`;
+- dos consultas directas consecutivas dentro del contenedor responden
+  `HTTP 200` y `ready`. El `503` se considera transitorio o propio del
+  camino de proxy, no una indisponibilidad persistente;
+- Loki y Grafana tienen endpoints internos validos;
+- el Deployment de Loki no define `readinessProbe` ni `livenessProbe`;
+- los logs revisados solo muestran subida y limpieza normal de indices TSDB, sin
+  errores en la muestra.
+
+El inventario 5.0 queda cerrado. La ausencia de probes, persistencia de
+Loki/Grafana y logs de Traefik se trata en el paso de observabilidad.
+
+
+#### 2.7.3.2 Fase 5, paso 5.1: aislar la administracion
+
+Mantener la asociacion Application Security mTLS de `assermetry.com`. La
+asociacion hace que Cloudflare solicite y valide certificados; son las reglas
+WAF las que deciden para que rutas son obligatorios.
+
+Usar dos reglas personalizadas:
+
+1. `Permanent mTLS - Keycloak administration`, activa permanentemente y antes
+   de la regla temporal.
+2. `Temporary mTLS gate - assermetry.com`, ya existente, activa durante las
+   pruebas y desactivada unicamente en la Fase 9.
+Estado comprobado tras la creacion:
+
+- regla permanente: activa, accion `Block` y posicion 1. Dos peticiones sin
+  certificado a `/auth/admin/master/console/` y
+  `/auth/realms/master/.well-known/openid-configuration` devolvieron `403` y
+  quedaron registradas como dos eventos en esta regla;
+- regla temporal: activa, accion `Block` y posicion 2;
+- ocupacion: dos de cinco reglas personalizadas.
+
+La separacion entre ambas reglas se comprobo con peticiones sin certificado a
+`/` y `/auth/realms/TrustNews/.well-known/openid-configuration`: ambas
+devolvieron `403`. Security Events atribuyo expresamente la ruta del realm
+`TrustNews` a la regla temporal. Su contador visible paso a 146 y la regla
+permanente permanecio en 4, por lo que las rutas de aplicacion no coincidieron
+con la proteccion administrativa. Los contadores mostrados son muestras
+agregadas; no debe exigirse que aumenten exactamente una unidad por cada
+peticion de prueba.
+
+La prueba positiva posterior desde Microsoft Edge devolvio `403` para `/` y
+`/auth/admin/master/console/`, no el `522` esperado mientras el origen esta
+cerrado. Esto indica que Edge no presento un certificado que Cloudflare
+considerase valido. Antes de reintentar, comprobar
+`AutoSelectCertificateForUrls` en `edge://policy` y que
+`cforcadell-win11-01` siga instalado con clave privada en el almacen personal
+del usuario. No revocar ni reemitir el certificado durante este diagnostico.
+
+Se comprobo que Edge carga y acepta la politica obligatoria, aplicada al
+dispositivo, con patron `https://assermetry.com` y filtro
+`CN=cforcadell-win11-01`. En `CurrentUser\My` tambien se verifico el
+certificado esperado, vigente del 6 de agosto de 2026 al 5 de agosto de 2028,
+con clave privada y EKU `Client Authentication`
+(`1.3.6.1.5.5.7.3.2`). Antes de revisar Cloudflare, cerrar la sesion TLS de
+Edge y repetir la prueba con una negociacion nueva.
+
+El reinicio completo de Edge tampoco cambio el resultado: las rutas de
+aplicacion y administracion siguieron devolviendo `403`. Comprobar ahora, sin
+modificarlo, que el certificado figure `Active` en Cloudflare y que
+`assermetry.com` siga asociado a la CA gestionada.
+
+La inspeccion posterior confirmo ambos extremos: el hostname figura en `Hosts`
+y `CN=cforcadell-win11-01, OU=Tester, O=Assermetry` esta `Active`, emitido por
+la CA gestionada de la cuenta y vigente hasta el 5 de agosto de 2028. Para
+separar un fallo de Edge de un rechazo de Cloudflare, presentar a continuacion
+el certificado de forma explicita con `curl.exe` y Schannel desde el almacen de
+Windows.
+
+La prueba explicita devolvio `522` para `/` y para
+`/auth/admin/master/console/`. Esto confirma que Cloudflare acepta el
+certificado y que las reglas temporal y permanente permiten sus rutas cuando
+`cert_verified` es verdadero; el firewall cerrado del origen produce despues
+el timeout esperado. Los `403` del navegador quedan aislados a la seleccion
+automatica de Edge y no justifican revocar ni reemitir el certificado.
+
+Google Chrome reprodujo el `403` sin mostrar selector de certificado. Como
+`curl.exe` con Schannel si presenta la misma credencial, probar Chromium con
+QUIC/HTTP/3 desactivado de forma temporal antes de revisar VPN, proxy o la
+cadena de emisores anunciada en la negociacion.
+
+Al desactivar temporalmente `Experimental QUIC protocol`, Chrome mostro el
+selector, presento el certificado y recibio `522`. El mTLS de navegador queda
+validado sobre HTTP/2 y el timeout confirma que el origen sigue cerrado. Los
+`403` anteriores quedan atribuidos al uso de QUIC/HTTP/3. Mantener la
+restriccion sin QUIC en el navegador administrativo mientras las rutas
+permanentes dependan de mTLS.
+
+Edge tambien devolvio `522` para `/` despues de desactivar
+`Experimental QUIC protocol`; la politica selecciono el certificado sin
+mostrar dialogo. `/auth/admin/master/console/` tambien devolvio `522`, por lo
+que quedan validadas la seleccion automatica y las reglas temporal y permanente
+con certificado valido. Sustituir ahora el flag por la politica estable
+`QuicAllowed=0`.
+
+Configuracion durable validada en PowerShell con privilegios administrativos:
+
+```powershell
+New-ItemProperty `
+  -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' `
+  -Name 'QuicAllowed' `
+  -PropertyType DWord `
+  -Value 0 `
+  -Force
+```
+
+Tras comprobar `QuicAllowed: false` en `edge://policy`, se devolvio
+`Experimental QUIC protocol` a `Default` y se reinicio Edge. `/` y
+`/auth/admin/master/console/` conservaron el `522`, confirmando que la politica
+estable sustituye correctamente al flag. La politica desactiva QUIC para todo
+Edge en ese dispositivo y debe mantenerse mientras sea el navegador
+administrativo mTLS. Rollback, solo si deja de ser necesaria:
+
+```powershell
+Remove-ItemProperty `
+  -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' `
+  -Name 'QuicAllowed'
+```
+
+En esa prueba, `curl` notifico `certificate is not yet valid`. El uso puntual
+de `-k` permitio aislar la validacion WAF, pero no constituye una solucion ni
+debe incorporarse a scripts o procedimientos normales. La comprobacion mostro
+que el cliente marcaba `2026-07-31 05:05 UTC` y no estaba sincronizado, aunque
+NTP figuraba activo. El certificado servido para `assermetry.com` es valido
+desde `2026-08-04 14:21:20 UTC`, y Cloudflare ya registraba eventos del 12 de
+agosto. El reinicio de `systemd-timesyncd` no corrigio el reloj:
+`timesync-status` mostro cero paquetes y el
+journal registro timeouts para todos los destinos de `ntp.ubuntu.com`, tanto
+IPv4 como IPv6. Esto apunta a falta de conectividad saliente UDP/123; no a un
+fallo del certificado de Cloudflare. Ademas, el cliente se ejecuta sobre
+VirtualBox y su `vboxadd-service` 7.0.12, aunque instalado y habilitado, estaba
+inactivo desde el 13 de junio. Tras arrancarlo, Guest Additions corrigio el
+reloj a `2026-08-12`; `curl` sin `-k` valido TLS correctamente y la ruta
+administrativa devolvio el `403` esperado. En este escenario, `System clock
+synchronized: no` refleja el estado de `systemd-timesyncd`; no invalida la
+hora ya corregida por VirtualBox. El servicio de Guest Additions debe permanecer
+activo.
+
+Expresion de la regla permanente:
+
+```text
+(http.host eq "assermetry.com" and
+ (
+  http.request.uri.path eq "/auth/admin" or
+  starts_with(http.request.uri.path, "/auth/admin/") or
+  http.request.uri.path eq "/auth/realms/master" or
+  starts_with(http.request.uri.path, "/auth/realms/master/")
+ ) and
+ (not cf.tls_client_auth.cert_verified or
+  cf.tls_client_auth.cert_revoked))
+```
+
+Accion: `Block`. La comparacion exacta mas el prefijo terminado en `/` evita
+afectar por accidente a rutas cuyo nombre solo comience de forma parecida.
+
+Mientras ambas reglas estan activas:
+
+- una peticion administrativa sin certificado coincide primero con la regla
+  permanente;
+- una peticion no administrativa sin certificado coincide con la temporal;
+- cualquier ruta con certificado valido continua;
+- Security Events permite revisar por separado ambos tipos de rechazo.
+
+En la Fase 9 se desactiva solo `Temporary mTLS gate - assermetry.com`. No
+desasociar mTLS del hostname y no desactivar la regla permanente.
+
+La administracion por tunel SSH hacia Traefik evita Cloudflare y debe preservar
+Host y SNI `assermetry.com`. El firewall del origen debe continuar impidiendo
+que Internet use esa ruta directa. La documentacion del Gateway permanece
+desactivada en `k8s/apis/gateway/overlays/prod`.
+
+La parte Cloudflare/navegador del paso 5.1 queda cerrada tras probar ambas reglas
+con y sin certificado. La disponibilidad real de `TrustNews` y el acceso
+administrativo por tunel con Host/SNI canonico se validan en las Fases 6-7,
+despues de activar `prod-domain`; no se abre ahora el firewall del origen.
+
+
 #### 2.7.4 TLS del origen con Cloudflare Origin CA
 
 La estrategia productiva usa un certificado Cloudflare Origin CA emitido y

@@ -902,8 +902,8 @@ Main local URLs exposed by Skaffold:
 
 For detailed commands, see:
 
-* `docs/k8s/skaffold.md` for the current Kubernetes/Skaffold workflow.
-* `docs/k8s/kind.md` for Kind setup notes.
+* `docs/deploy/skaffold-local.md` for the current local Kubernetes/Skaffold workflow.
+* `docs/deploy/skaffold-server.md` for the current server Kubernetes/Skaffold workflow.
 * `docs/docker/installation_blockchain.md` for private Geth PoA setup notes.
 * `docs/blockchain/scripts_blockchain.md` for smart contract deploy/test scripts.
 

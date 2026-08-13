@@ -797,6 +797,78 @@ administrativo por tunel con Host/SNI canonico se validan en las Fases 6-7,
 despues de activar `prod-domain`; no se abre ahora el firewall del origen.
 
 
+#### 2.7.3.3 Fase 5, paso 5.2: metodos, cuerpos y rechazos
+
+Gateway y Traefik limitan el cuerpo de las rutas `/backend` a 5 MiB
+(`5242880` bytes). El valor de `GATEWAY_MAX_REQUEST_BODY_BYTES` debe coincidir
+con `gateway-request-body-limit.spec.buffering.maxRequestBodyBytes`. Traefik
+rechaza primero el trafico publico; Gateway repite el control para accesos
+directos al Service y para cuerpos sin `Content-Length`. El limite incluye los
+cuerpos fragmentados y se aplica antes de autenticacion y proxy.
+
+Gateway emite un evento JSON `gateway_access` por respuesta. Incluye
+`request_id`, metodo, ruta sin query string, estado, bytes recibidos y duracion.
+No registra cabeceras de autorizacion ni el cuerpo. Los estados
+`401/403/405/413/429` usan nivel warning y los `5xx` nivel error. Si el cliente
+envia un `X-Request-ID` ASCII seguro se conserva; en otro caso se genera uno y
+se devuelve en la respuesta.
+
+Validacion automatizada:
+
+```bash
+cd api
+tests/venv/bin/python -m pytest -q tests/test_gateway_security.py
+cd ..
+python3 -m py_compile api/gateway/main.py api/gateway/security.py
+
+kubectl kustomize --load-restrictor=LoadRestrictionsNone \
+  k8s/apis/gateway/overlays/local >/tmp/gateway-local.yaml
+kubectl kustomize --load-restrictor=LoadRestrictionsNone \
+  k8s/ingress/overlays/local >/tmp/ingress-local.yaml
+```
+
+La prueba del 2026-08-13 produjo ocho tests correctos y renders validos para
+Gateway e Ingress, tanto local como prod. La imagen real del Gateway tambien se
+construyo e importo correctamente con el maximo de `5242880`.
+
+Con Gateway y Traefik desplegados en Kind, abrir temporalmente el borde:
+
+```bash
+kubectl port-forward -n kube-system svc/traefik 7443:443
+```
+
+En otra terminal, comprobar el metodo y ambos lados del limite:
+
+```bash
+curl -sk -o /dev/null -w "%{http_code}\n" -X DELETE \
+  https://localhost:7443/backend/orders/list
+
+head -c 5242880 /dev/zero | curl -sk -o /dev/null -w "%{http_code}\n" \
+  -X POST -H "Content-Type: application/octet-stream" --data-binary @- \
+  https://localhost:7443/backend/orders/publishNew
+
+head -c 5242881 /dev/zero | curl -sk -o /dev/null -w "%{http_code}\n" \
+  -X POST -H "Content-Type: application/octet-stream" --data-binary @- \
+  https://localhost:7443/backend/orders/publishNew
+```
+
+El resultado observado fue `405`, `403` y `413`. El `403` de la peticion de
+exactamente 5 MiB es esperado sin bearer token y demuestra que Traefik la
+entrego a Gateway; el byte adicional fue rechazado por Traefik. Una prueba
+directa al Service confirmo que la defensa interna de Gateway tambien devuelve
+`413`. Los logs mostraron eventos JSON para `403`, `405` y `413`.
+
+La comprobacion funcional de cuerpos superiores al limite se restringio a dos
+peticiones: 5242918 bytes con `validation_mode=LIGHT` y 5242923 bytes con
+`validation_mode=BLOCKCHAIN`. Las dos devolvieron `413` en Traefik y no
+alcanzaron Gateway, por lo que no iniciaron procesamiento ni consumieron cuotas.
+
+No desplegar aun en Hetzner. Antes deben repetirse con el perfil local completo
+login, refresh, logout, polling y los flujos Light y Blockchain, usando cuerpos
+legitimos. El rate limiting de Cloudflare pertenece al paso 5.3; en 5.2 solo se
+comprueba que Gateway puede registrar un `429` emitido por una dependencia.
+
+
 #### 2.7.4 TLS del origen con Cloudflare Origin CA
 
 La estrategia productiva usa un certificado Cloudflare Origin CA emitido y

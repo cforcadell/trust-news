@@ -753,13 +753,23 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   `403` en la ruta administrativa. `System clock synchronized: no` continua
   describiendo a `systemd-timesyncd`, no a la sincronizacion de Guest
   Additions que corrigio la hora.
-- Paso 5.2, metodos, cuerpos y rechazos: **inventario iniciado**. FastAPI ya
-  limita los metodos a los declarados por ruta y responde `405`, pero Gateway
-  lee actualmente el cuerpo completo en memoria sin imponer un maximo. No se
-  han encontrado rate limits en Gateway/Traefik, un middleware de tamano de
-  cuerpo, access logs estructurados ni un registro uniforme de respuestas
-  `401/403/405/413/429/5xx`. El primer cambio se preparara en local y debera
-  conservar login, refresh, logout, polling y los flujos Light y Blockchain.
+- Paso 5.2, metodos, cuerpos y rechazos: **implementacion local validada;
+  flujos funcionales pendientes**. Gateway y Traefik aplican el mismo maximo de
+  5 MiB. Traefik usa `buffering.maxRequestBodyBytes` y Gateway conserva una
+  defensa interna para peticiones directas o fragmentadas. Gateway emite un
+  evento JSON `gateway_access` por respuesta con `request_id`, metodo, ruta,
+  estado, bytes y duracion; `401/403/405/413/429` se registran como warning y
+  `5xx` como error, sin tokens, query string ni cuerpos. Ocho pruebas unitarias
+  cubren el limite declarado y fragmentado, el replay del cuerpo, el identificador
+  y los estados relevantes. En Kind se verifico `405`; a 5 MiB la peticion
+  alcanzo Gateway y devolvio `403` por falta de credenciales; a 5 MiB + 1 byte
+  Traefik devolvio `413`. Por acceso directo, Gateway devolvio y registro
+  `413` y `405`. Como prueba final de frontera se enviaron exactamente dos
+  payloads JSON por Traefik: 5242918 bytes con `validation_mode=LIGHT` y
+  5242923 bytes con `validation_mode=BLOCKCHAIN`. Ambos devolvieron `413` y
+  no llegaron al Gateway; no se crearon ordenes ni se consumieron cuotas. Antes
+  de desplegar en Hetzner faltan login, refresh, logout, polling y los flujos
+  Light y Blockchain con payloads legitimos.
 - Inventario Cloudflare del 2026-07-31: la regla personalizada
   `Temporary mTLS gate - assermetry.com` esta activa con accion `Block`,
   ocupa una de las cinco reglas disponibles y muestra 238 eventos en la captura
@@ -780,7 +790,8 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   debera cubrir intentos de acceso a `/.git` y otros archivos sensibles.
   La sustitucion de librerias JavaScript inseguras esta activa y el modo
   `I'm under attack` esta desactivado.
-- No se ha desplegado ningun cambio de esta fase.
+- Los cambios de 5.2 se desplegaron solo en Kind para validacion minima; no
+  se ha desplegado ningun cambio de esta fase en Hetzner.
 - `prod-domain` continua inactivo y el origen continua filtrado en `80/tcp` y
   `443/tcp`.
 - La revision estatica del repositorio confirma que solo frontend, Gateway y

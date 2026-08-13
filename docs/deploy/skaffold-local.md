@@ -325,8 +325,8 @@ probarlo. La prueba real del hostname canonico y el tunel se realiza en las
 Fases 6-7; local conserva las herramientas de desarrollo.
 
 
-Cuando se implementen los pasos 5.1 y 5.2, desplegar de nuevo solo si han
-cambiado Gateway, Traefik o sus manifests:
+Para validar el paso 5.2, desplegar de nuevo cuando cambien Gateway, Traefik o
+sus manifests:
 
 ```bash
 ./skaffold dev -p apis-frontend
@@ -341,6 +341,18 @@ La matriz de pruebas local de la fase debe cubrir:
 - cuerpo dentro del limite y por encima del limite (`413`);
 - autenticacion ausente o invalida (`401`);
 - documentacion del Gateway y consola de Keycloak accesibles en local.
+
+El 2026-08-13 se valido el despliegue minimo en Kind: `DELETE` sobre una ruta
+devolvio `405`; un cuerpo de exactamente 5 MiB alcanzo Gateway y devolvio
+`403` por falta de credenciales; 5 MiB + 1 byte fue rechazado por Traefik con
+`413`. El acceso directo al Service confirmo los `413` y `405` internos y
+sus eventos JSON `gateway_access`. Falta repetir la matriz funcional con el
+perfil completo antes de desplegar en Hetzner.
+
+Se ejecutaron despues exactamente dos pruebas superiores a 5 MiB: un JSON de
+5242918 bytes en modo `LIGHT` y otro de 5242923 bytes en modo `BLOCKCHAIN`.
+Traefik devolvio `413` en ambos casos y Gateway no registro los `POST`, por
+lo que no se crearon ordenes ni se consumieron cuotas.
 
 No se espera un `429` de Cloudflare en local. Si se añade un limite en el
 Gateway o en Traefik, su `429` se prueba aqui de forma controlada.

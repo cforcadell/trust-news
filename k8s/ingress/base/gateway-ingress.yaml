@@ -6,7 +6,7 @@ metadata:
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
-    traefik.ingress.kubernetes.io/router.middlewares: apis-gateway-strip-backend-prefix@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: apis-gateway-request-body-limit@kubernetescrd,apis-gateway-strip-backend-prefix@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:

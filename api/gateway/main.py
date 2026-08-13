@@ -9,6 +9,7 @@ from jose import jwt, JWTError
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from jose import jwt
+from gateway.security import RequestSecurityMiddleware
 from common.models.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -24,8 +25,24 @@ load_dotenv()
 
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
+
 logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("api-gateway")
+
+
+def positive_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+        if value <= 0:
+            raise ValueError
+        return value
+    except ValueError:
+        logger.warning("%s=%r no es un entero positivo; se usara %s", name, raw_value, default)
+        return default
+
+
+GATEWAY_MAX_REQUEST_BODY_BYTES = positive_int_env("GATEWAY_MAX_REQUEST_BODY_BYTES", 5_242_880)
 
 api_docs_enabled = os.getenv("GATEWAY_API_DOCS_ENABLED", "true").strip().lower() in {
     "1",
@@ -40,6 +57,11 @@ app = FastAPI(
     docs_url="/docs" if api_docs_enabled else None,
     redoc_url="/redoc" if api_docs_enabled else None,
     openapi_url="/openapi.json" if api_docs_enabled else None,
+)
+app.add_middleware(
+    RequestSecurityMiddleware,
+    max_request_body_bytes=GATEWAY_MAX_REQUEST_BODY_BYTES,
+    logger=logger,
 )
 
 # ============================================================

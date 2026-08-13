@@ -17,3 +17,5 @@ data:
 
   # La documentación interactiva solo se mantiene en local.
   GATEWAY_API_DOCS_ENABLED: "true"
+  # Debe coincidir con el middleware buffering de Traefik.
+  GATEWAY_MAX_REQUEST_BODY_BYTES: "5242880"

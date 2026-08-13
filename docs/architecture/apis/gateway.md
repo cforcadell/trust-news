@@ -23,6 +23,14 @@
 - `GET /validators/cache/{validator_hash}`: recupera detalle de un validador cacheado.
 - `GET /validators/cache/{validator_hash}/validations`: recupera validaciones asociadas a un validador, con filtros opcionales por proveedor/modelo.
 
+## Limites y trazabilidad
+
+El middleware de seguridad rechaza con `413` cualquier cuerpo que supere el
+maximo, incluido si llega fragmentado o sin `Content-Length`. Antes de invocar
+el proxy almacena como maximo ese volumen y reproduce el cuerpo para FastAPI.
+Cada respuesta genera un evento JSON `gateway_access` y devuelve
+`X-Request-ID`; no se registran tokens, query strings ni cuerpos.
+
 ## Daemons
 
 No arranca consumidores ni productores propios. Su cometido es actuar como proxy HTTP autenticado.
@@ -47,4 +55,7 @@ Al arrancar carga `.env`, configura logging, construye URLs internas de microser
 - `KEYCLOAK_REALM`: realm utilizado por el fallback de configuración local.
 - `GATEWAY_API_DOCS_ENABLED`: habilita `/docs`, `/redoc` y `/openapi.json`.
   Los overlays productivos lo establecen a `false`.
+- `GATEWAY_MAX_REQUEST_BODY_BYTES`: maximo positivo del cuerpo HTTP; por
+  defecto `5242880` (5 MiB) y debe coincidir con el middleware de Traefik.
+
 - `PORT`: puerto de uvicorn si se ejecuta directamente.

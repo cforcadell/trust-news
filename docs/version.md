@@ -7,6 +7,7 @@ Assermetry. Los comandos operativos se mantienen en:
 - [`k8s-common.md`](deploy/k8s-common.md): configuracion compartida.
 - [`skaffold-local.md`](deploy/skaffold-local.md): despliegue local con `kind`.
 - [`skaffold-server.md`](deploy/skaffold-server.md): despliegue productivo en Hetzner.
+- [`issues.md`](issues.md): incidencias detectadas y propuestas de mejora por version.
 
 ---
 
@@ -186,7 +187,7 @@ salida.
 | 2 | **Cerrada** | Registrar el dominio, delegar DNS a Cloudflare y asegurar el perimetro inicial | No | No | Dominio, Cloudflare y DNS |
 | 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
-| 5 | **En curso (paso 5.2)** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
+| 5 | **En curso (paso 5.3)** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
 | 6 | **Pendiente** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | No; solo renderizado de `prod-domain` | Si, despliegue definitivo con `prod-domain` | No |
 | 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
@@ -753,23 +754,26 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   `403` en la ruta administrativa. `System clock synchronized: no` continua
   describiendo a `systemd-timesyncd`, no a la sincronizacion de Guest
   Additions que corrigio la hora.
-- Paso 5.2, metodos, cuerpos y rechazos: **implementacion local validada;
-  flujos funcionales pendientes**. Gateway y Traefik aplican el mismo maximo de
-  5 MiB. Traefik usa `buffering.maxRequestBodyBytes` y Gateway conserva una
-  defensa interna para peticiones directas o fragmentadas. Gateway emite un
-  evento JSON `gateway_access` por respuesta con `request_id`, metodo, ruta,
-  estado, bytes y duracion; `401/403/405/413/429` se registran como warning y
-  `5xx` como error, sin tokens, query string ni cuerpos. Ocho pruebas unitarias
-  cubren el limite declarado y fragmentado, el replay del cuerpo, el identificador
-  y los estados relevantes. En Kind se verifico `405`; a 5 MiB la peticion
-  alcanzo Gateway y devolvio `403` por falta de credenciales; a 5 MiB + 1 byte
-  Traefik devolvio `413`. Por acceso directo, Gateway devolvio y registro
-  `413` y `405`. Como prueba final de frontera se enviaron exactamente dos
-  payloads JSON por Traefik: 5242918 bytes con `validation_mode=LIGHT` y
-  5242923 bytes con `validation_mode=BLOCKCHAIN`. Ambos devolvieron `413` y
-  no llegaron al Gateway; no se crearon ordenes ni se consumieron cuotas. Antes
-  de desplegar en Hetzner faltan login, refresh, logout, polling y los flujos
-  Light y Blockchain con payloads legitimos.
+- Paso 5.2, metodos, cuerpos y rechazos: **completado y aceptado en Hetzner**.
+  Gateway y Traefik aplican el mismo maximo de 5 MiB. Traefik usa
+  `buffering.maxRequestBodyBytes` y Gateway conserva una defensa interna para
+  peticiones directas o fragmentadas. Gateway emite un evento JSON
+  `gateway_access` por respuesta con `request_id`, metodo, ruta, estado, bytes y
+  duracion; `401/403/405/413/429` se registran como warning y `5xx` como error,
+  sin tokens, query string ni cuerpos. Ocho pruebas unitarias cubren el limite
+  declarado y fragmentado, el replay del cuerpo, el identificador y los estados
+  relevantes. En Kind se verifico `405`; a 5 MiB la peticion alcanzo Gateway y
+  devolvio `403` por falta de credenciales; a 5 MiB + 1 byte Traefik devolvio
+  `413`. Por acceso directo, Gateway devolvio y registro `413` y `405`. Dos
+  payloads JSON superiores al limite, uno Light y otro Blockchain, devolvieron
+  `413` sin crear ordenes ni consumir cuotas. En Hetzner se confirmaron ambos
+  limites activos con `5242880`, los rechazos `405`, `401` y `413` a traves de Traefik,
+  y el `413` directo del Gateway con `body_bytes=5242881` y `request_id`. El pod
+  permanecio preparado, sin reinicios, y las ordenes legitimas Light y
+  Blockchain completaron el flujo extremo a extremo. La carrera de
+  descubrimiento de validadores observada en Light queda mitigada y registrada
+  como `ISSUE-001` en `docs/issues.md`, con correccion de frescura de cache
+  pendiente.
 - Inventario Cloudflare del 2026-07-31: la regla personalizada
   `Temporary mTLS gate - assermetry.com` esta activa con accion `Block`,
   ocupa una de las cinco reglas disponibles y muestra 238 eventos en la captura
@@ -790,8 +794,10 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   debera cubrir intentos de acceso a `/.git` y otros archivos sensibles.
   La sustitucion de librerias JavaScript inseguras esta activa y el modo
   `I'm under attack` esta desactivado.
-- Los cambios de 5.2 se desplegaron solo en Kind para validacion minima; no
-  se ha desplegado ningun cambio de esta fase en Hetzner.
+- Los cambios de 5.2 se desplegaron y aceptaron en Hetzner el 2026-08-13 con
+  el perfil `apis-frontend-prod`. Gateway y Traefik exponen el limite coherente
+  de 5 MiB; los rechazos por ambos caminos y los flujos legitimos Light y
+  Blockchain quedaron verificados.
 - `prod-domain` continua inactivo y el origen continua filtrado en `80/tcp` y
   `443/tcp`.
 - La revision estatica del repositorio confirma que solo frontend, Gateway y
@@ -854,10 +860,10 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
    ultima. La administracion por SSH usara Traefik directamente, preservando el
    hostname canonico `assermetry.com`; el firewall impedira que Internet
    utilice esa via para evitar Cloudflare.
-3. **5.2 - Metodos, cuerpos y rechazos:** aplicar limites compatibles en
+3. **5.2 - Metodos, cuerpos y rechazos (completado):** aplicar limites compatibles en
    Gateway y Traefik, emitir logs para `401/403/405/413/429/5xx` y probar los
    flujos legitimos antes de desplegar en Hetzner.
-4. **5.3 - Cloudflare:** confirmar la Free Managed Ruleset, crear el conjunto
+4. **5.3 - Cloudflare (en curso):** confirmar la Free Managed Ruleset, crear el conjunto
    minimo de reglas personalizadas permanentes y dedicar la unica regla de rate
    limiting a los endpoints de mayor coste, sin incluir refresh ni polling.
 5. **5.4 - Observabilidad y cierre:** preparar consultas/alertas disponibles,

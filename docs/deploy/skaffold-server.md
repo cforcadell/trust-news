@@ -863,11 +863,17 @@ peticiones: 5242918 bytes con `validation_mode=LIGHT` y 5242923 bytes con
 `validation_mode=BLOCKCHAIN`. Las dos devolvieron `413` en Traefik y no
 alcanzaron Gateway, por lo que no iniciaron procesamiento ni consumieron cuotas.
 
-No desplegar aun en Hetzner. Antes deben repetirse con el perfil local completo
-login, refresh, logout, polling y los flujos Light y Blockchain, usando cuerpos
-legitimos. El rate limiting de Cloudflare pertenece al paso 5.3; en 5.2 solo se
+El despliegue en Hetzner se acepto el 2026-08-13 con el perfil
+`apis-frontend-prod`. ConfigMap y middleware mostraron `5242880`; a traves de Traefik
+se obtuvieron `405`, `401` y `413`, y el acceso directo a Gateway tambien
+devolvio `413`. Su evento estructurado registro `body_bytes=5242881`, estado
+`413` y `request_id`. El pod de Gateway permanecio preparado y sin reinicios.
+Las ordenes legitimas Light y Blockchain completaron el flujo extremo a
+extremo. La carrera de cache de validadores detectada durante la prueba Light
+queda documentada como `ISSUE-001` en `docs/issues.md`; su mitigacion permitio
+recibir las nueve respuestas esperadas, pero la correccion definitiva sigue
+pendiente. El rate limiting de Cloudflare pertenece al paso 5.3; en 5.2 solo se
 comprueba que Gateway puede registrar un `429` emitido por una dependencia.
-
 
 #### 2.7.4 TLS del origen con Cloudflare Origin CA
 

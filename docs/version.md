@@ -187,7 +187,7 @@ salida.
 | 2 | **Cerrada** | Registrar el dominio, delegar DNS a Cloudflare y asegurar el perimetro inicial | No | No | Dominio, Cloudflare y DNS |
 | 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
-| 5 | **En curso (paso 5.3)** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
+| 5 | **En curso (paso 5.4)** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
 | 6 | **Pendiente** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | No; solo renderizado de `prod-domain` | Si, despliegue definitivo con `prod-domain` | No |
 | 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
@@ -798,6 +798,30 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   el perfil `apis-frontend-prod`. Gateway y Traefik exponen el limite coherente
   de 5 MiB; los rechazos por ambos caminos y los flujos legitimos Light y
   Blockchain quedaron verificados.
+- El paso 5.3 se inicio el 2026-08-14. Se contrastaron las rutas reales del
+  Gateway con los limites vigentes de Cloudflare Free y se preparo en
+  `docs/deploy/skaffold-server.md` el despliegue controlado de dos reglas WAF
+  permanentes y la unica regla de rate limiting. El limite inicial es de 5
+  peticiones en 10 segundos por IP para importacion, generacion y publicacion.
+  Token, refresh y polling quedan excluidos porque el plan Free solo permite
+  filtrar el rate limiting por ruta y no puede distinguir el tipo de concesion
+  dentro del endpoint compartido de Keycloak. El dashboard confirmo la managed
+  ruleset como `Always active`, las cuatro reglas WAF quedaron activas en el
+  orden previsto y la regla de rate limiting quedo activa como `1/1`. Las
+  pruebas de recursos no publicos quedaron aceptadas: el control `GET /`
+  devolvio `522` tras superar mTLS, mientras que OpenAPI y las dos rutas Git
+  controladas devolvieron `403`. La regla de metodos tambien quedo aceptada:
+  `DELETE /backend/orders/list` devolvio `403` y el control `GET` devolvio
+  `522`. Una primera rafaga de seis `HEAD` simultaneos no produjo `429`; las
+  seis peticiones devolvieron `522`. La prueba definitiva uso respuestas
+  rapidas `403` de la Free Managed Ruleset: las cinco primeras peticiones
+  pasaron a esa fase, las diez siguientes devolvieron `429` y, tras 15
+  segundos, la recuperacion devolvio de nuevo `403`. Security Events atribuyo
+  las muestras a `Custom rules`, `Managed rules` y `Rate limiting rules`
+  segun lo esperado, sin falsos positivos visibles. No se registran IP ni
+  identificadores de Cloudflare. El paso 5.3 queda aceptado en el borde; los
+  flujos legitimos a traves de Cloudflare son un gate de las Fases 6-7, cuando
+  el origen sea alcanzable. El gate mTLS sigue activo.
 - `prod-domain` continua inactivo y el origen continua filtrado en `80/tcp` y
   `443/tcp`.
 - La revision estatica del repositorio confirma que solo frontend, Gateway y
@@ -863,10 +887,10 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
 3. **5.2 - Metodos, cuerpos y rechazos (completado):** aplicar limites compatibles en
    Gateway y Traefik, emitir logs para `401/403/405/413/429/5xx` y probar los
    flujos legitimos antes de desplegar en Hetzner.
-4. **5.3 - Cloudflare (en curso):** confirmar la Free Managed Ruleset, crear el conjunto
+4. **5.3 - Cloudflare (completado):** confirmar la Free Managed Ruleset, crear el conjunto
    minimo de reglas personalizadas permanentes y dedicar la unica regla de rate
    limiting a los endpoints de mayor coste, sin incluir refresh ni polling.
-5. **5.4 - Observabilidad y cierre:** preparar consultas/alertas disponibles,
+5. **5.4 - Observabilidad y cierre (en curso):** preparar consultas/alertas disponibles,
    generar rechazos controlados, revisar falsos positivos y adjuntar las
    evidencias de salida.
 

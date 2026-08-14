@@ -875,6 +875,242 @@ recibir las nueve respuestas esperadas, pero la correccion definitiva sigue
 pendiente. El rate limiting de Cloudflare pertenece al paso 5.3; en 5.2 solo se
 comprueba que Gateway puede registrar un `429` emitido por una dependencia.
 
+#### 2.7.3.4 Fase 5, paso 5.3: Cloudflare
+
+El paso se inicio el 2026-08-14. No requiere desplegar Kubernetes mientras no
+cambien Gateway, Traefik ni sus manifests. La configuracion se aplica en la zona
+`assermetry.com`, manteniendo activa la regla
+`Temporary mTLS gate - assermetry.com` durante todas las pruebas.
+
+El plan Free permite cinco reglas WAF personalizadas, sin accion `Log`, y una
+regla de rate limiting. La regla de rate limiting solo puede filtrar por ruta,
+usa la IP como caracteristica de conteo y ofrece una ventana y mitigacion de
+10 segundos. Estas restricciones se deben volver a comprobar en el dashboard
+antes de desplegar porque son limites del plan, no del repositorio. Referencias:
+
+- [disponibilidad de WAF](https://developers.cloudflare.com/waf/);
+- [reglas WAF personalizadas](https://developers.cloudflare.com/waf/custom-rules/);
+- [limites de rate limiting](https://developers.cloudflare.com/waf/rate-limiting-rules/).
+
+##### Inventario previo obligatorio
+
+Antes de crear reglas, comprobar y anotar sin direcciones IP ni identificadores
+de cuenta:
+
+1. `Cloudflare Free Managed Ruleset` continua `Always active`.
+2. `Permanent mTLS - Keycloak administration` continua activa y en primer
+   lugar.
+3. `Temporary mTLS gate - assermetry.com` continua activa y en segundo lugar.
+4. Hay tres slots WAF libres y el unico slot de rate limiting sigue libre.
+5. Security Events de las ultimas 24 horas no muestra falsos positivos para el
+   tester autorizado.
+
+No activar `Cloudflare Managed Ruleset` ni `Cloudflare OWASP Core Ruleset`: no
+estan incluidos en Free. No habilitar manualmente reglas especificas de
+WordPress; Assermetry no usa esa tecnologia. Conservar la configuracion por
+defecto de la Free Managed Ruleset y revisar sus eventos muestreados.
+
+Evidencia del 2026-08-14: el dashboard mostro `Cloudflare managed ruleset`
+como `Always active`; las dos reglas mTLS continuaban activas y ordenadas, con
+tres slots WAF y el slot de rate limiting libres. Tras aplicar la configuracion,
+las dos reglas WAF permanentes nuevas quedaron activas en las posiciones 3 y 4,
+el quinto slot quedo libre y `Expensive backend operations per IP` quedo activa
+como unica regla de rate limiting (`1/1`) con umbral `5/10 s`. Las pruebas de
+rechazo y los flujos legitimos siguen pendientes.
+
+##### Regla personalizada 3: recursos no publicos
+
+Nombre: `Permanent block - non-public resources`
+
+Expresion:
+
+```text
+(http.host eq "assermetry.com" and
+ (
+  lower(http.request.uri.path) in {
+   "/backend/docs"
+   "/backend/docs/"
+   "/backend/redoc"
+   "/backend/redoc/"
+   "/backend/openapi.json"
+   "/.git"
+   "/backend/.git"
+  } or
+  starts_with(lower(http.request.uri.path), "/.git/") or
+  starts_with(lower(http.request.uri.path), "/backend/.git/")
+ ))
+```
+
+Accion: `Block`. Situarla despues de las dos reglas mTLS. Agrupar documentacion
+y metadatos Git en una sola regla conserva un slot para ajustes posteriores.
+La documentacion del Gateway ya esta desactivada en produccion; esta regla es
+una defensa externa adicional.
+
+Pruebas controladas con certificado cliente valido:
+
+```text
+GET /backend/openapi.json -> 403 de Cloudflare
+GET /.git/config         -> 403 de Cloudflare
+GET /backend/.git/config -> 403 de Cloudflare
+GET /                    -> no coincide con esta regla
+```
+
+Revisar el Ray ID de cada rechazo en Security Events y confirmar que el servicio
+es `Custom rules` y que coincide con esta regla. No guardar el Ray ID ni la IP
+del cliente en Git.
+
+Prueba aceptada el 2026-08-14 desde Edge con certificado cliente valido:
+`GET /` devolvio `522`, demostrando que la conexion supero el gate mTLS y
+alcanzo el origen cerrado. En la misma sesion, `GET /backend/openapi.json`,
+`GET /.git/config` y `GET /backend/.git/config` devolvieron `403`. El
+contraste con el control `522` confirma que los tres recursos fueron bloqueados
+en Cloudflare por la nueva proteccion y no por ausencia de certificado.
+
+##### Regla personalizada 4: metodos del Gateway
+
+Nombre: `Permanent block - unexpected backend methods`
+
+Expresion:
+
+```text
+(http.host eq "assermetry.com" and
+ (http.request.uri.path eq "/backend" or
+  starts_with(http.request.uri.path, "/backend/")) and
+ not (http.request.method in {"GET" "HEAD" "POST" "OPTIONS"}))
+```
+
+Accion: `Block`. Situarla despues de `Permanent block - non-public resources`.
+La regla solo afecta al Gateway; no limita operaciones administrativas de
+Keycloak, que permanecen bajo mTLS. `OPTIONS` se conserva para preflight y
+`HEAD` para comprobaciones de bajo coste.
+
+Pruebas controladas con certificado valido:
+
+```text
+DELETE /backend/orders/list -> 403 de Cloudflare
+GET    /backend/orders/list -> alcanza el Gateway y exige autenticacion
+POST   /backend/orders/publishNew -> alcanza el Gateway y exige autenticacion
+```
+
+No usar una peticion de publicacion valida en esta comprobacion inicial. Un
+`POST` sin bearer token basta para demostrar que el metodo atraviesa el WAF sin
+crear una orden.
+
+Prueba aceptada el 2026-08-14 desde la misma sesion mTLS de Edge:
+`DELETE /backend/orders/list` devolvio `403`, mientras que el control
+`GET /backend/orders/list` devolvio `522` al continuar hasta el origen
+cerrado. Esto confirma que la regla bloquea el metodo inesperado y permite el
+metodo valido.
+
+##### Unica regla de rate limiting
+
+Nombre: `Expensive backend operations per IP`
+
+Expresion compatible con Free:
+
+```text
+http.request.uri.path in {
+ "/backend/extract_text_from_url"
+ "/backend/assertions/generate"
+ "/backend/orders/publishNew"
+ "/backend/orders/publishWithAssertions"
+}
+```
+
+Configuracion inicial:
+
+- caracteristica: IP, con el centro de datos que Cloudflare incorpora al
+  contador;
+- limite: 5 peticiones por 10 segundos;
+- accion: `Block`;
+- duracion: 10 segundos;
+- respuesta: la predeterminada de Cloudflare (`429`); Free no permite una
+  respuesta de bloqueo personalizada.
+
+La expresion no incluye metodo ni hostname porque esos campos no estan
+disponibles para rate limiting en Free. Las reglas WAF anteriores ya restringen
+el hostname y los metodos publicos previstos.
+
+No incluir el endpoint de token de Keycloak. Login y refresh comparten
+`/auth/realms/TrustNews/protocol/openid-connect/token`, y Free no permite
+distinguir `grant_type=password` o `grant_type=refresh_token` en el cuerpo. Una
+regla por ruta bloquearia tambien refresh legitimos. Tampoco incluir listados,
+consulta de ordenes, eventos ni ningun endpoint de polling.
+
+Validar el umbral sin ejecutar importaciones, IA ni publicaciones reales:
+
+1. Con certificado cliente valido, enviar peticiones `HEAD` escalonadas a una
+   de las cuatro rutas dentro de una ventana de 10 segundos. Gateway puede
+   responder `405`, pero la ruta incrementa el contador sin iniciar el trabajo
+   costoso.
+2. Confirmar que alguna peticion posterior al umbral devuelve `429` de
+   Cloudflare. El rate limiting no garantiza que la sexta peticion sea la
+   primera bloqueada: Cloudflare documenta un retardo de hasta varios segundos
+   entre la deteccion y la actualizacion del contador.
+3. Esperar mas de 10 segundos y comprobar que deja de responder `429`.
+4. Filtrar Security Events por `Rate limiting rules` y revisar la muestra.
+5. Ejecutar una vez los flujos legitimos de importar, generar, publicar Light y
+   publicar Blockchain. Ninguno debe recibir `429`.
+
+El umbral `5/10 s` es inicial. Mantenerlo solo si las pruebas funcionales y las
+muestras no muestran falsos positivos; cualquier ajuste debe documentar el
+motivo y conservar fuera de la regla los endpoints de refresh y polling.
+
+La primera prueba del 2026-08-14 envio seis `HEAD` simultaneos a
+`/backend/assertions/generate`; los seis devolvieron `522` y no se observo
+`429`. Este resultado no valida el bloqueo, pero es compatible con el retardo
+de actualizacion documentado para rafagas simultaneas. Se conserva la regla sin
+cambios y se repite una sola vez con peticiones escalonadas dentro de la misma
+ventana.
+
+La prueba definitiva evito el timeout del origen usando una sonda Log4J inerte,
+con destino `.invalid`, en la query string de la misma ruta. La Free Managed
+Ruleset, que se ejecuta despues de rate limiting, devolvio rapidamente `403`
+sin alcanzar el origen. Tras limpiar la ventana, quince peticiones `HEAD`
+secuenciales produjeron cinco respuestas `403` y diez respuestas `429`: el
+bloqueo comenzo exactamente en la sexta peticion. Pasados 15 segundos, una
+peticion de recuperacion volvio a obtener `403`, confirmando que la mitigacion
+de 10 segundos habia expirado. La ruta temporal `/cdn-cgi/trace`, usada en un
+intento anterior, se retiro de la expresion definitiva porque las respuestas
+internas de Cloudflare no incrementaron este contador.
+
+Security Events confirmo despues, mediante logs muestreados y sin exportarlos,
+los tres servicios esperados: `Custom rules` para las cuatro comprobaciones de
+recursos y metodos, `Managed rules` para la sonda controlada y
+`Rate limiting rules` para los `429`. El detalle de una muestra de rate
+limiting identifico `Expensive backend operations per IP`, metodo `HEAD` y
+ruta `/backend/assertions/generate`. No se conservan en Git IP, Ray ID, Rule ID
+ni Ruleset ID. No se observaron falsos positivos en la muestra revisada.
+
+##### Orden final y criterio de aceptacion
+
+Orden de reglas personalizadas:
+
+1. `Permanent mTLS - Keycloak administration`.
+2. `Temporary mTLS gate - assermetry.com`.
+3. `Permanent block - non-public resources`.
+4. `Permanent block - unexpected backend methods`.
+
+El quinto slot permanece libre. El gate temporal no se desactiva en este paso.
+Cloudflare evalua rate limiting despues de las reglas personalizadas, por lo
+que el trafico sin certificado seguira bloqueado por el gate durante las
+pruebas.
+
+Marcar 5.3 como completado cuando:
+
+- la Free Managed Ruleset y las cuatro reglas personalizadas consten activas;
+- los recursos no publicos y los metodos inesperados devuelvan `403`;
+- la rafaga controlada produzca `429` y se recupere tras la mitigacion;
+- Security Events atribuya correctamente los rechazos, sin falsos positivos;
+- no se hayan abierto el firewall del origen ni `prod-domain`.
+
+Estos criterios de borde quedaron aceptados el 2026-08-14. Login, refresh,
+polling, importacion, generacion y ambos modos de publicacion no se pueden
+probar a traves de Cloudflare mientras el origen permanece cerrado. Su regresion
+funcional se conserva como gate obligatorio de las Fases 6-7, antes de admitir
+trafico general; no se abre el firewall ni se activa `prod-domain` para cerrar
+5.3.
+
 #### 2.7.4 TLS del origen con Cloudflare Origin CA
 
 La estrategia productiva usa un certificado Cloudflare Origin CA emitido y

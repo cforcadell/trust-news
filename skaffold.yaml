@@ -76,13 +76,13 @@ profiles:
         - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
-        - k8s/infra/frontend-logs/*.yaml
       kustomize:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/local
           - k8s/infra/mongo-express/overlays/local
           - k8s/infra/keycloak/overlays/local
+          - k8s/infra/frontend-logs/overlays/local
 
     portForward:
       - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
@@ -188,13 +188,13 @@ profiles:
         - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
-        - k8s/infra/frontend-logs/*.yaml
       kustomize:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/prod 
           - k8s/infra/mongo-express/overlays/prod
           - k8s/infra/keycloak/overlays/prod
+          - k8s/infra/frontend-logs/overlays/prod
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND PROD

@@ -871,6 +871,24 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   Free Managed Ruleset y Security Events, probar cada regla con trafico
   controlado y solo entonces conservar su accion de bloqueo.
 
+- Primer incremento de 5.4 preparado en Git, validado en Kind y pendiente de
+  despliegue en Hetzner: Loki usa un PVC de 2 GiB en Kind y de 5 GiB en
+  Hetzner; Grafana usa 1 GiB en ambos entornos. Se han anadido probes de
+  arranque, disponibilidad y vida, e inclusion de `kube-system` con
+  etiqueta `container` en Fluent Bit. `frontend-logs` sigue el patron de
+  recursos compartidos y overlays `local`/`prod`; Skaffold selecciona el
+  correspondiente en `infra` e `infra-prod`. Ambos perfiles renderizan y
+  superan el dry-run cliente. En Kind, ambos PVC quedaron `Bound`; Loki,
+  Grafana y
+  Fluent Bit quedaron preparados y sin reinicios; sus endpoints de salud
+  respondieron correctamente, y Loki catalogo `kube-system` y `traefik`.
+  La consulta de lineas de Traefik debe repetirse: el reloj local salto del 14
+  al 17 de agosto durante la prueba, Loki devolvio `500` transitorio y los
+  reintentos de Fluent Bit terminaron despues correctamente. Antes de Hetzner
+  se exportaran dashboards/configuracion y evidencias efimeras. El paso sigue
+  abierto hasta validar ingesta y retencion tras reinicio, recursos, reinicios
+  y evidencias controladas de `401/403/429/5xx` en el servidor.
+
 **Secuencia de trabajo**
 
 1. **5.0 - Inventario:** registrar reglas WAF y rate limits existentes, revisar

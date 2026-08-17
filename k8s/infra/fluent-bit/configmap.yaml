@@ -29,20 +29,16 @@ data:
         Kube_Tag_Prefix     kube.var.log.containers.
         Merge_Log           On
 
-    # --- NUEVO FILTRO PARA EXCLUIR RUIDO ---
+    # Keep application logs and kube-system so Traefik reaches Loki. Exclude
+    # namespaces that only add storage or legacy ingress controller noise.
     [FILTER]
         Name    grep
         Match   kube.*
-        # Excluimos explícitamente los namespaces del sistema
-        Exclude $kubernetes['namespace_name'] ^(kube-system|local-path-storage|ingress-nginx)$
-        
-        # Alternativamente, si solo quisieras INCLUIR estrictamente tus 4 namespaces, 
-        # borrarías la línea de arriba y usarías esta (descomentándola):
-        # Regex $kubernetes['namespace_name'] ^(apis|blockchain|infra|frontend)$
+        Exclude $kubernetes['namespace_name'] ^(local-path-storage|ingress-nginx)$
 
     [OUTPUT]
             Name        loki
             Match       *
             Host        loki.infra.svc.cluster.local
             Port        3100
-            Labels      job=fluentbit, namespace=$kubernetes['namespace_name'], pod=$kubernetes['pod_name']
+            Labels      job=fluentbit, namespace=$kubernetes['namespace_name'], pod=$kubernetes['pod_name'], container=$kubernetes['container_name']

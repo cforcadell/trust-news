@@ -1111,6 +1111,85 @@ funcional se conserva como gate obligatorio de las Fases 6-7, antes de admitir
 trafico general; no se abre el firewall ni se activa `prod-domain` para cerrar
 5.3.
 
+#### 2.7.3.5 Fase 5, paso 5.4: observabilidad y cierre
+
+El primer incremento de 5.4 corrige las brechas detectadas en 5.0 sin exponer
+ningun servicio nuevo:
+
+- Loki dispone de un PVC montado en `/tmp/loki`, la ruta usada por su
+  configuracion local: 2 GiB en Kind y 5 GiB en Hetzner;
+- Grafana dispone de un PVC de 1 GiB montado en `/var/lib/grafana`;
+- ambos Deployments tienen `startupProbe`, `readinessProbe` y
+  `livenessProbe` sobre sus endpoints HTTP internos;
+- Fluent Bit deja de excluir `kube-system` y publica la etiqueta
+  `container`, lo que permite aislar los logs de Traefik en Loki. Se siguen
+  excluyendo `local-path-storage` e `ingress-nginx`.
+
+Los PVC usan la StorageClass predeterminada para conservar la compatibilidad
+entre Kind y K3s. En K3s se espera `local-path`. No se crea Ingress,
+`NodePort` ni `LoadBalancer` adicional.
+
+Antes del primer despliegue, exportar los dashboards o configuraciones de
+Grafana que deban conservarse y guardar las evidencias de Loki necesarias. Los
+datos actuales son efimeros: al montar los PVC nuevos, el contenido del
+filesystem de los pods anteriores no se migra automaticamente.
+
+Validacion estatica realizada:
+
+```bash
+git diff --check
+./skaffold render --offline -p infra -o /tmp/skaffold-infra.yaml
+./skaffold render --offline -p infra-prod -o /tmp/skaffold-infra-prod.yaml
+```
+
+Validacion local en Kind del 2026-08-17: ambos PVC quedaron `Bound` con
+StorageClass `standard`; Loki, Grafana y los dos pods de Fluent Bit quedaron
+preparados y sin reinicios. `/ready` respondio `ready` y
+`/api/health` devolvio base de datos `ok`. Loki mostro los valores
+`kube-system` y `traefik` en sus catalogos de etiquetas despues de reiniciar
+Traefik de forma controlada. La consulta de sus lineas no se da aun por
+aceptada: durante la prueba el reloj del entorno salto del 14 al 17 de agosto,
+Loki marco transitoriamente su ingester como no saludable y Fluent Bit recibio
+`500`; los reintentos posteriores terminaron correctamente. Repetir la
+consulta con relojes coherentes en Hetzner antes de cerrar la brecha.
+
+El despliegue en Hetzner conserva el flujo habitual de GitLab CI. Publicar
+estos cambios y lanzar el pipeline manual sobre `postTFM` con:
+
+```dotenv
+PROFILE=infra-prod
+```
+
+El job `build` incluye cambios bajo `k8s/infra/**`; el job `deploy`
+ejecuta `skaffold deploy --build-artifacts=build.json --profile=infra-prod`.
+Skaffold renderiza `frontend-logs/overlays/prod`, donde el patch eleva solo
+`loki-data` a 5 GiB. La anotacion de checksum del DaemonSet provoca el
+rollout de Fluent Bit al cambiar su ConfigMap. El propio job espera los
+rollouts de Loki, Grafana y Fluent Bit y falla si los PVC no solicitan
+respectivamente 5 GiB y 1 GiB. No usar `kubectl apply` manual para este
+despliegue.
+
+Comprobar dos veces `/ready` de Loki y `/api/health` de Grafana, y confirmar
+que los pods permanecen preparados y sin reinicios. En Loki, usar estas
+consultas iniciales sin copiar tokens, IP, Ray IDs ni cuerpos a Git:
+
+```text
+{namespace="kube-system", container="traefik"}
+{namespace="apis", container="gateway"} | json | event="gateway_access"
+{namespace="apis", container="gateway"} | json | status=~"401|403|429|5.."
+{namespace="infra", container="keycloak"} |~ "(?i)(error|exception)"
+```
+
+Generar despues, de forma controlada, un `401`, `403`, `429` y `5xx`;
+correlacionar Gateway/Traefik con Security Events de Cloudflare y revisar
+falsos positivos. Metrics Server no proporciona almacenamiento historico ni
+alertas. Hasta incorporar un backend de metricas, comprobar los umbrales de
+memoria (80%/90%) y disco (75%/85%) con `kubectl top nodes`,
+`kubectl top pods -A` y `df` en el nodo. La persistencia y las probes quedan
+preparadas en Git; 5.4 no se cierra hasta desplegarlas en Hetzner, comprobar
+la retencion tras reinicio y adjuntar las evidencias de rechazos, recursos y
+reinicios.
+
 #### 2.7.4 TLS del origen con Cloudflare Origin CA
 
 La estrategia productiva usa un certificado Cloudflare Origin CA emitido y

@@ -61,6 +61,7 @@ build:
         - web_classic/**
         - skaffold.yaml
         - k8s/apis/**
+        - k8s/infra/**
     - when: manual
 
   before_script:
@@ -150,6 +151,17 @@ deploy:
       case "$PROFILE" in
         infra-prod)
           kubectl rollout status statefulset/mongodb -n infra --timeout=180s
+          kubectl rollout status deployment/loki -n infra --timeout=180s
+          kubectl rollout status deployment/grafana -n infra --timeout=180s
+          kubectl rollout status daemonset/fluent-bit -n infra --timeout=180s
+          test "$(kubectl get pvc loki-data -n infra -o jsonpath='{.spec.resources.requests.storage}')" = "5Gi" || {
+            echo "ERROR: loki-data no solicita 5Gi en infra-prod"
+            exit 1
+          }
+          test "$(kubectl get pvc grafana-data -n infra -o jsonpath='{.spec.resources.requests.storage}')" = "1Gi" || {
+            echo "ERROR: grafana-data no solicita 1Gi en infra-prod"
+            exit 1
+          }
           ;;
         blockchain-prod)
           kubectl rollout status statefulset/geth-miner -n blockchain --timeout=180s

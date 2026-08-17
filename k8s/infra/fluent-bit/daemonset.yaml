@@ -11,6 +11,9 @@ spec:
       app: fluent-bit
   template:
     metadata:
+      # Update after changing configmap.yaml so Kubernetes rolls the pods.
+      annotations:
+        checksum/fluent-bit-config: "9954899eb05989e9ce2378322c5210475cec4d068e3335dd2190c13d362e4dec"
       labels:
         app: fluent-bit
     spec:

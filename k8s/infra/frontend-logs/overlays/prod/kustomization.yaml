@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../deployment-grafana.yaml
+  - ../../deployment-loky.yaml
+  - ../../persistent-volume-claims.yaml
+  - ../../service.grafana.yaml
+  - ../../service-loki.yaml
+
+patches:
+  - path: patch-loki-storage.yaml

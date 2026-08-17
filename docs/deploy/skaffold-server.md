@@ -1210,11 +1210,16 @@ de su historial confirmo que Skaffold desplegaba los Ingress, pero no declaraba
 el chart ni la release Traefik. La correccion queda preparada en Git: los
 perfiles `traefik` y `traefik-prod` fijan el chart `41.0.2`, consumen
 `k8s/traefik/values.yaml` y activan access log JSON sin cabeceras ni
-parametros de consulta. GitLab CI instala Helm 3.21.0 con SHA-256 verificado,
-aplica el upgrade con `--atomic` y comprueba el rollout y
+parametros de consulta. GitLab CI instala Helm 3.21.0 con SHA-256 verificado
+en los jobs `build` y `deploy`, y aplica el upgrade con `--atomic` y comprueba el rollout y
 `--accesslog=true`. El esquema, el render real del
 chart, el `build.json` sin imagenes y el YAML estan validados. No ejecutar
 `helm upgrade` manual ni parchear el Deployment.
+
+El primer pipeline `traefik-prod` fallo en `build` antes de generar
+artefactos: Skaffold inicializa el deployer Helm tambien durante esa fase y el
+cliente solo estaba instalado en `deploy`. No hubo cambios en Kubernetes. La
+correccion instala Helm, con el mismo checksum, en ambos jobs.
 
 Publicar los cambios y lanzar un pipeline manual sobre `postTFM` con:
 

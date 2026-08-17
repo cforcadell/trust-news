@@ -936,14 +936,17 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   ni la release. La correccion queda preparada en Git: los perfiles `traefik`
   y `traefik-prod` fijan el chart `41.0.2`, consumen valores versionados y
   activan access log JSON descartando cabeceras y parametros de consulta.
-  GitLab CI instala Helm 3.21.0 tras verificar su SHA-256, aplica el upgrade
-  con `--atomic` y comprueba el rollout y el argumento `--accesslog=true`. El
+  GitLab CI instala Helm 3.21.0 en los jobs `build` y `deploy` tras verificar
+  su SHA-256, y aplica el upgrade con `--atomic` y comprueba el rollout y el argumento `--accesslog=true`. El
   esquema Skaffold, el render real del
   chart, el `build.json` sin imagenes y el YAML estan validados. No ejecutar
   un `helm upgrade` manual ni parchear el Deployment; falta publicar y
   desplegar `traefik-prod` mediante el pipeline. Como el servidor no dispone
   de `jq`, el JSON se resume con `python3` sin instalar paquetes ni mostrar
-  lineas de log.
+  lineas de log. El primer pipeline `traefik-prod` fallo en `build` antes de
+  generar artefactos porque Skaffold inicializa el deployer Helm tambien en esa
+  fase y el cliente solo estaba instalado en `deploy`. No hubo cambios en el
+  cluster. La correccion instala el cliente verificado en ambos jobs.
 
 **Siguientes pasos de 5.4**
 

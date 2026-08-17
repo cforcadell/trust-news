@@ -1,0 +1,20 @@
+# Traefik is deployed by Skaffold using the pinned Helm chart in skaffold.yaml.
+# Keep this file free of environment-specific addresses and secrets.
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: true
+
+accessLog:
+  enabled: true
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+    queryParameters:
+      defaultMode: drop

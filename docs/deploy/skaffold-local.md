@@ -185,19 +185,23 @@ kubectl get pods -n frontend
 kubectl logs -n apis -f
 ```
 
-El frontend ya no termina TLS ni proxifica `/backend` o `/auth`; esas rutas las publica Traefik mediante los manifiestos de `k8s/ingress`. El overlay local de ingress genera `trustnews-origin-tls` desde `web_classic/certs/fullchain.pem` y `web_classic/certs/privkey.pem`; en prod/Hetzner ese secret se crea manualmente segun el runbook server. En `kind`, Traefik debe estar instalado en el cluster antes de usar la entrada HTTPS local:
+El frontend ya no termina TLS ni proxifica `/backend` o `/auth`; esas rutas
+las publica Traefik mediante los manifiestos de `k8s/ingress`. El overlay local
+de ingress genera `trustnews-origin-tls` desde
+`web_classic/certs/fullchain.pem` y `web_classic/certs/privkey.pem`; en
+prod/Hetzner ese secret se crea manualmente segun el runbook server.
+
+En `kind`, instalar o actualizar Traefik exclusivamente mediante el perfil
+Skaffold. No ejecutar `helm upgrade` manual:
 
 ```bash
-helm repo add traefik https://traefik.github.io/charts
-helm repo update
-
-helm upgrade --install traefik traefik/traefik \
-  --namespace kube-system \
-  --set ingressClass.enabled=true \
-  --set ingressClass.isDefaultClass=true \
-  --set providers.kubernetesIngress.enabled=true \
-  --set providers.kubernetesCRD.enabled=true
+./skaffold deploy -p traefik
 ```
+
+El perfil fija el chart `41.0.2` y consume
+`k8s/traefik/values.yaml`. Mantiene la clase Ingress predeterminada y los
+providers Kubernetes Ingress/CRD, activa access logs JSON sin cabeceras ni
+parametros de consulta y usa rollback atomico durante los upgrades.
 
 Comprobar que el controlador esta listo:
 

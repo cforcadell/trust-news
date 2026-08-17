@@ -9,6 +9,8 @@ variables:
     value: "apis-frontend-prod"
     description: "Perfil de Skaffold"
   SKAFFOLD_VERSION: "v2.17.3"
+  HELM_VERSION: "v3.21.0"
+  HELM_LINUX_AMD64_SHA256: "0093eb572e3d2380f094df162ddb525e219249de88957afe24cfbb19632acd36"
   DOCKER_BUILDKIT: "1"
 
 .kube_access:
@@ -136,6 +138,11 @@ deploy:
     - !reference [.kube_access, before_script]
     - curl -Lo skaffold "https://storage.googleapis.com/skaffold/releases/$SKAFFOLD_VERSION/skaffold-linux-amd64"
     - install skaffold /usr/local/bin/
+    - curl -Lo /tmp/helm.tar.gz "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+    - echo "$HELM_LINUX_AMD64_SHA256  /tmp/helm.tar.gz" | sha256sum -c -
+    - tar -xzf /tmp/helm.tar.gz -C /tmp
+    - install /tmp/linux-amd64/helm /usr/local/bin/
+    - helm version --short
 
   script:
     - echo "Deploy con Skaffold $SKAFFOLD_VERSION"
@@ -149,6 +156,17 @@ deploy:
     - echo "Verificando rollout"
     - |
       case "$PROFILE" in
+        traefik-prod)
+          kubectl rollout status deployment/traefik -n kube-system --timeout=180s
+          traefik_args="$(kubectl get deployment traefik -n kube-system -o jsonpath='{.spec.template.spec.containers[0].args}')"
+          case "$traefik_args" in
+            *--accesslog=true*) ;;
+            *)
+              echo "ERROR: Traefik no tiene access log activo"
+              exit 1
+              ;;
+          esac
+          ;;
         infra-prod)
           kubectl rollout status statefulset/mongodb -n infra --timeout=180s
           kubectl rollout status deployment/loki -n infra --timeout=180s

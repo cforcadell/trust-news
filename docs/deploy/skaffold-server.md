@@ -366,6 +366,14 @@ K3s publica HTTPS mediante Traefik. El frontend ya no genera ni monta
 cluster y Traefik enruta `/`, `/backend` y `/auth` por el entrypoint
 `websecure`.
 
+El controlador Traefik se instala y actualiza exclusivamente con Skaffold:
+`traefik` en local y `traefik-prod` en Hetzner. Ambos perfiles fijan el
+chart `41.0.2` y usan `k8s/traefik/values.yaml`. El job `deploy` instala
+el cliente Helm verificado que necesita el deployer Helm de Skaffold. Los
+upgrades usan `--atomic`: si el rollout falla, Helm restaura la revision
+anterior y el pipeline termina con error. No ejecutar `helm upgrade` ni
+parchear el Deployment manualmente.
+
 `k8s/ingress/base/tls-store.yaml` configura `trustnews-origin-tls` como
 certificado por defecto de Traefik. En Hetzner/prod ese secret debe crearse antes
 de desplegar `apis-frontend-prod` con `apply_tls_secret`; `k8s/ingress/base/kustomization.yaml`
@@ -1153,8 +1161,9 @@ Loki marco transitoriamente su ingester como no saludable y Fluent Bit recibio
 `500`; los reintentos posteriores terminaron correctamente. Repetir la
 consulta con relojes coherentes en Hetzner antes de cerrar la brecha.
 
-El despliegue en Hetzner conserva el flujo habitual de GitLab CI. Publicar
-estos cambios y lanzar el pipeline manual sobre `postTFM` con:
+El despliegue en Hetzner se ejecuto el 2026-08-17 y queda pendiente recopilar
+la evidencia posdespliegue. El flujo reproducible es GitLab CI: publicar los
+cambios y lanzar el pipeline manual sobre `postTFM` con:
 
 ```dotenv
 PROFILE=infra-prod
@@ -1169,9 +1178,71 @@ rollouts de Loki, Grafana y Fluent Bit y falla si los PVC no solicitan
 respectivamente 5 GiB y 1 GiB. No usar `kubectl apply` manual para este
 despliegue.
 
+Evidencia recogida el 2026-08-17 a las 14:35 UTC: los rollouts de Loki, Grafana
+y Fluent Bit finalizaron correctamente; `loki-data` y `grafana-data` estaban
+`Bound` sobre `local-path` con 5 GiB y 1 GiB; los tres componentes estaban
+preparados y sin reinicios. Se omiten nombres de pod y datos identificativos
+del servidor.
+
+Salud validada el 2026-08-17 a las 14:37 UTC: dos muestras separadas por 16
+segundos devolvieron Loki `ready` y Grafana 11.5.2 con base de datos `ok`.
+Loki, Grafana y Fluent Bit permanecieron preparados y con cero reinicios.
+
+La primera consulta de ingesta en Hetzner devolvio correctamente el catalogo
+de namespaces de Loki, incluidos `apis` y `kube-system`, pero no encontro
+streams de Traefik ni Gateway en las ultimas 24 horas. La consulta ampliada
+confirmo ingesta actual a las 14:44 UTC desde `coredns`, `news-chain` y
+`evidence-search`; no hay una interrupcion general entre Fluent Bit y Loki.
+El resumen de 162 lineas internas de Fluent Bit se clasifico despues en once
+eventos entre las 09:04:43 y las 09:06:39 UTC: seis errores genericos, dos
+fallos de envio, dos reintentos y una respuesta HTTP 500 de Loki. La ultima
+hora no contenia eventos y la ingesta actual estaba confirmada; se consideran
+transitorios del despliegue, no un fallo persistente. Una peticion GET
+controlada, sin credenciales y sin escritura devolvio el `403` esperado;
+Gateway genero dos muestras en Loki a las 14:50:00 UTC. Traefik no genero
+muestras en la misma ventana. Sus argumentos activos no habilitan access log;
+tampoco existe un `HelmChartConfig/traefik` ni un `HelmChart/traefik`
+empaquetado de K3s. El Deployment pertenece a la release Helm `traefik`,
+revision 1, con chart `traefik-41.0.2` e imagen
+`docker.io/traefik:v3.7.6`. La release figura desplegada y el Deployment no
+tiene `ownerReference`, como es habitual con Helm. La revision del proyecto y
+de su historial confirmo que Skaffold desplegaba los Ingress, pero no declaraba
+el chart ni la release Traefik. La correccion queda preparada en Git: los
+perfiles `traefik` y `traefik-prod` fijan el chart `41.0.2`, consumen
+`k8s/traefik/values.yaml` y activan access log JSON sin cabeceras ni
+parametros de consulta. GitLab CI instala Helm 3.21.0 con SHA-256 verificado,
+aplica el upgrade con `--atomic` y comprueba el rollout y
+`--accesslog=true`. El esquema, el render real del
+chart, el `build.json` sin imagenes y el YAML estan validados. No ejecutar
+`helm upgrade` manual ni parchear el Deployment.
+
+Publicar los cambios y lanzar un pipeline manual sobre `postTFM` con:
+
+```dotenv
+PROFILE=traefik-prod
+```
+
+El servidor no dispone de `jq`; usar `python3` para resumir el JSON sin
+mostrar lineas de log y sin instalar paquetes adicionales.
+
 Comprobar dos veces `/ready` de Loki y `/api/health` de Grafana, y confirmar
 que los pods permanecen preparados y sin reinicios. En Loki, usar estas
 consultas iniciales sin copiar tokens, IP, Ray IDs ni cuerpos a Git:
+
+Para acceder a Grafana desde Windows sin publicar ningun puerto del servicio,
+crear el port-forward remoto y transportarlo por SSH. Se usa el puerto local
+`13000` porque el `3000` puede estar ocupado o reservado por Windows:
+
+```bat
+ssh -o ExitOnForwardFailure=yes -i .\id_rsa_hetzner_deploy -p 2222 -L 13000:127.0.0.1:3000 sysadmin@<SERVER_IP> -t "kubectl port-forward --address 127.0.0.1 -n infra svc/grafana 3000:3000"
+```
+
+Abrir `http://127.0.0.1:13000`. El mensaje remoto
+`Forwarding from 127.0.0.1:3000` confirma el `kubectl port-forward`; la opcion
+`ExitOnForwardFailure=yes` evita mantener la sesion si falla el enlace local.
+No registrar la IP real del servidor en Git. Este acceso se valido el
+2026-08-17, pero solo demuestra alcanzabilidad: ejecutar igualmente las
+comprobaciones de salud, persistencia y reinicios.
 
 ```text
 {namespace="kube-system", container="traefik"}
@@ -1185,10 +1256,10 @@ correlacionar Gateway/Traefik con Security Events de Cloudflare y revisar
 falsos positivos. Metrics Server no proporciona almacenamiento historico ni
 alertas. Hasta incorporar un backend de metricas, comprobar los umbrales de
 memoria (80%/90%) y disco (75%/85%) con `kubectl top nodes`,
-`kubectl top pods -A` y `df` en el nodo. La persistencia y las probes quedan
-preparadas en Git; 5.4 no se cierra hasta desplegarlas en Hetzner, comprobar
-la retencion tras reinicio y adjuntar las evidencias de rechazos, recursos y
-reinicios.
+`kubectl top pods -A` y `df` en el nodo. La persistencia y las probes ya estan
+desplegadas en Hetzner y su estado basico ha sido verificado; 5.4 no se cierra
+hasta comprobar la retencion tras reinicio y adjuntar las evidencias de
+rechazos, recursos y reinicios.
 
 #### 2.7.4 TLS del origen con Cloudflare Origin CA
 

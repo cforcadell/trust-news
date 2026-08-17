@@ -871,8 +871,9 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   Free Managed Ruleset y Security Events, probar cada regla con trafico
   controlado y solo entonces conservar su accion de bloqueo.
 
-- Primer incremento de 5.4 preparado en Git, validado en Kind y pendiente de
-  despliegue en Hetzner: Loki usa un PVC de 2 GiB en Kind y de 5 GiB en
+- Primer incremento de 5.4 preparado en Git, validado en Kind y desplegado en
+  Hetzner el 2026-08-17, segun confirmacion del operador; su validacion
+  posdespliegue continua abierta: Loki usa un PVC de 2 GiB en Kind y de 5 GiB en
   Hetzner; Grafana usa 1 GiB en ambos entornos. Se han anadido probes de
   arranque, disponibilidad y vida, e inclusion de `kube-system` con
   etiqueta `container` en Fluent Bit. `frontend-logs` sigue el patron de
@@ -884,10 +885,82 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   respondieron correctamente, y Loki catalogo `kube-system` y `traefik`.
   La consulta de lineas de Traefik debe repetirse: el reloj local salto del 14
   al 17 de agosto durante la prueba, Loki devolvio `500` transitorio y los
-  reintentos de Fluent Bit terminaron despues correctamente. Antes de Hetzner
-  se exportaran dashboards/configuracion y evidencias efimeras. El paso sigue
-  abierto hasta validar ingesta y retencion tras reinicio, recursos, reinicios
-  y evidencias controladas de `401/403/429/5xx` en el servidor.
+  reintentos de Fluent Bit terminaron despues correctamente. Falta confirmar si
+  antes del despliegue se exportaron los dashboards, la configuracion y las
+  evidencias efimeras que debian conservarse. El paso sigue abierto hasta
+  validar ingesta y retencion tras reinicio, recursos, reinicios y evidencias
+  controladas de `401/403/429/5xx` en el servidor.
+
+- El 2026-08-17 se confirmo el acceso operativo a Grafana en Hetzner mediante
+  un doble tunel: `kubectl port-forward` escucha en el puerto `3000` del
+  servidor y SSH lo publica unicamente en `127.0.0.1:13000` del puesto de
+  operacion. Se uso `13000` porque Windows no permitio enlazar el puerto local
+  `3000`. Esta prueba acredita la alcanzabilidad privada de Grafana, sin crear
+  Ingress ni exponer el servicio; no acredita por si sola los PVC, las probes,
+  la retencion de Loki ni la ausencia de reinicios.
+
+- Validacion posdespliegue del 2026-08-17 a las 14:35 UTC: los rollouts de
+  Loki, Grafana y Fluent Bit finalizaron correctamente. Los PVC `loki-data` y
+  `grafana-data` estan `Bound` con StorageClass `local-path`, y capacidad y
+  solicitud de 5 GiB y 1 GiB respectivamente. Los pods de los tres componentes
+  estaban preparados y acumulaban cero reinicios. No se guardan nombres de pod
+  ni datos identificativos del servidor.
+
+- Salud posdespliegue validada el 2026-08-17 a las 14:37 UTC: dos muestras
+  separadas por 16 segundos devolvieron Loki `ready` y Grafana 11.5.2 con
+  base de datos `ok`. Loki, Grafana y Fluent Bit permanecieron preparados y
+  con cero reinicios en ambas muestras.
+
+- Diagnostico de ingesta del 2026-08-17: la API de Loki respondio `success` y
+  su catalogo contiene `apis`, `blockchain`, `infra` y `kube-system`. Sin
+  embargo, las consultas exactas de Traefik y Gateway no devolvieron streams
+  en la ventana de 24 horas. Una consulta ampliada confirmo ingesta actual a
+  las 14:44 UTC desde `coredns`, `news-chain` y `evidence-search`, por lo que
+  no existe una interrupcion general entre Fluent Bit y Loki. El resumen de
+  Fluent Bit examino 162 lineas. La clasificacion posterior identifico once
+  eventos entre las 09:04:43 y las 09:06:39 UTC: seis errores genericos, dos
+  fallos de envio, dos reintentos y una respuesta HTTP 500 de Loki. No hubo
+  eventos en la ultima hora y la ingesta actual estaba confirmada, por lo que
+  se consideran transitorios del despliegue, no un fallo persistente. El paso
+  3 avanzo con una peticion GET controlada y sin credenciales a una ruta
+  protegida: devolvio el `403` esperado y Gateway genero dos muestras en Loki
+  a las 14:50:00 UTC. Traefik no genero ninguna muestra en la misma ventana.
+  La inspeccion posterior confirmo que sus argumentos no habilitan access log.
+  Tampoco existe un `HelmChartConfig/traefik` ni un `HelmChart/traefik`
+  empaquetado de K3s. El Deployment pertenece a la release Helm `traefik`,
+  revision 1, con chart `traefik-41.0.2` e imagen
+  `docker.io/traefik:v3.7.6`; la release figura desplegada y el Deployment no
+  tiene `ownerReference`, como es habitual en recursos gestionados por Helm.
+  La revision del proyecto y de su historial confirmo una brecha de
+  automatizacion: Skaffold desplegaba los Ingress, pero no declaraba el chart
+  ni la release. La correccion queda preparada en Git: los perfiles `traefik`
+  y `traefik-prod` fijan el chart `41.0.2`, consumen valores versionados y
+  activan access log JSON descartando cabeceras y parametros de consulta.
+  GitLab CI instala Helm 3.21.0 tras verificar su SHA-256, aplica el upgrade
+  con `--atomic` y comprueba el rollout y el argumento `--accesslog=true`. El
+  esquema Skaffold, el render real del
+  chart, el `build.json` sin imagenes y el YAML estan validados. No ejecutar
+  un `helm upgrade` manual ni parchear el Deployment; falta publicar y
+  desplegar `traefik-prod` mediante el pipeline. Como el servidor no dispone
+  de `jq`, el JSON se resume con `python3` sin instalar paquetes ni mostrar
+  lineas de log.
+
+**Siguientes pasos de 5.4**
+
+1. **Completado:** evidencia de rollouts, PVC, pods preparados y reinicios del
+   despliegue `infra-prod`.
+2. **Completado:** salud de Loki y Grafana comprobada dos veces; componentes
+   preparados y sin reinicios inesperados.
+3. **En curso:** Gateway confirmado en Loki; desplegar `traefik-prod` mediante
+   Skaffold y confirmar sus access logs con relojes coherentes.
+4. Reiniciar de forma controlada Loki y Grafana y demostrar que los datos y la
+   configuracion persisten.
+5. Generar y correlacionar evidencias controladas de `401`, `403`, `429` y
+   `5xx`, revisando tambien Security Events y falsos positivos.
+6. Registrar CPU, memoria y disco frente a los umbrales acordados y adjuntar
+   las evidencias sin secretos, IP, Ray IDs ni cuerpos sensibles.
+7. Cerrar 5.4 y la Fase 5 solo si todas las comprobaciones anteriores quedan
+   aceptadas; despues se puede iniciar la Fase 6.
 
 **Secuencia de trabajo**
 

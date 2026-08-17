@@ -25,6 +25,46 @@ profiles:
         - k8s/namespaces.yaml
 
   # ---------------------------------------------------------
+  # PERFIL: TRAEFIK
+  # ---------------------------------------------------------
+  - name: traefik
+    deploy:
+      helm:
+        flags:
+          upgrade:
+            - --atomic
+        releases:
+          - name: traefik
+            remoteChart: traefik
+            repo: https://traefik.github.io/charts
+            namespace: kube-system
+            version: 41.0.2
+            valuesFiles:
+              - k8s/traefik/values.yaml
+            upgradeOnChange: true
+            wait: true
+
+  # ---------------------------------------------------------
+  # PERFIL: TRAEFIK PROD
+  # ---------------------------------------------------------
+  - name: traefik-prod
+    deploy:
+      helm:
+        flags:
+          upgrade:
+            - --atomic
+        releases:
+          - name: traefik
+            remoteChart: traefik
+            repo: https://traefik.github.io/charts
+            namespace: kube-system
+            version: 41.0.2
+            valuesFiles:
+              - k8s/traefik/values.yaml
+            upgradeOnChange: true
+            wait: true
+
+  # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN
   # ---------------------------------------------------------
   - name: blockchain

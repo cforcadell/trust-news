@@ -1124,7 +1124,7 @@ trafico general; no se abre el firewall ni se activa `prod-domain` para cerrar
 El primer incremento de 5.4 corrige las brechas detectadas en 5.0 sin exponer
 ningun servicio nuevo:
 
-- Loki dispone de un PVC montado en `/tmp/loki`, la ruta usada por su
+- Loki dispone de un PVC montado en `/loki`, la ruta usada por su
   configuracion local: 2 GiB en Kind y 5 GiB en Hetzner;
 - Grafana dispone de un PVC de 1 GiB montado en `/var/lib/grafana`;
 - ambos Deployments tienen `startupProbe`, `readinessProbe` y
@@ -1211,22 +1211,51 @@ el chart ni la release Traefik. La correccion queda preparada en Git: los
 perfiles `traefik` y `traefik-prod` fijan el chart `41.0.2`, consumen
 `k8s/traefik/values.yaml` y activan access log JSON sin cabeceras ni
 parametros de consulta. GitLab CI instala Helm 3.21.0 con SHA-256 verificado
-en los jobs `build` y `deploy`, y aplica el upgrade con `--atomic` y comprueba el rollout y
-`--accesslog=true`. El esquema, el render real del
+en los jobs `build` y `deploy`, aplica el upgrade con `--atomic` y
+comprueba el rollout y `--accesslog=true`. El esquema, el render real del
 chart, el `build.json` sin imagenes y el YAML estan validados. No ejecutar
 `helm upgrade` manual ni parchear el Deployment.
 
-El primer pipeline `traefik-prod` fallo en `build` antes de generar
-artefactos: Skaffold inicializa el deployer Helm tambien durante esa fase y el
-cliente solo estaba instalado en `deploy`. No hubo cambios en Kubernetes. La
-correccion instala Helm, con el mismo checksum, en ambos jobs. El segundo
-pipeline actualizo correctamente la release a la revision 2 y dejo Traefik
-preparado, pero Skaffold termino con codigo 1 tras `nothing to deploy`: el
-perfil heredaba el deployer global `kubectl` sin manifests. El cambio remoto
-si se aplico. Los perfiles Traefik eliminan ahora `/deploy/kubectl` mediante
-un parche y quedan como perfiles exclusivamente Helm.
+El primer pipeline `traefik-prod` fallo en `build` porque Helm solo estaba
+instalado en `deploy`; no hubo cambios en Kubernetes. El segundo actualizo la
+release a la revision 2, pero termino con codigo 1 porque el perfil heredaba el
+deployer global `kubectl` sin manifests. El tercero, con Helm en ambos jobs y
+los perfiles exclusivamente Helm, finalizo correctamente el 2026-08-17 a las
+15:41 UTC: release en revision 3, Deployment preparado, rollout aceptado y
+comprobacion de access log superada. A las 15:44 UTC se confirmaron de nuevo el
+rollout, un pod preparado con cero reinicios y los argumentos de access log,
+formato JSON, descarte de cabeceras y descarte de parametros de consulta. A las
+15:46 UTC, las peticiones controladas devolvieron frontend `200`, discovery
+OIDC `200` y Gateway protegido `403`. Loki respondio `success`, pero el
+primer extractor no encontro `DownstreamStatus`. La lectura directa y
+resumida de stdout confirmo 25 lineas, tres JSON de access log y los tres
+eventos controlados: dos `200` y un `403`. Traefik genera correctamente los
+registros. La consulta estructural de Loki devolvio tres streams y 50 muestras
+con campos superiores `kubernetes` y `log`: Fluent Bit conserva el evento en
+`log` con un prefijo anterior al JSON. La ingesta quedo confirmada con una
+correlacion final que recupero exactamente los tres eventos de las 15:46:23
+UTC: `GET /` con `200`, discovery OIDC con `200` y
+`GET /backend/orders/list` con `403`.
 
-Publicar los cambios y lanzar un pipeline manual sobre `postTFM` con:
+La linea base de persistencia de las 15:53 UTC confirmo ambos PVC `Bound`, pods
+preparados y sin reinicios, la base de Grafana presente con 1.110.016 bytes y
+Loki `ready`. Los identificadores y el hash se conservan solo para la
+comparacion operativa y no se registran en esta guia.
+
+A las 15:55 UTC, el reinicio controlado de Loki creo un pod nuevo preparado y
+sin reinicios, mantuvo el mismo PVC de 5 GiB y devolvio `ready`. La primera
+consulta historica devolvio cero eventos mientras el pod anterior aun figuraba
+preparado y pendiente de terminar. Tras quedar una sola replica preparada, la
+consulta del mismo intervalo devolvio cero streams y cero muestras. El
+diagnostico confirmo la causa: el PVC estaba montado en `/tmp/loki`, vacio,
+mientras la configuracion efectiva usa `/loki` para `path_prefix`, chunks y
+WAL. El manifiesto se corrige para montar `loki-data` en `/loki`; debe
+desplegarse con `infra-prod` y repetir la prueba antes de reiniciar Grafana.
+El overlay productivo se renderizo localmente y conserva la imagen 3.0.0, las
+probes y `claimName: loki-data`, con `mountPath: /loki`.
+
+El procedimiento reproducible es publicar los cambios y lanzar un pipeline
+manual sobre `postTFM` con:
 
 ```dotenv
 PROFILE=traefik-prod

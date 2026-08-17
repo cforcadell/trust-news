@@ -937,22 +937,32 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   y `traefik-prod` fijan el chart `41.0.2`, consumen valores versionados y
   activan access log JSON descartando cabeceras y parametros de consulta.
   GitLab CI instala Helm 3.21.0 en los jobs `build` y `deploy` tras verificar
-  su SHA-256, y aplica el upgrade con `--atomic` y comprueba el rollout y el argumento `--accesslog=true`. El
-  esquema Skaffold, el render real del
-  chart, el `build.json` sin imagenes y el YAML estan validados. No ejecutar
-  un `helm upgrade` manual ni parchear el Deployment; falta publicar y
-  desplegar `traefik-prod` mediante el pipeline. Como el servidor no dispone
-  de `jq`, el JSON se resume con `python3` sin instalar paquetes ni mostrar
-  lineas de log. El primer pipeline `traefik-prod` fallo en `build` antes de
-  generar artefactos porque Skaffold inicializa el deployer Helm tambien en esa
-  fase y el cliente solo estaba instalado en `deploy`. No hubo cambios en el
-  cluster. La correccion instala el cliente verificado en ambos jobs. El
-  segundo pipeline actualizo correctamente la release a la revision 2 y dejo
-  el Deployment preparado, pero Skaffold termino con codigo 1 despues de
-  informar `nothing to deploy`: el perfil Helm heredaba tambien el deployer
-  global `kubectl` sin manifests. El cambio remoto si se aplico. La correccion
-  posterior elimina `/deploy/kubectl` mediante un parche de perfil, dejando
-  `traefik` y `traefik-prod` como perfiles exclusivamente Helm.
+  su SHA-256, aplica el upgrade con `--atomic` y comprueba el rollout y
+  `--accesslog=true`. El esquema Skaffold, el render real del chart, el
+  `build.json` sin imagenes y el YAML estan validados. No ejecutar un
+  `helm upgrade` manual ni parchear el Deployment. El primer pipeline fallo en
+  `build` porque el cliente Helm solo estaba instalado en `deploy`; no hubo
+  cambios en el cluster. El segundo actualizo la release a la revision 2, pero
+  termino con codigo 1 porque el perfil heredaba el deployer global `kubectl`
+  sin manifests. El tercer pipeline, con Helm disponible en ambos jobs y los
+  perfiles exclusivamente Helm, finalizo correctamente el 2026-08-17 a las
+  15:41 UTC: release en revision 3, Deployment preparado, rollout aceptado y
+  comprobacion de access log superada. La verificacion directa de las 15:44
+  UTC confirmo el rollout, un pod preparado con cero reinicios y los argumentos
+  de access log, formato JSON, descarte de cabeceras y descarte de parametros
+  de consulta. A las 15:46 UTC, las peticiones controladas devolvieron frontend
+  `200`, discovery OIDC `200` y Gateway protegido `403`. Loki respondio
+  `success`, pero el primer extractor no encontro eventos con el campo
+  `DownstreamStatus`. La lectura directa y resumida de stdout confirmo 25
+  lineas, tres JSON de access log y exactamente los tres eventos controlados:
+  dos `200` y un `403`. Traefik genera correctamente los registros. La
+  consulta estructural de Loki devolvio tres streams y 50 muestras con campos
+  superiores `kubernetes` y `log`: Fluent Bit conserva el evento dentro de
+  `log` con un prefijo anterior al JSON. La ingesta quedo confirmada con una
+  correlacion final que recupero exactamente los tres eventos de las 15:46:23
+  UTC: `GET /` con `200`, discovery OIDC con `200` y `GET /backend/orders/list` con `403`.
+  Como el servidor no dispone de `jq`, el JSON se resume con `python3` sin
+  instalar paquetes ni mostrar lineas de log.
 
 **Siguientes pasos de 5.4**
 
@@ -960,10 +970,19 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
    despliegue `infra-prod`.
 2. **Completado:** salud de Loki y Grafana comprobada dos veces; componentes
    preparados y sin reinicios inesperados.
-3. **En curso:** Gateway confirmado en Loki; desplegar `traefik-prod` mediante
-   Skaffold y confirmar sus access logs con relojes coherentes.
-4. Reiniciar de forma controlada Loki y Grafana y demostrar que los datos y la
-   configuracion persisten.
+3. **Completado:** Gateway y Traefik confirmados en Loki; los tres eventos
+   controlados quedaron correlacionados por instante, metodo, ruta y estado.
+4. **En curso:** la linea base previa al reinicio confirma ambos PVC `Bound`,
+   pods preparados y sin reinicios, la base persistente de Grafana presente con
+   1.110.016 bytes y Loki `ready`. A las 15:55 UTC Loki creo un pod nuevo,
+   mantuvo el mismo PVC y volvio a `ready`; el pod anterior aun estaba terminando
+   durante la primera consulta. Con una sola replica activa, la consulta posterior
+   devolvio cero streams y cero muestras para el intervalo que antes contenia los
+   tres eventos. El diagnostico confirmo que el PVC estaba vacio en `/tmp/loki`,
+   mientras la configuracion efectiva escribia `path_prefix`, chunks y WAL en
+   `/loki`. El manifiesto queda corregido para montar `loki-data` en `/loki`;
+   el overlay productivo renderiza correctamente el nuevo montaje. Falta desplegar
+   `infra-prod` y repetir la prueba. Grafana no se reinicia todavia.
 5. Generar y correlacionar evidencias controladas de `401`, `403`, `429` y
    `5xx`, revisando tambien Security Events y falsos positivos.
 6. Registrar CPU, memoria y disco frente a los umbrales acordados y adjuntar

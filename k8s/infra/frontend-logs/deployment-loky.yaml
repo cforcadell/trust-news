@@ -57,7 +57,8 @@ spec:
           failureThreshold: 3
         volumeMounts:
           - name: loki-data
-            mountPath: /tmp/loki
+            # Debe coincidir con common.path_prefix de local-config.yaml.
+            mountPath: /loki
       volumes:
         - name: loki-data
           persistentVolumeClaim:

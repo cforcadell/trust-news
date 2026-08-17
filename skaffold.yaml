@@ -28,6 +28,9 @@ profiles:
   # PERFIL: TRAEFIK
   # ---------------------------------------------------------
   - name: traefik
+    patches:
+      - op: remove
+        path: /deploy/kubectl
     deploy:
       helm:
         flags:
@@ -48,6 +51,9 @@ profiles:
   # PERFIL: TRAEFIK PROD
   # ---------------------------------------------------------
   - name: traefik-prod
+    patches:
+      - op: remove
+        path: /deploy/kubectl
     deploy:
       helm:
         flags:

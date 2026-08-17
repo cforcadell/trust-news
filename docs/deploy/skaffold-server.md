@@ -1219,7 +1219,12 @@ chart, el `build.json` sin imagenes y el YAML estan validados. No ejecutar
 El primer pipeline `traefik-prod` fallo en `build` antes de generar
 artefactos: Skaffold inicializa el deployer Helm tambien durante esa fase y el
 cliente solo estaba instalado en `deploy`. No hubo cambios en Kubernetes. La
-correccion instala Helm, con el mismo checksum, en ambos jobs.
+correccion instala Helm, con el mismo checksum, en ambos jobs. El segundo
+pipeline actualizo correctamente la release a la revision 2 y dejo Traefik
+preparado, pero Skaffold termino con codigo 1 tras `nothing to deploy`: el
+perfil heredaba el deployer global `kubectl` sin manifests. El cambio remoto
+si se aplico. Los perfiles Traefik eliminan ahora `/deploy/kubectl` mediante
+un parche y quedan como perfiles exclusivamente Helm.
 
 Publicar los cambios y lanzar un pipeline manual sobre `postTFM` con:
 

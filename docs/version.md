@@ -946,7 +946,13 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   lineas de log. El primer pipeline `traefik-prod` fallo en `build` antes de
   generar artefactos porque Skaffold inicializa el deployer Helm tambien en esa
   fase y el cliente solo estaba instalado en `deploy`. No hubo cambios en el
-  cluster. La correccion instala el cliente verificado en ambos jobs.
+  cluster. La correccion instala el cliente verificado en ambos jobs. El
+  segundo pipeline actualizo correctamente la release a la revision 2 y dejo
+  el Deployment preparado, pero Skaffold termino con codigo 1 despues de
+  informar `nothing to deploy`: el perfil Helm heredaba tambien el deployer
+  global `kubectl` sin manifests. El cambio remoto si se aplico. La correccion
+  posterior elimina `/deploy/kubectl` mediante un parche de perfil, dejando
+  `traefik` y `traefik-prod` como perfiles exclusivamente Helm.
 
 **Siguientes pasos de 5.4**
 

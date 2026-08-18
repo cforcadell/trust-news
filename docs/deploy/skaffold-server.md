@@ -1600,11 +1600,20 @@ no romper antes el acceso por `https://localhost:9443`.
    Keycloak, el issuer del Gateway y los tres hosts a `assermetry.com`,
    manteniendo TLS en `websecure`.
 7. Verificar `KC_HOSTNAME_URL` y `KEYCLOAK_ISSUER_URL`.
-8. Desplegar `infra-prod` para aplicar Keycloak si cambia su ConfigMap.
-9. Desplegar `apis-frontend-prod`.
-10. Mantener `80/tcp` cerrado y abrir `443/tcp` exclusivamente a los rangos de
+8. Lanzar el pipeline con `PROFILE=infra-prod`. El job
+   `check_phase6_origin_tls` debe completar antes de `deploy`: comprueba que
+   `TLSStore/default` referencia `trustnews-origin-tls`, que el Secret tiene el
+   tipo TLS, que el certificado corresponde a `assermetry.com`, conserva al
+   menos 30 dias de vigencia y forma pareja con su clave. No continuar si
+   falla este gate.
+9. Desplegar `infra-prod` para aplicar Keycloak y validar su rollout antes de
+   iniciar el siguiente pipeline.
+10. Lanzar un segundo pipeline con `PROFILE=apis-frontend-prod`. Este repite el
+    gate TLS y ejecuta tambien `check_mongodb_bootstrap` antes de desplegar
+    Gateway, APIs, frontend e Ingress.
+11. Mantener `80/tcp` cerrado y abrir `443/tcp` exclusivamente a los rangos de
     Cloudflare cuando Access mTLS, WAF, TLS, DNS e issuer esten verificados.
-11. Verificar:
+12. Verificar:
 
 ```bash
 kubectl get ingress -A
@@ -1616,7 +1625,7 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' https://assermetry.com/backend/d
 curl -I https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configuration
 ```
 
-12. Probar login frontend, token refresh, llamada al Gateway, client credentials B2B y logout.
+13. Probar login frontend, token refresh, llamada al Gateway, client credentials B2B y logout.
 
 No abrir el servicio a clientes hasta que el issuer de Keycloak, el certificado
 TLS, las redirecciones OIDC y el WAF esten verificados con el dominio final.

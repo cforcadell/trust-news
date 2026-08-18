@@ -121,6 +121,50 @@ check_mongodb_bootstrap:
         quit(profiles === 1 && normalization >= 3 && domains >= 500 ? 0 : 1);
       "'
 
+check_phase6_origin_tls:
+  stage: preflight
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  extends: .kube_access
+
+  rules:
+    - if: '$PROFILE == "infra-prod" || $PROFILE == "apis-frontend-prod"'
+
+  before_script:
+    - !reference [.kube_access, before_script]
+    - apk add --no-cache openssl
+
+  script:
+    - echo "Comprobando el certificado de origen antes de desplegar prod-domain"
+    - |
+      test "$(kubectl get tlsstore default -n kube-system -o jsonpath='{.spec.defaultCertificate.secretName}')" = "trustnews-origin-tls" || {
+        echo "ERROR: TLSStore/default no referencia trustnews-origin-tls"
+        exit 1
+      }
+      test "$(kubectl get secret trustnews-origin-tls -n kube-system -o jsonpath='{.type}')" = "kubernetes.io/tls" || {
+        echo "ERROR: trustnews-origin-tls no es un Secret kubernetes.io/tls"
+        exit 1
+      }
+    - |
+      tls_tmp_dir="$(mktemp -d)"
+      trap 'rm -rf "$tls_tmp_dir"' EXIT
+      umask 077
+      kubectl get secret trustnews-origin-tls -n kube-system -o jsonpath='{.data.tls\.crt}' | base64 -d > "$tls_tmp_dir/tls.crt"
+      kubectl get secret trustnews-origin-tls -n kube-system -o jsonpath='{.data.tls\.key}' | base64 -d > "$tls_tmp_dir/tls.key"
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -noout >/dev/null
+      openssl pkey -in "$tls_tmp_dir/tls.key" -noout >/dev/null
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -noout -ext subjectAltName | grep -Eq 'DNS:assermetry\.com([,[:space:]]|$)'
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -checkend 2592000 -noout
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -pubkey -noout > "$tls_tmp_dir/cert.pub"
+      openssl pkey -in "$tls_tmp_dir/tls.key" -pubout > "$tls_tmp_dir/key.pub"
+      cmp -s "$tls_tmp_dir/cert.pub" "$tls_tmp_dir/key.pub" || {
+        echo "ERROR: el certificado y la clave de trustnews-origin-tls no forman pareja"
+        exit 1
+      }
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -noout -subject -issuer -dates -fingerprint -sha256 -ext subjectAltName
+      echo "Certificado de origen y TLSStore validados"
+
 # ---------------------------------------------------------
 # DEPLOY
 # ---------------------------------------------------------
@@ -133,6 +177,8 @@ deploy:
     - job: build
       optional: true
     - job: check_mongodb_bootstrap
+      optional: true
+    - job: check_phase6_origin_tls
       optional: true
 
   rules:

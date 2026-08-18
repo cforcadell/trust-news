@@ -1106,6 +1106,16 @@ los umbrales operativos quedaron validados sin abrir el origen.
 - No se ha ejecutado ningun pipeline, no se ha desplegado sobre K3s y el
   firewall permanece cerrado. El rollback estatico consiste en restaurar los
   tres paths `overlays/prod` y repetir los renderizados antes de desplegar.
+- El preflight local se repitio con Skaffold `v2.17.3`: `infra-prod` renderizo
+  27 recursos y `apis-frontend-prod` 43, todos aceptados por la validacion
+  client-side. La comparacion directa confirma como unicos cambios las dos URLs
+  externas de Keycloak, el issuer del Gateway y los tres hosts de Ingress; el
+  Secret de origen referenciado continua siendo `trustnews-origin-tls`.
+- GitLab CI incorpora `check_phase6_origin_tls` como dependencia previa de los
+  despliegues `infra-prod` y `apis-frontend-prod`. El gate comprueba en K3s el
+  tipo del Secret, la referencia de `TLSStore/default`, el hostname
+  `assermetry.com`, una vigencia restante minima de 30 dias y la pareja
+  certificado/clave, sin modificar el cluster ni mostrar la clave privada.
 
 **Despliegue**
 
@@ -1128,8 +1138,10 @@ los umbrales operativos quedaron validados sin abrir el origen.
   acceso a administracion y servicios internos.
 - Probar rollback a los overlays `prod` antes de modificar el firewall.
 
-1. **Siguiente gate antes del despliegue:** verificar de nuevo el certificado
-   instalado en la Fase 4 y que `TLSStore/default` lo consume.
+1. **Preparado; pendiente de ejecucion en GitLab:** verificar de nuevo el
+   certificado instalado en la Fase 4 y que `TLSStore/default` lo consume. El
+   job `check_phase6_origin_tls` automatiza este gate antes de cada despliegue
+   productivo de la fase.
 2. **Completado:** cambiar los paths de los perfiles productivos desde
    `overlays/prod` a `overlays/prod-domain`, revisar el diff renderizado y
    preparar el rollback estatico.

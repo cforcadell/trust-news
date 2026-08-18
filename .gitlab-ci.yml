@@ -234,12 +234,21 @@ deploy:
           trap 'kill "$keycloak_pf_pid" 2>/dev/null || true; wait "$keycloak_pf_pid" 2>/dev/null || true' EXIT
           keycloak_discovery=""
           for attempt in $(seq 1 30); do
-            if keycloak_discovery="$(curl -fsS http://127.0.0.1:18080/auth/realms/TrustNews/.well-known/openid-configuration 2>/dev/null)"; then
+            if keycloak_discovery="$(curl -fsS \
+              -H 'Host: assermetry.com' \
+              -H 'X-Forwarded-For: 127.0.0.1' \
+              -H 'X-Forwarded-Host: assermetry.com' \
+              -H 'X-Forwarded-Proto: https' \
+              -H 'X-Forwarded-Port: 443' \
+              http://127.0.0.1:18080/auth/realms/TrustNews/.well-known/openid-configuration \
+              2>/tmp/keycloak-discovery-curl.err)"; then
               break
             fi
             sleep 2
           done
-          printf '%s' "$keycloak_discovery" | tr -d '\n\r ' | grep -Fq '"issuer":"https://assermetry.com/auth/realms/TrustNews"' || {
+          keycloak_issuer="$(printf '%s' "$keycloak_discovery" | tr -d '\n\r ' | sed -n 's/.*"issuer":"\([^"]*\)".*/\1/p')"
+          echo "Issuer OIDC observado: ${keycloak_issuer:-<ausente>}"
+          test "$keycloak_issuer" = "https://assermetry.com/auth/realms/TrustNews" || {
             echo "ERROR: discovery OIDC no publica el issuer definitivo"
             exit 1
           }

@@ -1611,6 +1611,11 @@ no romper antes el acceso por `https://localhost:9443`.
 9. `infra-prod` se desplego en el pipeline `#2770049730`. Validar ahora el
    rollout, las URLs externas y el issuer del discovery OIDC de Keycloak antes
    de iniciar el siguiente pipeline.
+   Una repeticion sobre `77e189ef` confirmo el rollout y las dos URLs, pero la
+   consulta directa por `port-forward` no reproducia las cabeceras del proxy y
+   no acepto el issuer. El gate usa ahora `Host: assermetry.com` y las cabeceras
+   `X-Forwarded-Host`, `X-Forwarded-Proto` y `X-Forwarded-Port`, y registra solo
+   el issuer observado.
 10. Lanzar un segundo pipeline con `PROFILE=apis-frontend-prod`. Este repite el
     gate TLS y ejecuta tambien `check_mongodb_bootstrap` antes de desplegar
     Gateway, APIs, frontend e Ingress.

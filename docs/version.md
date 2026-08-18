@@ -53,9 +53,10 @@ memoria y 56% de disco; la memoria sigue por debajo del aviso del 80%, pero
 requiere vigilancia durante el despliegue definitivo. La **Fase 6 - Despliegue
 definitivo todavia cerrado** esta en curso. El pipeline GitLab `#2770049730`
 sobre el commit `4a7e9185` completo `build`, el gate TLS, `infra-prod` y el
-bootstrap de MongoDB; el rollback no se ejecuto. Keycloak ha recibido la
-configuracion `prod-domain`, pero su rollout e issuer se validaran
-explicitamente antes de desplegar `apis-frontend-prod`. El firewall permanece
+bootstrap de MongoDB; el rollback no se ejecuto. Una repeticion sobre el commit
+`77e189ef` confirmo el rollout de Keycloak y sus valores `KC_HOSTNAME_*`, pero
+fallo al consultar discovery sin las cabeceras del proxy. La prueba se ha
+corregido y debe repetirse antes de `apis-frontend-prod`. El firewall permanece
 cerrado. La **Fase 10 - Backups y recuperacion** queda pendiente y sera la
 ultima fase en ejecutarse.
 Hetzner esta en un estado transitorio controlado: Keycloak usa ya las URLs del
@@ -1115,6 +1116,20 @@ los umbrales operativos quedaron validados sin abrir el origen.
   pipeline ejecutado aun no esperaba explicitamente el rollout de Keycloak ni
   comprobaba su discovery OIDC. Esa validacion es el siguiente gate. El
   firewall permanece cerrado.
+- La repeticion de `infra-prod` sobre el commit `77e189ef` estabilizo los nueve
+  workloads. `keycloak-db` quedo preparado, el Deployment de Keycloak completo
+  su rollout y las dos comprobaciones de `KC_HOSTNAME_URL` y
+  `KC_HOSTNAME_ADMIN_URL` no fallaron. El job termino con codigo 1 unicamente en
+  la consulta del discovery OIDC.
+- Durante el rollout, el nuevo pod de Loki quedo temporalmente sin programar
+  por CPU y memoria insuficientes y su startup probe devolvio `503`. Finalmente
+  quedo preparado y Skaffold estabilizo los nueve workloads; vigilar recursos
+  antes y durante `apis-frontend-prod`.
+- La causa queda aislada al metodo de prueba: el `port-forward` consultaba
+  `127.0.0.1` sin las cabeceras `X-Forwarded-*` que Traefik sobrescribe y que
+  Keycloak espera con `KC_PROXY_HEADERS=xforwarded`. El gate corregido emula
+  `Host`, proto y puerto externos y muestra solo el issuer observado. No se
+  despliega `apis-frontend-prod` hasta superar su repeticion.
 - El preflight local se repitio con Skaffold `v2.17.3`: `infra-prod` renderizo
   27 recursos y `apis-frontend-prod` 43, todos aceptados por la validacion
   client-side. La comparacion directa confirma como unicos cambios las dos URLs
@@ -1153,9 +1168,10 @@ los umbrales operativos quedaron validados sin abrir el origen.
 2. **Completado:** cambiar los paths de los perfiles productivos desde
    `overlays/prod` a `overlays/prod-domain`, revisar el diff renderizado y
    preparar el rollback estatico.
-3. **Desplegado; validacion funcional pendiente:** `infra-prod` se aplico desde
-   `4a7e9185`. Antes de continuar se comprobaran el rollout de Keycloak, sus dos
-   URLs externas y el issuer publicado por discovery OIDC.
+3. **Desplegado; discovery pendiente:** `infra-prod` se aplico desde `4a7e9185`.
+   La repeticion sobre `77e189ef` confirmo el rollout de Keycloak y sus dos URLs
+   externas; fallo la prueba directa de discovery sin cabeceras de proxy. El
+   gate corregido debe confirmar ahora el issuer definitivo.
 4. Desplegar `blockchain-prod` solo si hay cambios o si falta el despliegue;
    verificar peers, bloques, contrato y categorias.
 5. **Pendiente, despues de validar Keycloak:** desplegar `apis-frontend-prod`

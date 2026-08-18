@@ -229,6 +229,22 @@ deploy:
             echo "ERROR: KC_HOSTNAME_ADMIN_URL no usa el dominio definitivo"
             exit 1
           }
+          kubectl exec -n infra deployment/keycloak -- sh -ec '
+            kcadm=/opt/keycloak/bin/kcadm.sh
+            kcadm_config=/tmp/kcadm-phase6.config
+            trap '\''rm -f "$kcadm_config"'\'' EXIT
+            "$kcadm" config credentials \
+              --config "$kcadm_config" \
+              --server http://127.0.0.1:8080/auth \
+              --realm master \
+              --user "$KEYCLOAK_ADMIN" \
+              --password "$KEYCLOAK_ADMIN_PASSWORD"
+            "$kcadm" update realms/TrustNews \
+              --config "$kcadm_config" \
+              -s attributes.frontendUrl=https://assermetry.com/auth
+            rm -f "$kcadm_config"
+            trap - EXIT
+          '
           kubectl port-forward -n infra svc/keycloak 18080:8080 >/tmp/keycloak-port-forward.log 2>&1 &
           keycloak_pf_pid="$!"
           trap 'kill "$keycloak_pf_pid" 2>/dev/null || true; wait "$keycloak_pf_pid" 2>/dev/null || true' EXIT

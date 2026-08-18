@@ -1611,11 +1611,17 @@ no romper antes el acceso por `https://localhost:9443`.
 9. `infra-prod` se desplego en el pipeline `#2770049730`. Validar ahora el
    rollout, las URLs externas y el issuer del discovery OIDC de Keycloak antes
    de iniciar el siguiente pipeline.
-   Una repeticion sobre `77e189ef` confirmo el rollout y las dos URLs, pero la
-   consulta directa por `port-forward` no reproducia las cabeceras del proxy y
-   no acepto el issuer. El gate usa ahora `Host: assermetry.com` y las cabeceras
-   `X-Forwarded-Host`, `X-Forwarded-Proto` y `X-Forwarded-Port`, y registra solo
-   el issuer observado.
+   La repeticion sobre `77e189ef` confirmo el rollout y las dos URLs. El intento
+   siguiente, `3c99a48e`, reprodujo las cabeceras del proxy y observo el issuer
+   `https://localhost/auth/realms/TrustNews`. El valor procede del atributo
+   persistido `frontendUrl` del realm y prevalece sobre el ConfigMap.
+   El gate autentica ahora `kcadm` dentro del pod, actualiza unicamente
+   `attributes.frontendUrl=https://assermetry.com/auth`, elimina su fichero de
+   sesion temporal y exige despues el issuer definitivo. La operacion es
+   idempotente y no modifica clientes ni secretos. Si se decide rollback antes
+   de desplegar APIs, usar el mismo procedimiento administrativo para restaurar
+   `attributes.frontendUrl=https://localhost/auth` y comprobar discovery; no
+   cambiar el firewall.
 10. Lanzar un segundo pipeline con `PROFILE=apis-frontend-prod`. Este repite el
     gate TLS y ejecuta tambien `check_mongodb_bootstrap` antes de desplegar
     Gateway, APIs, frontend e Ingress.

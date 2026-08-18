@@ -53,10 +53,11 @@ memoria y 56% de disco; la memoria sigue por debajo del aviso del 80%, pero
 requiere vigilancia durante el despliegue definitivo. La **Fase 6 - Despliegue
 definitivo todavia cerrado** esta en curso. El pipeline GitLab `#2770049730`
 sobre el commit `4a7e9185` completo `build`, el gate TLS, `infra-prod` y el
-bootstrap de MongoDB; el rollback no se ejecuto. Una repeticion sobre el commit
-`77e189ef` confirmo el rollout de Keycloak y sus valores `KC_HOSTNAME_*`, pero
-fallo al consultar discovery sin las cabeceras del proxy. La prueba se ha
-corregido y debe repetirse antes de `apis-frontend-prod`. El firewall permanece
+bootstrap de MongoDB; el rollback no se ejecuto. Las repeticiones sobre
+`77e189ef` y `3c99a48e` confirmaron el rollout y los valores `KC_HOSTNAME_*`.
+La segunda observo el issuer persistido `https://localhost/auth/realms/TrustNews`,
+por lo que el siguiente gate migra solo `attributes.frontendUrl` del realm y
+repite discovery antes de `apis-frontend-prod`. El firewall permanece
 cerrado. La **Fase 10 - Backups y recuperacion** queda pendiente y sera la
 ultima fase en ejecutarse.
 Hetzner esta en un estado transitorio controlado: Keycloak usa ya las URLs del
@@ -1125,11 +1126,15 @@ los umbrales operativos quedaron validados sin abrir el origen.
   por CPU y memoria insuficientes y su startup probe devolvio `503`. Finalmente
   quedo preparado y Skaffold estabilizo los nueve workloads; vigilar recursos
   antes y durante `apis-frontend-prod`.
-- La causa queda aislada al metodo de prueba: el `port-forward` consultaba
-  `127.0.0.1` sin las cabeceras `X-Forwarded-*` que Traefik sobrescribe y que
-  Keycloak espera con `KC_PROXY_HEADERS=xforwarded`. El gate corregido emula
-  `Host`, proto y puerto externos y muestra solo el issuer observado. No se
-  despliega `apis-frontend-prod` hasta superar su repeticion.
+- La repeticion sobre `3c99a48e` emulo correctamente `Host`, proto y puerto
+  externos. El discovery publico
+  `https://localhost/auth/realms/TrustNews`, confirmando que el atributo
+  persistido `frontendUrl` del realm prevalece sobre `KC_HOSTNAME_URL`.
+- El gate actualizado autentica `kcadm` solo dentro del pod, usa un fichero de
+  sesion temporal con permisos internos, actualiza idempotentemente
+  `attributes.frontendUrl=https://assermetry.com/auth` y elimina la sesion antes
+  de consultar discovery. No modifica todavia clientes ni secretos. No se
+  despliega `apis-frontend-prod` hasta obtener el issuer definitivo.
 - El preflight local se repitio con Skaffold `v2.17.3`: `infra-prod` renderizo
   27 recursos y `apis-frontend-prod` 43, todos aceptados por la validacion
   client-side. La comparacion directa confirma como unicos cambios las dos URLs
@@ -1168,10 +1173,11 @@ los umbrales operativos quedaron validados sin abrir el origen.
 2. **Completado:** cambiar los paths de los perfiles productivos desde
    `overlays/prod` a `overlays/prod-domain`, revisar el diff renderizado y
    preparar el rollback estatico.
-3. **Desplegado; discovery pendiente:** `infra-prod` se aplico desde `4a7e9185`.
-   La repeticion sobre `77e189ef` confirmo el rollout de Keycloak y sus dos URLs
-   externas; fallo la prueba directa de discovery sin cabeceras de proxy. El
-   gate corregido debe confirmar ahora el issuer definitivo.
+3. **Desplegado; migracion del realm pendiente:** `infra-prod` se aplico desde
+   `4a7e9185`. `77e189ef` confirmo el rollout y las URLs del ConfigMap;
+   `3c99a48e` observo el issuer persistido de localhost. El siguiente intento
+   actualizara solo `attributes.frontendUrl` y debera confirmar el issuer
+   definitivo por discovery.
 4. Desplegar `blockchain-prod` solo si hay cambios o si falta el despliegue;
    verificar peers, bloques, contrato y categorias.
 5. **Pendiente, despues de validar Keycloak:** desplegar `apis-frontend-prod`

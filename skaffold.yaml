@@ -239,7 +239,7 @@ profiles:
         paths:
           - k8s/infra/mongodb/overlays/prod 
           - k8s/infra/mongo-express/overlays/prod
-          - k8s/infra/keycloak/overlays/prod
+          - k8s/infra/keycloak/overlays/prod-domain
           - k8s/infra/frontend-logs/overlays/prod
 
   # ---------------------------------------------------------
@@ -298,13 +298,13 @@ profiles:
           - k8s/apis/evidence-search/overlays/prod
           - k8s/apis/news-handler/overlays/prod
           - k8s/apis/news-chain/overlays/prod
-          - k8s/apis/gateway/overlays/prod
+          - k8s/apis/gateway/overlays/prod-domain
           - k8s/apis/admin/overlays/prod
           - k8s/frontend
           # Traefik/K3s HTTPS edge routes. Keep host/final certificate
-          # details in k8s/ingress/overlays/prod once the public domain is known.
+          # details in k8s/ingress/overlays/prod-domain.
           # See docs/deploy/skaffold-server.md#27-configurar-dominio-y-tls.
-          - k8s/ingress/overlays/prod
+          - k8s/ingress/overlays/prod-domain
     portForward:
       - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
       - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 80, localPort: 10080, address: "0.0.0.0"}

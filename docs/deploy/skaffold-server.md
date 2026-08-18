@@ -1161,8 +1161,8 @@ Loki marco transitoriamente su ingester como no saludable y Fluent Bit recibio
 `500`; los reintentos posteriores terminaron correctamente. Repetir la
 consulta con relojes coherentes en Hetzner antes de cerrar la brecha.
 
-El despliegue en Hetzner se ejecuto el 2026-08-17 y queda pendiente recopilar
-la evidencia posdespliegue. El flujo reproducible es GitLab CI: publicar los
+El despliegue en Hetzner se ejecuto el 2026-08-17 y la evidencia posdespliegue
+quedo aceptada el 2026-08-18. El flujo reproducible es GitLab CI: publicar los
 cambios y lanzar el pipeline manual sobre `postTFM` con:
 
 ```dotenv
@@ -1249,10 +1249,36 @@ preparado y pendiente de terminar. Tras quedar una sola replica preparada, la
 consulta del mismo intervalo devolvio cero streams y cero muestras. El
 diagnostico confirmo la causa: el PVC estaba montado en `/tmp/loki`, vacio,
 mientras la configuracion efectiva usa `/loki` para `path_prefix`, chunks y
-WAL. El manifiesto se corrige para montar `loki-data` en `/loki`; debe
-desplegarse con `infra-prod` y repetir la prueba antes de reiniciar Grafana.
+WAL. El manifiesto quedo corregido para montar `loki-data` en `/loki`.
 El overlay productivo se renderizo localmente y conserva la imagen 3.0.0, las
-probes y `claimName: loki-data`, con `mountPath: /loki`.
+probes y `claimName: loki-data`, con `mountPath: /loki`. `infra-prod` desplego
+la correccion y, a las 16:05 UTC, el mismo PVC de 5 GiB estaba `Bound` en
+`/loki`, con cuatro archivos, WAL bajo el PVC, pod preparado sin reinicios y
+Loki `ready`. El probe controlado devolvio `404`, aparecio una vez antes del
+segundo reinicio y permanecio una vez despues. El pod fue reemplazado, quedo
+preparado y con cero reinicios. Grafana tambien reemplazo su pod y conservo la
+base persistente, el datasource Loki y la consulta del mismo probe. La
+persistencia de ambos componentes queda aceptada.
+
+**Cierre del 2026-08-18:** Loki y Grafana conservaron respectivamente el probe
+y el datasource tras reemplazar sus pods. Los `401` y `403` se correlacionaron
+en Gateway y Loki; Cloudflare produjo cinco `403`, diez `429` y recupero el
+`403` tras 15 segundos; una consulta blockchain imposible y de solo lectura
+produjo un `500` correlacionado en Gateway y Loki. Security Events mostro las
+diez acciones de rate limiting esperadas, sin falsos positivos visibles.
+
+Desde una sesion operativa en el servidor, la parte de Loki se puede ejecutar
+sin imprimir logs crudos mediante:
+
+```bash
+./scripts/k8s/infra/verify-loki-persistence.sh --execute
+```
+
+El script exige el PVC productivo `loki-data` de 5 GiB sobre `local-path`,
+comprueba el montaje en `/loki`, genera el probe contra el origen local,
+verifica su ingesta antes y despues de reemplazar el pod y solo devuelve
+codigos de estado, recuentos y salud. No sustituye la comprobacion visual en
+Grafana Explore.
 
 El procedimiento reproducible es publicar los cambios y lanzar un pipeline
 manual sobre `postTFM` con:
@@ -1283,22 +1309,44 @@ No registrar la IP real del servidor en Git. Este acceso se valido el
 2026-08-17, pero solo demuestra alcanzabilidad: ejecutar igualmente las
 comprobaciones de salud, persistencia y reinicios.
 
+##### Consultar los logs desde Grafana
+
+El manifiesto actual no provisiona automaticamente un datasource. El
+datasource Loki se configuro y su persistencia se valido el 2026-08-18. Para
+reproducir la configuracion, tras abrir
+`http://127.0.0.1:13000`, iniciar sesion con las credenciales operativas sin
+copiarlas a Git. Ir a **Connections > Data sources** y comprobar si existe
+`Loki`. Si no existe, seleccionar **Add data source > Loki**, usar como URL
+interna `http://loki.infra.svc.cluster.local:3100` y pulsar **Save & test**. No
+habilitar autenticacion basica ni introducir secretos: Grafana y Loki se
+comunican dentro del namespace `infra`. Esta configuracion queda en
+`/var/lib/grafana/grafana.db` y formara parte de la prueba de persistencia de
+Grafana.
+
+Ir a **Explore**, seleccionar el datasource `Loki`, elegir un intervalo que
+incluya la prueba y usar el modo **Code** con estas consultas:
+
 ```text
 {namespace="kube-system", container="traefik"}
+{namespace="kube-system", container="traefik"} |= "/observability-persistence-probe-20260817T1605Z"
 {namespace="apis", container="gateway"} | json | event="gateway_access"
 {namespace="apis", container="gateway"} | json | status=~"401|403|429|5.."
 {namespace="infra", container="keycloak"} |~ "(?i)(error|exception)"
 ```
 
-Generar despues, de forma controlada, un `401`, `403`, `429` y `5xx`;
-correlacionar Gateway/Traefik con Security Events de Cloudflare y revisar
-falsos positivos. Metrics Server no proporciona almacenamiento historico ni
-alertas. Hasta incorporar un backend de metricas, comprobar los umbrales de
-memoria (80%/90%) y disco (75%/85%) con `kubectl top nodes`,
-`kubectl top pods -A` y `df` en el nodo. La persistencia y las probes ya estan
-desplegadas en Hetzner y su estado basico ha sido verificado; 5.4 no se cierra
-hasta comprobar la retencion tras reinicio y adjuntar las evidencias de
-rechazos, recursos y reinicios.
+La primera consulta permite navegar por los access logs de Traefik y la
+segunda aisla el probe persistido. Expandir una fila solo durante la revision
+operativa; no exportar ni copiar a Git lineas crudas que puedan contener IP,
+identificadores o rutas sensibles.
+
+Las evidencias controladas y su correlacion quedaron aceptadas el 2026-08-18.
+Metrics Server no proporciona almacenamiento historico ni alertas. Hasta
+incorporar un backend de metricas, comprobar los umbrales de memoria (80%/90%)
+y disco (75%/85%) con `kubectl top nodes`, `kubectl top pods -A` y `df` en el
+nodo. La muestra de cierre registro CPU 5%, memoria 78%, disco 56% y 31,7 GiB
+disponibles; 29 de 29 pods activos preparados, 9 de 9 PVC `Bound` y cero
+reinicios. La memoria queda por debajo del aviso, pero debe vigilarse durante
+la Fase 6. El paso 5.4 y la Fase 5 quedan cerrados.
 
 #### 2.7.4 TLS del origen con Cloudflare Origin CA
 
@@ -1456,8 +1504,9 @@ traefik.ingress.kubernetes.io/router.middlewares: apis-gateway-strip-backend-pre
 
 #### 2.7.5 Fijar host en los Ingress
 
-Cuando el dominio este decidido, activar `k8s/ingress/overlays/prod-domain` para
-que los tres Ingress tengan el mismo `host` si se usa dominio unico:
+Como preparacion estatica de la Fase 6, Skaffold referencia ya
+`k8s/ingress/overlays/prod-domain` para que los tres Ingress tengan el mismo
+`host`:
 
 ```yaml
 spec:
@@ -1484,9 +1533,9 @@ k8s/ingress/base/gateway-ingress.yaml    path /backend
 k8s/ingress/base/keycloak-ingress.yaml   path /auth
 ```
 
-Para no tocar `base`, usar los parches preparados en `k8s/ingress/overlays/prod-domain` y
-referenciar ese overlay desde Skaffold solo al llegar a la fase de dominio. Mantener `base` sin dominio
-permite reutilizarlo en local/integracion.
+Los parches se mantienen en `k8s/ingress/overlays/prod-domain`; `base` continua
+sin dominio para reutilizarlo en local e integracion. El cambio de referencia
+esta preparado y renderizado, pero aun no se ha desplegado en K3s.
 
 #### 2.7.6 Alinear Keycloak y Gateway
 
@@ -1546,7 +1595,10 @@ no romper antes el acceso por `https://localhost:9443`.
    seccion 2.7.4, conservando el certificado anterior para rollback.
 5. Verificar que `TLSStore` apunta a `trustnews-origin-tls` y validar por tunel
    la cadena, SNI y hostname con la raiz Origin CA correspondiente.
-6. Cambiar Skaffold a los overlays `prod-domain` y verificar que renderizan `host: assermetry.com` manteniendo TLS en `websecure`.
+6. **Preparado el 2026-08-18, no desplegado:** Skaffold usa los overlays
+   `prod-domain`; el diff renderizado solo cambia las dos URLs externas de
+   Keycloak, el issuer del Gateway y los tres hosts a `assermetry.com`,
+   manteniendo TLS en `websecure`.
 7. Verificar `KC_HOSTNAME_URL` y `KEYCLOAK_ISSUER_URL`.
 8. Desplegar `infra-prod` para aplicar Keycloak si cambia su ConfigMap.
 9. Desplegar `apis-frontend-prod`.

@@ -43,7 +43,17 @@ lo presenta correctamente y la cadena, el hostname y el SNI se validaron por
 tunel con la raiz Origin CA. Las pruebas funcionales mantienen frontend `200`,
 discovery OIDC `200` y Gateway alcanzable. El origen permanece filtrado en
 `80/tcp` y `443/tcp`. La caducidad esta inventariada y dispone de una alerta
-operativa. La
+operativa. La **Fase 5 - WAF, restricciones permanentes y observabilidad** esta
+cerrada desde el 2026-08-18: Loki y Grafana conservaron sus datos tras
+reemplazar los pods, Grafana mantuvo el datasource Loki, los rechazos
+controlados `401`, `403`, `429` y `500` quedaron correlacionados en el punto de
+control correspondiente y la muestra final mantuvo 29 de 29 pods preparados,
+9 de 9 PVC `Bound` y cero reinicios. El nodo estaba al 5% de CPU, 78% de
+memoria y 56% de disco; la memoria sigue por debajo del aviso del 80%, pero
+requiere vigilancia durante el despliegue definitivo. La **Fase 6 - Despliegue
+definitivo todavia cerrado** esta en curso: la preparacion estatica de los
+perfiles `prod-domain` esta completada y validada, pero no se ha ejecutado
+ningun pipeline ni despliegue en K3s y el firewall permanece cerrado. La
 **Fase 10 - Backups y recuperacion** queda pendiente y sera la ultima fase en
 ejecutarse.
 Existe una version estable en Hetzner accesible mediante tunel SSH, pero todavia
@@ -57,11 +67,11 @@ Hetzner/tunel:  https://localhost:9443
 Cloudflare:     https://assermetry.com (proxy activo; origen cerrado)
 ```
 
-Los perfiles Skaffold actuales continúan usando `overlays/local` y
-`overlays/prod`, ambos con `host: localhost`. Los overlays `prod-domain` dejan
-preparados el host, Keycloak y el issuer de `assermetry.com`, pero no estan
-referenciados por Skaffold y no deben activarse hasta superar las fases previas
-al despliegue definitivo.
+Los perfiles locales continúan usando `overlays/local`. Como preparacion
+revisable de la Fase 6, `infra-prod` referencia ahora el overlay
+`prod-domain` de Keycloak y `apis-frontend-prod` referencia los overlays
+`prod-domain` de Gateway e Ingress. Este cambio aun no se ha desplegado: el K3s
+activo conserva `host: localhost`, sus URLs OIDC de tunel y el firewall cerrado.
 
 ### Contrato publico de la version
 
@@ -183,16 +193,21 @@ salida.
 | Fase | Estado | Alcance breve | Kubernetes local | Kubernetes Hetzner | Cambio externo |
 | --- | --- | --- | --- | --- | --- |
 | 0 | **Cerrada** | Inventariar el sistema estable y fijar una linea base funcional y recuperable | No | No; se prueba lo ya desplegado | No |
-| 1 | **Cerrada** | Preparar aplicacion, OIDC, manifests y overlays para el dominio sin activarlo | **OK** | **OK**; solo con `prod`, `prod-domain` sigue inactivo | No |
+| 1 | **Cerrada** | Preparar aplicacion, OIDC, manifests y overlays para el dominio sin activarlo | **OK** | **OK**; se valido `prod` y `prod-domain` no se activo durante esta fase | No |
 | 2 | **Cerrada** | Registrar el dominio, delegar DNS a Cloudflare y asegurar el perimetro inicial | No | No | Dominio, Cloudflare y DNS |
 | 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
-| 5 | **En curso (paso 5.4)** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Si cambian Gateway o Traefik | Si cambian manifests u observabilidad | WAF, rate limits y alertas |
-| 6 | **Pendiente** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | No; solo renderizado de `prod-domain` | Si, despliegue definitivo con `prod-domain` | No |
+| 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
+| 6 | **En curso (preparacion estatica cerrada; despliegue pendiente)** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Todavia no desplegado; siguiente gate `infra-prod` y despues `apis-frontend-prod` | No |
 | 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
 | 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
 | 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
+
+**Hito actual para versionado:** este estado es apto para un commit de cierre de
+la Fase 5 y preparacion estatica de la Fase 6. El commit incluye los manifests y
+perfiles `prod-domain` revisados, pero no certifica ningun despliegue de Fase 6,
+cambio de issuer en K3s ni apertura del firewall.
 
 `No` significa que esa fase no debe provocar un despliegue en ese cluster. Las
 consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
@@ -563,7 +578,8 @@ paso al inicio controlado de la Fase 4.
   `apply_tls_secret` es su unico mecanismo de instalacion y rotacion.
 - `k8s/ingress/base/tls-store.yaml` permanece comun y referencia siempre
   `trustnews-origin-tls` en `kube-system`.
-- `prod-domain` permanece inactivo hasta la Fase 6.
+- `prod-domain` se mantuvo inactivo durante las Fases 4 y 5. Su referencia en
+  Skaffold esta preparada en la Fase 6, pero K3s aun no la ha desplegado.
 - Ningun certificado, clave privada o fichero `tls-origin.env` entra en Git.
 
 **Despliegue**
@@ -649,7 +665,7 @@ referenciado por `TLSStore/default`. El certificado anterior permite rollback,
 la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
 `443/tcp`; `prod-domain` permanece sin desplegar hasta la Fase 6.
 
-#### Fase 5 - WAF, restricciones permanentes y observabilidad (en curso)
+#### Fase 5 - WAF, restricciones permanentes y observabilidad (cerrada)
 
 **Estado**
 
@@ -658,6 +674,8 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
 - Subpaso Ingress y Services de K3s del inventario 5.0: **completado**.
 - Subpaso salud de pods y estado de PVC del inventario 5.0: **completado**.
 - Subpaso recursos del nodo y disponibilidad de observabilidad: **completado**.
+- Paso 5.4, persistencia, correlacion y cierre: **completado y aceptado en
+  Hetzner el 2026-08-18**.
 - Paso 5.1, restricciones permanentes del origen: **proteccion Cloudflare y
   navegador administrativo completados**. Las reglas temporal y permanente se
   verificaron sin certificado y con certificado. Las pruebas reales de
@@ -822,8 +840,9 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   identificadores de Cloudflare. El paso 5.3 queda aceptado en el borde; los
   flujos legitimos a traves de Cloudflare son un gate de las Fases 6-7, cuando
   el origen sea alcanzable. El gate mTLS sigue activo.
-- `prod-domain` continua inactivo y el origen continua filtrado en `80/tcp` y
-  `443/tcp`.
+- Los perfiles Skaffold quedan preparados para usar `prod-domain`, pero no se
+  han desplegado. El K3s activo sigue con `host: localhost` y el origen continua
+  filtrado en `80/tcp` y `443/tcp`.
 - La revision estatica del repositorio confirma que solo frontend, Gateway y
   Keycloak tienen Ingress. Los Services inventariados no declaran `NodePort`;
   el estado real de K3s se contrasto y coincide. Solo existen
@@ -833,22 +852,19 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   `LoadBalancer` es Traefik en `80/443`, como borde previsto, y su alcance
   publico continua controlado por el firewall externo. No se registran
   direcciones del cluster en Git.
-- Los 29 pods inventariados estan preparados y muestran cero reinicios. Los
-  siete PVC estan `Bound` sobre `local-path`: tres para blockchain y cuatro
-  para Keycloak DB, IPFS, Kafka y MongoDB. Las capacidades declaradas son 1 GiB,
-  salvo el PVC del minero con 2 GiB; falta medir su ocupacion real y el disco
-  del nodo.
-- Brechas de observabilidad detectadas: Loki y Grafana no tienen PVC en los
-  manifests actuales, por lo que sus datos y configuracion son efimeros.
-  Ademas, el filtro de Fluent Bit excluye `kube-system` y, por tanto, no
-  centraliza actualmente los logs de Traefik. Estas brechas deben corregirse y
-  probarse en los pasos de observabilidad de la Fase 5.
-- Linea base de recursos: nodo al 5% de CPU, 76% de memoria y 53% de disco
-  raiz, con 35 GiB disponibles. La memoria requiere vigilancia antes de abrir;
+- La muestra final del 2026-08-18 confirma 29 pods activos, todos preparados y
+  con cero reinicios. Los nueve PVC estan `Bound` sobre `local-path`, incluidos
+  `loki-data` y `grafana-data`; no hay PVC pendientes.
+- Brechas de observabilidad detectadas en 5.0: Loki y Grafana no tenian PVC y
+  Fluent Bit excluia `kube-system`. Las tres quedaron corregidas y probadas en
+  5.4; Loki conserva sus eventos, Grafana conserva su datasource y los access
+  logs de Traefik son consultables por `namespace` y `container`.
+- Muestra final de recursos: nodo al 5% de CPU, 78% de memoria y 56% de disco
+  raiz, con 31,7 GiB disponibles. La memoria requiere vigilancia antes de abrir;
   se propone alerta preventiva al 80% y critica al 90%. Para disco se propone
   aviso al 75% y critico al 85%. Los tres nodos Geth suman aproximadamente
   1,9 GiB; Kafka usa unos 577 MiB y Keycloak unos 469 MiB en la muestra.
-- Fluent Bit, Loki y Grafana tienen una replica disponible y 108 dias de
+- En la linea base de 5.0, Fluent Bit, Loki y Grafana tenian una replica disponible y 108 dias de
   antiguedad. Metrics Server responde correctamente. La API de consulta de Loki
   funciona y contiene streams de `apis`, `blockchain` e `infra`; no
   contiene `kube-system`, confirmando la ausencia de logs de Traefik.
@@ -860,8 +876,8 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   endpoints internos validos y los logs revisados contienen solo operaciones
   informativas de indices TSDB, sin errores. Se clasifica el `503` como
   transitorio o propio del camino de proxy, no como indisponibilidad persistente.
-  El Deployment de Loki sigue sin `readinessProbe` ni `livenessProbe`; esta
-  brecha permanece para el paso de observabilidad.
+  El Deployment de Loki no tenia `readinessProbe` ni `livenessProbe`; esta
+  brecha quedo corregida y validada en 5.4.
 - El plan activo de Cloudflare es Free. En este plan no existe la accion `Log`
   para reglas WAF personalizadas, Security Events contiene muestras con hasta
   24 horas de retencion, hay cinco reglas personalizadas y una regla de rate
@@ -872,9 +888,9 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   controlado y solo entonces conservar su accion de bloqueo.
 
 - Primer incremento de 5.4 preparado en Git, validado en Kind y desplegado en
-  Hetzner el 2026-08-17, segun confirmacion del operador; su validacion
-  posdespliegue continua abierta: Loki usa un PVC de 2 GiB en Kind y de 5 GiB en
-  Hetzner; Grafana usa 1 GiB en ambos entornos. Se han anadido probes de
+  Hetzner el 2026-08-17, segun confirmacion del operador. Loki usa un PVC de
+  2 GiB en Kind y de 5 GiB en Hetzner; Grafana usa 1 GiB en ambos entornos. Se
+  han anadido probes de
   arranque, disponibilidad y vida, e inclusion de `kube-system` con
   etiqueta `container` en Fluent Bit. `frontend-logs` sigue el patron de
   recursos compartidos y overlays `local`/`prod`; Skaffold selecciona el
@@ -883,13 +899,11 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   Grafana y
   Fluent Bit quedaron preparados y sin reinicios; sus endpoints de salud
   respondieron correctamente, y Loki catalogo `kube-system` y `traefik`.
-  La consulta de lineas de Traefik debe repetirse: el reloj local salto del 14
-  al 17 de agosto durante la prueba, Loki devolvio `500` transitorio y los
-  reintentos de Fluent Bit terminaron despues correctamente. Falta confirmar si
-  antes del despliegue se exportaron los dashboards, la configuracion y las
-  evidencias efimeras que debian conservarse. El paso sigue abierto hasta
-  validar ingesta y retencion tras reinicio, recursos, reinicios y evidencias
-  controladas de `401/403/429/5xx` en el servidor.
+  La incidencia de reloj observada en Kind no se reprodujo en Hetzner. La
+  ingesta de Gateway y Traefik, la retencion tras reiniciar Loki, la base y el
+  datasource de Grafana tras reiniciarlo, los recursos, los reinicios y las
+  evidencias controladas quedaron validados el 2026-08-18. El paso queda
+  cerrado.
 
 - El 2026-08-17 se confirmo el acceso operativo a Grafana en Hetzner mediante
   un doble tunel: `kubectl port-forward` escucha en el puerto `3000` del
@@ -960,11 +974,12 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   superiores `kubernetes` y `log`: Fluent Bit conserva el evento dentro de
   `log` con un prefijo anterior al JSON. La ingesta quedo confirmada con una
   correlacion final que recupero exactamente los tres eventos de las 15:46:23
-  UTC: `GET /` con `200`, discovery OIDC con `200` y `GET /backend/orders/list` con `403`.
+  UTC: `GET /` con `200`, discovery OIDC con `200` y
+  `GET /backend/orders/list` con `403`.
   Como el servidor no dispone de `jq`, el JSON se resume con `python3` sin
   instalar paquetes ni mostrar lineas de log.
 
-**Siguientes pasos de 5.4**
+**Cierre de 5.4**
 
 1. **Completado:** evidencia de rollouts, PVC, pods preparados y reinicios del
    despliegue `infra-prod`.
@@ -972,7 +987,7 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
    preparados y sin reinicios inesperados.
 3. **Completado:** Gateway y Traefik confirmados en Loki; los tres eventos
    controlados quedaron correlacionados por instante, metodo, ruta y estado.
-4. **En curso:** la linea base previa al reinicio confirma ambos PVC `Bound`,
+4. **Completado:** la linea base previa al reinicio confirmo ambos PVC `Bound`,
    pods preparados y sin reinicios, la base persistente de Grafana presente con
    1.110.016 bytes y Loki `ready`. A las 15:55 UTC Loki creo un pod nuevo,
    mantuvo el mismo PVC y volvio a `ready`; el pod anterior aun estaba terminando
@@ -981,14 +996,33 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
    tres eventos. El diagnostico confirmo que el PVC estaba vacio en `/tmp/loki`,
    mientras la configuracion efectiva escribia `path_prefix`, chunks y WAL en
    `/loki`. El manifiesto queda corregido para montar `loki-data` en `/loki`;
-   el overlay productivo renderiza correctamente el nuevo montaje. Falta desplegar
-   `infra-prod` y repetir la prueba. Grafana no se reinicia todavia.
-5. Generar y correlacionar evidencias controladas de `401`, `403`, `429` y
-   `5xx`, revisando tambien Security Events y falsos positivos.
-6. Registrar CPU, memoria y disco frente a los umbrales acordados y adjuntar
-   las evidencias sin secretos, IP, Ray IDs ni cuerpos sensibles.
-7. Cerrar 5.4 y la Fase 5 solo si todas las comprobaciones anteriores quedan
-   aceptadas; despues se puede iniciar la Fase 6.
+   el overlay productivo renderizo correctamente el nuevo montaje. `infra-prod`
+   lo desplego y, a las 16:05 UTC, el mismo PVC de 5 GiB estaba `Bound` en
+   `/loki`, con cuatro archivos, WAL persistente, pod preparado sin reinicios y
+   Loki `ready`. El probe controlado devolvio `404`, aparecio una vez antes del
+   reinicio y permanecio una vez despues. El pod fue reemplazado, quedo
+   preparado y con cero reinicios. Grafana tambien reemplazo su pod y conservo
+   la base, el datasource Loki y la consulta del mismo probe.
+5. **Completado:** los `401` y `403` controlados quedaron correlacionados por
+   `request_id` en Gateway y Loki. La regla de Cloudflare produjo cinco `403`,
+   diez `429` y volvio a `403` tras 15 segundos; Security Events mostro las diez
+   acciones `Block` esperadas, sin falsos positivos visibles. Una consulta
+   blockchain imposible y de solo lectura produjo un unico `500`, tambien
+   correlacionado en Gateway y Loki. No se detuvieron servicios ni se crearon
+   ordenes.
+6. **Completado:** CPU 5%, memoria 78% y disco 56%, con 31,7 GiB disponibles.
+   Los 29 pods activos estaban preparados, los nueve PVC estaban `Bound` y no
+   habia reinicios.
+7. **Completado:** 5.4 y la Fase 5 quedan cerradas. La Fase 6 puede comenzar
+   manteniendo el origen cerrado.
+
+**Punto de reanudacion del 2026-08-18**
+
+Los perfiles Skaffold quedan preparados para `prod-domain`, pero no se han
+desplegado. La comparacion de renderizados y el rollback estatico a `prod`
+estan revisados. Reanudar tras versionar y publicar el cambio: verificar de
+nuevo certificado y `TLSStore`, ejecutar `infra-prod`, validar Keycloak y solo
+entonces ejecutar `apis-frontend-prod`. No tocar el firewall.
 
 **Secuencia de trabajo**
 
@@ -1009,9 +1043,8 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
 4. **5.3 - Cloudflare (completado):** confirmar la Free Managed Ruleset, crear el conjunto
    minimo de reglas personalizadas permanentes y dedicar la unica regla de rate
    limiting a los endpoints de mayor coste, sin incluir refresh ni polling.
-5. **5.4 - Observabilidad y cierre (en curso):** preparar consultas/alertas disponibles,
-   generar rechazos controlados, revisar falsos positivos y adjuntar las
-   evidencias de salida.
+5. **5.4 - Observabilidad y cierre (completado):** persistencia, consultas,
+   rechazos controlados, falsos positivos, recursos y reinicios aceptados.
 
 **Despliegue**
 
@@ -1055,10 +1088,24 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
 6. Confirmar que MongoDB, PostgreSQL, Kafka, Kafdrop, Mongo Express, IPFS API,
    RPC Ethereum, admin-service y Kubernetes API no tienen Ingress ni NodePort.
 
-Criterio de salida: las protecciones que deben sobrevivir a la retirada del mTLS
-estan activas y observables.
+Criterio de salida: **cumplido**. Las protecciones que deben sobrevivir a la
+retirada del mTLS estan activas y observables; la persistencia, los rechazos y
+los umbrales operativos quedaron validados sin abrir el origen.
 
-#### Fase 6 - Despliegue definitivo todavia cerrado (pendiente)
+#### Fase 6 - Despliegue definitivo todavia cerrado (en curso; no desplegada)
+
+**Estado de preparacion estatica del 2026-08-18**
+
+- `infra-prod` referencia `k8s/infra/keycloak/overlays/prod-domain`.
+- `apis-frontend-prod` referencia los overlays `prod-domain` de Gateway e
+  Ingress.
+- Los dos perfiles renderizan offline y el diagnostico de Skaffold es valido.
+- Frente al render anterior, solo cambian `KC_HOSTNAME_URL`,
+  `KC_HOSTNAME_ADMIN_URL`, `KEYCLOAK_ISSUER_URL` y los tres hosts de Ingress,
+  todos de `localhost` a `assermetry.com` con las rutas y puertos previstos.
+- No se ha ejecutado ningun pipeline, no se ha desplegado sobre K3s y el
+  firewall permanece cerrado. El rollback estatico consiste en restaurar los
+  tres paths `overlays/prod` y repetir los renderizados antes de desplegar.
 
 **Despliegue**
 
@@ -1081,15 +1128,17 @@ estan activas y observables.
   acceso a administracion y servicios internos.
 - Probar rollback a los overlays `prod` antes de modificar el firewall.
 
-1. Verificar el certificado instalado en la Fase 4 y desplegar `TLSStore` y los
-   recursos de seguridad que lo consumen.
-2. Cambiar los paths de los perfiles productivos desde `overlays/prod` a
-   `overlays/prod-domain` en un cambio revisable y coordinado.
-3. Desplegar `infra-prod` con Keycloak alineado con el issuer definitivo.
+1. **Siguiente gate antes del despliegue:** verificar de nuevo el certificado
+   instalado en la Fase 4 y que `TLSStore/default` lo consume.
+2. **Completado:** cambiar los paths de los perfiles productivos desde
+   `overlays/prod` a `overlays/prod-domain`, revisar el diff renderizado y
+   preparar el rollback estatico.
+3. **Pendiente:** desplegar `infra-prod` con Keycloak alineado con el issuer
+   definitivo.
 4. Desplegar `blockchain-prod` solo si hay cambios o si falta el despliegue;
    verificar peers, bloques, contrato y categorias.
-5. Desplegar `apis-frontend-prod` con Gateway, frontend, workers e Ingress
-   productivos.
+5. **Pendiente, despues de validar Keycloak:** desplegar `apis-frontend-prod`
+   con Gateway, frontend, workers e Ingress productivos.
 6. Antes de tocar el firewall, validar mediante tunel y resolucion local de
    `assermetry.com` que TLS, redirects e issuer son correctos.
 

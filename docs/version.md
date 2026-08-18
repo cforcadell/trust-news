@@ -51,27 +51,31 @@ control correspondiente y la muestra final mantuvo 29 de 29 pods preparados,
 9 de 9 PVC `Bound` y cero reinicios. El nodo estaba al 5% de CPU, 78% de
 memoria y 56% de disco; la memoria sigue por debajo del aviso del 80%, pero
 requiere vigilancia durante el despliegue definitivo. La **Fase 6 - Despliegue
-definitivo todavia cerrado** esta en curso: la preparacion estatica de los
-perfiles `prod-domain` esta completada y validada, pero no se ha ejecutado
-ningun pipeline ni despliegue en K3s y el firewall permanece cerrado. La
-**Fase 10 - Backups y recuperacion** queda pendiente y sera la ultima fase en
-ejecutarse.
-Existe una version estable en Hetzner accesible mediante tunel SSH, pero todavia
-no se ha activado el dominio publico ni deben cambiarse sus URLs OIDC.
+definitivo todavia cerrado** esta en curso. El pipeline GitLab `#2770049730`
+sobre el commit `4a7e9185` completo `build`, el gate TLS, `infra-prod` y el
+bootstrap de MongoDB; el rollback no se ejecuto. Keycloak ha recibido la
+configuracion `prod-domain`, pero su rollout e issuer se validaran
+explicitamente antes de desplegar `apis-frontend-prod`. El firewall permanece
+cerrado. La **Fase 10 - Backups y recuperacion** queda pendiente y sera la
+ultima fase en ejecutarse.
+Hetzner esta en un estado transitorio controlado: Keycloak usa ya las URLs del
+dominio definitivo, mientras Gateway e Ingress conservan `prod` hasta el
+segundo pipeline. El dominio publico todavia no esta activado.
 
 Configuracion activa:
 
 ```text
 Local:          https://localhost:7443
-Hetzner/tunel:  https://localhost:9443
+Hetzner/tunel:  https://localhost:9443 (Ingress actual; Keycloak usa dominio final)
 Cloudflare:     https://assermetry.com (proxy activo; origen cerrado)
 ```
 
-Los perfiles locales continúan usando `overlays/local`. Como preparacion
-revisable de la Fase 6, `infra-prod` referencia ahora el overlay
-`prod-domain` de Keycloak y `apis-frontend-prod` referencia los overlays
-`prod-domain` de Gateway e Ingress. Este cambio aun no se ha desplegado: el K3s
-activo conserva `host: localhost`, sus URLs OIDC de tunel y el firewall cerrado.
+Los perfiles locales continúan usando `overlays/local`. `infra-prod` referencia
+el overlay `prod-domain` de Keycloak y ya fue desplegado por el pipeline
+`#2770049730`. `apis-frontend-prod` referencia los overlays `prod-domain` de
+Gateway e Ingress, pero ese segundo perfil aun no se ha desplegado: los Ingress
+activos conservan `host: localhost` y el Gateway conserva el issuer de tunel.
+El firewall permanece cerrado.
 
 ### Contrato publico de la version
 
@@ -198,16 +202,16 @@ salida.
 | 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
 | 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
-| 6 | **En curso (preparacion estatica cerrada; despliegue pendiente)** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Todavia no desplegado; siguiente gate `infra-prod` y despues `apis-frontend-prod` | No |
+| 6 | **En curso (`infra-prod` desplegado; validacion Keycloak pendiente)** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Gate TLS e `infra-prod` completados; validar Keycloak antes de `apis-frontend-prod` | No |
 | 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
 | 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
 | 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
 
-**Hito actual para versionado:** este estado es apto para un commit de cierre de
-la Fase 5 y preparacion estatica de la Fase 6. El commit incluye los manifests y
-perfiles `prod-domain` revisados, pero no certifica ningun despliegue de Fase 6,
-cambio de issuer en K3s ni apertura del firewall.
+**Hito actual para versionado:** el pipeline `#2770049730` desplego
+`infra-prod` desde `4a7e9185` y supero el gate TLS y el bootstrap. El siguiente
+gate es validar el rollout y el discovery OIDC de Keycloak. No se ha desplegado
+`apis-frontend-prod` ni se ha abierto el firewall.
 
 `No` significa que esa fase no debe provocar un despliegue en ese cluster. Las
 consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
@@ -1092,9 +1096,9 @@ Criterio de salida: **cumplido**. Las protecciones que deben sobrevivir a la
 retirada del mTLS estan activas y observables; la persistencia, los rechazos y
 los umbrales operativos quedaron validados sin abrir el origen.
 
-#### Fase 6 - Despliegue definitivo todavia cerrado (en curso; no desplegada)
+#### Fase 6 - Despliegue definitivo todavia cerrado (en curso; infra desplegada)
 
-**Estado de preparacion estatica del 2026-08-18**
+**Estado del 2026-08-18**
 
 - `infra-prod` referencia `k8s/infra/keycloak/overlays/prod-domain`.
 - `apis-frontend-prod` referencia los overlays `prod-domain` de Gateway e
@@ -1103,9 +1107,14 @@ los umbrales operativos quedaron validados sin abrir el origen.
 - Frente al render anterior, solo cambian `KC_HOSTNAME_URL`,
   `KC_HOSTNAME_ADMIN_URL`, `KEYCLOAK_ISSUER_URL` y los tres hosts de Ingress,
   todos de `localhost` a `assermetry.com` con las rutas y puertos previstos.
-- No se ha ejecutado ningun pipeline, no se ha desplegado sobre K3s y el
-  firewall permanece cerrado. El rollback estatico consiste en restaurar los
-  tres paths `overlays/prod` y repetir los renderizados antes de desplegar.
+- El pipeline GitLab `#2770049730`, ejecutado sobre `postTFM` y el commit
+  `4a7e9185`, finalizo correctamente en 2 minutos y 22 segundos. Completaron
+  `build`, `check_phase6_origin_tls`, `deploy` con `PROFILE=infra-prod` y
+  `bootstrap_mongodb`; el job de rollback no se ejecuto.
+- Esta evidencia confirma el gate TLS y la aplicacion de `infra-prod`, pero el
+  pipeline ejecutado aun no esperaba explicitamente el rollout de Keycloak ni
+  comprobaba su discovery OIDC. Esa validacion es el siguiente gate. El
+  firewall permanece cerrado.
 - El preflight local se repitio con Skaffold `v2.17.3`: `infra-prod` renderizo
   27 recursos y `apis-frontend-prod` 43, todos aceptados por la validacion
   client-side. La comparacion directa confirma como unicos cambios las dos URLs
@@ -1138,15 +1147,15 @@ los umbrales operativos quedaron validados sin abrir el origen.
   acceso a administracion y servicios internos.
 - Probar rollback a los overlays `prod` antes de modificar el firewall.
 
-1. **Preparado; pendiente de ejecucion en GitLab:** verificar de nuevo el
-   certificado instalado en la Fase 4 y que `TLSStore/default` lo consume. El
-   job `check_phase6_origin_tls` automatiza este gate antes de cada despliegue
-   productivo de la fase.
+1. **Completado en el pipeline `#2770049730`:** el certificado instalado en la
+   Fase 4, su clave, el SAN, la vigencia y la referencia de `TLSStore/default`
+   superaron `check_phase6_origin_tls`.
 2. **Completado:** cambiar los paths de los perfiles productivos desde
    `overlays/prod` a `overlays/prod-domain`, revisar el diff renderizado y
    preparar el rollback estatico.
-3. **Pendiente:** desplegar `infra-prod` con Keycloak alineado con el issuer
-   definitivo.
+3. **Desplegado; validacion funcional pendiente:** `infra-prod` se aplico desde
+   `4a7e9185`. Antes de continuar se comprobaran el rollout de Keycloak, sus dos
+   URLs externas y el issuer publicado por discovery OIDC.
 4. Desplegar `blockchain-prod` solo si hay cambios o si falta el despliegue;
    verificar peers, bloques, contrato y categorias.
 5. **Pendiente, despues de validar Keycloak:** desplegar `apis-frontend-prod`

@@ -219,6 +219,33 @@ deploy:
           esac
           ;;
         infra-prod)
+          kubectl rollout status statefulset/keycloak-db -n infra --timeout=180s
+          kubectl rollout status deployment/keycloak -n infra --timeout=180s
+          test "$(kubectl get configmap keycloak-env-config -n infra -o jsonpath='{.data.KC_HOSTNAME_URL}')" = "https://assermetry.com/auth" || {
+            echo "ERROR: KC_HOSTNAME_URL no usa el dominio definitivo"
+            exit 1
+          }
+          test "$(kubectl get configmap keycloak-env-config -n infra -o jsonpath='{.data.KC_HOSTNAME_ADMIN_URL}')" = "https://assermetry.com/auth" || {
+            echo "ERROR: KC_HOSTNAME_ADMIN_URL no usa el dominio definitivo"
+            exit 1
+          }
+          kubectl port-forward -n infra svc/keycloak 18080:8080 >/tmp/keycloak-port-forward.log 2>&1 &
+          keycloak_pf_pid="$!"
+          trap 'kill "$keycloak_pf_pid" 2>/dev/null || true; wait "$keycloak_pf_pid" 2>/dev/null || true' EXIT
+          keycloak_discovery=""
+          for attempt in $(seq 1 30); do
+            if keycloak_discovery="$(curl -fsS http://127.0.0.1:18080/auth/realms/TrustNews/.well-known/openid-configuration 2>/dev/null)"; then
+              break
+            fi
+            sleep 2
+          done
+          printf '%s' "$keycloak_discovery" | tr -d '\n\r ' | grep -Fq '"issuer":"https://assermetry.com/auth/realms/TrustNews"' || {
+            echo "ERROR: discovery OIDC no publica el issuer definitivo"
+            exit 1
+          }
+          kill "$keycloak_pf_pid" 2>/dev/null || true
+          wait "$keycloak_pf_pid" 2>/dev/null || true
+          trap - EXIT
           kubectl rollout status statefulset/mongodb -n infra --timeout=180s
           kubectl rollout status deployment/loki -n infra --timeout=180s
           kubectl rollout status deployment/grafana -n infra --timeout=180s

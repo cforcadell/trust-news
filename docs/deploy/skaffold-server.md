@@ -1595,10 +1595,12 @@ no romper antes el acceso por `https://localhost:9443`.
    seccion 2.7.4, conservando el certificado anterior para rollback.
 5. Verificar que `TLSStore` apunta a `trustnews-origin-tls` y validar por tunel
    la cadena, SNI y hostname con la raiz Origin CA correspondiente.
-6. **Preparado el 2026-08-18, no desplegado:** Skaffold usa los overlays
-   `prod-domain`; el diff renderizado solo cambia las dos URLs externas de
-   Keycloak, el issuer del Gateway y los tres hosts a `assermetry.com`,
-   manteniendo TLS en `websecure`.
+6. **Despliegue iniciado el 2026-08-18:** Skaffold usa los overlays
+   `prod-domain`. `infra-prod` se aplico correctamente mediante el pipeline
+   `#2770049730`; `apis-frontend-prod` permanece pendiente hasta validar
+   Keycloak. El diff renderizado solo cambia las dos URLs externas de Keycloak,
+   el issuer del Gateway y los tres hosts a `assermetry.com`, manteniendo TLS en
+   `websecure`.
 7. Verificar `KC_HOSTNAME_URL` y `KEYCLOAK_ISSUER_URL`.
 8. Lanzar el pipeline con `PROFILE=infra-prod`. El job
    `check_phase6_origin_tls` debe completar antes de `deploy`: comprueba que
@@ -1606,8 +1608,9 @@ no romper antes el acceso por `https://localhost:9443`.
    tipo TLS, que el certificado corresponde a `assermetry.com`, conserva al
    menos 30 dias de vigencia y forma pareja con su clave. No continuar si
    falla este gate.
-9. Desplegar `infra-prod` para aplicar Keycloak y validar su rollout antes de
-   iniciar el siguiente pipeline.
+9. `infra-prod` se desplego en el pipeline `#2770049730`. Validar ahora el
+   rollout, las URLs externas y el issuer del discovery OIDC de Keycloak antes
+   de iniciar el siguiente pipeline.
 10. Lanzar un segundo pipeline con `PROFILE=apis-frontend-prod`. Este repite el
     gate TLS y ejecuta tambien `check_mongodb_bootstrap` antes de desplegar
     Gateway, APIs, frontend e Ingress.

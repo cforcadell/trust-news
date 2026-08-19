@@ -1675,13 +1675,18 @@ La consulta abreviada `--fields realm,displayName,attributes` puede mostrar
 `attributes` vacio aunque el mapa este persistido. Para comprobar
 `frontendUrl` se debe consultar la representacion completa del realm.
 
-El siguiente gate es publicar esta documentacion y lanzar
-`PROFILE=apis-frontend-prod`. No repetir `infra-prod`, no desplegar
-`blockchain-prod` y mantener el firewall cerrado.
+El segundo despliegue con `PROFILE=apis-frontend-prod` ya fue aplicado. La
+evidencia aportada muestra 29 de 29 pods preparados, cero reinicios, nueve PVC
+`Bound` y los tres Ingress en `assermetry.com`. La repeticion desde Windows con
+la raiz Origin CA y sin `-k` obtuvo frontend `200` y los endpoints OIDC
+definitivos. Gateway sin credenciales devolvio `403`; OpenAPI, Redoc y Swagger
+devolvieron `404`. El nodo estaba al 5% de CPU y 74% de memoria una hora
+despues del rollout, sin pods `Pending` ni reinicios.
 
-10. Lanzar un segundo pipeline con `PROFILE=apis-frontend-prod`. Este repite el
-    gate TLS y ejecuta tambien `check_mongodb_bootstrap` antes de desplegar
-    Gateway, APIs, frontend e Ingress.
+10. **Aplicado; Fase 6 cerrada:**
+    `PROFILE=apis-frontend-prod` desplego
+    Gateway, APIs, frontend e Ingress. Registrar el identificador del pipeline
+    cuando este disponible y no repetir `infra-prod` ni `blockchain-prod`.
 11. Mantener `80/tcp` cerrado y abrir `443/tcp` exclusivamente a los rangos de
     Cloudflare cuando Access mTLS, WAF, TLS, DNS e issuer esten verificados.
 12. Verificar:
@@ -1696,7 +1701,26 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' https://assermetry.com/backend/d
 curl -I https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configuration
 ```
 
-13. Probar login frontend, token refresh, llamada al Gateway, client credentials B2B y logout.
+13. **Completado parcialmente:** frontend y discovery pasaron sin `-k`;
+    Gateway sin credenciales devolvio `403`; los tres endpoints OpenAPI
+    devolvieron `404`; recursos, pods y reinicios quedaron dentro del gate.
+14. **Completado:** Keycloak emitio un token `client_credentials` para
+    `TrustNewsApi` y Gateway acepto el JWT. `GET /backend/orders/list` devolvio
+    `404` desde `news-handler` porque no habia noticias para el `client_id` del
+    service account; no fue un rechazo de autenticacion. Con un token nuevo,
+    `GET /backend/auth/is-admin` devolvio `HTTP 200` e `is_admin:false`. El
+    primer `403` de esta ruta uso una variable de token vacia y se descarta como
+    fallo del cliente. No se registraron el secret ni el token.
+15. **Completado por confirmacion del operador:** acceso privado de navegador,
+    login, refresh, logout, redirects, Web Origins y smoke tests Light y
+    Blockchain hasta el punto 6 del procedimiento. Los identificadores y datos
+    funcionales no se registran en Git.
+16. **Limpieza completada; `ISSUE-002` resuelto:** se retiraron la entrada
+    temporal de `hosts`, la raiz Origin CA importada, el tunel SSH y las
+    variables. El operador confirmo que el secret de `ISSUE-002` no coincide con produccion;
+    no rotar `TrustNewsApi` por este hallazgo. El valor por defecto no vacio se
+    elimino. Revisar su posible alcance historico en tests queda como
+    recomendacion no bloqueante y la Fase 7 puede comenzar.
 
 No abrir el servicio a clientes hasta que el issuer de Keycloak, el certificado
 TLS, las redirecciones OIDC y el WAF esten verificados con el dominio final.

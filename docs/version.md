@@ -50,8 +50,8 @@ controlados `401`, `403`, `429` y `500` quedaron correlacionados en el punto de
 control correspondiente y la muestra final mantuvo 29 de 29 pods preparados,
 9 de 9 PVC `Bound` y cero reinicios. El nodo estaba al 5% de CPU, 78% de
 memoria y 56% de disco; la memoria sigue por debajo del aviso del 80%, pero
-requiere vigilancia durante el despliegue definitivo. La **Fase 6 - Despliegue
-definitivo todavia cerrado** esta en curso. El pipeline GitLab `#2770049730`
+requiere vigilancia durante los siguientes cambios operativos. La **Fase 6 -
+Despliegue definitivo todavia cerrado** esta cerrada. El pipeline GitLab `#2770049730`
 sobre el commit `4a7e9185` completo `build`, el gate TLS, `infra-prod` y el
 bootstrap de MongoDB; el rollback no se ejecuto. Tras dos intentos de
 diagnostico, el job sobre `dc81ca9` actualizo idempotentemente el atributo del
@@ -60,27 +60,41 @@ realm y confirmo el issuer
 cerrado. El 2026-08-19 se alineo `TrustNewsWeb` mediante `kcadm` dentro del pod,
 se establecio el display name `Assermetry`, se verifico el issuer definitivo y
 se confirmo que `TrustNewsApi` conserva su configuracion confidencial y su
-service account sin cambios. Queda publicar esta evidencia y ejecutar
-`apis-frontend-prod`; el firewall permanece cerrado. La **Fase 10 - Backups y
+service account sin cambios. La evidencia posterior al despliegue de
+`apis-frontend-prod` muestra los 29 pods preparados, cero reinicios, los nueve
+PVC `Bound` y los tres Ingress con `host: assermetry.com`. Por tunel, el
+frontend devolvio `200` y discovery publico el issuer definitivo. La repeticion
+desde Windows, con `--cacert` y sin `-k`, acepto la cadena TLS; Gateway devolvio
+`403` sin credenciales y los tres endpoints OpenAPI devolvieron `404`. El
+operador valido despues el flujo web y los smoke tests Light y Blockchain.
+`TrustNewsApi` emitio un token y Gateway acepto el JWT; `/orders/list` devolvio
+`404` porque no habia noticias para el service account. Con un token nuevo,
+`/auth/is-admin` devolvio `HTTP 200` e `is_admin:false`, cerrando el gate API.
+La limpieza local esta completada. `ISSUE-002` esta resuelto: el valor por
+defecto no vacio se elimino y el operador confirmo que no coincide con el
+secret productivo, por lo que no requiere rotacion productiva. La posible
+revision de una credencial historica de tests queda como recomendacion no
+bloqueante. El firewall permanece cerrado. La
+**Fase 10 - Backups y
 recuperacion** queda pendiente y sera la ultima fase en ejecutarse.
-Hetzner esta en un estado transitorio controlado: Keycloak usa ya las URLs del
-dominio definitivo, mientras Gateway e Ingress conservan `prod` hasta el
-segundo pipeline. El dominio publico todavia no esta activado.
+Hetzner usa ya el dominio definitivo en Keycloak, Gateway e Ingress, pero el
+despliegue permanece cerrado y el dominio publico todavia no esta activado.
 
 Configuracion activa:
 
 ```text
 Local:          https://localhost:7443
-Hetzner/tunel:  https://localhost:9443 (Ingress actual; Keycloak usa dominio final)
+Hetzner/tunel:  https://assermetry.com (conexion a 127.0.0.1:9443 con --connect-to)
 Cloudflare:     https://assermetry.com (proxy activo; origen cerrado)
 ```
 
 Los perfiles locales continúan usando `overlays/local`. `infra-prod` referencia
 el overlay `prod-domain` de Keycloak y ya fue desplegado por el pipeline
 `#2770049730`. `apis-frontend-prod` referencia los overlays `prod-domain` de
-Gateway e Ingress, pero ese segundo perfil aun no se ha desplegado: los Ingress
-activos conservan `host: localhost` y el Gateway conserva el issuer de tunel.
-El firewall permanece cerrado.
+Gateway e Ingress y ya fue aplicado; los tres Ingress activos usan
+`host: assermetry.com`. La aceptacion funcional y la limpieza local estan
+completadas. `ISSUE-002` esta resuelto y no afecta al secret productivo. La
+revision historica recomendada no bloquea la apertura controlada del firewall.
 
 ### Contrato publico de la version
 
@@ -207,17 +221,31 @@ salida.
 | 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
 | 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
-| 6 | **En curso (`TrustNewsWeb` aceptado; `apis-frontend-prod` pendiente)** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | TLS, Keycloak, `infra-prod` y clientes aceptados; falta `apis-frontend-prod` | No |
+| 6 | **Cerrada** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Funcionalidad y limpieza aceptadas; valor por defecto de tests eliminado y sin coincidencia con produccion | No |
 | 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
 | 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
 | 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
 
-**Hito actual para versionado:** `infra-prod` esta aceptado, el job sobre
-`dc81ca9` confirmo el issuer definitivo y el 2026-08-19 se aplicaron y
-verificaron las URLs publicas de `TrustNewsWeb` sin modificar `TrustNewsApi`.
-El siguiente gate es publicar esta evidencia y desplegar
-`apis-frontend-prod`. No se ha abierto el firewall.
+**Hito actual para versionado:** `infra-prod`, los clientes OIDC y el despliegue
+de `apis-frontend-prod` estan aplicados. La muestra posterior mantiene 29 de 29
+pods preparados, cero reinicios, nueve PVC `Bound` y los tres Ingress en
+`assermetry.com`. Desde Windows, frontend y discovery pasaron sin `-k` usando
+la raiz Origin CA; Gateway rechazo sin credenciales con `403` y los tres
+endpoints OpenAPI devolvieron `404`. El operador confirmo despues login,
+refresh, logout, redirects y Web Origins, junto con los smoke tests Light y
+Blockchain. `TrustNewsApi` emitio un token valido y Gateway acepto el JWT; la
+ruta de listado devolvio `404` por ausencia de noticias para ese service
+account. La repeticion con un token nuevo obtuvo `HTTP 200` e
+`is_admin:false` en `/backend/auth/is-admin`. El primer `403` observado en esa
+ruta se produjo con la variable del token vacia y no se clasifica como fallo.
+La entrada temporal de `hosts`, la raiz importada, el tunel y las variables se
+retiraron. El operador confirmo que el valor de `ISSUE-002` no coincide con el
+secret productivo de `TrustNewsApi`; no se requiere rotacion productiva por
+este hallazgo. La copia de trabajo elimina ya el valor no vacio y `ISSUE-002`
+queda resuelto. Determinar si el valor historico pertenecio a una credencial de
+tests activa es una recomendacion de seguridad independiente y no bloquea la
+Fase 7. No se ha abierto el firewall.
 
 `No` significa que esa fase no debe provocar un despliegue en ese cluster. Las
 consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
@@ -1102,7 +1130,7 @@ Criterio de salida: **cumplido**. Las protecciones que deben sobrevivir a la
 retirada del mTLS estan activas y observables; la persistencia, los rechazos y
 los umbrales operativos quedaron validados sin abrir el origen.
 
-#### Fase 6 - Despliegue definitivo todavia cerrado (en curso; infra desplegada)
+#### Fase 6 - Despliegue definitivo todavia cerrado (cerrada)
 
 **Estado del 2026-08-18**
 
@@ -1156,16 +1184,50 @@ los umbrales operativos quedaron validados sin abrir el origen.
   `assermetry.com`, una vigencia restante minima de 30 dias y la pareja
   certificado/clave, sin modificar el cluster ni mostrar la clave privada.
 
-**Punto de reanudacion tras alinear los clientes el 2026-08-19**
+**Punto de control posterior a `apis-frontend-prod` del 2026-08-19**
 
-- Estado confirmado: `infra-prod` esta aceptado, el certificado y
-  `TLSStore/default` son validos, Keycloak esta preparado y discovery devuelve
-  exactamente `https://assermetry.com/auth/realms/TrustNews`.
+- Estado confirmado antes del segundo despliegue: `infra-prod`, el certificado,
+  `TLSStore/default`, Keycloak y los clientes OIDC estaban aceptados.
+- Evidencia posterior a `apis-frontend-prod`: 29 de 29 pods preparados, cero
+  reinicios y los nueve PVC `Bound`. Los pods de APIs y frontend tenian unos
+  80 segundos de antiguedad en la captura, coherente con el rollout reciente.
+- `gateway-ingress`, `frontend-ingress` y `keycloak-ingress` usan
+  `host: assermetry.com`; `TLSStore/default` continua apuntando a
+  `trustnews-origin-tls`. No se registra la direccion del servidor en Git.
+- Mediante `--connect-to assermetry.com:443:127.0.0.1:9443`, el frontend
+  devolvio `HTTP/2 200` y discovery devolvio el issuer exacto
+  `https://assermetry.com/auth/realms/TrustNews`, junto con endpoints de
+  autorizacion, token, JWKS y logout bajo el dominio definitivo.
+- Las dos peticiones preliminares usaron `curl -k`; una repeticion posterior
+  desde Windows uso la raiz publica Origin CA mediante `--cacert`, sin `-k`, y
+  obtuvo `HTTP/1.1 200` en el frontend sin errores de certificado. Discovery
+  confirmo issuer, token endpoint, JWKS y logout bajo el dominio definitivo.
+- Gateway devolvio `403` sin credenciales, como se esperaba.
+  `/backend/docs`, `/backend/redoc` y `/backend/openapi.json` devolvieron `404`.
+- Una hora despues del rollout, los 29 pods continuaban preparados y sin
+  reinicios. El nodo estaba al 5% de CPU y 74% de memoria; los mayores consumos
+  eran los tres nodos Geth, Kafka y Keycloak. No habia pods `Pending`.
+- El operador recupero el secret por su via autorizada, lo introdujo como
+  `SecureString` y lo elimino de las variables tras la prueba. Keycloak emitio
+  un access token para `TrustNewsApi`. Gateway valido el JWT y envio
+  `GET /orders/list` a `news-handler`; la respuesta fue `404` porque ese
+  servicio devuelve `No hay noticias registradas` cuando el service account no
+  tiene noticias. No fue un rechazo `401/403` de autenticacion.
+- Tras obtener un token nuevo, `GET /backend/auth/is-admin` devolvio `HTTP 200`
+  con `is_admin:false`, esperado para un service account sin `trust-admin`. Un
+  intento anterior devolvio `403` porque la variable `AccessToken` ya estaba
+  vacia; no se considera un fallo de `TrustNewsApi`.
+- El operador confirmo la validacion hasta el punto 6 del procedimiento de
+  navegador: carga por el dominio canonico, flujo de `TrustNewsWeb` y smoke
+  tests Light y Blockchain. No se aportaron al documento tokens, secrets, datos
+  de usuario ni identificadores de orden. El punto 7 tambien se completo: se
+  retiraron la entrada de `hosts`, la raiz Origin CA importada, el tunel y las
+  variables temporales.
 - `TrustNewsWeb` se actualizo mediante `kcadm` dentro del pod porque la consola
   cargada como `https://localhost:9443` quedaba bloqueada por la CSP: Keycloak
   ya genera sus recursos administrativos para el hostname canonico
-  `assermetry.com`, mientras los Ingress activos todavia conservan
-  `host: localhost`.
+  `assermetry.com`, mientras los Ingress activos todavia conservaban
+  `host: localhost`. Tras `apis-frontend-prod`, los tres usan el dominio final.
 - El realm conserva el nombre tecnico `TrustNews`, tiene display name
   `Assermetry` y su representacion completa confirma
   `attributes.frontendUrl=https://assermetry.com/auth`. La proyeccion abreviada
@@ -1183,20 +1245,19 @@ los umbrales operativos quedaron validados sin abrir el origen.
 - La sesion temporal de `kcadm` se elimino. El discovery, consultado por
   port-forward con las cabeceras externas emuladas, devolvio exactamente
   `https://assermetry.com/auth/realms/TrustNews`.
-- Pendiente: publicar esta documentacion y ejecutar
-  `PROFILE=apis-frontend-prod`. El firewall mantiene cerrados `80/tcp` y
-  `443/tcp`.
+- Limpieza local completada. `ISSUE-002` esta resuelto: se elimino el valor por
+  defecto no vacio y se confirmo que no coincide con produccion, por lo que no
+  exige rotar `TrustNewsApi`. Comprobar si el valor historico corresponde a una
+  credencial de tests activa queda como recomendacion no bloqueante. El
+  firewall mantiene cerrados `80/tcp` y `443/tcp`.
 - No repetir `infra-prod` salvo que aparezca un problema de salud. No desplegar
   `blockchain-prod` porque esta fase no ha introducido cambios en blockchain.
 
-Al reanudar el despliegue:
-
-1. Publicar la documentacion que contiene la evidencia anterior.
-2. Lanzar `PROFILE=apis-frontend-prod` sin repetir `infra-prod` ni desplegar
-   `blockchain-prod`.
-3. Tras ese pipeline, mantener el firewall cerrado y validar por tunel TLS,
-   Ingress, issuer, login, refresh, logout, roles, client credentials y los
-   smoke tests Light y Blockchain. No iniciar la Fase 7 hasta que todo pase.
+La fase queda formalmente cerrada. Como recomendacion independiente, comprobar
+si el valor historico pertenecio a una credencial de tests activa y revocarla o
+rotarla si procede. No rotar `TrustNewsApi` de produccion por este hallazgo,
+porque el operador confirmo que los valores no coinciden. La Fase 7 puede
+comenzar manteniendo el alcance de apertura definido para Cloudflare.
 
 **Despliegue**
 
@@ -1233,10 +1294,15 @@ Al reanudar el despliegue:
 5. **Completado el 2026-08-19:** alinear mediante `kcadm` las URLs permitidas de
    `TrustNewsWeb`, confirmar el realm y verificar que `TrustNewsApi` permanece
    confidencial y sin cambios.
-6. **Pendiente:** desplegar `apis-frontend-prod` con Gateway, frontend, workers
-   e Ingress productivos.
-7. Antes de tocar el firewall, validar mediante tunel y resolucion local de
-   `assermetry.com` que TLS, redirects e issuer son correctos.
+6. **Aceptacion funcional completada:** `apis-frontend-prod` actualizo Gateway,
+   frontend, workers e Ingress. TLS, salud, dominio, ambos clientes OIDC,
+   Gateway, OpenAPI y smoke tests Light y Blockchain tienen evidencia. El
+   `404` autenticado de `/orders/list` corresponde a ausencia de datos.
+7. **Limpieza completada; `ISSUE-002` resuelto:** la prueba independiente de
+   `TrustNewsApi` devolvio `200` y se retiro la configuracion temporal de
+   Windows. El valor por defecto eliminado no coincide con produccion y no
+   requiere rotar `TrustNewsApi`. La revision de su posible alcance historico
+   en tests es una recomendacion no bloqueante.
 
 Criterio de salida: la aplicacion completa usa ya la configuracion final, pero
 el origen todavia no acepta trafico de Internet.

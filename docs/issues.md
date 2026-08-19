@@ -109,3 +109,47 @@ para toda la orden.
 Marcar como **Resuelto** cuando la mejora este implementada, las pruebas de
 concurrencia pasen y un despliegue conjunto en Kind y Hetzner seleccione los
 tres validadores sin refresco manual.
+
+
+### ISSUE-002 - Secret OIDC no vacio como valor por defecto en tests
+
+| Campo | Valor |
+| --- | --- |
+| Fecha de deteccion | 2026-08-19 |
+| Entorno | Repositorio y credenciales de tests; produccion descartada |
+| Fase | 6 - Despliegue definitivo todavia cerrado (cerrada) |
+| Estado | **Resuelto** |
+| Componentes | `api/tests`, Keycloak, clientes B2B y CI/CD |
+
+#### Comportamiento detectado
+
+La fixture de autenticacion de las pruebas define un valor por defecto no vacio
+para `AUTH_CLIENT_SECRET`. El valor no se reproduce en este documento. El operador comparo el valor por una via que no lo expuso en logs ni
+documentacion y confirmo que no coincide con el secret productivo de
+`TrustNewsApi`. No se requiere rotacion productiva por este hallazgo. Falta
+determinar si corresponde a una credencial de tests todavia activa. La copia de
+trabajo sustituye el valor por defecto no vacio por uno vacio, sin revelar el
+valor anterior. Esta correccion resuelve la incidencia y no bloquea la Fase 7.
+
+La prueba operativa del 2026-08-19 obtuvo un token `client_credentials` mediante
+un secret proporcionado de forma interactiva. No se registra si era el mismo
+valor y no debe compararse mediante logs, comandos versionados o documentacion.
+
+#### Seguimiento recomendado no bloqueante
+
+1. En una mejora posterior, hacer que la fixture exija `AUTH_CLIENT_SECRET`
+   explicitamente y falle antes de realizar una peticion cuando la variable no
+   exista.
+2. Revisar de forma autorizada el historial y el entorno de tests para
+   determinar a que credencial pertenece, sin copiar el valor a incidencias ni
+   logs.
+3. Si la credencial de tests sigue activa, revocarla o rotarla y actualizar su
+   gestor de secretos. No rotar `TrustNewsApi` de produccion por este hallazgo.
+4. Ejecutar una busqueda de secretos y conservar solo evidencias anonimizadas.
+
+#### Resolucion
+
+**Resuelto el 2026-08-19.** El valor por defecto no vacio se elimino y el
+operador confirmo que no coincide con el secret productivo. No se requiere
+rotacion de `TrustNewsApi`. La comprobacion y eventual revocacion de una
+credencial historica de tests se conserva como recomendacion independiente.

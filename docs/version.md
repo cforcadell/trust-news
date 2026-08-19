@@ -18,7 +18,7 @@ Assermetry. Los comandos operativos se mantienen en:
 Publicar la instalacion de Hetzner en `https://assermetry.com`, conservando la
 posibilidad de desplegar y validar la misma aplicacion en local.
 
-La apertura al publico se realizara en la Fase 9. Antes de ella, el servicio
+La apertura al publico se realizara en la Fase 10. Antes de ella, el servicio
 completo debe funcionar en el dominio definitivo y el acceso HTTPS por
 `443/tcp` debe estar restringido mediante un certificado personal mTLS.
 Desactivar la regla mTLS general sera el unico cambio necesario para abrir los
@@ -80,8 +80,13 @@ alternativa permanece pendiente. Hetzner permite ahora `TCP/443` exclusivamente
 desde las 22 redes verificadas de Cloudflare; los accesos directos a `443`, `80`
 y `6443` quedaron bloqueados. El lock de mantenimiento de Cloudflare esta
 activo en primera posicion y bloquea el hostname completo mientras no se prueba.
-La **Fase 10 - Backups y recuperacion** queda pendiente y sera la ultima fase en
-ejecutarse dentro de `v0.0.12`.
+La **Fase 8 - Hardening interno, identidad y cadena de suministro** queda
+pendiente y es obligatoria antes del GO/NO-GO. Corregira la validacion de
+audiencia JWT, el acceso CI a Kubernetes, la superficie RPC de Geth, la
+segmentacion interna, la inmutabilidad de imagenes y los riesgos de capacidad
+y disponibilidad detectados en la revision. La **Fase 11 - Backups y
+recuperacion** queda pendiente y sera la ultima fase en ejecutarse dentro de
+`v0.0.12`.
 
 Configuracion activa:
 
@@ -156,11 +161,12 @@ rechace cualquier cliente sin un certificado mTLS valido.
 
 - El acceso por mTLS debe estar activo antes del primer momento en que
   `443/tcp` sea alcanzable desde Internet, en la **Fase 7**, y mantenerse hasta
-  la apertura publica de la **Fase 9** tras el GO/NO-GO. Despues de la apertura,
+  la apertura publica de la **Fase 10** tras el GO/NO-GO. Despues de la apertura,
   mTLS sigue siendo obligatorio en `/auth/admin` y
   `/auth/realms/master`.
-- No se debe abrir `443/tcp` al trafico publico general hasta que la Fase 7 haya
-  sido probada con Cloudflare y mTLS.
+- No se debe abrir `443/tcp` al trafico publico general hasta cerrar las fases
+  7 y 8 y obtener un `GO` formal en la Fase 9. Terminar las pruebas mTLS no
+  sustituye el hardening interno.
 - Si aparece una incidencia durante la apertura, el rollback inmediato consiste en
   reactivar la politica mTLS sin cambiar DNS, Kubernetes, Keycloak ni
   certificados.
@@ -226,9 +232,10 @@ salida.
 | 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
 | 6 | **Cerrada** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Funcionalidad y limpieza aceptadas; valor por defecto de tests eliminado y sin coincidencia con produccion | No |
 | 7 | **En curso (pasos 7.1 a 7.5 completados; 7.6 pendiente)** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | `443/tcp` abierto solo a Cloudflare; aplicacion y salud aceptadas | Lock de mantenimiento activo; pendiente repetir desde una red alternativa |
-| 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
-| 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
-| 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
+| 8 | **Pendiente** | Reducir la superficie interna, endurecer identidad y CI, segmentar el cluster y fijar artefactos reproducibles | Validar antes de produccion | Despliegues controlados por bloque; lock y mTLS activos | No |
+| 9 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
+| 10 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
+| 11 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
 
 **Hito actual para versionado:** `infra-prod`, los clientes OIDC y el despliegue
 de `apis-frontend-prod` estan aplicados. La muestra posterior mantiene 29 de 29
@@ -248,7 +255,8 @@ secret productivo de `TrustNewsApi`; no se requiere rotacion productiva por
 este hallazgo. La copia de trabajo elimina ya el valor no vacio y `ISSUE-002`
 queda resuelto. Determinar si el valor historico pertenecio a una credencial de
 tests activa es una recomendacion de seguridad independiente y no bloquea la
-Fase 7. No se ha abierto el firewall.
+Fase 7. El firewall permite `443/tcp` exclusivamente desde las redes de
+Cloudflare; no esta abierto al trafico general ni al acceso directo al origen.
 
 `No` significa que esa fase no debe provocar un despliegue en ese cluster. Las
 consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
@@ -584,7 +592,7 @@ esa modalidad requiere Zero Trust Enterprise.
    por lo que la administracion y revocacion siguen disponibles aunque el
    certificado deje de funcionar.
 5. Durante la apertura publica se desactivara la regla WAF temporal segun la
-   Fase 9. No retirar la politica de seleccion de Edge, el certificado del
+   Fase 10. No retirar la politica de seleccion de Edge, el certificado del
    almacen de Windows ni su copia privada operativa mientras protejan la
    administracion permanente. Mantener los procedimientos de renovacion,
    revocacion y reemplazo.
@@ -1077,7 +1085,7 @@ entonces ejecutar `apis-frontend-prod`. No tocar el firewall.
    el acceso administrativo por tunel. Crear antes del gate temporal una regla
    WAF mTLS permanente para
    `/auth/admin` y `/auth/realms/master`. Mantener la asociacion mTLS del
-   hostname y la regla general temporal. En la Fase 9 se desactivara solo esta
+   hostname y la regla general temporal. En la Fase 10 se desactivara solo esta
    ultima. La administracion por SSH usara Traefik directamente, preservando el
    hostname canonico `assermetry.com`; el firewall impedira que Internet
    utilice esa via para evitar Cloudflare.
@@ -1498,7 +1506,230 @@ resto    cerrado
 Criterio de salida: toda la produccion funciona sobre el dominio real y nadie
 sin certificado cliente puede acceder a ningun flujo de usuario.
 
-#### Fase 8 - GO/NO-GO para apertura (pendiente)
+#### Fase 8 - Hardening interno, identidad y cadena de suministro (pendiente)
+
+**Motivo y objetivo**
+
+La revision de seguridad posterior a la Fase 7 considera adecuado el perimetro
+privado, pero declara `NO-GO` para una apertura publica inmediata. Esta fase
+corrige los hallazgos que no estaban asignados a una fase posterior: validacion
+incompleta de tokens, confianza debil del canal CI, superficie RPC de Geth,
+ausencia de segmentacion entre pods, artefactos no inmutables y riesgo
+operativo del nodo unico.
+
+Durante toda la fase deben permanecer activas la regla de mantenimiento
+`Maintenance lock - assermetry.com`, la regla mTLS temporal y la proteccion
+mTLS administrativa permanente. Cada bloque se valida fuera de produccion y
+se despliega por separado, con diff renderizado, copia de la configuracion
+anterior y rollback identificado.
+
+**Fuera de alcance de esta fase**
+
+- Backups cifrados y restauraciones: pertenecen a la Fase 11.
+- Red alternativa, revocacion del certificado cliente, dependencias caidas y
+  rollback mTLS: siguen siendo criterios pendientes de la Fase 7.
+- Sustituir la exposicion del origen por Cloudflare Tunnel: se mantiene en
+  `v0.0.13`.
+- La existencia de estas tareas posteriores no permite cerrar esta fase ni
+  declarar `GO` antes de corregir los controles incluidos a continuacion.
+
+**Paso 8.1 - Inventario reproducible y plan de cambio**
+
+1. Congelar una linea base de manifests renderizados, imagenes y digests,
+   configuracion efectiva del Gateway, argumentos de cada nodo Geth, grafo de
+   jobs del pipeline, Services y flujos de red entre namespaces.
+2. Inventariar los metodos JSON-RPC usados realmente por la aplicacion y
+   confirmar que las transacciones se firman localmente antes de retirar
+   `personal`, desbloqueos o APIs auxiliares.
+3. Capturar tokens de prueba sin registrar su valor y anotar solo `iss`, `aud`,
+   `azp` o `client_id`, tipo de flujo y roles esperados para `TrustNewsWeb` y
+   `TrustNewsApi`.
+4. Identificar para cada bloque el perfil de despliegue, recursos afectados,
+   prueba de salud y procedimiento exacto para volver a la revision anterior.
+5. Mantener secretos, tokens, claves privadas, kubeconfig y huellas fuera del
+   repositorio y de los logs del pipeline.
+
+Criterio de salida 8.1: existe una matriz de flujos y consumidores que permite
+endurecer sin asumir dependencias, y cada cambio tiene rollback verificable.
+
+**Paso 8.2 - Validacion estricta de JWT en Gateway**
+
+1. Definir `TrustNewsApi` como audiencia del recurso protegido y configurar en
+   Keycloak el mapper o client scope necesario para que los tokens validos de
+   los flujos web y `client_credentials` contengan esa audiencia.
+2. Mantener la validacion de firma, algoritmo, `iss`, expiracion y vigencia, y
+   activar la validacion de `aud`; eliminar
+   `options={"verify_aud": False}`.
+3. Validar tambien el cliente presentador mediante `azp` o `client_id` contra
+   una lista explicita. No aceptar tokens de cualquier otro cliente del realm
+   aunque su firma e issuer sean validos.
+4. Aplicar autorizacion por rol y tipo de principal despues de validar el
+   token. Las rutas de usuario y las de service account no deben adquirir
+   permisos entre si por accidente.
+5. No registrar headers ni claims antes de verificarlos. Tras la validacion,
+   registrar solo campos operativos permitidos y no tokens, secretos, PII ni
+   claims arbitrarios controlados por el cliente.
+6. Conservar una sola implementacion de `/auth/is-admin` y eliminar la ruta
+   duplicada sin cambiar su contrato.
+7. Probar positivamente login web, refresh, roles y
+   `TrustNewsApi client_credentials`; probar negativamente audiencia ausente o
+   incorrecta, `azp` no permitido, token de otro cliente del mismo realm,
+   issuer incorrecto, expiracion, firma alterada y ausencia de token.
+
+Criterio de salida 8.2: solo se aceptan tokens emitidos para la API y por un
+cliente autorizado; los smokes Light y Blockchain siguen funcionando y los
+logs no contienen datos JWT sin verificar.
+
+**Paso 8.3 - Confianza criptografica del pipeline**
+
+1. Sustituir `--insecure-skip-tls-verify=true` por la CA real del API de K3s,
+   entregada como variable protegida de tipo fichero o extraida de un kubeconfig
+   protegido. Configurar `tls-server-name` solo si el endpoint del tunel no
+   coincide con un SAN, usando un nombre que el certificado incluya realmente.
+2. Guardar la clave publica o la entrada `known_hosts` esperada del servidor en
+   una variable protegida y verificarla antes de abrir el tunel. No usar la
+   salida de `ssh-keyscan` obtenida en esa misma conexion como raiz de
+   confianza.
+3. Forzar `StrictHostKeyChecking=yes` y un `UserKnownHostsFile` dedicado; ante
+   CA ausente, certificado invalido o clave SSH distinta, el pipeline debe
+   fallar cerrado.
+4. Revisar los `needs.optional`: un gate de seguridad requerido por el perfil
+   seleccionado no puede omitirse. La opcionalidad solo se conserva cuando el
+   job no existe por sus `rules` y otro gate obligatorio demuestra el mismo
+   requisito.
+5. Probar el grafo para cada perfil productivo y ejecutar pruebas negativas con
+   CA incorrecta, nombre TLS no valido y clave SSH distinta. Ninguna debe llegar
+   a ejecutar `kubectl`, Helm o Skaffold.
+
+Criterio de salida 8.3: el runner autentica tanto el host SSH como el API de
+Kubernetes, no hay saltos TLS inseguros y los gates aplicables son obligatorios.
+
+**Paso 8.4 - Minimo privilegio en los RPC de Geth**
+
+1. Separar las necesidades de bootnode, miner y endpoint RPC. Publicar por HTTP
+   o WebSocket unicamente los modulos y metodos que consume la aplicacion.
+2. Retirar `admin` y `personal` de `--http.api` y `--ws.api`. Deshabilitar
+   WebSocket si no tiene consumidores y restringir `--http.vhosts` a los
+   nombres internos realmente usados.
+3. Eliminar `--http.corsdomain=*`; dejar CORS deshabilitado para llamadas
+   servidor a servidor o fijar solo los origenes imprescindibles.
+4. Eliminar `--allow-insecure-unlock` y cualquier desbloqueo remoto. Si el
+   minado o una operacion heredada necesita una cuenta desbloqueada, migrar ese
+   uso a IPC local, firma previa de transacciones o un signer dedicado antes de
+   retirar el flag; no romper el consenso eliminandolo sin esta prueba.
+5. Mantener los Services como `ClusterIP`, sin Ingress ni NodePort para RPC, y
+   limitar sus consumidores mediante las politicas del paso 8.5.
+6. Verificar desde un pod autorizado sincronizacion, peers, bloques, contrato,
+   categorias y transacciones firmadas. Desde un pod no autorizado, y para los
+   metodos `admin_*`, `personal_*` y desbloqueo, esperar denegacion.
+
+Criterio de salida 8.4: no quedan APIs administrativas, comodines de origen o
+host ni desbloqueo inseguro accesibles por RPC; Blockchain conserva su
+funcionalidad.
+
+**Paso 8.5 - Segmentacion interna con NetworkPolicy**
+
+1. Confirmar mediante una politica canario que el CNI de K3s aplica
+   `NetworkPolicy`; no desplegar un `default-deny` si el plugin no lo hace.
+2. Etiquetar namespaces y pods de forma estable y construir la matriz minima de
+   origen, destino, protocolo y puerto. Usar selectores, no IP de pods.
+3. Aplicar por namespace, de forma progresiva, denegacion por defecto de
+   ingress y egress. Autorizar explicitamente DNS hacia CoreDNS antes de cerrar
+   egress.
+4. Permitir solo los flujos necesarios: Traefik hacia frontend, Gateway y
+   Keycloak; Gateway y APIs hacia sus dependencias; Keycloak hacia PostgreSQL;
+   workers hacia MongoDB, Kafka, IPFS y los RPC concretos; y los flujos de
+   observabilidad requeridos.
+5. Aislar especialmente Geth, MongoDB, PostgreSQL, Kafka, IPFS, Kafdrop,
+   Mongo Express, Grafana y servicios administrativos. Un frontend o pod de
+   prueba no debe alcanzar directamente datos, consolas ni RPC.
+6. Tras cada namespace, ejecutar smokes funcionales y pruebas negativas desde
+   un pod sin etiquetas autorizadas. Ante fallo, revertir solo el bloque de
+   politicas recien aplicado y completar la matriz antes de reintentarlo.
+
+Criterio de salida 8.5: existe `default-deny` efectivo con allowlists minimas,
+la aplicacion funciona y se demuestra que un pod no autorizado no puede moverse
+lateralmente hacia servicios sensibles.
+
+**Paso 8.6 - Imagenes y artefactos inmutables**
+
+1. Inventariar imagenes de runtime, init containers, bases de Dockerfile y
+   charts. Eliminar `latest`, referencias sin version y tags que puedan cambiar,
+   incluidos `busybox`, IPFS y las bases de aplicacion.
+2. Fijar dependencias externas por digest y conservar una version legible como
+   metadato. Fijar Keycloak a la version exacta probada y su digest; mantener el
+   chart de Traefik versionado y registrar tambien los digests renderizados.
+3. Publicar las imagenes propias con digest inmutable y hacer que el despliegue
+   productivo consuma el digest construido por el pipeline, no un tag
+   reutilizable.
+4. Generar inventario o SBOM y ejecutar el escaneo disponible antes del
+   despliegue. Definir un proceso controlado de actualizacion que cambie version
+   y digest de forma revisable.
+5. Anadir un gate sobre el render productivo que rechace `latest`, imagenes sin
+   tag y, para los componentes exigidos por la politica, referencias sin digest.
+6. Repetir render, despliegue y rollback demostrando que una misma revision
+   resuelve siempre los mismos artefactos.
+
+Criterio de salida 8.6: el inventario productivo identifica exactamente cada
+binario desplegado y el pipeline impide introducir referencias flotantes.
+
+**Paso 8.7 - Capacidad y disponibilidad declaradas**
+
+1. Completar `requests` y `limits` donde falten, revisar memoria, swap,
+   almacenamiento y margen necesario para rollouts, y fijar alertas antes de
+   alcanzar presion del nodo.
+2. Medir un rollout y los smokes completos con la carga actual. No continuar si
+   aparecen `MemoryPressure`, OOM, evicciones, falta de disco o degradacion
+   persistente.
+3. Documentar que una replica en un unico nodo mejora recuperacion de proceso,
+   pero no proporciona alta disponibilidad. Definir SLO, RTO y tolerancia real
+   a la perdida del nodo.
+4. Si el servicio debe sobrevivir al fallo de un nodo, ampliar a varios nodos y
+   almacenamiento replicado o servicios de datos externos antes del `GO`. Si se
+   mantiene nodo unico, registrar la aceptacion explicita del SPOF y no
+   presentar la plataforma como HA. Esto no sustituye los backups de la
+   Fase 11.
+5. Resolver o aceptar expresamente el warning `DNSConfigForming` y dejar
+   evidencia de salud posterior al ultimo rollout.
+
+Criterio de salida 8.7: existe margen operativo medido y una decision explicita
+sobre disponibilidad; los riesgos no se deducen del numero de pods preparados.
+
+**Orden de despliegue y rollback**
+
+1. Preparar y validar localmente Gateway, tests JWT, manifests, politicas y
+   gates de render.
+2. Corregir primero la confianza del pipeline, porque los cambios posteriores
+   no deben desplegarse por un canal que no autentica sus extremos.
+3. Desplegar por separado Gateway/Keycloak, Geth, `NetworkPolicy` e imagenes
+   fijadas. No agrupar todos los cambios en una unica ventana.
+4. Tras cada bloque, comprobar rollouts, reinicios, eventos, recursos y smokes
+   OIDC, API, Light y Blockchain. Mantener el lock durante las comprobaciones.
+5. Si falla un bloque, volver a su revision anterior sin desactivar mTLS, abrir
+   el firewall ni retirar las politicas de los bloques ya aceptados.
+
+**Criterio de salida global**
+
+La Fase 8 solo se cierra cuando se aporta evidencia de todos los criterios
+8.1 a 8.7, las pruebas negativas fallan cerrado y los flujos funcionales siguen
+operativos. Deben cumplirse, como minimo, estas condiciones:
+
+- Gateway valida `aud` y el presentador autorizado, y no registra claims sin
+  verificar ni mantiene la ruta administrativa duplicada.
+- CI valida CA y nombre del API de Kubernetes, fija la clave SSH esperada y no
+  permite omitir gates de seguridad aplicables.
+- Geth no expone `admin`, `personal`, desbloqueo inseguro ni comodines de CORS o
+  virtual hosts.
+- Las `NetworkPolicy` bloquean movimiento lateral y permiten solo los flujos
+  inventariados.
+- Produccion usa artefactos inmutables y el gate rechaza referencias flotantes.
+- Capacidad y disponibilidad tienen evidencia y una decision de riesgo
+  documentada.
+- Cloudflare conserva el lock de mantenimiento y las reglas mTLS activas.
+
+Cualquier incumplimiento mantiene el estado `NO-GO` y bloquea la Fase 9.
+
+#### Fase 9 - GO/NO-GO para apertura (pendiente)
 
 **Despliegue**
 
@@ -1517,6 +1748,7 @@ sin certificado cliente puede acceder a ningun flujo de usuario.
 
 La apertura recibe `GO` solo si:
 
+- Las fases 7 y 8 estan cerradas con sus evidencias y sin excepciones abiertas.
 - DNS, proxy Cloudflare y TLS `Full (strict)` son correctos.
 - El origen solo admite rangos Cloudflare y no responde por acceso directo.
 - Issuer, redirects, login, refresh, logout y client credentials funcionan.
@@ -1528,11 +1760,12 @@ La apertura recibe `GO` solo si:
 
 Cualquier incumplimiento produce `NO-GO`; no se compensa retirando controles.
 
-#### Fase 9 - Apertura publica (pendiente)
+#### Fase 10 - Apertura publica (pendiente)
 
 **Despliegue**
 
 - Kubernetes local: no desplegar.
+- Prerrequisito: la Fase 9 ha registrado una decision formal `GO`.
 - Kubernetes Hetzner: no desplegar ni cambiar firewall, Ingress, Keycloak,
   Gateway, issuer o certificados.
 - Externo: desactivar unicamente la regla WAF temporal que exige mTLS.
@@ -1567,7 +1800,7 @@ Tras retirarla:
 4. Si aparece una incidencia, reactivar inmediatamente la exigencia mTLS. Este
    rollback vuelve a cerrar el servicio sin cambios de DNS ni redespliegue.
 
-#### Fase 10 - Backups y recuperacion (pendiente; no implementada)
+#### Fase 11 - Backups y recuperacion (pendiente; no implementada)
 
 **Estado**
 

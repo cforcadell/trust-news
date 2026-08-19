@@ -222,7 +222,7 @@ salida.
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
 | 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
 | 6 | **Cerrada** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Funcionalidad y limpieza aceptadas; valor por defecto de tests eliminado y sin coincidencia con produccion | No |
-| 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
+| 7 | **En curso (paso 7.1 completado; firewall cerrado)** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | Pendiente configurar Traefik y abrir `443/tcp` solo a Cloudflare | Preflight de Cloudflare y mTLS aceptado |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
 | 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
 | 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
@@ -486,9 +486,9 @@ esa modalidad requiere Zero Trust Enterprise.
 
 **Pruebas**
 
-- Verificar cadena, uso extendido `clientAuth`, fechas e identificador de cada
-  certificado, probar su importacion como PKCS#12 y documentar el procedimiento
-  de revocacion.
+- Verificar cadena, fechas, identificador y presencia o ausencia de restricciones
+  EKU en cada certificado; probar su importacion como PKCS#12, confirmar la
+  aceptacion mTLS real y documentar el procedimiento de revocacion.
 - Confirmar que la clave privada de cada tester se genera y conserva fuera de
   Git, Kubernetes, Hetzner y Cloudflare.
 - Confirmar que mTLS esta asociado al hostname `assermetry.com` y que la regla
@@ -537,12 +537,13 @@ esa modalidad requiere Zero Trust Enterprise.
    repositorio. Se verifico la autofirma del CSR y su sujeto
    `CN=cforcadell-win11-01, O=Assermetry, OU=Tester`.
 3. La CA gestionada de Cloudflare emitio un certificado cliente con validez
-   limitada hasta el 5 de agosto de 2028. Se comprobaron sujeto, emisor, fechas,
-   uso extendido `clientAuth` y correspondencia criptografica entre certificado
-   y clave privada.
+   limitada hasta el 5 de agosto de 2028. Se comprobaron sujeto, emisor, fechas
+   y correspondencia criptografica entre certificado y clave privada. La
+   inspeccion repetida en la Fase 7 confirmo que no declara una extension EKU;
+   Cloudflare lo acepto correctamente como certificado cliente mTLS.
 4. Se creo un PKCS#12 cifrado y se valido su estructura antes de importarlo en el
    almacen personal del usuario de Windows. El certificado importado conserva
-   la clave privada y el uso `Client Authentication`.
+   la clave privada; no declara una extension EKU restrictiva.
 5. En Cloudflare se asocio exclusivamente `assermetry.com` a Application
    Security mTLS; `www` permanece fuera de alcance.
 6. Se creo y activo la regla WAF temporal `Temporary mTLS gate -
@@ -753,8 +754,10 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   alcance de dispositivo, patron `https://assermetry.com` y filtro de sujeto
   `CN=cforcadell-win11-01`. Tambien se comprobo en `CurrentUser\My` el
   certificado esperado, emitido por la CA gestionada de Cloudflare, valido del
-  6 de agosto de 2026 al 5 de agosto de 2028, con clave privada y EKU
-  `Client Authentication` (`1.3.6.1.5.5.7.3.2`). Tanto la politica como el
+  6 de agosto de 2026 al 5 de agosto de 2028 y con clave privada. Una inspeccion
+  posterior confirmo que no declara la extension EKU. Cloudflare lo acepta
+  correctamente para mTLS, por lo que la ausencia de esa restriccion no impide
+  este uso. Tanto la politica como el
   certificado local quedan descartados como ausentes; antes de revisar
   Cloudflare se forzara una nueva sesion TLS de Edge.
   Tras reiniciar Edge y abrir URLs nuevas, `/` y
@@ -1307,7 +1310,32 @@ comenzar manteniendo el alcance de apertura definido para Cloudflare.
 Criterio de salida: la aplicacion completa usa ya la configuracion final, pero
 el origen todavia no acepta trafico de Internet.
 
-#### Fase 7 - Abrir 443 solo a Cloudflare y probar con mTLS (pendiente)
+#### Fase 7 - Abrir 443 solo a Cloudflare y probar con mTLS (en curso)
+
+**Estado del 2026-08-19 - Paso 7.1 completado**
+
+- DNS de `assermetry.com` continua proxificado y Cloudflare mantiene el modo
+  TLS `Full (strict)`.
+- `Permanent mTLS - Keycloak administration` esta activa con accion `Block` en
+  posicion 1. Su expresion cubre `/auth/admin`, `/auth/admin/*`,
+  `/auth/realms/master` y `/auth/realms/master/*`, bloqueando certificados no
+  verificados o revocados.
+- `Temporary mTLS gate - assermetry.com` esta activa con accion `Block` en
+  posicion 2 y cubre el resto del hostname con las mismas condiciones de
+  certificado. No se registran identificadores internos de Cloudflare.
+- Sin certificado cliente, `/`, `/auth/admin/master/console/` y el discovery
+  del realm `TrustNews` devolvieron `403`. Security Events atribuyo la ruta
+  administrativa a la regla permanente y las dos rutas publicas a la temporal.
+- El PKCS#12 operativo se importo de nuevo en el almacen personal de Windows.
+  El certificado esta vigente y conserva su clave privada. No declara una
+  extension EKU, corrigiendo la evidencia documental anterior; Cloudflare lo
+  acepto realmente en las tres rutas.
+- Con el certificado presentado explicitamente mediante Schannel, las tres
+  rutas devolvieron `522`: ambas reglas permitieron el trafico autenticado y el
+  origen siguio inaccesible porque el firewall permanece cerrado.
+- No se modificaron el firewall, Kubernetes, Traefik, DNS ni las reglas WAF.
+  El siguiente paso es inventariar `externalTrafficPolicy` y la configuracion
+  actual de cabeceras reenviadas antes de definir `trustedIPs` en Traefik.
 
 **Despliegue**
 

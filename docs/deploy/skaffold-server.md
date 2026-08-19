@@ -680,9 +680,9 @@ del usuario. No revocar ni reemitir el certificado durante este diagnostico.
 Se comprobo que Edge carga y acepta la politica obligatoria, aplicada al
 dispositivo, con patron `https://assermetry.com` y filtro
 `CN=cforcadell-win11-01`. En `CurrentUser\My` tambien se verifico el
-certificado esperado, vigente del 6 de agosto de 2026 al 5 de agosto de 2028,
-con clave privada y EKU `Client Authentication`
-(`1.3.6.1.5.5.7.3.2`). Antes de revisar Cloudflare, cerrar la sesion TLS de
+certificado esperado, vigente del 6 de agosto de 2026 al 5 de agosto de 2028 y
+con clave privada. La inspeccion posterior de la Fase 7 confirmo que no declara
+extension EKU; Cloudflare lo acepta realmente para mTLS. Antes de revisar Cloudflare, cerrar la sesion TLS de
 Edge y repetir la prueba con una negociacion nueva.
 
 El reinicio completo de Edge tampoco cambio el resultado: las rutas de
@@ -1721,6 +1721,21 @@ curl -I https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configur
     no rotar `TrustNewsApi` por este hallazgo. El valor por defecto no vacio se
     elimino. Revisar su posible alcance historico en tests queda como
     recomendacion no bloqueante y la Fase 7 puede comenzar.
+
+17. **Fase 7, paso 7.1 completado el 2026-08-19:** DNS permanece proxificado y
+    TLS esta en `Full (strict)`. Las reglas mTLS permanente y temporal siguen
+    activas con accion `Block`, en posiciones 1 y 2 respectivamente. Sin
+    certificado, `/`, la consola administrativa y el discovery de `TrustNews`
+    devolvieron `403`; Security Events atribuyo Admin a la regla permanente y
+    las rutas publicas a la temporal. Tras importar el PKCS#12 operativo, se
+    confirmaron vigencia y clave privada. El certificado no declara extension
+    EKU, corrigiendo la evidencia anterior, pero Cloudflare lo acepto mediante
+    Schannel: las tres rutas devolvieron `522` contra el origen todavia cerrado.
+    No registrar ruta local, thumbprint, IP, Rule ID ni otros identificadores.
+    No se modificaron firewall, Kubernetes, Traefik, DNS ni reglas WAF.
+18. **Siguiente gate:** consultar `externalTrafficPolicy`, ServiceLB, argumentos
+    `forwardedHeaders` de Traefik y `KC_PROXY_HEADERS` antes de configurar
+    `trustedIPs`. No abrir `443/tcp` hasta cerrar esa comprobacion.
 
 No abrir el servicio a clientes hasta que el issuer de Keycloak, el certificado
 TLS, las redirecciones OIDC y el WAF esten verificados con el dominio final.

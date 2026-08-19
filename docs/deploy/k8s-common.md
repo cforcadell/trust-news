@@ -208,12 +208,20 @@ Configuracion minima:
 - Realm: `TrustNews`.
 - Cliente frontend: `TrustNewsWeb`.
   - Root URL: URL publica o local del frontend.
+  - Home URL: URL publica o local del frontend, con `/` final.
   - Valid redirect URIs: `<frontend-url>/*`.
+  - Valid post logout redirect URIs: `<frontend-url>/*`.
   - Web Origins: URL publica o local del frontend, o `*` solo para pruebas.
+  - En produccion no conservar entradas localhost ni usar un comodin global.
 - Cliente backend: `TrustNewsApi`.
   - Client authentication: ON.
   - Service accounts roles: ON.
   - Guardar el client secret para clientes externos.
+  - No modificar ni rotar este cliente al cambiar las URLs de `TrustNewsWeb`.
+
+En un despliegue cerrado cuyo hostname canonico ya no sea `localhost`, usar el
+cierre operativo mediante `kcadm` documentado en `skaffold-server.md` como
+referencia en lugar de la consola web.
 
 Obtener token:
 

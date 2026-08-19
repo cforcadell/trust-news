@@ -1583,7 +1583,7 @@ No añadir `:443`: el puerto HTTPS implicito no forma parte del issuer canonico.
 
 El display name `Assermetry` del realm y los redirects, post-logout redirects y
 Web Origins de `TrustNewsWeb` se almacenan en PostgreSQL. Preparar sus valores en
-la Fase 1, pero aplicarlos coordinadamente con estos overlays en la Fase 7 para
+la Fase 1, pero aplicarlos coordinadamente con estos overlays en la Fase 6 para
 no romper antes el acceso por `https://localhost:9443`.
 
 #### 2.7.7 Orden de despliegue recomendado para apertura publica
@@ -1622,6 +1622,63 @@ no romper antes el acceso por `https://localhost:9443`.
    de desplegar APIs, usar el mismo procedimiento administrativo para restaurar
    `attributes.frontendUrl=https://localhost/auth` y comprobar discovery; no
    cambiar el firewall.
+   El job posterior sobre `dc81ca9` completo la migracion y observo el issuer
+   `https://assermetry.com/auth/realms/TrustNews`; `infra-prod` queda aceptado.
+   El 2026-08-19 se aplico y verifico mediante `kcadm` sobre `TrustNewsWeb`:
+   `rootUrl=https://assermetry.com`, `baseUrl=https://assermetry.com/`,
+   redirects y post-logout `https://assermetry.com/*`, y Web Origin
+   `https://assermetry.com`. El rollback anterior quedo documentado y
+   `TrustNewsApi` conservo su configuracion confidencial y su service account
+   sin cambios.
+
+##### Cierre operativo del 2026-08-19: clientes alineados mediante `kcadm`
+
+No se uso la consola administrativa ni se abrio el firewall. Durante el estado
+transitorio, la consola cargada como `https://localhost:9443` bloqueaba por CSP
+los recursos que Keycloak ya generaba para `assermetry.com`, mientras los
+Ingress activos todavia esperaban `host: localhost`. La administracion se hizo
+con `kcadm` dentro del pod y una sesion temporal eliminada al terminar.
+
+La operacion localizo dinamicamente ambos clientes, capturo los cinco valores
+no secretos de rollback de `TrustNewsWeb`, actualizo solo ese cliente y comparo
+antes y despues la configuracion no secreta de `TrustNewsApi`.
+
+Estado aceptado:
+
+- Realm name: `TrustNews` (sin cambios).
+- Frontend URL: `https://assermetry.com/auth`.
+- Display name: `Assermetry`.
+- `TrustNewsWeb` Root URL: `https://assermetry.com`.
+- `TrustNewsWeb` Home URL: `https://assermetry.com/`.
+- Redirect URI: `https://assermetry.com/*`.
+- Post logout redirect URI: `https://assermetry.com/*`.
+- Web Origin: `https://assermetry.com`.
+- `TrustNewsApi`: habilitado, confidencial mediante `client-secret` y con
+  service account activa; no se consulto ni modifico el secret.
+
+Rollback capturado para `TrustNewsWeb`:
+
+```text
+Root URL:                       https://localhost:9443
+Home URL:                       vacio
+Valid redirect URIs:            https://localhost:9443/*
+Valid post logout redirect URIs:ausente
+Web Origins:                    *
+```
+
+La sesion temporal de `kcadm` se elimino. El discovery se consulto mediante
+port-forward al Service de Keycloak, emulando `Host`, `X-Forwarded-Host` y
+`X-Forwarded-Proto`, y devolvio el issuer exacto
+`https://assermetry.com/auth/realms/TrustNews`.
+
+La consulta abreviada `--fields realm,displayName,attributes` puede mostrar
+`attributes` vacio aunque el mapa este persistido. Para comprobar
+`frontendUrl` se debe consultar la representacion completa del realm.
+
+El siguiente gate es publicar esta documentacion y lanzar
+`PROFILE=apis-frontend-prod`. No repetir `infra-prod`, no desplegar
+`blockchain-prod` y mantener el firewall cerrado.
+
 10. Lanzar un segundo pipeline con `PROFILE=apis-frontend-prod`. Este repite el
     gate TLS y ejecuta tambien `check_mongodb_bootstrap` antes de desplegar
     Gateway, APIs, frontend e Ingress.

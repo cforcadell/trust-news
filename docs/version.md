@@ -53,13 +53,16 @@ memoria y 56% de disco; la memoria sigue por debajo del aviso del 80%, pero
 requiere vigilancia durante el despliegue definitivo. La **Fase 6 - Despliegue
 definitivo todavia cerrado** esta en curso. El pipeline GitLab `#2770049730`
 sobre el commit `4a7e9185` completo `build`, el gate TLS, `infra-prod` y el
-bootstrap de MongoDB; el rollback no se ejecuto. Las repeticiones sobre
-`77e189ef` y `3c99a48e` confirmaron el rollout y los valores `KC_HOSTNAME_*`.
-La segunda observo el issuer persistido `https://localhost/auth/realms/TrustNews`,
-por lo que el siguiente gate migra solo `attributes.frontendUrl` del realm y
-repite discovery antes de `apis-frontend-prod`. El firewall permanece
-cerrado. La **Fase 10 - Backups y recuperacion** queda pendiente y sera la
-ultima fase en ejecutarse.
+bootstrap de MongoDB; el rollback no se ejecuto. Tras dos intentos de
+diagnostico, el job sobre `dc81ca9` actualizo idempotentemente el atributo del
+realm y confirmo el issuer
+`https://assermetry.com/auth/realms/TrustNews`. El gate de infraestructura esta
+cerrado. El 2026-08-19 se alineo `TrustNewsWeb` mediante `kcadm` dentro del pod,
+se establecio el display name `Assermetry`, se verifico el issuer definitivo y
+se confirmo que `TrustNewsApi` conserva su configuracion confidencial y su
+service account sin cambios. Queda publicar esta evidencia y ejecutar
+`apis-frontend-prod`; el firewall permanece cerrado. La **Fase 10 - Backups y
+recuperacion** queda pendiente y sera la ultima fase en ejecutarse.
 Hetzner esta en un estado transitorio controlado: Keycloak usa ya las URLs del
 dominio definitivo, mientras Gateway e Ingress conservan `prod` hasta el
 segundo pipeline. El dominio publico todavia no esta activado.
@@ -204,16 +207,17 @@ salida.
 | 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
 | 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
-| 6 | **En curso (`infra-prod` desplegado; validacion Keycloak pendiente)** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Gate TLS e `infra-prod` completados; validar Keycloak antes de `apis-frontend-prod` | No |
+| 6 | **En curso (`TrustNewsWeb` aceptado; `apis-frontend-prod` pendiente)** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | TLS, Keycloak, `infra-prod` y clientes aceptados; falta `apis-frontend-prod` | No |
 | 7 | **Pendiente** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | No se redespliega Kubernetes | Firewall Hetzner y pruebas por Cloudflare |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
 | 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
 | 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
 
-**Hito actual para versionado:** el pipeline `#2770049730` desplego
-`infra-prod` desde `4a7e9185` y supero el gate TLS y el bootstrap. El siguiente
-gate es validar el rollout y el discovery OIDC de Keycloak. No se ha desplegado
-`apis-frontend-prod` ni se ha abierto el firewall.
+**Hito actual para versionado:** `infra-prod` esta aceptado, el job sobre
+`dc81ca9` confirmo el issuer definitivo y el 2026-08-19 se aplicaron y
+verificaron las URLs publicas de `TrustNewsWeb` sin modificar `TrustNewsApi`.
+El siguiente gate es publicar esta evidencia y desplegar
+`apis-frontend-prod`. No se ha abierto el firewall.
 
 `No` significa que esa fase no debe provocar un despliegue en ese cluster. Las
 consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
@@ -1135,6 +1139,12 @@ los umbrales operativos quedaron validados sin abrir el origen.
   `attributes.frontendUrl=https://assermetry.com/auth` y elimina la sesion antes
   de consultar discovery. No modifica todavia clientes ni secretos. No se
   despliega `apis-frontend-prod` hasta obtener el issuer definitivo.
+- El job ejecutado sobre `dc81ca9` completo el rollout de Keycloak, autentico
+  `kcadm` dentro del pod, actualizo `attributes.frontendUrl` y observo
+  `https://assermetry.com/auth/realms/TrustNews`. MongoDB, Loki, Grafana y
+  Fluent Bit completaron tambien sus rollouts. El job finalizo correctamente y
+  la sesion administrativa temporal se elimino durante la limpieza del bloque.
+  El gate de `infra-prod` queda aceptado.
 - El preflight local se repitio con Skaffold `v2.17.3`: `infra-prod` renderizo
   27 recursos y `apis-frontend-prod` 43, todos aceptados por la validacion
   client-side. La comparacion directa confirma como unicos cambios las dos URLs
@@ -1145,6 +1155,48 @@ los umbrales operativos quedaron validados sin abrir el origen.
   tipo del Secret, la referencia de `TLSStore/default`, el hostname
   `assermetry.com`, una vigencia restante minima de 30 dias y la pareja
   certificado/clave, sin modificar el cluster ni mostrar la clave privada.
+
+**Punto de reanudacion tras alinear los clientes el 2026-08-19**
+
+- Estado confirmado: `infra-prod` esta aceptado, el certificado y
+  `TLSStore/default` son validos, Keycloak esta preparado y discovery devuelve
+  exactamente `https://assermetry.com/auth/realms/TrustNews`.
+- `TrustNewsWeb` se actualizo mediante `kcadm` dentro del pod porque la consola
+  cargada como `https://localhost:9443` quedaba bloqueada por la CSP: Keycloak
+  ya genera sus recursos administrativos para el hostname canonico
+  `assermetry.com`, mientras los Ingress activos todavia conservan
+  `host: localhost`.
+- El realm conserva el nombre tecnico `TrustNews`, tiene display name
+  `Assermetry` y su representacion completa confirma
+  `attributes.frontendUrl=https://assermetry.com/auth`. La proyeccion abreviada
+  de `kcadm` con `--fields ... attributes` mostro inicialmente un mapa vacio;
+  para verificar atributos se uso la representacion completa.
+- `TrustNewsWeb` quedo con `rootUrl=https://assermetry.com`,
+  `baseUrl=https://assermetry.com/`, redirects y post-logout
+  `https://assermetry.com/*`, y Web Origin `https://assermetry.com`.
+- `TrustNewsApi` se verifico antes y despues: continua habilitado,
+  confidencial (`client-secret`), con service account activa y sin cambios. No
+  se consulto, mostro ni modifico su secret.
+- El rollback no secreto capturado para `TrustNewsWeb` es
+  `rootUrl=https://localhost:9443`, `baseUrl` vacio, redirects
+  `https://localhost:9443/*`, Web Origin `*` y post-logout ausente.
+- La sesion temporal de `kcadm` se elimino. El discovery, consultado por
+  port-forward con las cabeceras externas emuladas, devolvio exactamente
+  `https://assermetry.com/auth/realms/TrustNews`.
+- Pendiente: publicar esta documentacion y ejecutar
+  `PROFILE=apis-frontend-prod`. El firewall mantiene cerrados `80/tcp` y
+  `443/tcp`.
+- No repetir `infra-prod` salvo que aparezca un problema de salud. No desplegar
+  `blockchain-prod` porque esta fase no ha introducido cambios en blockchain.
+
+Al reanudar el despliegue:
+
+1. Publicar la documentacion que contiene la evidencia anterior.
+2. Lanzar `PROFILE=apis-frontend-prod` sin repetir `infra-prod` ni desplegar
+   `blockchain-prod`.
+3. Tras ese pipeline, mantener el firewall cerrado y validar por tunel TLS,
+   Ingress, issuer, login, refresh, logout, roles, client credentials y los
+   smoke tests Light y Blockchain. No iniciar la Fase 7 hasta que todo pase.
 
 **Despliegue**
 
@@ -1173,16 +1225,17 @@ los umbrales operativos quedaron validados sin abrir el origen.
 2. **Completado:** cambiar los paths de los perfiles productivos desde
    `overlays/prod` a `overlays/prod-domain`, revisar el diff renderizado y
    preparar el rollback estatico.
-3. **Desplegado; migracion del realm pendiente:** `infra-prod` se aplico desde
-   `4a7e9185`. `77e189ef` confirmo el rollout y las URLs del ConfigMap;
-   `3c99a48e` observo el issuer persistido de localhost. El siguiente intento
-   actualizara solo `attributes.frontendUrl` y debera confirmar el issuer
-   definitivo por discovery.
+3. **Completado:** el job sobre `dc81ca9` aplico la migracion del realm y
+   confirmo por discovery el issuer definitivo. Keycloak y el resto de
+   `infra-prod` completaron sus rollouts.
 4. Desplegar `blockchain-prod` solo si hay cambios o si falta el despliegue;
    verificar peers, bloques, contrato y categorias.
-5. **Pendiente, despues de validar Keycloak:** desplegar `apis-frontend-prod`
-   con Gateway, frontend, workers e Ingress productivos.
-6. Antes de tocar el firewall, validar mediante tunel y resolucion local de
+5. **Completado el 2026-08-19:** alinear mediante `kcadm` las URLs permitidas de
+   `TrustNewsWeb`, confirmar el realm y verificar que `TrustNewsApi` permanece
+   confidencial y sin cambios.
+6. **Pendiente:** desplegar `apis-frontend-prod` con Gateway, frontend, workers
+   e Ingress productivos.
+7. Antes de tocar el firewall, validar mediante tunel y resolucion local de
    `assermetry.com` que TLS, redirects e issuer son correctos.
 
 Criterio de salida: la aplicacion completa usa ya la configuracion final, pero

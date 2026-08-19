@@ -210,6 +210,10 @@ deploy:
         traefik-prod)
           kubectl rollout status deployment/traefik -n kube-system --timeout=180s
           traefik_args="$(kubectl get deployment traefik -n kube-system -o jsonpath='{.spec.template.spec.containers[0].args}')"
+          test "$(kubectl get service traefik -n kube-system -o jsonpath='{.spec.externalTrafficPolicy}')" = "Local" || {
+            echo "ERROR: Traefik no preserva la IP de origen con externalTrafficPolicy=Local"
+            exit 1
+          }
           case "$traefik_args" in
             *--accesslog=true*) ;;
             *)
@@ -217,6 +221,23 @@ deploy:
               exit 1
               ;;
           esac
+          case "$traefik_args" in
+            *--entryPoints.websecure.forwardedHeaders.trustedIPs=*) ;;
+            *)
+              echo "ERROR: Traefik no limita X-Forwarded-* a proxies conocidos"
+              exit 1
+              ;;
+          esac
+          case "$traefik_args" in
+            *--entryPoints.websecure.forwardedHeaders.insecure=true*)
+              echo "ERROR: Traefik confia en X-Forwarded-* de cualquier origen"
+              exit 1
+              ;;
+          esac
+          test "$(kubectl get configmap keycloak-env-config -n infra -o jsonpath='{.data.KC_PROXY_HEADERS}')" = "xforwarded" || {
+            echo "ERROR: Keycloak no usa KC_PROXY_HEADERS=xforwarded"
+            exit 1
+          }
           ;;
         infra-prod)
           kubectl rollout status statefulset/keycloak-db -n infra --timeout=180s

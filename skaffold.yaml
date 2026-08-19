@@ -67,6 +67,7 @@ profiles:
             version: 41.0.2
             valuesFiles:
               - k8s/traefik/values.yaml
+              - k8s/traefik/values-prod.yaml
             upgradeOnChange: true
             wait: true
 

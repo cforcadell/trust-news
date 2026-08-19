@@ -1733,9 +1733,21 @@ curl -I https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configur
     Schannel: las tres rutas devolvieron `522` contra el origen todavia cerrado.
     No registrar ruta local, thumbprint, IP, Rule ID ni otros identificadores.
     No se modificaron firewall, Kubernetes, Traefik, DNS ni reglas WAF.
-18. **Siguiente gate:** consultar `externalTrafficPolicy`, ServiceLB, argumentos
-    `forwardedHeaders` de Traefik y `KC_PROXY_HEADERS` antes de configurar
-    `trustedIPs`. No abrir `443/tcp` hasta cerrar esa comprobacion.
+18. **Fase 7, paso 7.2 completado el 2026-08-19:** el preflight confirmo un
+    nodo, un pod y un endpoint local de Traefik, sin `node-external-ip`. El
+    perfil `traefik-prod` desplego el chart `41.0.2` con
+    `externalTrafficPolicy: Local`, 22 redes oficiales en
+    `websecure.forwardedHeaders.trustedIPs` e `insecure=false`; el perfil local
+    no cambio. El pipeline manual finalizo correctamente y el pod quedo
+    preparado sin reinicios. Release Helm, manifest, ReplicaSet y pod
+    confirmaron las 22 entradas; `KC_PROXY_HEADERS=xforwarded` permanece
+    activo. Un recuento inicial de cero fue un falso negativo del diagnostico.
+    La repeticion mTLS continuo devolviendo `522` en las tres rutas porque el
+    firewall sigue cerrado. No se desplegaron otros perfiles.
+19. **Siguiente gate:** cancelar cualquier pipeline automatico bloqueado y
+    anadir en Hetzner una unica regla inbound `TCP/443` para las mismas 22 redes
+    oficiales de Cloudflare. Conservar cerrados `80/tcp`, `6443/tcp` y el resto
+    de puertos; no usar `0.0.0.0/0` ni `::/0`.
 
 No abrir el servicio a clientes hasta que el issuer de Keycloak, el certificado
 TLS, las redirecciones OIDC y el WAF esten verificados con el dominio final.

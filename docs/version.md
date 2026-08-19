@@ -74,18 +74,21 @@ La limpieza local esta completada. `ISSUE-002` esta resuelto: el valor por
 defecto no vacio se elimino y el operador confirmo que no coincide con el
 secret productivo, por lo que no requiere rotacion productiva. La posible
 revision de una credencial historica de tests queda como recomendacion no
-bloqueante. El firewall permanece cerrado. La
-**Fase 10 - Backups y
-recuperacion** queda pendiente y sera la ultima fase en ejecutarse.
-Hetzner usa ya el dominio definitivo en Keycloak, Gateway e Ingress, pero el
-despliegue permanece cerrado y el dominio publico todavia no esta activado.
+bloqueante. La **Fase 7 - Abrir 443 solo a Cloudflare y probar con mTLS**
+esta en curso: sus pasos 7.1 a 7.5 estan completados y la prueba desde una red
+alternativa permanece pendiente. Hetzner permite ahora `TCP/443` exclusivamente
+desde las 22 redes verificadas de Cloudflare; los accesos directos a `443`, `80`
+y `6443` quedaron bloqueados. El lock de mantenimiento de Cloudflare esta
+activo en primera posicion y bloquea el hostname completo mientras no se prueba.
+La **Fase 10 - Backups y recuperacion** queda pendiente y sera la ultima fase en
+ejecutarse dentro de `v0.0.12`.
 
 Configuracion activa:
 
 ```text
-Local:          https://localhost:7443
-Hetzner/tunel:  https://assermetry.com (conexion a 127.0.0.1:9443 con --connect-to)
-Cloudflare:     https://assermetry.com (proxy activo; origen cerrado)
+Local:           https://localhost:7443
+Hetzner/origen:  TCP/443 accesible solo desde las 22 redes de Cloudflare
+Cloudflare:      https://assermetry.com (proxy, mTLS y lock de mantenimiento activos)
 ```
 
 Los perfiles locales continúan usando `overlays/local`. `infra-prod` referencia
@@ -94,7 +97,7 @@ el overlay `prod-domain` de Keycloak y ya fue desplegado por el pipeline
 Gateway e Ingress y ya fue aplicado; los tres Ingress activos usan
 `host: assermetry.com`. La aceptacion funcional y la limpieza local estan
 completadas. `ISSUE-002` esta resuelto y no afecta al secret productivo. La
-revision historica recomendada no bloquea la apertura controlada del firewall.
+revision historica recomendada no bloquea las pruebas controladas de la Fase 7.
 
 ### Contrato publico de la version
 
@@ -222,7 +225,7 @@ salida.
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
 | 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
 | 6 | **Cerrada** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Funcionalidad y limpieza aceptadas; valor por defecto de tests eliminado y sin coincidencia con produccion | No |
-| 7 | **En curso (paso 7.1 completado; firewall cerrado)** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | Pendiente configurar Traefik y abrir `443/tcp` solo a Cloudflare | Preflight de Cloudflare y mTLS aceptado |
+| 7 | **En curso (pasos 7.1 a 7.5 completados; 7.6 pendiente)** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | `443/tcp` abierto solo a Cloudflare; aplicacion y salud aceptadas | Lock de mantenimiento activo; pendiente repetir desde una red alternativa |
 | 8 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
 | 9 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
 | 10 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
@@ -1337,14 +1340,120 @@ el origen todavia no acepta trafico de Internet.
   El siguiente paso es inventariar `externalTrafficPolicy` y la configuracion
   actual de cabeceras reenviadas antes de definir `trustedIPs` en Traefik.
 
+**Estado del 2026-08-19 - Paso 7.2 completado**
+
+- El cluster tiene un nodo, un pod Traefik preparado y un nodo con endpoint
+  local de Traefik. K3s no configura `node-external-ip` ni mediante
+  `config.yaml` ni mediante systemd, por lo que se acepto
+  `externalTrafficPolicy: Local` para preservar la IP de origen.
+- El perfil local conserva exclusivamente `k8s/traefik/values.yaml`. El perfil
+  `traefik-prod` incorpora ademas `k8s/traefik/values-prod.yaml`, con
+  `externalTrafficPolicy: Local`, `forwardedHeaders.insecure: false` y las 22
+  redes IPv4 e IPv6 oficiales de Cloudflare vigentes durante la preparacion.
+- El render del chart Traefik `41.0.2` confirmo el Service en modo `Local` y el
+  argumento `websecure.forwardedHeaders.trustedIPs` con 22 entradas, sin
+  modificar el perfil local.
+- Se ejecuto una sola vez el pipeline manual con `PROFILE=traefik-prod` y
+  finalizo correctamente. El rollout dejo un pod Traefik preparado y sin
+  reinicios. No se desplegaron `infra-prod`, `apis-frontend-prod` ni
+  `blockchain-prod`.
+- La release Helm quedo `deployed`, usa el chart `41.0.2`, almacena 22 redes de
+  confianza y su manifest contiene el argumento esperado. El ReplicaSet activo
+  y el pod en ejecucion confirmaron `trustedIPs=true`, 22 entradas e
+  `insecure=false`; `KC_PROXY_HEADERS` permanece en `xforwarded`.
+- Una primera comprobacion de shell informo incorrectamente cero entradas. La
+  release, el manifest, el ReplicaSet, el pod y el gate del pipeline confirmaron
+  que fue un falso negativo del diagnostico y no deriva del despliegue.
+- La prueba mTLS posterior mantuvo `522` en `/`, la consola administrativa y el
+  discovery de `TrustNews`, confirmando que Traefik quedo preparado mientras el
+  firewall continua cerrado. No se registran identificadores de pipeline,
+  release, pod, IP ni certificados.
+- El siguiente paso es anadir en Hetzner una unica regla inbound `TCP/443` con
+  las mismas 22 redes oficiales de Cloudflare. No ampliar el origen a
+  `0.0.0.0/0` ni `::/0`.
+
+**Estado del 2026-08-19 - Paso 7.3 completado**
+
+- Se descargaron nuevamente las redes oficiales de Cloudflare: 15 IPv4 y 7
+  IPv6, 22 entradas en total. Hetzner permite ahora `TCP/443` exclusivamente
+  desde esas redes; no se anadieron `0.0.0.0/0` ni `::/0`.
+- Desde la red inicial, sin certificado cliente, `/`, la consola administrativa
+  y el discovery de `TrustNews` devolvieron `403`. Presentando el certificado
+  mTLS operativo, las tres rutas devolvieron `200`; el `522` previo desaparecio.
+- El discovery mantuvo el issuer y los endpoints OIDC canonicos bajo
+  `https://assermetry.com/auth/realms/TrustNews`.
+- El intento de acceso directo a la IP del origen en `443/tcp`, `80/tcp` y
+  `6443/tcp` devolvio `HTTP 000` y termino por timeout. Por tanto, la red de
+  prueba no puede evitar Cloudflare. No se registran la IP ni datos del
+  certificado.
+
+**Estado del 2026-08-19 - Paso 7.4 completado**
+
+- `GET /backend/auth/is-admin` sin mTLS fue bloqueado por Cloudflare con `403`.
+  Con mTLS pero sin JWT alcanzo el Gateway y devolvio `403` con
+  `Not authenticated`.
+- Keycloak emitio un token `client_credentials` nuevo para `TrustNewsApi` y el
+  Gateway lo acepto: `GET /backend/auth/is-admin` devolvio `200` e
+  `is_admin:false`, resultado esperado para la cuenta de servicio. Un primer
+  intento `401` se debio a la entrada del secreto y se descarta como incidencia
+  de la aplicacion; el secreto no se regenero ni se registro.
+- El operador confirmo en navegador el flujo OIDC sobre el dominio real con
+  certificado mTLS: login, mantenimiento de sesion, refresh, roles, logout y
+  redireccion funcionaron.
+- Los smoke tests funcionales de los modos `LIGHT` y `BLOCKCHAIN` finalizaron
+  correctamente desde la interfaz. No se registran usuarios, tokens, secrets,
+  contenidos ni identificadores de orden.
+
+**Estado del 2026-08-19 - Paso 7.5 completado**
+
+- La revision posterior a los smoke tests mostro todos los pods preparados y
+  en ejecucion, cero reinicios y todos los Deployments y StatefulSets
+  disponibles.
+- El nodo presento aproximadamente `5%` de CPU, `80%` de memoria usada y
+  `1.7 GiB` disponibles. Habia `381 MiB` de swap ocupada, pero
+  `MemoryPressure`, `DiskPressure` y `PIDPressure` estaban en `False`; el nodo
+  permanecio `Ready`. El consumo de memoria queda como observacion a vigilar,
+  no como bloqueo de esta fase.
+- Traefik permanecio con una replica preparada, disponible y actualizada,
+  `externalTrafficPolicy=Local` y un endpoint local preparado. El warning
+  anterior `UnAvailableLoadBalancer` se considera transitorio y resuelto por el
+  estado actual.
+- Se observo un warning `DNSConfigForming` por superar el limite de nameservers;
+  Kubernetes aplico tres resolvers y los flujos funcionales continuaron
+  operativos. Queda como observacion no bloqueante para revision posterior.
+
+**Control operativo de pausa introducido el 2026-08-19**
+
+- La regla Cloudflare `Maintenance lock - assermetry.com` esta activa con accion
+  `Block` y ocupa la primera posicion del ruleset.
+- Su expresion cubre todo el hostname `assermetry.com`. Cuando esta activa debe
+  bloquear tambien a clientes con certificado mTLS valido; se desactiva solo
+  durante una ventana de pruebas autorizada.
+- Las reglas `Permanent mTLS - Keycloak administration` y
+  `Temporary mTLS gate - assermetry.com` permanecen activas por debajo. Por
+  tanto, desactivar el lock no elimina la exigencia mTLS de la fase privada.
+- Este lock detiene el trafico en el edge, pero no cierra por si mismo el
+  `TCP/443` del firewall de Hetzner. Para una pausa prolongada, el cierre fuerte
+  sigue siendo retirar exclusivamente esa regla inbound y restaurarla con las
+  22 redes verificadas al reanudar.
+- La posicion y activacion fueron confirmadas por el operador. Queda pendiente
+  aportar una comprobacion HTTP posterior que atribuya el `403` a esta regla.
+
+**Siguiente gate - Paso 7.6 pendiente**
+
+- La prueba con y sin certificado mTLS desde una red alternativa todavia no se
+  ha realizado. No asumirla superada a partir de las pruebas de la red inicial.
+- Despues seguiran pendientes la prueba con un certificado desechable revocado,
+  los reinicios controlados, una dependencia caida y la recuperacion o rollback
+  correspondiente. La Fase 7 permanece en curso.
+
 **Despliegue**
 
 - Kubernetes local: no desplegar.
-- Kubernetes Hetzner: no redesplegar Kubernetes salvo que una prueba descubra un
-  defecto. Cambiar exclusivamente el firewall para permitir `443/tcp` desde los
-  rangos oficiales de Cloudflare.
-- Externo: mantener Application Security mTLS y su regla WAF activos; este es
-  el primer acceso al dominio real.
+- Kubernetes Hetzner: el rollout requerido de `traefik-prod` esta completado.
+  No redesplegar componentes para la prueba desde una red alternativa.
+- Externo: el firewall permite `443/tcp` solo desde las 22 redes comprobadas de
+  Cloudflare. Mantener Application Security mTLS y sus reglas WAF activas.
 
 **Pruebas**
 
@@ -1367,22 +1476,24 @@ Este es el primer momento en que se modifica el firewall de Hetzner:
 resto    cerrado
 ```
 
-1. Configurar Traefik para confiar cabeceras reenviadas solo desde proxies
-   conocidos y mantener `KC_PROXY_HEADERS=xforwarded` en Keycloak.
-2. Confirmar que la IP directa de Hetzner no permite saltarse Cloudflare.
-3. Desde un dispositivo sin certificado, verificar respuesta 403 en `/`,
-   `/backend` y `/auth`.
-4. Desde dispositivos con certificado, probar login, refresh, logout, roles,
-   client credentials, modo Light, modo Blockchain, ordenes, cuotas, IPFS,
-   validadores y exploradores.
-5. Comprobar el discovery OIDC. `issuer` debe ser exactamente:
+1. **Completado:** Traefik confia cabeceras reenviadas solo desde proxies
+   conocidos y `KC_PROXY_HEADERS=xforwarded` permanece en Keycloak.
+2. **Completado desde la red inicial:** la IP directa de Hetzner no permite
+   saltarse Cloudflare en `443/tcp`, `80/tcp` ni `6443/tcp`.
+3. **Completado desde la red inicial:** sin certificado se obtuvo `403` en
+   frontend, Gateway y Keycloak. Pendiente repetir desde una red alternativa.
+4. **Completado funcionalmente desde la red inicial:** login, refresh, logout,
+   roles, client credentials y los modos Light y Blockchain funcionaron. Las
+   pruebas de resiliencia permanecen pendientes.
+5. **Completado:** el discovery OIDC publica exactamente:
 
    ```text
    https://assermetry.com/auth/realms/TrustNews
    ```
 
-6. Probar desde varias redes, caducidad del certificado cliente, reinicios,
-   dependencias caidas, rollback y recuperacion ante fallos.
+6. **Pendiente:** probar desde una red alternativa, revocacion de un
+   certificado cliente desechable, reinicios, dependencias caidas, rollback y
+   recuperacion ante fallos.
 
 Criterio de salida: toda la produccion funciona sobre el dominio real y nadie
 sin certificado cliente puede acceder a ningun flujo de usuario.
@@ -1513,3 +1624,189 @@ Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup
 - Publicar bases de datos, Kafka, IPFS API, RPC, paneles o APIs administrativas.
 - Añadir `www.assermetry.com` sin una redireccion canonica probada.
 - Sustituir los runbooks operativos por este documento de version.
+
+---
+
+## v0.0.13 - Migracion del origen a Cloudflare Tunnel (planificada)
+
+### Objetivo
+
+Sustituir la entrada publica desde las redes compartidas de Cloudflare por un
+Named Tunnel iniciado desde el cluster. El estado final no requiere ningun
+puerto web inbound en Hetzner:
+
+```text
+Cliente
+    | HTTPS, WAF y politicas mTLS
+    v
+Cloudflare Edge
+    | Cloudflare Tunnel iniciado en sentido saliente
+    v
+cloudflared
+    | HTTPS interno con validacion del certificado de origen
+    v
+Traefik ClusterIP
+    +-- /         -> frontend
+    +-- /backend  -> Gateway
+    +-- /auth     -> Keycloak
+```
+
+El contrato publico no cambia. Se mantienen `https://assermetry.com`, el realm
+`TrustNews`, los clientes `TrustNewsWeb` y `TrustNewsApi`, el issuer, los
+redirects, las rutas y las reglas WAF. Cloudflare Tunnel esta disponible en el
+plan Free y no exige un plan Cloudflare Access de pago para publicar el
+hostname.
+
+Referencias:
+
+- https://developers.cloudflare.com/tunnel/
+- https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/
+- https://developers.cloudflare.com/tunnel/advanced/origin-parameters/
+
+### Estado, alcance y esfuerzo
+
+- Estado: **planificada; no implementada ni autorizada para despliegue**.
+- No forma parte de la Fase 7 activa de `v0.0.12`. Terminar o cerrar
+  expresamente esa version antes de iniciar el cutover evita mezclar dos cambios
+  del perimetro.
+- Esfuerzo estimado: **12 a 18 horas tecnicas**, normalmente repartidas entre
+  dos o tres ventanas para permitir observacion y rollback.
+- Alcance de codigo: moderado, aproximadamente 6 a 10 ficheros de
+  infraestructura, CI/CD y documentacion.
+- No se esperan cambios en frontend, APIs, logica funcional, modelos, Keycloak,
+  realm, clientes OIDC, issuer ni base de datos.
+- La mayor complejidad es conservar de forma segura la IP real del cliente, los
+  rate limits y la confianza de cabeceras reenviadas.
+
+### Invariantes de seguridad
+
+1. No almacenar el token del tunel, credenciales ni identificadores internos en
+   Git, logs, artifacts o documentacion.
+2. No usar `noTLSVerify`. El salto `cloudflared -> Traefik` debe validar la
+   raiz Origin CA y `originServerName=assermetry.com`.
+3. No activar `forwardedHeaders.insecure`. Traefik debe confiar unicamente en
+   el origen interno elegido para los conectores.
+4. El lock de mantenimiento y las reglas mTLS permanecen disponibles durante
+   toda la migracion.
+5. No retirar el inbound `TCP/443` hasta que el tunel haya superado las pruebas
+   extremo a extremo y exista un rollback preparado.
+6. Tras el cierre, no dejar rutas alternativas por LoadBalancer, NodePort,
+   hostPort, IP publica o DNS historico.
+7. Dos replicas de `cloudflared` reducen el riesgo de fallo del proceso, pero en
+   el cluster actual de un solo nodo no aportan alta disponibilidad del host.
+
+### Decisiones tecnicas previas
+
+1. Desplegar `cloudflared` como workload dedicado: ServiceAccount sin
+   privilegios, Secret externo para el token, dos replicas, probes, limites de
+   recursos, `securityContext` restrictivo y `--no-autoupdate`.
+2. Mantener Traefik como unico router para conservar `/`, `/backend` y `/auth`.
+   El tunel no debe conectar directamente a cada API ni eludir middlewares,
+   limites de cuerpo, observabilidad o reglas Ingress.
+3. Usar el Service interno HTTPS de Traefik. Montar en `cloudflared` solo la
+   raiz Origin CA necesaria para verificar el certificado; no montar su clave.
+4. Elegir y probar una estrategia para `X-Forwarded-For` y
+   `CF-Connecting-IP`. Si se confia en un CIDR de pods, compensarlo con
+   aislamiento y NetworkPolicy, verificando antes su enforcement real en K3s.
+5. Mantener inicialmente el LoadBalancer de Traefik para rollback. Tras el
+   periodo de observacion, cambiar produccion a `ClusterIP` y retirar
+   `externalTrafficPolicy` y las allowlists que ya no correspondan.
+6. Mantener el perfil local sin `cloudflared` y sin dependencias de Cloudflare.
+
+### Plan de implementacion
+
+1. **Linea base y rollback**
+   - Exportar de forma segura DNS, WAF, firewall, Helm y Traefik sin registrar
+     IP, tokens ni identificadores sensibles.
+   - Capturar los checks actuales: sin mTLS `403`, con mTLS `200`, issuer
+     exacto, API `200` y smokes Light/Blockchain.
+   - Preparar el orden de rollback antes de desplegar el conector.
+
+2. **Configuracion de Cloudflare**
+   - Crear un Named Tunnel sin asociar aun el hostname productivo.
+   - Crear el token con el menor alcance disponible y guardarlo fuera de Git.
+   - Definir el servicio HTTPS hacia Traefik con hostname y CA verificados.
+   - No crear un hostname de prueba publico sin una proteccion equivalente al
+     mTLS actual.
+
+3. **Manifests de Kubernetes**
+   - Crear workload, ConfigMap no sensible, referencia al Secret, probes,
+     recursos, afinidad y seguridad de `cloudflared`.
+   - Crear NetworkPolicy solo despues de comprobar que K3s la aplica.
+   - Incluir dos replicas y demostrar que reiniciar una no interrumpe el tunel.
+
+4. **Traefik y cabeceras**
+   - Añadir valores productivos especificos para el camino del tunel.
+   - Conservar `forwardedHeaders.insecure=false`.
+   - Limitar `trustedIPs` al origen interno definido para `cloudflared`.
+   - Verificar en logs y rate limits la IP real y que otro pod no puede
+     falsificarla.
+
+5. **CI/CD y observabilidad**
+   - Añadir un perfil productivo y gates de render sin afectar al perfil local.
+   - Validar replicas, probes, Secret referenciado, TLS, ausencia de
+     `noTLSVerify` y configuracion segura de cabeceras.
+   - Integrar logs y metricas de `cloudflared` y alertar si no hay conectores
+     saludables.
+
+6. **Pre-cutover**
+   - Desplegar `cloudflared` sin modificar todavia el registro A productivo.
+   - Confirmar en Cloudflare que las conexiones estan saludables.
+   - Mantener el lock activo y guardar el estado DNS anterior para rollback.
+
+7. **Cutover protegido**
+   - Asociar `assermetry.com` al Named Tunnel durante una ventana controlada.
+   - Desactivar solo el lock; mantener el mTLS temporal y el administrativo.
+   - Probar frontend, discovery, login, refresh, logout, roles,
+     `TrustNewsApi`, Gateway, Light, Blockchain, polling, limites e IP real.
+
+8. **Cierre del origen**
+   - Reactivar el lock mientras se cambia el perimetro.
+   - Retirar en Hetzner la regla inbound `TCP/443` con las 22 redes.
+   - Cambiar Traefik a `ClusterIP` tras el periodo de rollback rapido.
+   - Confirmar que `443`, `80` y `6443` directos no responden mientras el
+     dominio funciona por el tunel.
+
+9. **Soak y cierre**
+   - Probar reinicio de una replica y perdida y recuperacion de conectores.
+   - Repetir smokes y revisar errores, latencia, memoria y reinicios.
+   - Probar el rollback completo antes de cerrar la version.
+
+### Rollback
+
+1. Activar el lock de mantenimiento.
+2. Restaurar Traefik como LoadBalancer con los valores previos.
+3. Restaurar `TCP/443` en Hetzner con las 22 redes verificadas.
+4. Restaurar el registro DNS proxificado anterior.
+5. Confirmar mediante mTLS frontend, discovery y Gateway.
+6. Desactivar el lock solo si las comprobaciones son correctas.
+7. Retirar el tunel despues de recuperar el camino anterior, nunca antes.
+
+El rollback no cambia issuer, Keycloak, clientes, redirects ni aplicacion.
+
+### Estimacion detallada
+
+| Trabajo | Horas |
+| --- | ---: |
+| Diseño final, inventario y rollback | 1-2 |
+| Manifests de `cloudflared` y NetworkPolicy | 3-4 |
+| Traefik, TLS interno y cabeceras | 2-4 |
+| Tunnel, DNS y secretos en Cloudflare | 1-2 |
+| CI/CD, observabilidad y documentacion | 1-2 |
+| Cutover, pruebas de fallo y rollback | 4 |
+| **Total estimado** | **12-18** |
+
+La horquilla superior es probable si NetworkPolicy o la IP real requieren
+ajustes. Una migracion basica puede funcionar antes, pero no termina hasta
+demostrar cabeceras seguras, cierre del origen y rollback.
+
+### Criterio de salida
+
+- `assermetry.com` funciona exclusivamente por el Named Tunnel.
+- Hetzner no admite ningun puerto web inbound.
+- Traefik no expone un LoadBalancer publico innecesario.
+- No se usa `noTLSVerify` ni confianza indiscriminada de cabeceras.
+- WAF, mTLS administrativo, autenticacion, rate limits y observabilidad se
+  conservan.
+- Frontend, OIDC, API, Light y Blockchain superan las pruebas.
+- La perdida de un conector y el rollback completo estan demostrados.

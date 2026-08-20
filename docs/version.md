@@ -11,19 +11,20 @@ Assermetry. Los comandos operativos se mantienen en:
 
 ---
 
-## v0.0.12 - Exposicion controlada de Assermetry en Internet
+## v0.0.12 - Cierre del perimetro y acceso administrativo
 
 ### Objetivo
 
-Publicar la instalacion de Hetzner en `https://assermetry.com`, conservando la
-posibilidad de desplegar y validar la misma aplicacion en local.
+Cerrar la preparacion tecnica del entorno controlado de Hetzner en
+`https://assermetry.com`, conservando el despliegue local y sin autoservicio ni
+registro publico de usuarios.
 
-La apertura al publico se realizara en la Fase 10. Antes de ella, el servicio
-completo debe funcionar en el dominio definitivo y el acceso HTTPS por
-`443/tcp` debe estar restringido mediante un certificado personal mTLS.
-Desactivar la regla mTLS general sera el unico cambio necesario para abrir los
-flujos de usuario; la asociacion mTLS, el certificado cliente y la regla
-administrativa permanente se conservaran.
+La version termina con la **Fase 8 - Cierre del perimetro y acceso
+administrativo**. El estado objetivo permite que un usuario previamente
+provisionado acceda mediante login OIDC sin certificado cliente, mantiene mTLS
+solo para la administracion de Keycloak y utiliza el lock de Cloudflare para
+cerrar temporalmente todo el hostname. Las pruebas sistematicas de GUI y API,
+la correccion funcional y los ensayos de demo comienzan en `v0.0.13`.
 
 ### Estado actual
 
@@ -31,7 +32,7 @@ La version `v0.0.12` ha cerrado la **Fase 0 - Inventario y linea base**, la
 **Fase 1 - Adaptacion de aplicacion y manifests** y la **Fase 2 - Dominio,
 Cloudflare y DNS**. En la Fase 2 se completaron la configuracion tecnica, las
 comprobaciones externas y la verificacion del 2FA en Porkbun y Cloudflare. La
-**Fase 3 - Acceso privado por certificado cliente** esta cerrada: la emision,
+**Fase 3 - Acceso privado temporal por certificado cliente** esta cerrada: la emision,
 instalacion y validacion funcional del certificado, el gate mTLS y su rollback
 estan completados. Por decision de alcance no se ejecutaron una revocacion real
 ni un certificado de reemplazo; se mantiene el certificado probado durante el
@@ -74,26 +75,27 @@ La limpieza local esta completada. `ISSUE-002` esta resuelto: el valor por
 defecto no vacio se elimino y el operador confirmo que no coincide con el
 secret productivo, por lo que no requiere rotacion productiva. La posible
 revision de una credencial historica de tests queda como recomendacion no
-bloqueante. La **Fase 7 - Abrir 443 solo a Cloudflare y probar con mTLS**
-esta en curso: sus pasos 7.1 a 7.5 estan completados y la prueba desde una red
+bloqueante. La **Fase 8 - Cierre del acceso privado**
+esta en curso: sus pasos 8.1 a 8.5 estan completados y la prueba desde una red
 alternativa permanece pendiente. Hetzner permite ahora `TCP/443` exclusivamente
 desde las 22 redes verificadas de Cloudflare; los accesos directos a `443`, `80`
 y `6443` quedaron bloqueados. El lock de mantenimiento de Cloudflare esta
 activo en primera posicion y bloquea el hostname completo mientras no se prueba.
-La **Fase 8 - Hardening interno, identidad y cadena de suministro** queda
-pendiente y es obligatoria antes del GO/NO-GO. Corregira la validacion de
-audiencia JWT, el acceso CI a Kubernetes, la superficie RPC de Geth, la
-segmentacion interna, la inmutabilidad de imagenes y los riesgos de capacidad
-y disponibilidad detectados en la revision. La **Fase 11 - Backups y
-recuperacion** queda pendiente y sera la ultima fase en ejecutarse dentro de
-`v0.0.12`.
+`v0.0.12` se cerrara al retirar de forma controlada la regla mTLS general,
+validar el acceso OIDC de usuario sin certificado, probar la proteccion mTLS
+administrativa y su revocacion, comprobar el lock y repetir desde una red
+alternativa.
+Las pruebas sistematicas de GUI y API, el hardening, los backups, la
+recuperacion y cualquier decision de produccion dejan de pertenecer a esta
+version.
 
 Configuracion activa:
 
 ```text
 Local:           https://localhost:7443
 Hetzner/origen:  TCP/443 accesible solo desde las 22 redes de Cloudflare
-Cloudflare:      https://assermetry.com (proxy, mTLS y lock de mantenimiento activos)
+Cloudflare hoy: https://assermetry.com (lock, mTLS general temporal y mTLS administrativo activos)
+Objetivo Fase 8: acceso OIDC de usuario sin certificado; mTLS solo administrativo; lock disponible
 ```
 
 Los perfiles locales continúan usando `overlays/local`. `infra-prod` referencia
@@ -102,9 +104,9 @@ el overlay `prod-domain` de Keycloak y ya fue desplegado por el pipeline
 Gateway e Ingress y ya fue aplicado; los tres Ingress activos usan
 `host: assermetry.com`. La aceptacion funcional y la limpieza local estan
 completadas. `ISSUE-002` esta resuelto y no afecta al secret productivo. La
-revision historica recomendada no bloquea las pruebas controladas de la Fase 7.
+revision historica recomendada no bloquea el cierre de la Fase 8.
 
-### Contrato publico de la version
+### Contrato de acceso controlado de la version
 
 ```text
 https://assermetry.com/          -> frontend
@@ -126,50 +128,55 @@ No se utilizara un dominio provisional. Tampoco se renombrara el realm tecnico,
 porque hacerlo cambiaria el issuer, las URLs OIDC y la configuracion de todos
 los clientes.
 
-### Arquitectura de produccion
+### Arquitectura objetivo de acceso
 
 ```text
-Navegador o cliente
-        |
-        | HTTPS + certificado cliente obligatorio durante las pruebas
-        v
-Cloudflare Proxy / Application Security mTLS / WAF
-        |
-        | HTTPS Full (strict)
-        v
-Firewall Hetzner: 443 solo desde rangos de Cloudflare
-        |
-        v
-Traefik (K3s)
-        +-- /         -> frontend
-        +-- /backend  -> Gateway
-        +-- /auth     -> Keycloak
+Usuario provisionado                 Administrador
+        |                                  |
+        | HTTPS sin certificado cliente    | HTTPS + certificado mTLS administrativo
+        v                                  v
+Cloudflare WAF + maintenance lock     Regla mTLS administrativa permanente
+        |                                  |
+        +----------------+-----------------+
+                         | HTTPS Full (strict)
+                         v
+        Firewall Hetzner: 443 solo desde rangos de Cloudflare
+                         |
+                         v
+                    Traefik (K3s)
+                         +-- /         -> frontend + login OIDC
+                         +-- /backend  -> Gateway + validacion JWT
+                         +-- /auth     -> Keycloak
 ```
 
 Hay dos certificados con finalidades diferentes:
 
 - El certificado TLS del origen autentica `assermetry.com` y cifra la conexion
   entre Cloudflare y Traefik.
-- El certificado cliente mTLS, emitido por la CA gestionada de Cloudflare,
-  autoriza temporalmente a cada tester antes de la apertura publica.
+- El certificado cliente mTLS administrativo, emitido por la CA gestionada de
+  Cloudflare, protege `/auth/admin` y `/auth/realms/master`. No se entrega a
+  usuarios ni clientes para acceder a los flujos funcionales.
 
-Tener solo el certificado TLS del servidor no restringe el acceso. El gate
-privado previo a la apertura requiere una regla WAF de Application Security que
-rechace cualquier cliente sin un certificado mTLS valido.
+Tener solo el certificado TLS del servidor no autoriza a usar la aplicacion. El
+acceso funcional se controla mediante OIDC, JWT, roles y asociacion de cliente
+en servidor; el mTLS se reserva para la administracion.
 
 ### Regla de oro de seguridad
 
-- El acceso por mTLS debe estar activo antes del primer momento en que
-  `443/tcp` sea alcanzable desde Internet, en la **Fase 7**, y mantenerse hasta
-  la apertura publica de la **Fase 10** tras el GO/NO-GO. Despues de la apertura,
-  mTLS sigue siendo obligatorio en `/auth/admin` y
-  `/auth/realms/master`.
-- No se debe abrir `443/tcp` al trafico publico general hasta cerrar las fases
-  7 y 8 y obtener un `GO` formal en la Fase 9. Terminar las pruebas mTLS no
-  sustituye el hardening interno.
-- Si aparece una incidencia durante la apertura, el rollback inmediato consiste en
-  reactivar la politica mTLS sin cambiar DNS, Kubernetes, Keycloak ni
-  certificados.
+- Los usuarios previamente provisionados acceden sin certificado cliente y se
+  autentican mediante OIDC. Gateway debe rechazar las APIs protegidas cuando no
+  existe un token valido.
+- El mTLS permanece obligatorio en `/auth/admin`, `/auth/admin/*`,
+  `/auth/realms/master` y `/auth/realms/master/*`.
+- El lock de mantenimiento es independiente de OIDC y mTLS administrativo:
+  cuando esta activo bloquea todo `assermetry.com`, incluidos usuarios y
+  administradores validos.
+- `443/tcp` no se abrira al trafico publico general dentro de `v0.0.12`.
+  Hetzner solo aceptara los rangos oficiales vigentes de Cloudflare y el origen
+  no sera accesible directamente.
+- Si aparece una incidencia durante una demo, el cierre inmediato consiste en
+  reactivar el lock sin cambiar DNS, Kubernetes, Keycloak ni certificados. Para
+  una pausa prolongada se retirara la regla inbound de `443/tcp`.
 
 ### Compatibilidad con el despliegue local
 
@@ -193,27 +200,27 @@ La version debe conservar estas reglas:
 El plan de partida es valido como objetivo, con las siguientes correcciones y
 controles:
 
-1. No se debe confundir TLS con control de acceso. Antes de abrir `443/tcp`, el
-   certificado del origen y el mTLS de cliente deben estar activos y probados.
+1. No se debe confundir TLS con control de acceso. El certificado del origen
+   protege el salto Cloudflare-Traefik; OIDC/JWT autoriza usuarios y el mTLS
+   administrativo protege las rutas de administracion.
 2. El issuer externo y la URL interna de JWKS tienen responsabilidades
    distintas. El Gateway valida `iss` contra la URL publica, pero puede obtener
    las claves por la red interna de Kubernetes.
 3. No se debe añadir `:443` al issuer canonico. Keycloak y Gateway deben producir
    y validar exactamente la misma cadena sin el puerto HTTPS implicito.
-4. El DNS proxificado, Application Security mTLS y su regla WAF deben
-   configurarse antes de permitir que Cloudflare alcance el origen. En el plan
-   Free se usaran certificados emitidos por la CA gestionada de Cloudflare; la
-   CA propia mediante Cloudflare Access queda descartada porque requiere
-   Enterprise.
+4. El DNS proxificado, WAF, lock y regla mTLS administrativa deben configurarse
+   antes de permitir que Cloudflare alcance el origen. En el plan Free se usan
+   certificados emitidos por la CA gestionada de Cloudflare.
 5. El firewall no puede abrir `443/tcp` a `0.0.0.0/0`. Solo aceptara los rangos
    oficiales vigentes de Cloudflare. Esos rangos requieren un procedimiento de
    actualizacion.
 6. Bloquear `/auth/admin/*` no basta por si solo: tambien se debe bloquear el
    realm `master`, la documentacion del Gateway y cualquier servicio operativo.
-7. Los cambios de seguridad y de issuer deben probarse primero por tunel, luego
-   en el dominio real protegido por mTLS y finalmente sin mTLS.
-8. La apertura necesita un rollback de un solo paso: reactivar la politica mTLS,
-   sin cambiar DNS, Kubernetes, Keycloak ni certificados.
+7. Los cambios de seguridad e issuer deben probarse primero por tunel y luego en
+   el dominio real. Los flujos de usuario se prueban sin certificado; las rutas
+   administrativas, con y sin certificado administrativo.
+8. Cada demo necesita un cierre de un solo paso: reactivar el lock de
+   mantenimiento sin cambiar DNS, Kubernetes, Keycloak ni certificados.
 
 ### Plan ordenado de despliegue
 
@@ -227,15 +234,11 @@ salida.
 | 0 | **Cerrada** | Inventariar el sistema estable y fijar una linea base funcional y recuperable | No | No; se prueba lo ya desplegado | No |
 | 1 | **Cerrada** | Preparar aplicacion, OIDC, manifests y overlays para el dominio sin activarlo | **OK** | **OK**; se valido `prod` y `prod-domain` no se activo durante esta fase | No |
 | 2 | **Cerrada** | Registrar el dominio, delegar DNS a Cloudflare y asegurar el perimetro inicial | No | No | Dominio, Cloudflare y DNS |
-| 3 | **Cerrada** | Proteger temporalmente el dominio con certificado cliente mTLS durante las pruebas | No | No | Certificado cliente y regla WAF mTLS activos; rollback probado; revocacion y reemplazo no ejecutados por decision de alcance |
+| 3 | **Cerrada** | Proteger temporalmente todo el dominio con certificado cliente durante la preparacion | No | No | Gate mTLS general probado como control transitorio; no es el modelo final de usuario |
 | 4 | **Cerrada** | Instalar y rotar manualmente un certificado Cloudflare Origin CA sin abrir puertos publicos | Render validado; Secret local y `localhost` intactos | Origin CA instalado y validado por tunel | Certificado emitido; origen filtrado en 80/443 y alerta activa |
-| 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de publicar | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
+| 5 | **Cerrada** | Implantar protecciones permanentes, limites, registros y alertas antes de las demos | Validada | Validada | WAF, rate limits y alertas activos y comprobados |
 | 6 | **Cerrada** | Activar la configuracion definitiva del dominio en K3s manteniendo el origen cerrado | Render validado; no desplegar en local | Funcionalidad y limpieza aceptadas; valor por defecto de tests eliminado y sin coincidencia con produccion | No |
-| 7 | **En curso (pasos 7.1 a 7.5 completados; 7.6 pendiente)** | Permitir HTTPS solo desde Cloudflare y validar la aplicacion completa bajo mTLS | No | `443/tcp` abierto solo a Cloudflare; aplicacion y salud aceptadas | Lock de mantenimiento activo; pendiente repetir desde una red alternativa |
-| 8 | **Pendiente** | Reducir la superficie interna, endurecer identidad y CI, segmentar el cluster y fijar artefactos reproducibles | Validar antes de produccion | Despliegues controlados por bloque; lock y mTLS activos | No |
-| 9 | **Pendiente** | Revisar evidencias y decidir formalmente si el sistema puede abrirse al publico | No | No | Decision GO/NO-GO |
-| 10 | **Pendiente** | Retirar el gate mTLS temporal y habilitar el acceso publico con rollback inmediato | No | No | Desactivar la regla WAF mTLS temporal |
-| 11 | **Pendiente; no implementada** | Obtener backups cifrados y demostrar una restauracion funcional aislada | Si, solo para restauracion aislada | No se redespliega; se obtienen backups reales | Copia cifrada externa |
+| 8 | **En curso (pasos 8.1 a 8.5 completados; 8.6 pendiente)** | Activar acceso OIDC de usuario y mantener mTLS solo administrativo | No | `443/tcp` solo desde Cloudflare; Gateway protegido por JWT | Retirar mTLS general, probar administracion mTLS, lock y red alternativa |
 
 **Hito actual para versionado:** `infra-prod`, los clientes OIDC y el despliegue
 de `apis-frontend-prod` estan aplicados. La muestra posterior mantiene 29 de 29
@@ -255,11 +258,11 @@ secret productivo de `TrustNewsApi`; no se requiere rotacion productiva por
 este hallazgo. La copia de trabajo elimina ya el valor no vacio y `ISSUE-002`
 queda resuelto. Determinar si el valor historico pertenecio a una credencial de
 tests activa es una recomendacion de seguridad independiente y no bloquea la
-Fase 7. El firewall permite `443/tcp` exclusivamente desde las redes de
+Fase 8. El firewall permite `443/tcp` exclusivamente desde las redes de
 Cloudflare; no esta abierto al trafico general ni al acceso directo al origen.
 
 `No` significa que esa fase no debe provocar un despliegue en ese cluster. Las
-consultas, renderizados, backups o pruebas indicadas siguen siendo obligatorios.
+consultas, renderizados y pruebas indicadas siguen siendo obligatorios.
 
 #### Fase 0 - Inventario y linea base (cerrada)
 
@@ -467,7 +470,7 @@ Criterio de salida: **cumplido**. DNS resuelve a Cloudflare, el origen sigue
 filtrado en `80/tcp` y `443/tcp`, SSH solo admite la unica clave autorizada y
 el 2FA esta activo en Porkbun y Cloudflare.
 
-#### Fase 3 - Acceso privado por certificado cliente (cerrada)
+#### Fase 3 - Acceso privado temporal por certificado cliente (cerrada)
 
 La implementacion se hara con **Cloudflare Application Security mTLS**,
 compatible con el plan Free y con certificados emitidos por la CA gestionada de
@@ -510,7 +513,7 @@ esa modalidad requiere Zero Trust Enterprise.
   bloqueado si fuese necesario ejecutar ese procedimiento. Con un certificado
   valido se supera el gate mTLS, aunque el acceso a la aplicacion seguira
   fallando mientras el origen permanezca cerrado.
-- La prueba HTTP extremo a extremo con la aplicacion se realiza en la Fase 7.
+- La prueba HTTP extremo a extremo con la aplicacion se realiza en la Fase 8.
 
 1. Inventariar testers y dispositivos. Usar un certificado distinto por
    dispositivo, con nombre identificable, validez limitada y revocacion
@@ -550,7 +553,8 @@ esa modalidad requiere Zero Trust Enterprise.
 3. La CA gestionada de Cloudflare emitio un certificado cliente con validez
    limitada hasta el 5 de agosto de 2028. Se comprobaron sujeto, emisor, fechas
    y correspondencia criptografica entre certificado y clave privada. La
-   inspeccion repetida en la Fase 7 confirmo que no declara una extension EKU;
+   inspeccion repetida durante la Fase 8 confirmo que
+   no declara una extension EKU;
    Cloudflare lo acepto correctamente como certificado cliente mTLS.
 4. Se creo un PKCS#12 cifrado y se valido su estructura antes de importarlo en el
    almacen personal del usuario de Windows. El certificado importado conserva
@@ -578,9 +582,9 @@ esa modalidad requiere Zero Trust Enterprise.
 
 1. No se genero `cforcadell-win11-02` y no se revoco
    `cforcadell-win11-01`. Se decidio conservar la credencial ya probada porque
-   existe un unico tester, la clave privada esta cifrada y bajo su control, y
-   mTLS solo se utilizara temporalmente durante las pruebas previas a la apertura
-   publica.
+   existe un unico tester, la clave privada esta cifrada y bajo su control. Esta
+   decision describia el gate temporal de preparacion y queda sustituida por el
+   modelo de acceso de la Fase 8.
 2. Se acepta el riesgo residual de que una copia de la clave privada y su
    contraseña permitiria superar el gate mientras este activo. La autenticacion
    de la aplicacion seguiria siendo una barrera independiente.
@@ -591,11 +595,9 @@ esa modalidad requiere Zero Trust Enterprise.
 4. La cuenta de Cloudflare y su 2FA son independientes del certificado cliente,
    por lo que la administracion y revocacion siguen disponibles aunque el
    certificado deje de funcionar.
-5. Durante la apertura publica se desactivara la regla WAF temporal segun la
-   Fase 10. No retirar la politica de seleccion de Edge, el certificado del
-   almacen de Windows ni su copia privada operativa mientras protejan la
-   administracion permanente. Mantener los procedimientos de renovacion,
-   revocacion y reemplazo.
+5. La Fase 8 desactivara la regla mTLS general. El certificado operativo se
+   conserva solo para administracion, junto con los procedimientos de
+   renovacion, revocacion y reemplazo.
 6. No se desplego Kubernetes, no se modificaron las URLs OIDC y no se abrieron
    `80/tcp` ni `443/tcp` en el origen.
 
@@ -659,7 +661,7 @@ paso al inicio controlado de la Fase 4.
   este ultimo; confirmar la separacion Kind/K3s.
 - Confirmar externamente que la IP de Hetzner mantiene `80/tcp` y `443/tcp`
   filtrados. `Full (strict)` se probara cuando Cloudflare pueda alcanzar el
-  origen en la Fase 7.
+  origen en la Fase 8.
 
 **Evidencias registradas el 2026-08-11**
 
@@ -704,7 +706,7 @@ paso al inicio controlado de la Fase 4.
 5. Verificar el Secret, el `TLSStore` y el certificado presentado por Traefik
    mediante tunel, SNI y la raiz Origin CA de Cloudflare.
 6. Repetir las pruebas funcionales por tunel y mantener el origen cerrado hasta
-   la Fase 7.
+   la Fase 8.
 7. Registrar una alerta anterior a `notAfter` y probar documentalmente la
    rotacion y el rollback manuales.
 
@@ -734,9 +736,9 @@ la caducidad esta inventariada. El origen continua filtrado en `80/tcp` y
   asociacion mTLS de `assermetry.com` permanece
   activa. Una regla WAF permanente exige
   certificado cliente valido solo en `/auth/admin` y
-  `/auth/realms/master`; la regla general actual seguira siendo el gate
-  temporal para el resto de la aplicacion. En la apertura se desactivara solo
-  la regla temporal. La administracion por tunel SSH directo a Traefik no pasa
+  `/auth/realms/master`; la regla general actual es solo el gate historico de
+  preparacion y se desactivara en la Fase 8. La administracion por tunel SSH
+  directo a Traefik no pasa
   por Cloudflare y conservara Host/SNI `assermetry.com`. OpenAPI continua
   desactivado en produccion.
   `Permanent mTLS - Keycloak administration` esta activa con accion `Block`
@@ -1085,9 +1087,9 @@ entonces ejecutar `apis-frontend-prod`. No tocar el firewall.
    el acceso administrativo por tunel. Crear antes del gate temporal una regla
    WAF mTLS permanente para
    `/auth/admin` y `/auth/realms/master`. Mantener la asociacion mTLS del
-   hostname y la regla general temporal. En la Fase 10 se desactivara solo esta
-   ultima. La administracion por SSH usara Traefik directamente, preservando el
-   hostname canonico `assermetry.com`; el firewall impedira que Internet
+   hostname y la regla general temporal. Solo una futura decision de produccion
+   podra desactivar esta ultima. La administracion por SSH usara Traefik
+   directamente, preservando el hostname canonico `assermetry.com`; el firewall impedira que Internet
    utilice esa via para evitar Cloudflare.
 3. **5.2 - Metodos, cuerpos y rechazos (completado):** aplicar limites compatibles en
    Gateway y Traefik, emitir logs para `401/403/405/413/429/5xx` y probar los
@@ -1270,8 +1272,8 @@ los umbrales operativos quedaron validados sin abrir el origen.
 La fase queda formalmente cerrada. Como recomendacion independiente, comprobar
 si el valor historico pertenecio a una credencial de tests activa y revocarla o
 rotarla si procede. No rotar `TrustNewsApi` de produccion por este hallazgo,
-porque el operador confirmo que los valores no coinciden. La Fase 7 puede
-comenzar manteniendo el alcance de apertura definido para Cloudflare.
+porque el operador confirmo que los valores no coinciden. La Fase 8 puede
+continuar manteniendo el alcance privado definido para Cloudflare.
 
 **Despliegue**
 
@@ -1321,9 +1323,11 @@ comenzar manteniendo el alcance de apertura definido para Cloudflare.
 Criterio de salida: la aplicacion completa usa ya la configuracion final, pero
 el origen todavia no acepta trafico de Internet.
 
-#### Fase 7 - Abrir 443 solo a Cloudflare y probar con mTLS (en curso)
+#### Fase 8 - Cierre del perimetro y acceso administrativo (en curso)
 
-**Estado del 2026-08-19 - Paso 7.1 completado**
+Esta fase es el unico trabajo pendiente para cerrar `v0.0.12`.
+
+**Estado del 2026-08-19 - Paso 8.1 completado**
 
 - DNS de `assermetry.com` continua proxificado y Cloudflare mantiene el modo
   TLS `Full (strict)`.
@@ -1348,7 +1352,7 @@ el origen todavia no acepta trafico de Internet.
   El siguiente paso es inventariar `externalTrafficPolicy` y la configuracion
   actual de cabeceras reenviadas antes de definir `trustedIPs` en Traefik.
 
-**Estado del 2026-08-19 - Paso 7.2 completado**
+**Estado del 2026-08-19 - Paso 8.2 completado**
 
 - El cluster tiene un nodo, un pod Traefik preparado y un nodo con endpoint
   local de Traefik. K3s no configura `node-external-ip` ni mediante
@@ -1380,7 +1384,7 @@ el origen todavia no acepta trafico de Internet.
   las mismas 22 redes oficiales de Cloudflare. No ampliar el origen a
   `0.0.0.0/0` ni `::/0`.
 
-**Estado del 2026-08-19 - Paso 7.3 completado**
+**Estado del 2026-08-19 - Paso 8.3 completado**
 
 - Se descargaron nuevamente las redes oficiales de Cloudflare: 15 IPv4 y 7
   IPv6, 22 entradas en total. Hetzner permite ahora `TCP/443` exclusivamente
@@ -1395,7 +1399,7 @@ el origen todavia no acepta trafico de Internet.
   prueba no puede evitar Cloudflare. No se registran la IP ni datos del
   certificado.
 
-**Estado del 2026-08-19 - Paso 7.4 completado**
+**Estado del 2026-08-19 - Paso 8.4 completado**
 
 - `GET /backend/auth/is-admin` sin mTLS fue bloqueado por Cloudflare con `403`.
   Con mTLS pero sin JWT alcanzo el Gateway y devolvio `403` con
@@ -1412,7 +1416,7 @@ el origen todavia no acepta trafico de Internet.
   correctamente desde la interfaz. No se registran usuarios, tokens, secrets,
   contenidos ni identificadores de orden.
 
-**Estado del 2026-08-19 - Paso 7.5 completado**
+**Estado del 2026-08-19 - Paso 8.5 completado**
 
 - La revision posterior a los smoke tests mostro todos los pods preparados y
   en ejecucion, cero reinicios y todos los Deployments y StatefulSets
@@ -1447,13 +1451,35 @@ el origen todavia no acepta trafico de Internet.
 - La posicion y activacion fueron confirmadas por el operador. Queda pendiente
   aportar una comprobacion HTTP posterior que atribuya el `403` a esta regla.
 
-**Siguiente gate - Paso 7.6 pendiente**
+**Decision de acceso vigente desde el 2026-08-20**
 
-- La prueba con y sin certificado mTLS desde una red alternativa todavia no se
-  ha realizado. No asumirla superada a partir de las pruebas de la red inicial.
-- Despues seguiran pendientes la prueba con un certificado desechable revocado,
-  los reinicios controlados, una dependencia caida y la recuperacion o rollback
-  correspondiente. La Fase 7 permanece en curso.
+- La regla `Temporary mTLS gate - assermetry.com` se retirara como requisito
+  general de usuario durante el Paso 8.6.
+- La regla `Permanent mTLS - Keycloak administration` permanecera activa para
+  las rutas administrativas.
+- Los usuarios se autenticaran mediante OIDC sin certificado cliente. No se
+  habilita autorregistro: todas las identidades se provisionan expresamente.
+- El lock de mantenimiento seguira siendo el mecanismo de pausa que bloquea el
+  hostname completo.
+
+**Siguiente gate - Paso 8.6 pendiente**
+
+- Desactivar de forma controlada la regla mTLS general manteniendo activos el
+  lock y la regla mTLS administrativa permanente.
+- Desde una red alternativa y sin certificado cliente, validar frontend,
+  discovery OIDC, login, refresh, logout, Light y Blockchain.
+- Sin JWT, comprobar que las APIs protegidas rechazan la peticion. Con un JWT
+  valido, comprobar que Gateway aplica usuario, roles y cliente esperados.
+- Sin certificado administrativo, comprobar `403` en `/auth/admin` y
+  `/auth/realms/master`; con un certificado administrativo valido, comprobar
+  que se supera mTLS sin eludir la autenticacion de Keycloak.
+- Revocar un certificado administrativo desechable y demostrar su rechazo. La
+  prueba valida el ciclo de credenciales administrativas, no el acceso de
+  usuarios.
+- Comprobar que el lock bloquea todo el hostname incluso para usuarios y
+  administradores validos, y dejarlo en el estado operativo decidido.
+- Los reinicios controlados, las dependencias caidas y las pruebas funcionales
+  sistematicas se trasladan a `v0.0.13` y versiones posteriores.
 
 **Despliegue**
 
@@ -1461,18 +1487,22 @@ el origen todavia no acepta trafico de Internet.
 - Kubernetes Hetzner: el rollout requerido de `traefik-prod` esta completado.
   No redesplegar componentes para la prueba desde una red alternativa.
 - Externo: el firewall permite `443/tcp` solo desde las 22 redes comprobadas de
-  Cloudflare. Mantener Application Security mTLS y sus reglas WAF activas.
+  Cloudflare. Mantener el lock durante el cambio, desactivar solo la regla mTLS
+  general y conservar la regla mTLS administrativa.
 
 **Pruebas**
 
-- Sin certificado cliente: esperar denegacion en `/`, `/backend` y `/auth`.
-- Con certificado cliente: probar TLS, login, refresh, logout, roles, client
-  credentials y los flujos funcionales completos desde varias redes.
+- Sin certificado cliente: frontend y OIDC deben ser alcanzables; las APIs
+  protegidas deben requerir JWT.
+- Con credenciales OIDC validas: probar login, refresh, logout, roles y los
+  flujos funcionales completos desde varias redes.
+- En administracion: probar sin certificado, con certificado valido y con un
+  certificado administrativo desechable revocado.
 - Comprobar `Full (strict)`, issuer exacto y cabeceras reenviadas; verificar que
   la IP directa de Hetzner, `80/tcp`, `6443/tcp` y el resto de puertos no permiten
   evitar Cloudflare.
-- Probar certificado caducado o revocado, reinicio de pods, dependencia caida y
-  reactivacion del cierre mTLS.
+- Probar el lock como cierre general y la regla mTLS como cierre exclusivo de
+  administracion.
 
 Este es el primer momento en que se modifica el firewall de Hetzner:
 
@@ -1488,52 +1518,423 @@ resto    cerrado
    conocidos y `KC_PROXY_HEADERS=xforwarded` permanece en Keycloak.
 2. **Completado desde la red inicial:** la IP directa de Hetzner no permite
    saltarse Cloudflare en `443/tcp`, `80/tcp` ni `6443/tcp`.
-3. **Completado desde la red inicial:** sin certificado se obtuvo `403` en
-   frontend, Gateway y Keycloak. Pendiente repetir desde una red alternativa.
-4. **Completado funcionalmente desde la red inicial:** login, refresh, logout,
-   roles, client credentials y los modos Light y Blockchain funcionaron. Las
-   pruebas de resiliencia permanecen pendientes.
+3. **Evidencia historica completada:** la regla mTLS general bloqueo sin
+   certificado y permitio los flujos con certificado. Esa regla es transitoria
+   y se retirara en el Paso 8.6.
+4. **Completado bajo el gate historico:** login, refresh, logout, roles, client
+   credentials y los modos Light y Blockchain funcionaron. Deben repetirse sin
+   certificado cliente en el Paso 8.6.
 5. **Completado:** el discovery OIDC publica exactamente:
 
    ```text
    https://assermetry.com/auth/realms/TrustNews
    ```
 
-6. **Pendiente:** probar desde una red alternativa, revocacion de un
-   certificado cliente desechable, reinicios, dependencias caidas, rollback y
-   recuperacion ante fallos.
+6. **Pendiente para cerrar la Fase 8:** retirar el mTLS general, probar desde
+   una red alternativa el acceso OIDC de usuario, demostrar los rechazos sin
+   JWT, validar y revocar un certificado administrativo desechable, verificar
+   el lock y documentar el cierre operativo.
 
-Criterio de salida: toda la produccion funciona sobre el dominio real y nadie
-sin certificado cliente puede acceder a ningun flujo de usuario.
+Criterio de salida: un usuario provisionado accede y completa los flujos OIDC
+sin certificado cliente; las APIs protegidas rechazan peticiones sin JWT; la
+administracion exige mTLS y autenticacion de Keycloak; un certificado
+administrativo revocado es rechazado; el lock cierra el hostname completo y
+queda una linea base estable para iniciar `v0.0.13`.
 
-#### Fase 8 - Hardening interno, identidad y cadena de suministro (pendiente)
+### Entregables de v0.0.12
+
+- Dominio, DNS, TLS de origen, issuer, Ingress y clientes OIDC alineados.
+- WAF, rate limits, observabilidad y restricciones administrativas activas.
+- Origen accesible en `443/tcp` solo desde Cloudflare.
+- Acceso funcional OIDC sin certificado cliente validado desde dos redes.
+- mTLS administrativo y revocacion de un certificado administrativo
+  desechable demostrados.
+- Lock de mantenimiento comprobado como cierre de un solo paso.
+- Linea base tecnica identificada para iniciar las pruebas funcionales.
+
+### Fuera de alcance de v0.0.12
+
+- Pruebas sistematicas y correccion funcional de GUI y API.
+- Entrega de credenciales persistentes a clientes.
+- Pilotos con datos reales o compromisos de servicio.
+- Hardening completo, backups, restauracion y alta disponibilidad.
+- GO/NO-GO de produccion y apertura publica.
+
+---
+
+## v0.0.13 - Estabilizacion funcional y demo repetible
+
+### Objetivo
+
+Probar de forma sistematica la GUI y la API, corregir problemas fundamentales y
+obtener una demo privada reproducible con datos sinteticos. Durante esta version
+se mantiene el lock fuera de las ventanas autorizadas y el mTLS solo en las
+rutas administrativas. Los recorridos de usuario se prueban mediante OIDC sin
+certificado cliente. No se entregan todavia accesos persistentes a clientes.
+
+La version se organiza en cuatro fases propias: preparacion, pruebas de GUI,
+pruebas de API y correccion con ensayos de demo.
+
+### Fase 13.1 - Preparacion reproducible de pruebas
+
+1. Crear un conjunto fijo de datos sinteticos, sin informacion de clientes.
+2. Definir identidades pseudonimas de administrador de plataforma, usuario
+   normal y cliente API para al menos dos organizaciones sinteticas.
+3. Preparar casos Light y Blockchain con resultados comprobables.
+4. Documentar la inicializacion, limpieza y repeticion de los datos de prueba.
+5. Registrar version, configuracion y resultado de cada ejecucion sin guardar
+   tokens, secretos ni datos personales.
+6. Fijar una linea base de latencia, errores y consumo de recursos.
+
+Criterio de salida: cualquier ejecucion de regresion parte del mismo estado y
+produce evidencia comparable.
+
+### Fase 13.2 - Pruebas funcionales de GUI
+
+Probar manualmente y automatizar los recorridos criticos que sean estables:
+
+- Login, mantenimiento de sesion, refresh, logout y sesion expirada.
+- Navegacion, menus y control de acceso segun rol.
+- Creacion, consulta y seguimiento de ordenes.
+- Flujos completos Light y Blockchain.
+- Aserciones, validaciones, evidencias, validadores y enlaces entre entidades.
+- Filtros, busqueda, paginacion, cuotas y limites.
+- Estados vacios, carga, error, timeout y reintento.
+- Espanol e ingles.
+- Chrome, Edge y Firefox, resoluciones habituales de portatil y una
+  comprobacion movil basica.
+- Ausencia de errores relevantes en consola y de mensajes que expongan trazas,
+  secretos o detalles internos.
+
+Criterio de salida: los recorridos principales son repetibles, los mensajes son
+comprensibles y no quedan defectos bloqueantes para una demo.
+
+### Fase 13.3 - Pruebas funcionales de API
+
+Las pruebas se ejecutan por la via interna autorizada; OpenAPI permanece
+bloqueado en el dominio productivo.
+
+- Autenticacion valida, ausente, expirada y manipulada.
+- Autorizacion de administrador, usuario y service account.
+- Derivacion server-side del cliente a partir del token verificado o de una
+  asociacion interna inmutable; nunca confiar en un `client_id` enviado por el
+  frontend.
+- Rechazo o ignorado seguro de cualquier intento de sustituir el `client_id` o
+  identificador de organizacion en parametros, body o cabeceras.
+- Usuario A del cliente 1 no puede leer, enumerar, modificar ni inferir datos
+  del cliente 2.
+- El aislamiento se aplica en listados, detalle, ordenes, aserciones,
+  validaciones, evidencias, busquedas, exportaciones y enlaces indirectos.
+- Un administrador de cliente no puede obtener privilegios de administrador
+  global ni cambiar su asociacion de organizacion.
+- Creacion, consulta y seguimiento de ordenes.
+- Generacion de aserciones, evidencias y validaciones.
+- Modos Light y Blockchain, recomendaciones, validadores y categorias.
+- Consumo real de cuotas y comportamiento al agotarlas.
+- Esquemas Pydantic, campos ausentes, parametros invalidos y tamaños limite.
+- Respuestas `400`, `401`, `403`, `404`, `409`, `413`, `429` y `5xx`.
+- Timeouts, reintentos y compatibilidad entre Gateway y servicios internos.
+- Ausencia de datos, contadores, identificadores o metadatos de otro cliente en
+  respuestas, errores y logs.
+
+Se ampliaran los tests Python existentes hasta obtener una regresion de
+contrato que pueda repetirse antes y despues de cada correccion.
+
+Criterio de salida: los contratos criticos son estables, los errores son
+coherentes y el aislamiento por organizacion se demuestra en todas las rutas,
+sin depender de filtros o parametros proporcionados por el frontend.
+
+### Fase 13.4 - Pruebas exploratorias, correccion y ensayos de demo
+
+Cada ciclo sigue este orden: reproducir, registrar evidencia, clasificar,
+corregir, repetir el caso afectado y ejecutar la regresion completa.
+
+Clasificacion de defectos:
+
+- **P0 bloqueante:** seguridad, corrupcion o perdida de datos, o plataforma
+  inaccesible.
+- **P1 critico para demo:** rompe autenticacion, ordenes, Light, Blockchain o
+  cuotas; permite cambiar el cliente efectivo, acceder a datos de otra
+  organizacion o elevar un administrador de cliente a administrador global.
+- **P2 relevante:** degradacion visible con alternativa temporal aceptable.
+- **P3 menor:** problema cosmetico o mejora no necesaria para demostrar el
+  producto.
+
+Durante esta fase existe congelacion funcional: se corrigen defectos, pero no
+se incorporan X/Threads, reputacion, LLM dedicado, Cloudflare Tunnel ni otras
+funcionalidades de roadmap.
+
+El cierre incluye tres demos internas completas y consecutivas, una de ellas
+desde otra red o equipo, comprobacion de observabilidad, limpieza de datos y
+reactivacion final del lock.
+
+### Criterio de salida de v0.0.13
+
+- No quedan defectos P0 ni P1.
+- Los P2 aceptados estan documentados y no rompen el recorrido principal.
+- GUI y API superan una regresion reproducible.
+- Login, Light y Blockchain funcionan en tres ejecuciones consecutivas.
+- El aislamiento por organizacion se aplica server-side a listados, detalles,
+  validaciones, evidencias, ordenes y busquedas; cualquier bypass es P1.
+- La demo puede inicializarse, ejecutarse, limpiarse y cerrarse.
+- Existe un guion de demo y una lista de limitaciones conocidas.
+- La plataforma no se presenta como produccion ni como servicio HA.
+
+---
+
+## v0.0.14 - Beta cerrada por invitacion
+
+### Objetivo
+
+Permitir que un maximo de diez organizaciones externas evaluen la plataforma
+durante un periodo definido con identidades pseudonimas y acceso OIDC
+provisionado manualmente.
+
+### Alcance minimo
+
+- Una identidad pseudonima por evaluador y prohibicion de usuarios compartidos.
+  El identificador sera opaco y no requerira nombre real ni correo personal.
+- Keycloak solo almacenara el identificador tecnico, la organizacion y los roles
+  imprescindibles. Logs y metricas no incluiran nombres, correos, tokens,
+  credenciales ni otros datos personales evitables.
+- Los usuarios acceden mediante OIDC sin certificado cliente. El mTLS se
+  conserva exclusivamente para administracion.
+- Un cliente confidencial distinto por organizacion cuando se habilite la API;
+  no compartir el secret de `TrustNewsApi`.
+- Validacion estricta de `aud`, `azp` o `client_id`, issuer, firma, vigencia y
+  roles antes de entregar credenciales persistentes.
+- Asociacion server-side e inmutable entre identidad y organizacion; Gateway,
+  servicios y frontend no aceptan un `client_id` efectivo elegido por el usuario.
+- Aislamiento entre organizaciones en listados, detalle, ordenes, aserciones,
+  validaciones, evidencias, busquedas y exportaciones.
+- Cuotas y limites por organizacion, auditoria minima, soporte y offboarding.
+- Guia de evaluacion, tres tareas concretas y recogida estructurada de feedback.
+
+### Limite operativo de la beta
+
+- Un cliente equivale a una organizacion externa con evaluacion activa.
+- Se permiten como maximo diez clientes activos simultaneamente; las identidades
+  internas y los tenants sinteticos de prueba no consumen ese limite.
+- No hay autorregistro ni alta automatica. Cada organizacion, identidad, rol y
+  cuota se aprueba y provisiona manualmente.
+- Al llegar al cliente numero diez se cierran las nuevas altas y se abre una
+  lista de espera.
+- Superar el limite requiere una decision deliberada, nueva revision de
+  capacidad y aislamiento y actualizacion del roadmap; no se amplia de forma
+  implicita.
+
+### Politica minima de datos de evaluacion
+
+- No introducir secretos, contrasenas, tokens, claves API ni otras credenciales.
+- No introducir datos personales salvo necesidad y autorizacion expresas.
+- No introducir informacion regulada o confidencial sin una autorizacion y un
+  tratamiento acordados previamente.
+- Cada evaluacion define fecha de fin, retencion y limpieza de sus datos.
+- Los participantes aceptan que la beta puede interrumpirse y que los datos
+  sinteticos o desechables no tienen recuperacion garantizada.
+- Si un dato debe conservarse, se exige un backup minimo antes de incorporarlo.
+  Los datos irremplazables no entran hasta demostrar una restauracion.
+
+### Pruebas y criterio de salida
+
+- Un usuario de la organizacion A no puede acceder ni inferir recursos de B en
+  ninguna ruta, aunque manipule el `client_id` o enlaces directos.
+- El backend resuelve la organizacion desde el token verificado o una asociacion
+  server-side y aplica el mismo gate a GUI y API.
+- Un administrador de cliente no puede elevarse a administrador global.
+- Un usuario desactivado y un token incorrecto o caducado pierden acceso.
+- Los limites no rompen login, refresh ni polling legitimos.
+- El alta numero once queda bloqueada y se deriva a la lista de espera.
+- Al menos dos evaluaciones externas se completan y existe un candidato a
+  design partner con problema, metrica y posible piloto definidos.
+
+---
+
+## v0.0.15 - Piloto con design partners
+
+### Objetivo
+
+Validar durante cuatro a ocho semanas uno o dos casos de uso especializados con
+alcance, datos, soporte y metricas acordados antes de desarrollar.
+
+### Alcance minimo
+
+- Caso de uso y criterio de exito firmados antes del piloto.
+- Datos delimitados, procedimiento de exportacion y eliminacion y cadencia
+  semanal de seguimiento.
+- Pruebas de carga representativas, reinicios controlados y degradacion de una
+  dependencia.
+- Endurecimiento del canal CI, minimo privilegio de Geth y artefactos
+  reproducibles en los componentes afectados.
+- Aplicar el gate de persistencia antes de aceptar datos que deban conservarse.
+- Medicion de latencia, coste por validacion, calidad percibida, uso repetido y
+  carga de soporte.
+
+### Gate de persistencia de datos
+
+- Los datos sinteticos o desechables no requieren recuperacion garantizada; el
+  participante debe conocer y aceptar el riesgo de perdida.
+- Los datos de cliente que deban conservarse requieren un backup minimo antes
+  de su incorporacion.
+- Los datos irremplazables no pueden entrar hasta que exista una restauracion
+  probada en un destino aislado.
+
+La reputacion de validadores y el LLM dedicado solo se incorporaran si un caso
+de uso validado los necesita. La integracion con X/Threads permanece en backlog
+hasta demostrar que resuelve un flujo o canal comercial concreto.
+
+Criterio de salida: al menos un piloto termina con evidencia de valor y existe
+una decision explicita de continuar, cambiar el producto o detener ese caso de
+uso.
+
+---
+
+## v0.0.16 - Preparacion de produccion
+
+### Objetivo
+
+Convertir la plataforma validada con clientes en un servicio operable. Es una
+version de estabilizacion: no debe incorporar nuevas funcionalidades comerciales
+salvo las imprescindibles para cerrar un riesgo de produccion.
+
+### Alcance minimo
+
+- Validacion estricta de identidad y autorizacion en todos los flujos.
+- Confianza criptografica del pipeline y gates obligatorios.
+- Minimo privilegio de RPC, `NetworkPolicy` y aislamiento interno.
+- Imagenes y dependencias inmutables, inventario o SBOM y escaneo disponible.
+- Requests, limits, capacidad, alertas y decision explicita sobre el nodo unico.
+- SLO, RTO y RPO acordados.
+- Backups cifrados externos y restauracion aislada demostrada.
+- Rollback de aplicacion, configuracion y datos.
+- Pruebas de carga, soak, fallos y recuperacion.
+- Runbooks de incidentes, credenciales, certificados, soporte y bajas.
+- Revision de privacidad, retencion, condiciones comerciales y seguridad.
+
+Cloudflare Tunnel se considera una mejora opcional de esta version. Solo se
+ejecutara si el analisis de riesgo y operacion justifica sustituir el inbound
+actual; no constituye por si solo una version de producto.
+
+Criterio de salida: no quedan riesgos de produccion sin resolver o aceptar
+formalmente, y existe evidencia de restauracion, no solo ficheros de backup.
+
+---
+
+## v0.9.0 - Release Candidate
+
+### Objetivo y criterio de salida
+
+- Congelacion de funcionalidades.
+- Ensayo completo de despliegue, migracion y rollback.
+- Restauracion repetida y cronometrada.
+- Regresion funcional, pruebas negativas de seguridad, carga y soak.
+- Revision de observabilidad, soporte y procedimientos operativos.
+- GO/NO-GO formal con responsables y excepciones registradas.
+
+Cualquier fallo critico produce `NO-GO` y una nueva release candidate.
+
+---
+
+## v1.0.0 - Produccion controlada
+
+Produccion no implica autorregistro ni acceso anonimo. El servicio puede seguir
+siendo invite-only mediante identidades OIDC provisionadas; el mTLS permanece
+reservado para administracion.
+
+La version solo recibe `GO` cuando:
+
+- Dos organizaciones especializadas han completado una evaluacion o piloto.
+- Al menos una tiene un compromiso contractual de produccion.
+- Existe un caso de uso repetible y una propuesta economica sostenible.
+- Backup, restauracion, seguridad, capacidad y soporte estan aceptados.
+- Se conocen responsables, horarios, escalado y limites del servicio.
+- El rollback de apertura o cierre ha sido probado.
+
+La regla mTLS general ya no forma parte del modelo de usuario. La proteccion
+mTLS administrativa, WAF, lock, rate limits, logs y alertas permaneceran
+activos.
+
+---
+
+## Plan transversal de despliegue, comunicacion y venta
+
+### Secuencia de despliegue
+
+1. Demo interna con datos sinteticos y operador presente.
+2. Demo externa guiada con una identidad OIDC temporal y sin certificado
+   cliente.
+3. Evaluacion cerrada con credenciales persistentes y fecha de fin.
+4. Piloto con alcance, metricas y soporte pactados.
+5. Release candidate sin nuevas funcionalidades.
+6. Produccion controlada para clientes contratados.
+
+Antes de cada demo o evaluacion se congelan cambios durante 24 a 48 horas, se
+activa el lock para desplegar, se ejecutan preflight, regresion y smoke, y solo
+entonces se abre la ventana autorizada. Al terminar se cierra el acceso, se
+revocan credenciales temporales y se limpian los datos previstos.
+
+### Comunicacion y material comercial
+
+- One-pager centrado en un problema y un perfil de cliente concretos.
+- Presentacion breve, guion de demo y guia de evaluacion.
+- Documento que explique que valida Assermetry y que no garantiza.
+- Ficha de seguridad y tratamiento de datos, incluyendo retencion, limpieza y
+  ausencia de recuperacion garantizada para datos desechables de beta.
+- FAQ y limitaciones conocidas.
+- Propuesta de piloto con alcance, duracion, metricas, soporte y precio.
+
+El proceso comercial sera dirigido y no un lanzamiento publico:
+
+```text
+descubrimiento -> demo guiada -> evaluacion -> design partner -> piloto -> produccion
+```
+
+Se mediran tiempo hasta la primera validacion util, finalizacion de tareas,
+utilidad percibida, repeticion, coste y latencia por validacion, carga de soporte
+y conversion entre etapas. El mensaje comercial se centrara en trazabilidad,
+evidencia, diversidad de validadores y auditabilidad, no en afirmar que la
+blockchain garantiza la verdad.
+
+---
+
+## Anexo A - Requisitos tecnicos diferidos del plan anterior
+
+Los bloques siguientes conservan su numeracion original para trazabilidad. Ya
+no forman parte de `v0.0.12`: alimentan principalmente `v0.0.16`, el GO/NO-GO
+de `v0.9.0` y, en su caso, `v1.0.0`.
+
+### A.1 - Hardening interno, identidad y cadena de suministro
 
 **Motivo y objetivo**
 
-La revision de seguridad posterior a la Fase 7 considera adecuado el perimetro
-privado, pero declara `NO-GO` para una apertura publica inmediata. Esta fase
+La revision de seguridad posterior al cierre considera adecuado el perimetro,
+pero declara `NO-GO` para una produccion inmediata. Esta fase
 corrige los hallazgos que no estaban asignados a una fase posterior: validacion
 incompleta de tokens, confianza debil del canal CI, superficie RPC de Geth,
 ausencia de segmentacion entre pods, artefactos no inmutables y riesgo
 operativo del nodo unico.
 
-Durante toda la fase deben permanecer activas la regla de mantenimiento
-`Maintenance lock - assermetry.com`, la regla mTLS temporal y la proteccion
-mTLS administrativa permanente. Cada bloque se valida fuera de produccion y
+Durante toda la fase deben permanecer disponibles el lock
+`Maintenance lock - assermetry.com` y la proteccion mTLS administrativa
+permanente. La regla mTLS general no forma parte del modelo de usuario. Cada
+bloque se valida fuera de produccion y
 se despliega por separado, con diff renderizado, copia de la configuracion
 anterior y rollback identificado.
 
 **Fuera de alcance de esta fase**
 
-- Backups cifrados y restauraciones: pertenecen a la Fase 11.
-- Red alternativa, revocacion del certificado cliente, dependencias caidas y
-  rollback mTLS: siguen siendo criterios pendientes de la Fase 7.
-- Sustituir la exposicion del origen por Cloudflare Tunnel: se mantiene en
-  `v0.0.13`.
+- Backups cifrados y restauraciones: pertenecen a `v0.0.16`, o se adelantan a
+  `v0.0.15` si el piloto incorpora datos que deban conservarse. Los datos
+  irremplazables no entran sin una restauracion probada.
+- Red alternativa y revocacion del certificado administrativo desechable:
+  pertenecen al cierre de la Fase 8. Las dependencias caidas y la recuperacion
+  progresan desde `v0.0.13`.
+- Sustituir la exposicion del origen por Cloudflare Tunnel es una mejora
+  opcional de `v0.0.16`.
 - La existencia de estas tareas posteriores no permite cerrar esta fase ni
   declarar `GO` antes de corregir los controles incluidos a continuacion.
 
-**Paso 8.1 - Inventario reproducible y plan de cambio**
+**Bloque A.1.1 - Inventario reproducible y plan de cambio**
 
 1. Congelar una linea base de manifests renderizados, imagenes y digests,
    configuracion efectiva del Gateway, argumentos de cada nodo Geth, grafo de
@@ -1549,10 +1950,10 @@ anterior y rollback identificado.
 5. Mantener secretos, tokens, claves privadas, kubeconfig y huellas fuera del
    repositorio y de los logs del pipeline.
 
-Criterio de salida 8.1: existe una matriz de flujos y consumidores que permite
+Criterio de salida A.1.1: existe una matriz de flujos y consumidores que permite
 endurecer sin asumir dependencias, y cada cambio tiene rollback verificable.
 
-**Paso 8.2 - Validacion estricta de JWT en Gateway**
+**Bloque A.1.2 - Validacion estricta de JWT en Gateway**
 
 1. Definir `TrustNewsApi` como audiencia del recurso protegido y configurar en
    Keycloak el mapper o client scope necesario para que los tokens validos de
@@ -1576,11 +1977,11 @@ endurecer sin asumir dependencias, y cada cambio tiene rollback verificable.
    incorrecta, `azp` no permitido, token de otro cliente del mismo realm,
    issuer incorrecto, expiracion, firma alterada y ausencia de token.
 
-Criterio de salida 8.2: solo se aceptan tokens emitidos para la API y por un
+Criterio de salida A.1.2: solo se aceptan tokens emitidos para la API y por un
 cliente autorizado; los smokes Light y Blockchain siguen funcionando y los
 logs no contienen datos JWT sin verificar.
 
-**Paso 8.3 - Confianza criptografica del pipeline**
+**Bloque A.1.3 - Confianza criptografica del pipeline**
 
 1. Sustituir `--insecure-skip-tls-verify=true` por la CA real del API de K3s,
    entregada como variable protegida de tipo fichero o extraida de un kubeconfig
@@ -1601,10 +2002,10 @@ logs no contienen datos JWT sin verificar.
    CA incorrecta, nombre TLS no valido y clave SSH distinta. Ninguna debe llegar
    a ejecutar `kubectl`, Helm o Skaffold.
 
-Criterio de salida 8.3: el runner autentica tanto el host SSH como el API de
+Criterio de salida A.1.3: el runner autentica tanto el host SSH como el API de
 Kubernetes, no hay saltos TLS inseguros y los gates aplicables son obligatorios.
 
-**Paso 8.4 - Minimo privilegio en los RPC de Geth**
+**Bloque A.1.4 - Minimo privilegio en los RPC de Geth**
 
 1. Separar las necesidades de bootnode, miner y endpoint RPC. Publicar por HTTP
    o WebSocket unicamente los modulos y metodos que consume la aplicacion.
@@ -1618,16 +2019,16 @@ Kubernetes, no hay saltos TLS inseguros y los gates aplicables son obligatorios.
    uso a IPC local, firma previa de transacciones o un signer dedicado antes de
    retirar el flag; no romper el consenso eliminandolo sin esta prueba.
 5. Mantener los Services como `ClusterIP`, sin Ingress ni NodePort para RPC, y
-   limitar sus consumidores mediante las politicas del paso 8.5.
+   limitar sus consumidores mediante las politicas del bloque A.1.5.
 6. Verificar desde un pod autorizado sincronizacion, peers, bloques, contrato,
    categorias y transacciones firmadas. Desde un pod no autorizado, y para los
    metodos `admin_*`, `personal_*` y desbloqueo, esperar denegacion.
 
-Criterio de salida 8.4: no quedan APIs administrativas, comodines de origen o
+Criterio de salida A.1.4: no quedan APIs administrativas, comodines de origen o
 host ni desbloqueo inseguro accesibles por RPC; Blockchain conserva su
 funcionalidad.
 
-**Paso 8.5 - Segmentacion interna con NetworkPolicy**
+**Bloque A.1.5 - Segmentacion interna con NetworkPolicy**
 
 1. Confirmar mediante una politica canario que el CNI de K3s aplica
    `NetworkPolicy`; no desplegar un `default-deny` si el plugin no lo hace.
@@ -1647,11 +2048,11 @@ funcionalidad.
    un pod sin etiquetas autorizadas. Ante fallo, revertir solo el bloque de
    politicas recien aplicado y completar la matriz antes de reintentarlo.
 
-Criterio de salida 8.5: existe `default-deny` efectivo con allowlists minimas,
+Criterio de salida A.1.5: existe `default-deny` efectivo con allowlists minimas,
 la aplicacion funciona y se demuestra que un pod no autorizado no puede moverse
 lateralmente hacia servicios sensibles.
 
-**Paso 8.6 - Imagenes y artefactos inmutables**
+**Bloque A.1.6 - Imagenes y artefactos inmutables**
 
 1. Inventariar imagenes de runtime, init containers, bases de Dockerfile y
    charts. Eliminar `latest`, referencias sin version y tags que puedan cambiar,
@@ -1670,10 +2071,10 @@ lateralmente hacia servicios sensibles.
 6. Repetir render, despliegue y rollback demostrando que una misma revision
    resuelve siempre los mismos artefactos.
 
-Criterio de salida 8.6: el inventario productivo identifica exactamente cada
+Criterio de salida A.1.6: el inventario productivo identifica exactamente cada
 binario desplegado y el pipeline impide introducir referencias flotantes.
 
-**Paso 8.7 - Capacidad y disponibilidad declaradas**
+**Bloque A.1.7 - Capacidad y disponibilidad declaradas**
 
 1. Completar `requests` y `limits` donde falten, revisar memoria, swap,
    almacenamiento y margen necesario para rollouts, y fijar alertas antes de
@@ -1687,12 +2088,12 @@ binario desplegado y el pipeline impide introducir referencias flotantes.
 4. Si el servicio debe sobrevivir al fallo de un nodo, ampliar a varios nodos y
    almacenamiento replicado o servicios de datos externos antes del `GO`. Si se
    mantiene nodo unico, registrar la aceptacion explicita del SPOF y no
-   presentar la plataforma como HA. Esto no sustituye los backups de la
-   Fase 11.
+   presentar la plataforma como HA. Esto no sustituye los backups del bloque
+   A.4 de `v0.0.16`.
 5. Resolver o aceptar expresamente el warning `DNSConfigForming` y dejar
    evidencia de salud posterior al ultimo rollout.
 
-Criterio de salida 8.7: existe margen operativo medido y una decision explicita
+Criterio de salida A.1.7: existe margen operativo medido y una decision explicita
 sobre disponibilidad; los riesgos no se deducen del numero de pods preparados.
 
 **Orden de despliegue y rollback**
@@ -1705,13 +2106,13 @@ sobre disponibilidad; los riesgos no se deducen del numero de pods preparados.
    fijadas. No agrupar todos los cambios en una unica ventana.
 4. Tras cada bloque, comprobar rollouts, reinicios, eventos, recursos y smokes
    OIDC, API, Light y Blockchain. Mantener el lock durante las comprobaciones.
-5. Si falla un bloque, volver a su revision anterior sin desactivar mTLS, abrir
-   el firewall ni retirar las politicas de los bloques ya aceptados.
+5. Si falla un bloque, volver a su revision anterior sin retirar el mTLS
+   administrativo, abrir el firewall ni retirar las politicas ya aceptadas.
 
 **Criterio de salida global**
 
-La Fase 8 solo se cierra cuando se aporta evidencia de todos los criterios
-8.1 a 8.7, las pruebas negativas fallan cerrado y los flujos funcionales siguen
+El bloque A.1 solo se considera cubierto cuando se aporta evidencia de todos
+los criterios A.1.1 a A.1.7, las pruebas negativas fallan cerrado y los flujos funcionales siguen
 operativos. Deben cumplirse, como minimo, estas condiciones:
 
 - Gateway valida `aud` y el presentador autorizado, y no registra claims sin
@@ -1725,30 +2126,34 @@ operativos. Deben cumplirse, como minimo, estas condiciones:
 - Produccion usa artefactos inmutables y el gate rechaza referencias flotantes.
 - Capacidad y disponibilidad tienen evidencia y una decision de riesgo
   documentada.
-- Cloudflare conserva el lock de mantenimiento y las reglas mTLS activas.
+- Cloudflare conserva el lock de mantenimiento y la regla mTLS administrativa.
 
-Cualquier incumplimiento mantiene el estado `NO-GO` y bloquea la Fase 9.
+Cualquier incumplimiento mantiene el estado `NO-GO` y bloquea `v0.9.0`.
 
-#### Fase 9 - GO/NO-GO para apertura (pendiente)
+### A.2 - Checklist GO/NO-GO reutilizable para produccion
+
+Este gate se reutilizara y actualizara en `v0.9.0`; no es una fase de
+`v0.0.12`.
 
 **Despliegue**
 
 - Kubernetes local: no desplegar.
 - Kubernetes Hetzner: no desplegar ni cambiar configuracion.
-- Externo: no retirar todavia mTLS; esta fase solo decide `GO` o `NO-GO`.
+- Externo: no cambiar el modelo de acceso; esta fase solo decide `GO` o `NO-GO`.
 
 **Pruebas**
 
-- Repetir sobre el dominio real protegido por mTLS el smoke de autenticacion,
-  Light, Blockchain, cuotas y dependencias.
-- Repetir pruebas negativas sin certificado, contra la IP directa, rutas
-  administrativas, OpenAPI y servicios internos.
+- Repetir sin certificado cliente el smoke OIDC de usuario, Light, Blockchain,
+  cuotas y dependencias.
+- Repetir pruebas negativas sin JWT, contra la IP directa, sin certificado en
+  rutas administrativas, OpenAPI y servicios internos.
 - Revisar evidencias de rollback, renovacion TLS, WAF, rate limits,
-  logs y alertas; comprobar que el equipo puede reactivar mTLS.
+  logs y alertas; comprobar que el equipo puede activar el lock.
 
-La apertura recibe `GO` solo si:
+La produccion recibe `GO` solo si:
 
-- Las fases 7 y 8 estan cerradas con sus evidencias y sin excepciones abiertas.
+- El perimetro privado y el bloque A.1 estan cerrados con sus evidencias y sin
+  excepciones abiertas.
 - DNS, proxy Cloudflare y TLS `Full (strict)` son correctos.
 - El origen solo admite rangos Cloudflare y no responde por acceso directo.
 - Issuer, redirects, login, refresh, logout y client credentials funcionan.
@@ -1756,55 +2161,24 @@ La apertura recibe `GO` solo si:
 - Administracion, OpenAPI y servicios internos permanecen bloqueados.
 - El rollback de la apertura ha sido probado.
 - WAF, rate limiting, logs y alertas estan activos.
-- El equipo conoce y ha probado el procedimiento para reactivar el mTLS.
+- El equipo conoce y ha probado el lock general y el acceso mTLS administrativo.
 
 Cualquier incumplimiento produce `NO-GO`; no se compensa retirando controles.
 
-#### Fase 10 - Apertura publica (pendiente)
+### A.3 - Procedimiento de apertura anterior (sustituido)
 
-**Despliegue**
+El procedimiento anterior aplazaba la retirada del mTLS general hasta una
+apertura publica. Queda sustituido por la decision de la Fase 8: los usuarios
+provisionados acceden mediante OIDC sin certificado, el mTLS protege solo la
+administracion y el lock de mantenimiento cierra todo el hostname. Esta seccion
+no contiene pasos ejecutables y se conserva unicamente para explicar el cambio
+de criterio.
 
-- Kubernetes local: no desplegar.
-- Prerrequisito: la Fase 9 ha registrado una decision formal `GO`.
-- Kubernetes Hetzner: no desplegar ni cambiar firewall, Ingress, Keycloak,
-  Gateway, issuer o certificados.
-- Externo: desactivar unicamente la regla WAF temporal que exige mTLS.
-
-**Pruebas**
-
-- Desde un navegador limpio y sin certificado: probar acceso, login, refresh,
-  logout y los principales flujos Light y Blockchain.
-- Repetir las pruebas negativas de rutas administrativas, OpenAPI, IP directa y
-  servicios internos.
-- Vigilar en la ventana de apertura latencia, `401`, `403`, `429`, `5xx`, WAF,
-  rate limits, reinicios y disco.
-- Ejecutar una prueba controlada del rollback reactivando mTLS y comprobando que
-  un cliente sin certificado vuelve a quedar bloqueado; retirarlo de nuevo solo
-  si la plataforma sigue estable.
-
-El unico cambio de apertura es desactivar la regla WAF temporal que bloquea a
-los clientes sin certificado valido. La asociacion mTLS del hostname, la regla
-administrativa permanente y al menos un certificado cliente operativo deben
-mantenerse.
-
-No se modifican DNS, proxy, certificado TLS, firewall, Ingress, Keycloak,
-Gateway, issuer, frontend, las demas reglas WAF ni los rate limits.
-
-Tras retirarla:
-
-1. Probar desde un navegador limpio y sin certificado el acceso, login, refresh,
-   logout y los principales flujos funcionales.
-2. Confirmar que las rutas administrativas, documentacion y servicios internos
-   siguen bloqueados.
-3. Vigilar errores, latencia, WAF y rate limits durante la ventana de apertura.
-4. Si aparece una incidencia, reactivar inmediatamente la exigencia mTLS. Este
-   rollback vuelve a cerrar el servicio sin cambios de DNS ni redespliegue.
-
-#### Fase 11 - Backups y recuperacion (pendiente; no implementada)
+### A.4 - Backups y recuperacion para v0.0.16
 
 **Estado**
 
-- Posicion en el plan: **ultima fase de ejecucion**.
+- Posicion en el plan: **antes de `v0.9.0` y de cualquier produccion real**.
 - Estado global de la fase: **pendiente; no implementada**.
 - Las pruebas funcionales actuales no implican que los backups ni los ensayos de
   restauracion se hayan realizado.
@@ -1837,21 +2211,7 @@ Tras retirarla:
 
 Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup.
 
-### Entregables de v0.0.12
-
-- Overlays local y productivo renderizables y separados por entorno.
-- Issuer y JWKS del Gateway parametrizados correctamente.
-- Keycloak configurado para `assermetry.com` y marca visible `Assermetry`.
-- Ingress productivos con hostname y rutas definitivas.
-- Documentacion y endpoints administrativos no expuestos.
-- Backups y restauraciones verificados.
-- DNS proxificado, WAF, rate limiting y observabilidad activos.
-- Certificado TLS del origen gestionado y renovable.
-- Acceso privado mTLS probado antes de abrir al publico.
-- Firewall restringido a Cloudflare y sin acceso directo al origen.
-- Checklist GO/NO-GO y rollback de apertura probados.
-
-### Fuera de alcance
+### A.5 - Invariantes que permanecen fuera de alcance
 
 - Renombrar el realm `TrustNews` o los clientes OIDC existentes.
 - Publicar bases de datos, Kafka, IPFS API, RPC, paneles o APIs administrativas.
@@ -1860,7 +2220,7 @@ Criterio de salida: existe evidencia de restauracion, no solo ficheros de backup
 
 ---
 
-## v0.0.13 - Migracion del origen a Cloudflare Tunnel (planificada)
+## Anexo B - Cloudflare Tunnel opcional para v0.0.16
 
 ### Objetivo
 
@@ -1870,7 +2230,7 @@ puerto web inbound en Hetzner:
 
 ```text
 Cliente
-    | HTTPS, WAF y politicas mTLS
+    | HTTPS, WAF y lock; mTLS solo para administracion
     v
 Cloudflare Edge
     | Cloudflare Tunnel iniciado en sentido saliente
@@ -1899,9 +2259,9 @@ Referencias:
 ### Estado, alcance y esfuerzo
 
 - Estado: **planificada; no implementada ni autorizada para despliegue**.
-- No forma parte de la Fase 7 activa de `v0.0.12`. Terminar o cerrar
-  expresamente esa version antes de iniciar el cutover evita mezclar dos cambios
-  del perimetro.
+- No forma parte de la Fase 8 ni de la estabilizacion `v0.0.13`. Solo se
+  iniciara en `v0.0.16` si existe una decision explicita que justifique el
+  cutover y evita mezclar cambios de perimetro con pruebas funcionales.
 - Esfuerzo estimado: **12 a 18 horas tecnicas**, normalmente repartidas entre
   dos o tres ventanas para permitir observacion y rollback.
 - Alcance de codigo: moderado, aproximadamente 6 a 10 ficheros de
@@ -1919,8 +2279,8 @@ Referencias:
    raiz Origin CA y `originServerName=assermetry.com`.
 3. No activar `forwardedHeaders.insecure`. Traefik debe confiar unicamente en
    el origen interno elegido para los conectores.
-4. El lock de mantenimiento y las reglas mTLS permanecen disponibles durante
-   toda la migracion.
+4. El lock de mantenimiento y la regla mTLS administrativa permanecen
+   disponibles durante toda la migracion.
 5. No retirar el inbound `TCP/443` hasta que el tunel haya superado las pruebas
    extremo a extremo y exista un rollback preparado.
 6. Tras el cierre, no dejar rutas alternativas por LoadBalancer, NodePort,
@@ -1951,16 +2311,17 @@ Referencias:
 1. **Linea base y rollback**
    - Exportar de forma segura DNS, WAF, firewall, Helm y Traefik sin registrar
      IP, tokens ni identificadores sensibles.
-   - Capturar los checks actuales: sin mTLS `403`, con mTLS `200`, issuer
-     exacto, API `200` y smokes Light/Blockchain.
+   - Capturar los checks actuales: frontend y OIDC sin certificado, API sin JWT
+     rechazada, API autenticada aceptada, administracion sin mTLS `403`, issuer
+     exacto y smokes Light/Blockchain.
    - Preparar el orden de rollback antes de desplegar el conector.
 
 2. **Configuracion de Cloudflare**
    - Crear un Named Tunnel sin asociar aun el hostname productivo.
    - Crear el token con el menor alcance disponible y guardarlo fuera de Git.
    - Definir el servicio HTTPS hacia Traefik con hostname y CA verificados.
-   - No crear un hostname de prueba publico sin una proteccion equivalente al
-     mTLS actual.
+   - No crear un hostname de prueba sin lock, OIDC y una proteccion
+     administrativa equivalente a la actual.
 
 3. **Manifests de Kubernetes**
    - Crear workload, ConfigMap no sensible, referencia al Secret, probes,
@@ -1989,7 +2350,8 @@ Referencias:
 
 7. **Cutover protegido**
    - Asociar `assermetry.com` al Named Tunnel durante una ventana controlada.
-   - Desactivar solo el lock; mantener el mTLS temporal y el administrativo.
+   - Desactivar solo el lock; mantener OIDC para usuarios y mTLS
+     administrativo.
    - Probar frontend, discovery, login, refresh, logout, roles,
      `TrustNewsApi`, Gateway, Light, Blockchain, polling, limites e IP real.
 
@@ -2011,7 +2373,8 @@ Referencias:
 2. Restaurar Traefik como LoadBalancer con los valores previos.
 3. Restaurar `TCP/443` en Hetzner con las 22 redes verificadas.
 4. Restaurar el registro DNS proxificado anterior.
-5. Confirmar mediante mTLS frontend, discovery y Gateway.
+5. Confirmar frontend y discovery sin certificado, Gateway con JWT y
+   administracion mediante mTLS.
 6. Desactivar el lock solo si las comprobaciones son correctas.
 7. Retirar el tunel despues de recuperar el camino anterior, nunca antes.
 

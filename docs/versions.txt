@@ -128,34 +128,67 @@ Develop v0.0.11. Released
 - Usamos trtaefik como ingress tanto para local como para prod
     
 
-Develop v0.0.12 - Exposición controlada de Assermetry en Internet (resumen)
-- Objetivo: publicar Assermetry en https://assermetry.com manteniendo el despliegue local operativo.
-- Estado actual: fase 0 - inventario y línea base en curso; hay una instalación estable en Hetzner accesible por túnel SSH, pero el dominio público y los cambios de OIDC siguen inactivos.
-- Trabajo prioritario:
-  - preparar overlays prod-domain y parametrizar issuer/JWKS para el dominio definitivo;
-  - validar backups/restauración, DNS/Cloudflare, mTLS de cliente, TLS de origen y WAF/observabilidad;
-  - abrir 443 únicamente a Cloudflare y ejecutar GO/NO-GO antes de la apertura pública.
-- Criterio de salida: la plataforma funciona en producción de forma cerrada y segura, con rollback simple y sin exponer servicios internos.
+Develop v0.0.12 - Cierre del perímetro y acceso administrativo
+- Objetivo: permitir acceso OIDC a usuarios provisionados sin certificado cliente, mantener mTLS solo para administración y conservar el lock como pausa general.
+- Estado actual: fases 0 a 6 cerradas; la fase 8 es el único trabajo pendiente de la versión.
+- Pendiente para cerrar la fase 8:
+  - retirar de forma controlada la regla mTLS general;
+  - probar desde una red alternativa login OIDC y flujos de usuario sin certificado cliente;
+  - rechazar APIs sin JWT y proteger la administración sin certificado mTLS;
+  - revocar y comprobar un certificado administrativo desechable;
+  - verificar que el maintenance lock bloquea el hostname completo;
+  - documentar el cierre operativo y dejar una línea base estable.
+- Fuera de alcance: pruebas sistemáticas GUI/API, backups, hardening completo, GO/NO-GO y apertura pública.
+- Criterio de salida: usuarios provisionados acceden por OIDC sin certificado, Gateway rechaza sin JWT, la administración exige mTLS, el origen solo acepta Cloudflare y el lock cierra la plataforma en un paso.
 
 
+Develop v0.0.13 - Estabilización funcional y demo repetible
+- Fase 13.1: preparación reproducible de datos, identidades y casos de prueba.
+- Fase 13.2: pruebas funcionales y regresión de GUI.
+- Fase 13.3: pruebas funcionales y de contrato de API, con aislamiento por organización derivado server-side y sin confiar en el client_id del frontend.
+- Fase 13.4: pruebas exploratorias, corrección de P0/P1 y ensayos de demo.
+- Congelación funcional: no incorporar X/Threads, reputación, LLM dedicado ni Cloudflare Tunnel.
+- Criterio de salida: sin P0/P1, sin bypass de aislamiento, regresión GUI/API superada y tres demos internas consecutivas con datos sintéticos.
 
 
+Develop v0.0.14 - Beta cerrada por invitación
+- Máximo diez organizaciones externas activas; al llegar a diez se cierran altas y se abre lista de espera.
+- Identidad pseudónima y opaca por evaluador, sin nombre real ni correo personal obligatorios.
+- Acceso de usuario mediante OIDC sin certificado; mTLS solo administrativo.
+- Cliente API confidencial distinto por organización cuando sea necesario.
+- Validación estricta de audiencia, cliente presentador, issuer, firma, vigencia y roles.
+- Asociación de organización server-side; ningún usuario puede elegir o sustituir su client_id efectivo.
+- Aislamiento en listados, detalles, órdenes, validaciones, evidencias, búsquedas y exportaciones.
+- No introducir credenciales ni datos personales, regulados o confidenciales sin autorización; definir retención y limpieza.
+- Criterio de salida: dos evaluaciones externas completas y un candidato a design partner con problema, métrica y posible piloto definidos.
 
 
-Develop v0.0.13
-- integración con X/Trhreads
-
-Develop v0.0.14.   Reputation policy
-    - consulta de reputaciones. Consulta de nombre, tipo y reputacion
-    - gestión de reputaciones fuera de la cadena. 
-        AI defecto reputacion media
-        Especializaciones maxima
-        individuales minima o custom
-- estado validated --> dejar en pending y solo cerrar si todas validadas o al cabo de x tiempo
+Develop v0.0.15 - Piloto con design partners
+- Uno o dos casos de uso especializados durante cuatro a ocho semanas.
+- Alcance, datos, métricas, soporte, exportación y eliminación acordados antes del piloto.
+- Pruebas de carga representativas, reinicios y degradación de dependencias.
+- Hardening de CI, Geth y artefactos en los componentes afectados.
+- Datos sintéticos o desechables sin recuperación garantizada; datos que deban conservarse con backup mínimo; datos irremplazables solo con restauración probada.
+- Reputación de validadores y LLM dedicado solo si el piloto demuestra su necesidad.
+- X/Threads permanece en backlog hasta validar un flujo o canal comercial.
 
 
+Develop v0.0.16 - Preparación de producción
+- Hardening completo de identidad, CI, RPC, NetworkPolicy y cadena de suministro.
+- Capacidad, alertas, SLO, RTO, RPO y decisión explícita sobre el nodo único.
+- Backups cifrados externos y restauración aislada demostrada.
+- Rollback de aplicación, configuración y datos; carga, soak, fallos y recuperación.
+- Runbooks operativos, seguridad, privacidad, retención y soporte.
+- Cloudflare Tunnel queda como mejora opcional condicionada al análisis de riesgo.
+- Criterio de salida: riesgos de producción resueltos o aceptados formalmente y recuperación demostrada.
 
 
-Develop v0.0.15.
-- integracion con llm dedicado de categoria concreta
+Develop v0.9.0 - Release Candidate
+- Congelación funcional, regresión integral, restauración cronometrada, carga, soak y pruebas negativas de seguridad.
+- GO/NO-GO formal; cualquier fallo crítico exige una nueva release candidate.
 
+
+Develop v1.0.0 - Producción controlada
+- No exige autorregistro ni acceso anónimo; puede continuar invite-only mediante OIDC y con mTLS solo administrativo.
+- Requiere dos organizaciones especializadas evaluadas o pilotadas y al menos un compromiso contractual de producción.
+- Requiere caso de uso repetible, propuesta económica sostenible, soporte, backups, restauración, seguridad y capacidad aceptados.

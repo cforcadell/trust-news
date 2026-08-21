@@ -7,6 +7,8 @@ REALM="TrustNews"
 CLIENT_ID="TrustNewsWeb"
 KEYCLOAK_URL="https://assermetry.com/auth"
 FRONTEND_URL="https://assermetry.com"
+KCADM="/opt/keycloak/bin/kcadm.sh"
+REMOTE_CONFIG="/tmp/kcadm-reconcile-web-$$.config"
 
 for command_name in kubectl python3; do
   command -v "$command_name" >/dev/null || {
@@ -15,18 +17,18 @@ for command_name in kubectl python3; do
   }
 done
 
-observed_state="$({
-  kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -- \
-    sh -s -- "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL" <<'KEYCLOAK_SCRIPT'
+cleanup() {
+  kubectl exec -n "$NAMESPACE" "deployment/$DEPLOYMENT" -- \
+    rm -f "$REMOTE_CONFIG" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -- \
+  sh -s -- "$KCADM" "$REMOTE_CONFIG" <<'KEYCLOAK_LOGIN'
 set -eu
 
-realm="$1"
-client_id="$2"
-keycloak_url="$3"
-frontend_url="$4"
-kcadm=/opt/keycloak/bin/kcadm.sh
-config="/tmp/kcadm-reconcile-web-$$.config"
-trap 'rm -f "$config"' EXIT
+kcadm="$1"
+config="$2"
 
 test -x "$kcadm" || {
   echo "ERROR: kcadm is not available in the Keycloak container" >&2
@@ -42,50 +44,82 @@ test -x "$kcadm" || {
   --user "$KEYCLOAK_ADMIN" \
   --password "$KEYCLOAK_ADMIN_PASSWORD" \
   >/dev/null
+KEYCLOAK_LOGIN
 
-client_rows="$("$kcadm" get clients \
-  --config "$config" \
-  -r "$realm" \
-  -q "clientId=$client_id" \
+keycloak_admin() {
+  kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -- \
+    "$KCADM" "$@" --config "$REMOTE_CONFIG"
+}
+
+client_rows="$(keycloak_admin get clients \
+  -r "$REALM" \
+  -q "clientId=$CLIENT_ID" \
   --fields id \
   --format csv \
   --noquotes)"
-set -- $client_rows
-if [ "$#" -ne 1 ]; then
-  echo "ERROR: expected exactly one $client_id client in realm $realm; found $#" >&2
+client_ids=()
+while IFS= read -r candidate_uuid; do
+  [ -z "$candidate_uuid" ] || client_ids+=("$candidate_uuid")
+done <<<"$client_rows"
+if [ "${#client_ids[@]}" -ne 1 ]; then
+  echo "ERROR: expected exactly one $CLIENT_ID client in realm $REALM; found ${#client_ids[@]}" >&2
   exit 1
 fi
-client_uuid="$1"
+client_uuid="${client_ids[0]}"
 
-"$kcadm" update "realms/$realm" \
-  --config "$config" \
-  -s "attributes.frontendUrl=$keycloak_url" \
+realm_state="$(keycloak_admin get "realms/$REALM" --fields attributes)"
+realm_attributes="$(printf '%s\n' "$realm_state" | python3 -c '
+import json
+import sys
+
+frontend_url = sys.argv[1]
+state = json.load(sys.stdin)
+attributes = state.get("attributes")
+if not isinstance(attributes, dict):
+    attributes = {}
+attributes["frontendUrl"] = frontend_url
+json.dump(attributes, sys.stdout, separators=(",", ":"), sort_keys=True)
+' "$KEYCLOAK_URL")"
+
+client_state="$(keycloak_admin get "clients/$client_uuid" \
+  -r "$REALM" \
+  --fields attributes)"
+client_attributes="$(printf '%s\n' "$client_state" | python3 -c '
+import json
+import sys
+
+post_logout_redirect_uri = sys.argv[1]
+state = json.load(sys.stdin)
+attributes = state.get("attributes")
+if not isinstance(attributes, dict):
+    attributes = {}
+attributes["post.logout.redirect.uris"] = post_logout_redirect_uri
+json.dump(attributes, sys.stdout, separators=(",", ":"), sort_keys=True)
+' "$FRONTEND_URL/*")"
+
+# kcadm cannot reliably create a missing attributes map or address a map key
+# containing dots through a nested -s path. Replace each complete map after
+# merging the required value locally so existing attributes are preserved.
+keycloak_admin update "realms/$REALM" \
+  -s "attributes=$realm_attributes" \
   >/dev/null
 
-"$kcadm" update "clients/$client_uuid" \
-  --config "$config" \
-  -r "$realm" \
-  -s "rootUrl=$frontend_url" \
-  -s "baseUrl=$frontend_url/" \
-  -s "redirectUris=[\"$frontend_url/*\"]" \
-  -s "webOrigins=[\"$frontend_url\"]" \
-  -s "attributes.\"post.logout.redirect.uris\"=\"$frontend_url/*\"" \
+keycloak_admin update "clients/$client_uuid" \
+  -r "$REALM" \
+  -s "rootUrl=$FRONTEND_URL" \
+  -s "baseUrl=$FRONTEND_URL/" \
+  -s "redirectUris=[\"$FRONTEND_URL/*\"]" \
+  -s "webOrigins=[\"$FRONTEND_URL\"]" \
+  -s "attributes=$client_attributes" \
   >/dev/null
 
-printf '{"realm":'
-"$kcadm" get "realms/$realm" \
-  --config "$config" \
-  --fields realm,attributes
-printf ',"client":'
-"$kcadm" get "clients/$client_uuid" \
-  --config "$config" \
-  -r "$realm" \
-  --fields clientId,rootUrl,baseUrl,redirectUris,webOrigins,attributes
-printf '}\n'
-KEYCLOAK_SCRIPT
-} 2> >(cat >&2))"
+realm_observed="$(keycloak_admin get "realms/$REALM" \
+  --fields realm,attributes)"
+client_observed="$(keycloak_admin get "clients/$client_uuid" \
+  -r "$REALM" \
+  --fields clientId,rootUrl,baseUrl,redirectUris,webOrigins,attributes)"
 
-printf '%s\n' "$observed_state" | python3 -c '
+printf '{"realm":%s,"client":%s}\n' "$realm_observed" "$client_observed" | python3 -c '
 import json
 import sys
 

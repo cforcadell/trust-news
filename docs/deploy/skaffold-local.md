@@ -1,62 +1,99 @@
 # Assermetry Kubernetes - Despliegue local
 
-Runbook para entorno local con `kind` y perfiles no productivos de Skaffold.
-Los procedimientos compartidos viven en [`k8s-common.md`](k8s-common.md).
+Runbook del entorno local con Kind y perfiles no productivos de Skaffold. Este
+documento contiene la fotografía vigente, procedimientos repetibles y próximos
+pasos. La evidencia histórica no se conserva aquí.
 
-Orden recomendado:
-
-1. Recrear cluster local si se quiere empezar desde cero.
-2. Crear namespaces.
-3. Levantar blockchain.
-4. Desplegar contrato local.
-5. Levantar infraestructura.
-6. Levantar APIs y frontend.
-7. Configurar Keycloak, cuotas y usuarios.
-8. Cargar configuraciones funcionales.
-9. Consultar datos, endpoints y colecciones.
+Los procedimientos compartidos están en
+[`k8s-common.md`](k8s-common.md), el estado de la versión actual en
+[`version.md`](../version.md) y el roadmap en
+[`next_releases.md`](../next_releases.md).
 
 ---
 
-## 1. Recrear cluster local
+## 1. Fotografía local actual
 
-Usar esta seccion cuando se quiera empezar desde cero. Es destructiva: borra el
-cluster `kind`, imagenes/volumenes Docker no usados y limpia espacio local.
+| Ámbito | Estado vigente |
+| --- | --- |
+| Clúster | Kind, nombre `trust-news` |
+| Entrada web | `https://localhost:7443`, conservando el hostname mediante redirección o túnel desde el host |
+| Ingress | Overlay `k8s/ingress/overlays/local` con `host: localhost` |
+| TLS | Secret local `trustnews-origin-tls` generado desde `web_classic/certs/*` |
+| Identidad | Keycloak con issuer `https://localhost:7443/auth/realms/TrustNews` |
+| APIs | Documentación disponible por los port-forward locales de Skaffold |
+| Cloudflare | No interviene en local |
+| mTLS | No se reproducen las reglas Cloudflare en Kind |
+| Producción | No se despliegan overlays `prod` ni `prod-domain` |
 
-Inspeccion previa:
+Perfiles locales:
+
+| Perfil | Alcance |
+| --- | --- |
+| `traefik` | Traefik local, chart `41.0.2` |
+| `blockchain` | Red privada Geth local |
+| `infra-basic` | Infraestructura básica sin monitorización |
+| `infra` | Infraestructura completa con Kafdrop, Fluent Bit, Loki y Grafana |
+| `apis-frontend` | APIs, Gateway, frontend e Ingress local |
+
+`infra-basic` y `infra` son alternativas. No deben ejecutarse simultáneamente:
+
+- usar `infra-basic` para el flujo local ligero sin monitorización;
+- usar `infra` cuando se necesiten logs, persistencia de observabilidad,
+  Grafana o Kafdrop.
+
+`infra-basic` no existe en producción.
+
+### 1.1 Acceso desde el host de la VM
+
+El entorno local se ejecuta dentro de una VM y los port-forward que deben
+abrirse desde el host escuchan deliberadamente en `0.0.0.0`. Esta excepción es
+solo local: el adaptador de la VM debe ser `host-only` o una red privada
+equivalente, y el firewall del guest debe aceptar esos puertos únicamente desde
+la dirección del host. No usar una interfaz puente ni una red compartida no
+fiable con esos listeners activos.
+
+El recorrido completo por Traefik debe conservar `localhost`: el Ingress y el
+issuer OIDC dependen de ese hostname. Desde el host se
+redirige el puerto del hipervisor hacia la VM o se abre un túnel, por ejemplo:
 
 ```bash
-kubectl get pvc -A
-docker volume ls
-df -h /
+ssh -L 7443:127.0.0.1:7443 <usuario-vm>@<ip-privada-vm>
 ```
 
-Borrar cluster:
+Después se abre `https://localhost:7443` en el host. No sustituir el hostname
+por la IP de la VM para validar login u OIDC. Los paneles y APIs accedidos por
+port-forward directo, sin una regla de host canónica, sí pueden abrirse como
+`http://<ip-privada-vm>:<puerto>`. Si no se necesita acceso desde el host,
+ligar el port-forward a `127.0.0.1`.
 
-```bash
-kind delete cluster --name trust-news
-```
+---
 
-Limpieza local:
+## 2. Flujo de despliegue
 
-```bash
-docker system prune -a -f
-sudo journalctl --vacuum-size=300M
-sudo apt clean
-sudo apt autoremove -y
-docker volume prune -f
-df -h /
-docker volume ls
-```
+Orden:
 
-Crear cluster:
+1. Crear o comprobar el clúster Kind.
+2. Crear namespaces.
+3. Desplegar `blockchain`.
+4. Desplegar o verificar el contrato.
+5. Elegir `infra-basic` o `infra`.
+6. Ejecutar el bootstrap de MongoDB.
+7. Desplegar `traefik`.
+8. Desplegar `apis-frontend`.
+9. Configurar Keycloak, cuotas y datos funcionales.
+10. Ejecutar la matriz de validación local.
+
+---
+
+## 3. Clúster y namespaces
+
+Crear el clúster:
 
 ```bash
 kind create cluster --name trust-news --config kind-config.yaml
 ```
 
----
-
-## 2. Crear namespaces
+Crear namespaces:
 
 ```bash
 cd ./scripts/k8s
@@ -64,146 +101,135 @@ cd ./scripts/k8s
 kubectl get ns blockchain infra apis frontend
 ```
 
-Ver tambien: [`k8s-common.md#1-namespaces`](k8s-common.md#1-namespaces).
+Recrear el clúster es destructivo. Antes de hacerlo:
+
+```bash
+kubectl get pvc -A
+docker volume ls
+df -h /
+```
+
+Cuando la reconstrucción esté decidida:
+
+```bash
+kind delete cluster --name trust-news
+kind create cluster --name trust-news --config kind-config.yaml
+```
+
+La limpieza adicional de imágenes o volúmenes Docker se ejecuta por separado y
+solo después de revisar sus objetivos.
 
 ---
 
-## 3. Desplegar blockchain local
+## 4. Blockchain y contrato
+
+Desplegar la red local:
 
 ```bash
 ./skaffold dev -p blockchain --namespace blockchain
-# ./skaffold dev -p blockchain --namespace blockchain --cleanup=false
 ```
 
-Verificaciones comunes:
-
-- [`k8s-common.md#4-blockchain`](k8s-common.md#4-blockchain)
-
-Logs directos:
+Comprobar nodos y logs:
 
 ```bash
+kubectl get pods -n blockchain
 kubectl logs -n blockchain -f geth-bootnode-0
 kubectl logs -n blockchain -f geth-rpc-endpoint-0
 kubectl logs -n blockchain -f geth-miner-0
 ```
 
-Conectar al RPC:
-
-```bash
-kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
-```
-
-Abrir RPC local:
+Abrir el RPC solo cuando sea necesario:
 
 ```bash
 kubectl port-forward svc/geth-rpc-endpoint 8555:8555 -n blockchain
 ```
 
----
-
-## 4. Desplegar smart contract local
-
-Atencion: si se despliega un contrato nuevo, revisar primero
-[`k8s-common.md#5-smart-contract`](k8s-common.md#5-smart-contract).
-
-Desplegar:
+Desplegar un contrato local:
 
 ```bash
 cd smart-contracts
 npx hardhat run scripts/deployGeth.js --network privateGeth
 ```
 
-Fondear cuentas desde geth:
-
-```bash
-kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
-```
-
-Ejemplo dentro de la consola:
-
-```javascript
-eth.sendTransaction({
-  from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",
-  to: "0xa28885a13a7b4d3561a7af64ea1ba0f82ed9f06b",
-  value: web3.toWei(10, "ether")
-})
-```
-
-Inicializar categorias:
+Inicializar categorías:
 
 ```bash
 cd smart-contracts
 export CONTRACT_ADDRESS=0x<direccion-trust-news>
-read -rsp "Contract owner private key: " DEPLOYER_PRIVATE_KEY && echo
+read -rsp "Contract owner private key: " DEPLOYER_PRIVATE_KEY
 export DEPLOYER_PRIVATE_KEY
 npx hardhat run scripts/initCategories.js --network privateGeth
 npx hardhat run scripts/initCategories.js --network privateGeth
 unset DEPLOYER_PRIVATE_KEY
 ```
 
+La segunda ejecución verifica la idempotencia y no debe crear categorías
+duplicadas.
+
 ---
 
-## 5. Desplegar infraestructura local
+## 5. Infraestructura local
+
+### 5.1 Perfil básico
+
+`infra-basic` incluye Kafka, IPFS, MongoDB, Mongo Express y Keycloak. Excluye
+Kafdrop, Fluent Bit, Loki y Grafana.
 
 ```bash
-./skaffold dev -p infra
 ./skaffold dev -p infra-basic
 ```
 
-Servicios expuestos por Skaffold:
+Mongo Express queda disponible en:
 
 ```text
-Kafdrop: http://localhost:9000
-Grafana: http://localhost:3000
-Mongo Express: http://localhost:18081
+http://localhost:8081
 ```
 
-Si se rompe el tunel de Mongo Express:
+### 5.2 Perfil completo
+
+`infra` añade Kafdrop, Fluent Bit, Loki y Grafana:
 
 ```bash
-kubectl port-forward --address 0.0.0.0 -n infra svc/mongo-express 8081:8081
+./skaffold dev -p infra
 ```
 
-Despues de levantar MongoDB, ejecutar el bootstrap comun:
+Servicios:
 
-- [`k8s-common.md#6-mongodb-bootstrap`](k8s-common.md#6-mongodb-bootstrap)
+```text
+Kafdrop:       http://localhost:9000
+Grafana:       http://localhost:3000
+Mongo Express: http://localhost:8081
+```
+
+Si el port-forward de Mongo Express se interrumpe:
+
+```bash
+kubectl port-forward --address 0.0.0.0 \
+  -n infra svc/mongo-express 8081:8081
+```
+
+El listener queda accesible desde el host de acuerdo con el modelo de red
+privada descrito en [1.1](#11-acceso-desde-el-host-de-la-vm).
+
+Con cualquiera de los dos perfiles, ejecutar después el bootstrap común:
+
+- [`k8s-common.md - MongoDB bootstrap`](k8s-common.md#6-mongodb-bootstrap).
 
 ---
 
-## 6. Desplegar APIs y frontend local
+## 6. Traefik, APIs y frontend
 
-```bash
-./skaffold dev -p apis-frontend
-# ./skaffold dev -p apis-frontend --cache-artifacts=true --cleanup=false
-```
-
-Estado:
-
-```bash
-kubectl get pods -n apis
-kubectl get pods -n frontend
-kubectl logs -n apis -f
-```
-
-El frontend ya no termina TLS ni proxifica `/backend` o `/auth`; esas rutas
-las publica Traefik mediante los manifiestos de `k8s/ingress`. El overlay local
-de ingress genera `trustnews-origin-tls` desde
-`web_classic/certs/fullchain.pem` y `web_classic/certs/privkey.pem`; en
-prod/Hetzner ese secret se crea manualmente segun el runbook server.
-
-En `kind`, instalar o actualizar Traefik exclusivamente mediante el perfil
-Skaffold. No ejecutar `helm upgrade` manual:
+Instalar o actualizar Traefik exclusivamente mediante Skaffold:
 
 ```bash
 ./skaffold deploy -p traefik
 ```
 
-El perfil fija el chart `41.0.2` y consume
-`k8s/traefik/values.yaml`. Mantiene la clase Ingress predeterminada y los
-providers Kubernetes Ingress/CRD, activa access logs JSON sin cabeceras ni
-parametros de consulta y usa rollback atomico durante los upgrades.
+El perfil fija el chart `41.0.2`, usa `k8s/traefik/values.yaml` y aplica
+upgrades atómicos. No ejecutar `helm upgrade` ni parchear el Deployment
+manualmente.
 
-Comprobar que el controlador esta listo:
+Comprobar el controlador:
 
 ```bash
 kubectl rollout status deployment/traefik -n kube-system
@@ -211,15 +237,23 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik
 kubectl get ingress -A
 ```
 
-Despues de levantar `./skaffold dev -p apis-frontend`, abrir el tunel local hacia Traefik:
+Desplegar APIs y frontend:
 
 ```bash
-kubectl port-forward --address 0.0.0.0 -n kube-system svc/traefik 7443:443
+./skaffold dev -p apis-frontend
 ```
 
-Mantener ese `port-forward` activo mientras se use la entrada web. Usar `https://localhost:7443` como `traefik-host`; el navegador puede mostrar aviso por certificado local.
+Abrir la entrada completa:
 
-URLs mediante Traefik:
+```bash
+kubectl port-forward --address 0.0.0.0 \
+  -n kube-system svc/traefik 7443:443
+```
+
+El listener queda accesible desde el host de acuerdo con el modelo de red
+privada descrito en [1.1](#11-acceso-desde-el-host-de-la-vm).
+
+Rutas principales:
 
 ```text
 https://localhost:7443/
@@ -227,67 +261,46 @@ https://localhost:7443/backend/docs
 https://localhost:7443/auth/admin/master/console/
 ```
 
-No usar el port-forward directo al Service del frontend para validar la aplicacion completa: `kubectl port-forward svc/frontend-service -n frontend 7080:80` solo sirve los estaticos y deja fuera `/backend` y `/auth`.
+El navegador puede mostrar un aviso por el certificado local.
 
-Ver nginx del frontend:
-
-```bash
-kubectl exec -it -n frontend <frontend-pod> -- cat /etc/nginx/conf.d/default.conf
-```
+No usar el port-forward directo del frontend para validar la aplicación
+completa: solo sirve los estáticos y deja fuera `/backend` y `/auth`.
 
 ---
 
-## 7. Secretos y configuracion local
+## 7. Secrets y configuración
 
-Comprobar secretos:
+Comprobar Secrets sin copiar su contenido al repositorio:
 
 ```bash
 kubectl get secrets -n infra
-kubectl get secret mongodb-secret -n infra -o jsonpath='{.data}'
 kubectl get secrets -n apis
-kubectl get secret mongodb-app-secret -n apis -o jsonpath='{.data}'
 ```
 
-Decodificar un valor:
+La configuración compartida de Keycloak y cuotas está en:
 
-```bash
-echo "<valor-base64>" | base64 --decode
-```
+- [`k8s-common.md - Keycloak y cuotas`](k8s-common.md#7-keycloak-y-cuotas).
 
-Keycloak via Traefik:
+La configuración funcional y las operaciones de MongoDB están en:
 
-```bash
-kubectl port-forward --address 0.0.0.0 -n kube-system svc/traefik 7443:443
-```
+- [`k8s-common.md - Evidence Search`](k8s-common.md#8-evidence-search);
+- [`k8s-common.md - MongoDB`](k8s-common.md#9-mongodb-consultas-y-limpieza).
 
-Comprobacion:
-
-```bash
-curl -v -k https://localhost:7443/auth/admin/master/console
-```
-
-Configuracion comun de Keycloak y cuotas:
-
-- [`k8s-common.md#7-keycloak-y-cuotas`](k8s-common.md#7-keycloak-y-cuotas)
+El frontend no termina TLS ni proxifica `/backend` o `/auth`. Traefik publica
+esas rutas mediante los manifests de Ingress.
 
 ---
 
-## 8. Configuraciones funcionales
+## 8. Endpoints locales
 
-Evidence Search, perfiles de dominios y normalizacion:
-
-- [`k8s-common.md#8-evidence-search`](k8s-common.md#8-evidence-search)
-
-MongoDB, limpieza runtime y colecciones:
-
-- [`k8s-common.md#9-mongodb-consultas-y-limpieza`](k8s-common.md#9-mongodb-consultas-y-limpieza)
-
----
-
-## 9. Endpoints locales
+La tabla usa `localhost` como referencia canónica. Para el frontend y Keycloak
+se conserva mediante redirección o túnel. Un port-forward HTTP directo expuesto
+por Skaffold puede usar la IP privada de la VM. Los servicios que Skaffold liga
+solo a loopback requieren un túnel o un port-forward explícito con el mismo
+criterio de red de [1.1](#11-acceso-desde-el-host-de-la-vm).
 
 | Servicio | URL | Perfil |
-|---|---|---|
+| --- | --- | --- |
 | Frontend | `https://localhost:7443` | `apis-frontend` |
 | Admin API Swagger | `http://localhost:8400/docs` | `apis-frontend` |
 | Gateway Swagger | `http://localhost:8500/docs` | `apis-frontend` |
@@ -299,85 +312,107 @@ MongoDB, limpieza runtime y colecciones:
 | Validator Worker 1 Swagger | `http://localhost:8070/docs` | `apis-frontend` |
 | Validator Worker 2 Swagger | `http://localhost:8069/docs` | `apis-frontend` |
 | Validator Worker 3 Swagger | `http://localhost:8068/docs` | `apis-frontend` |
+| Mongo Express | `http://localhost:8081` | `infra-basic` o `infra` |
 | Grafana | `http://localhost:3000` | `infra` |
-| Mongo Express | `http://localhost:8081` | `infra` |
 | Kafdrop | `http://localhost:9000` | `infra` |
 | Keycloak Admin | `https://localhost:7443/auth/admin/master/console/` | `apis-frontend` |
 
 ---
 
-## 10. Validacion local de la Fase 5
+## 9. Validación local vigente
 
-La Fase 5 no aplica reglas Cloudflare ni activa `prod-domain` en local. Se usa
-el perfil `apis-frontend` para validar cualquier cambio de Gateway o Traefik
-antes de llevarlo a Hetzner.
+Local valida aplicación y manifests sin reproducir los controles externos de
+Cloudflare.
 
-El paso 5.0 es solo de inventario y no requiere redesplegar. Confirmar el render
-local y que no contiene los bloqueos exclusivos de produccion:
+### 9.1 Render
 
 ```bash
 kubectl kustomize --load-restrictor=LoadRestrictionsNone \
   k8s/ingress/overlays/local > /tmp/assermetry-ingress-local.yaml
+
 rg -n 'host: localhost|gateway-strip-backend-prefix' \
   /tmp/assermetry-ingress-local.yaml
 ```
-El paso 5.1 conserva deliberadamente la consola administrativa y el realm
-`master` en local. En produccion, Cloudflare exige mTLS permanentemente en esas
-rutas; no se aplica un `deny` total en Traefik porque impediria tambien la via
-administrativa por tunel. No desplegar `prod` o `prod-domain` sobre Kind para
-probarlo. La prueba real del hostname canonico y el tunel se realiza en las
-Fases 6-7; local conserva las herramientas de desarrollo.
 
+El render no debe contener `prod-domain`, el issuer público ni bloqueos
+exclusivos de Cloudflare.
 
-Para validar el paso 5.2, desplegar de nuevo cuando cambien Gateway, Traefik o
-sus manifests:
+### 9.2 Matriz funcional
+
+La validación debe cubrir:
+
+- login, refresh, logout y expiración;
+- navegación y autorización por rol;
+- polling y cuotas;
+- flujos Light y Blockchain;
+- métodos válidos e inválidos;
+- autenticación ausente, expirada o manipulada;
+- cuerpo dentro de 5 MiB y por encima del límite;
+- documentación del Gateway y consola de Keycloak accesibles en local;
+- ausencia de errores relevantes en Gateway, workers, Traefik y frontend.
+
+Resultados esperados de los controles técnicos:
+
+| Caso | Resultado |
+| --- | --- |
+| API protegida sin token | `401` o `403` según la capa |
+| Método no permitido | `405` |
+| Cuerpo superior a 5 MiB | `413` |
+| Documentación local | Accesible |
+| Rate limiting Cloudflare | No aplica |
+| mTLS Cloudflare | No aplica |
+
+Cuando cambien Gateway, Traefik o sus manifests se repite esta matriz antes de
+desplegar en Hetzner.
+
+---
+
+## 10. Mantenimiento local
+
+Estado y consumo:
 
 ```bash
-./skaffold dev -p apis-frontend
-kubectl port-forward --address 0.0.0.0 \
-  -n kube-system svc/traefik 7443:443
+kubectl get pods -A
+kubectl get pvc -A
+docker system df
 ```
 
-La matriz de pruebas local de la fase debe cubrir:
-
-- login, refresh, logout, polling y flujos Light y Blockchain;
-- metodos validos y no validos (`405`);
-- cuerpo dentro del limite y por encima del limite (`413`);
-- autenticacion ausente o invalida (`401`);
-- documentacion del Gateway y consola de Keycloak accesibles en local.
-
-El 2026-08-13 se valido el despliegue minimo en Kind: `DELETE` sobre una ruta
-devolvio `405`; un cuerpo de exactamente 5 MiB alcanzo Gateway y devolvio
-`403` por falta de credenciales; 5 MiB + 1 byte fue rechazado por Traefik con
-`413`. El acceso directo al Service confirmo los `413` y `405` internos y
-sus eventos JSON `gateway_access`. Falta repetir la matriz funcional con el
-perfil completo antes de desplegar en Hetzner.
-
-Se ejecutaron despues exactamente dos pruebas superiores a 5 MiB: un JSON de
-5242918 bytes en modo `LIGHT` y otro de 5242923 bytes en modo `BLOCKCHAIN`.
-Traefik devolvio `413` en ambos casos y Gateway no registro los `POST`, por
-lo que no se crearon ordenes ni se consumieron cuotas.
-
-No se espera un `429` de Cloudflare en local. Si se añade un limite en el
-Gateway o en Traefik, su `429` se prueba aqui de forma controlada.
-
-## 11. Mantenimiento local
-
-Limpiar imagenes no usadas dentro de nodos kind:
+Limpiar imágenes no usadas dentro de los nodos Kind:
 
 ```bash
-docker system df
-
 for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
   docker exec "$node" crictl rmi --prune || true
 done
 ```
 
-Borrar PVCs de infra solo si se reconstruye el entorno:
+La eliminación de PVC solo pertenece a una reconstrucción local deliberada.
+Inspeccionar siempre antes:
 
 ```bash
 kubectl get pvc -n infra
-kubectl delete pvc ipfs-storage-ipfs-0 -n infra
-kubectl delete pvc kafka-data-kafka-0 -n infra
-kubectl delete pvc mongodb-storage-mongodb-0 -n infra
+kubectl get pvc -n blockchain
 ```
+
+---
+
+## 11. Próximos pasos
+
+### v0.0.13
+
+- Crear el conjunto reproducible de datos sintéticos.
+- Ejecutar la regresión completa de GUI y API.
+- Añadir pruebas negativas de `aud`, `azp` o `client_id`, issuer, expiración y
+  firma.
+- Demostrar aislamiento entre organizaciones.
+- Repetir tres demos internas consecutivas con la misma inicialización y
+  limpieza.
+
+### Versiones posteriores
+
+- Mantener local sin Cloudflare, certificados cliente ni `prod-domain`.
+- Usar local como destino aislado para pruebas de restauración cuando
+  `v0.0.16` defina el procedimiento.
+- No incorporar Cloudflare Tunnel al perfil local.
+
+El detalle y los criterios de salida se mantienen en
+[`next_releases.md`](../next_releases.md).

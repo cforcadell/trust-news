@@ -84,6 +84,9 @@ profiles:
   # ---------------------------------------------------------
   # PERFIL: INFRA BASIC
   # ---------------------------------------------------------
+  # Los port-forward 0.0.0.0 de perfiles locales permiten acceder desde el
+  # host a la VM. Usarlos solo con un adaptador host-only/privado y firewall
+  # del guest limitado al host; no conectar la VM a una red puente no fiable.
   - name: infra-basic
     build:
       artifacts:
@@ -304,8 +307,8 @@ profiles:
           - k8s/frontend
           # Traefik/K3s HTTPS edge routes. Keep host/final certificate
           # details in k8s/ingress/overlays/prod-domain.
-          # See docs/deploy/skaffold-server.md#27-configurar-dominio-y-tls.
+          # See docs/deploy/skaffold-server.md#4-dominio-traefik-y-tls.
           - k8s/ingress/overlays/prod-domain
     portForward:
-      - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
-      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 80, localPort: 10080, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "127.0.0.1"}
+      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 80, localPort: 10080, address: "127.0.0.1"}

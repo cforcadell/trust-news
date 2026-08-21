@@ -1,5 +1,9 @@
 
 **create/recreate cluster**
+> [!WARNING]
+> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
+> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+
 ```bash delete
 
 kubectl get pvc -A

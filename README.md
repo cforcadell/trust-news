@@ -197,7 +197,8 @@ Primary deployment documentation:
 - [Server/Hetzner deployment](docs/deploy/skaffold-server.md)
 - [GitLab, GitHub and release workflow](docs/deploy/gitlab-github-release-workflow.md)
 
-The previous Kubernetes notes are archived in `docs/deploy/old/`.
+The previous Kubernetes notes are archived and non-operational; see
+[the archive warning](docs/deploy/old/README.md).
 
 ---
 

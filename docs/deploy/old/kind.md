@@ -1,4 +1,8 @@
 
+> [!WARNING]
+> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
+> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+
 **Crear el cluster:**
 ```bash
 kind create cluster --config kind-config.yaml

@@ -15,6 +15,23 @@ server environments.
 
 ---
 
+## Version Status
+
+The latest closed version is
+[`v0.0.12 - Perimeter closure and administrative access`](docs/releases/v0.0.12.md).
+It validated the controlled Hetzner environment, Cloudflare perimeter, OIDC,
+Gateway authentication, temporary general mTLS, permanent administrative mTLS
+and the maintenance lock.
+
+Versioned documentation:
+
+- [Current version record](docs/version.md)
+- [Published release summaries](docs/releases.md)
+- [Future roadmap](docs/next_releases.md)
+- [Known issues](docs/issues.md)
+
+---
+
 ## Overview
 
 Assermetry decomposes news into atomic assertions, enriches them with optional
@@ -39,16 +56,23 @@ The platform supports two operating modes:
 - RAG-assisted evidence search.
 - Preferred-domain evidence strategies backed by MongoDB profiles.
 - Evidence normalization metadata and cache in MongoDB.
-- OpenRouter/Gemini-compatible assertion and validation flows.
+- Mistral, Gemini, OpenRouter and Grok-compatible assertion and validation
+  flows.
 - Secure API Gateway.
 - OIDC frontend authentication through Keycloak.
-- OAuth 2.0 Client Credentials for B2B access.
+- OAuth 2.0 Client Credentials for controlled B2B access.
 - Admin API for clients, quotas and operational configuration.
 - Kafka-based asynchronous orchestration.
 - Optional IPFS persistence.
 - Optional Ethereum smart contract auditability.
 - Idempotent MongoDB bootstrap for server deployments.
 - Idempotent on-chain category initialization.
+- Traefik as the only application edge in local and server environments.
+- Controlled Hetzner exposure through Cloudflare with strict origin TLS.
+- Temporary general mTLS, permanent administrative mTLS and an independently
+  tested maintenance lock.
+- WAF rules, rate limiting, non-public route blocking and persistent
+  Loki/Grafana observability.
 - Local and Hetzner-oriented Kubernetes/Skaffold runbooks.
 - GitLab CI manual deployment flow from `postTFM`.
 
@@ -186,6 +210,7 @@ Skaffold profiles currently defined in `skaffold.yaml`:
 | Layer | Local profile | Server profile |
 |---|---|---|
 | Namespaces/setup | `setup` or local namespace script | `setup` |
+| Web entrypoint | `traefik` | `traefik-prod` |
 | Blockchain | `blockchain` | `blockchain-prod` |
 | Infrastructure | `infra`, `infra-basic` | `infra-prod` |
 | APIs and frontend | `apis-frontend` | `apis-frontend-prod` |
@@ -240,10 +265,10 @@ Main local URLs:
 
 | Service | URL |
 |---|---|
-| Frontend | `https://<traefik-host>` |
-| Keycloak Admin | `https://<traefik-host>/auth/admin/master/console/` |
+| Frontend | `https://localhost:7443/` |
+| Keycloak Admin | `https://localhost:7443/auth/admin/master/console/` |
 | Admin API | `http://localhost:8400/docs` |
-| Gateway | `https://<traefik-host>/backend/docs` |
+| Gateway | `https://localhost:7443/backend/docs` |
 | Evidence Search | `http://localhost:8074/docs` |
 | News Handler | `http://localhost:8072/docs` |
 | News Chain | `http://localhost:8073/docs` |
@@ -267,6 +292,15 @@ Current server workflow:
 6. Validate the deployment in Hetzner.
 7. Open PR/MR from `postTFM` to `main` in GitHub and GitLab.
 8. Create the release from `main`.
+
+The controlled server entrypoint is `https://assermetry.com`. Cloudflare
+publishes only the frontend, `/backend` and `/auth`; internal services,
+databases, Kafka, IPFS, RPC and observability panels remain private. While the
+temporary general mTLS rule is active, an authorized client certificate is
+required before application authentication is evaluated.
+
+Infrastructure changes use their dedicated `traefik-prod`, `infra-prod` or
+`blockchain-prod` profile. Do not combine profiles in one diagnostic window.
 
 The repo has both GitHub and GitLab remotes documented in:
 
@@ -324,7 +358,20 @@ inspect live pods/logs with `kubectl`.
 - The README and k8s docs use placeholders for secret values.
 - GitLab CI receives sensitive values through protected/masked variables.
 - Keycloak handles OIDC authentication for frontend users.
-- B2B/API access uses OAuth 2.0 Client Credentials.
+- B2B/API access uses OAuth 2.0 Client Credentials and is explicitly
+  provisioned; there is no public self-registration.
+- `assermetry.com` is proxied by Cloudflare with strict origin TLS; the Hetzner
+  origin accepts application HTTPS only from verified Cloudflare networks.
+- A temporary general mTLS rule protects non-administrative routes through
+  `v0.0.13`. Its controlled removal is planned for `v0.0.14`.
+- Keycloak administrative routes retain permanent mTLS and still require
+  Keycloak authentication after the certificate check.
+- The maintenance lock can block the complete hostname independently of OIDC,
+  JWT and certificate validity.
+- Protected Gateway routes require JWT validation after mTLS, and API
+  documentation is not published in the server environment.
+- Cloudflare WAF rules, rate limiting and explicit route/method restrictions
+  remain active at the edge.
 
 ---
 
@@ -341,33 +388,33 @@ Known limitations:
 - Validator reputation is planned but not completed.
 - Production hardening is still in progress.
 - `BLOCKCHAIN` mode has higher operational complexity than `LIGHT` mode.
+- The Hetzner deployment currently uses a single Kubernetes node and must not
+  be presented as highly available.
+- [`ISSUE-001`](docs/issues.md#issue-001---carrera-de-inicializacion-en-la-cache-de-validadores-light)
+  is mitigated, but its LIGHT validator-cache initialization race remains to be
+  resolved in `v0.0.13`.
+- Memory headroom and rollout scheduling remain under observation, and the
+  non-blocking `DNSConfigForming` warning is still registered.
+- Access remains controlled: the temporary general mTLS rule is kept through
+  `v0.0.13`, and public or anonymous access is not enabled.
 
 ---
 
 ## Roadmap
 
-- [x] Secure authenticated gateway.
-- [x] Assertion-based news verification.
-- [x] Strict `categoryId` protocol identity.
-- [x] AI-based validation engine.
-- [x] Evidence-backed RAG validation.
-- [x] Preferred-domain evidence search.
-- [x] MongoDB-backed evidence domain profiles.
-- [x] Evidence search cache.
-- [x] LIGHT mode for centralized validation workflows.
-- [x] BLOCKCHAIN mode for auditable validation workflows.
-- [x] IPFS document storage in blockchain mode.
-- [x] Ethereum smart contract registration.
-- [x] Blockchain event-based validation.
-- [x] Admin and quota management.
-- [x] Kubernetes/Skaffold deployment workflow.
-- [x] GitLab CI manual deployment flow.
-- [ ] Improve evidence ranking and deduplication.
-- [ ] Improve provider-specific official-source filtering behavior.
-- [ ] Validator reputation system.
-- [ ] Full production hardening.
-- [ ] Performance and cost analysis.
-- [ ] Evaluate Hyperledger Besu or Fabric support.
+| Version | Status | Main objective |
+|---|---|---|
+| `v0.0.12` | Closed | Cloudflare perimeter, controlled access and administrative protection |
+| `v0.0.13` | Next | Functional stabilization and repeatable private demo |
+| `v0.0.14` | Planned | Closed beta by invitation and controlled removal of general mTLS |
+| `v0.0.15` | Planned | Design-partner pilot with explicit success criteria |
+| `v0.0.16` | Planned | Production hardening, recovery and operational readiness |
+| `v0.9.0` | Planned | Release Candidate and formal GO/NO-GO decision |
+| `v1.0.0` | Planned | Controlled production after technical and commercial acceptance |
+
+See the [current version record](docs/version.md),
+[published releases](docs/releases.md) and
+[detailed future roadmap](docs/next_releases.md) for criteria and scope.
 
 ---
 

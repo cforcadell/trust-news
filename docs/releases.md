@@ -4,6 +4,27 @@ Este documento conserva el resultado funcional de las versiones anteriores a la
 versión en curso. La planificación activa está en [`version.md`](version.md) y
 las versiones futuras en [`next_releases.md`](next_releases.md).
 
+## v0.0.12 - Cierre del perímetro y acceso administrativo
+
+- `assermetry.com` quedó publicado mediante Cloudflare con TLS estricto y el
+  origen de Hetzner limitado a sus redes verificadas.
+- Se conservaron el mTLS general temporal hasta `v0.0.14` y la protección mTLS
+  administrativa permanente de Keycloak.
+- OIDC quedó alineado con el issuer canónico y se comprobaron login, sesión,
+  renovación del token y logout.
+- Gateway rechazó las peticiones sin JWT y aceptó un JWT válido con el rol
+  administrativo esperado.
+- Los recorridos Light y Blockchain se completaron bajo el acceso protegido.
+- El lock de mantenimiento bloqueó sesiones válidas de usuario y administrador
+  y permitió recuperar ambos accesos al deshabilitarlo.
+- La línea base de cierre registró el nodo y los 29 pods preparados sin
+  reinicios, nueve PVC `Bound` y observabilidad disponible.
+- `ISSUE-001` permanece mitigada y su resolución se traslada a `v0.0.13`.
+- La revocación controlada de un certificado administrativo desechable se
+  realizará en `v0.0.14`.
+
+[Detalle completo del cierre de v0.0.12](releases/v0.0.12.md).
+
 ## v0.0.11 - Validadores con evidencia y renovación del frontend
 
 - Se añadieron endpoints de recomendación de modelos económicos mediante un

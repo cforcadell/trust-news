@@ -139,6 +139,10 @@ externas.
 - La regla mTLS general temporal se retira en una ventana controlada,
   manteniendo activos el lock, la regla mTLS administrativa y un rollback
   probado.
+- Se valida el ciclo de revocación con un certificado administrativo
+  desechable y un certificado de respaldo ya comprobado: el desechable supera
+  mTLS antes de revocarlo y es rechazado después, sin perder el acceso de
+  recuperación.
 - Los usuarios acceden por OIDC sin certificado; mTLS queda reservado a la
   administración.
 - Cuando se habilite API, cada organización usa su propio cliente confidencial;
@@ -172,6 +176,8 @@ externas.
 - Los límites no rompen login, refresh ni polling legítimos.
 - La regla mTLS general temporal está retirada y la administración continúa
   protegida por su regla mTLS permanente.
+- Un certificado administrativo desechable revocado es rechazado y el
+  certificado de respaldo conserva el acceso administrativo.
 - El alta número once se deriva a la lista de espera.
 - Se completan dos evaluaciones externas y se identifica un candidato a design
   partner con problema, métrica y posible piloto.

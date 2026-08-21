@@ -21,8 +21,8 @@ La regla mTLS general temporal para las rutas no administrativas se conserva en
 
 ## Estado de la versión
 
-**En curso.** Las fases 0 a 6 están cerradas. La fase 7 concentra el trabajo
-restante.
+**Cerrada.** Las fases 0 a 7 están completadas y la línea base estable quedó
+registrada después de superar las pruebas de cierre.
 
 Configuración vigente:
 
@@ -63,7 +63,7 @@ Issuer:         https://assermetry.com/auth/realms/TrustNews
 | 4 | Cerrada | Instalar TLS válido en el origen antes de permitir tráfico HTTPS | Cloudflare Origin CA instalado, validado y con renovación controlada |
 | 5 | Cerrada | Implantar protecciones permanentes, límites y observabilidad | WAF, rate limit, límites de petición, logs y persistencia comprobados |
 | 6 | Cerrada | Activar la configuración definitiva del dominio manteniendo el origen cerrado | Keycloak, Gateway, frontend e Ingress alineados con `assermetry.com` |
-| 7 | En curso | Cerrar el perímetro y validar OIDC conservando el mTLS general temporal hasta `v0.0.14` | Origen limitado a Cloudflare y controles preparados; faltan las pruebas finales y registrar la línea base estable |
+| 7 | Cerrada | Cerrar el perímetro y validar OIDC conservando el mTLS general temporal hasta `v0.0.14` | Pruebas finales superadas y línea base estable registrada |
 
 ## Detalle de las fases
 
@@ -146,7 +146,8 @@ general y certificados individuales por dispositivo.
   certificado válido superaron el control mTLS.
 - Se comprobó la desactivación y reactivación de la regla como rollback.
 - No se ejecutó una revocación real ni se emitió un reemplazo en esta fase; la
-  prueba de revocación administrativa pertenece a la fase 7.
+  prueba de revocación administrativa se traslada a `v0.0.14`, durante la
+  retirada controlada del mTLS general temporal.
 
 ### Fase 4 - TLS del origen
 
@@ -254,29 +255,46 @@ Cloudflare mantiene un cierre general independiente.
   reinicios y el nodo `Ready`. El uso de memoria cercano al 80 % y el warning
   `DNSConfigForming` quedan como observaciones no bloqueantes.
 - El lock de mantenimiento está configurado en primera posición y cubre todo
-  `assermetry.com`. Su estado se cambia de forma selectiva según la ventana de
-  trabajo; en la evidencia actual figura deshabilitado.
-
-**Por hacer**
-
-- Ejecutar un pipeline con `PROFILE=infra-prod` para aplicar la reconciliación
-  automatizada de URLs del realm `TrustNews` y del cliente `TrustNewsWeb`,
-  exigir `keycloak_web_alignment=PASS` y volver a validar el issuer OIDC.
-- Confirmar la convivencia del mTLS general temporal, la regla administrativa
-  permanente y el lock, y documentar el rollback para su retirada en
-  `v0.0.14`.
-- Desde una red alternativa y con un certificado cliente temporal válido,
-  validar frontend, discovery OIDC, login, refresh, logout y los modos Light y
-  Blockchain.
-- Comprobar el rechazo de las APIs sin JWT y el acceso correcto con un JWT
-  válido.
-- Verificar que las rutas administrativas rechazan sin certificado y permiten
-  superar mTLS con un certificado administrativo válido, sin eludir la
-  autenticación de Keycloak.
-- Revocar un certificado administrativo desechable y demostrar su rechazo.
-- Comprobar que el lock bloquea el hostname completo incluso para usuarios y
-  administradores válidos, y dejarlo en el estado operativo decidido.
-- Registrar la línea base estable para iniciar la siguiente versión.
+  `assermetry.com`. Con sesiones válidas de usuario y administrador, su
+  activación produjo `403` en ambos accesos y los eventos se atribuyeron al
+  lock. Al deshabilitarlo, ambos accesos volvieron a `200`; el estado operativo
+  final quedó deshabilitado y las reglas permanentes continuaron activas.
+- El pipeline `PROFILE=infra-prod` del commit `8bdaa6f` completó la
+  reconciliación automatizada del realm `TrustNews` y del cliente
+  `TrustNewsWeb`, obtuvo `keycloak_web_alignment=PASS` y confirmó el issuer
+  canónico `https://assermetry.com/auth/realms/TrustNews`.
+- Se confirmó la convivencia y atribución de las reglas de Cloudflare: una
+  ruta administrativa sin certificado fue bloqueada por el mTLS
+  administrativo permanente y una ruta no administrativa por el mTLS general
+  temporal. El lock conserva la prioridad y el bloqueo general ya probado.
+  Para `v0.0.14`, el rollback consiste en reactivar únicamente la regla
+  temporal, manteniendo la asociación mTLS y la regla administrativa.
+- Desde la red habitual y con un certificado cliente válido se comprobaron el
+  frontend, el discovery OIDC con el issuer canónico, el inicio de sesión, la
+  persistencia de la sesión tras recargar, el logout con retorno al login y los
+  flujos Light y Blockchain.
+- Con el certificado cliente válido, Gateway rechazó
+  `/backend/auth/is-admin` sin JWT mediante `403 Not authenticated`; tras
+  renovar el token, aceptó el JWT y confirmó el rol `trust-admin` del usuario.
+- Las rutas administrativas quedaron verificadas en las dos capas: sin
+  certificado fueron bloqueadas por la regla mTLS administrativa; con un
+  certificado válido, la consola de Keycloak respondió, mientras que su API
+  administrativa sin token mantuvo el rechazo `401 Unauthorized`. El
+  certificado no elude la autenticación de Keycloak.
+- La línea base estable de cierre, capturada el `2026-08-21T15:32:55Z` y
+  vinculada al pipeline verificado del commit `8bdaa6f`, registró el nodo
+  `Ready`, 20 Deployments, siete StatefulSets y dos DaemonSets disponibles,
+  29 pods preparados sin reinicios y nueve PVC `Bound`. Los tres Ingress
+  esperados permanecían tras Traefik, único Service `LoadBalancer`; el resto de
+  servicios eran internos.
+- En esa captura el nodo consumía un 5 % de CPU y un 76 % de memoria, el disco
+  raíz estaba al 58 %, y Loki y Grafana estaban disponibles con sus PVC
+  enlazados y sus rollouts completados. `DNSConfigForming` y un
+  `FailedScheduling` transitorio de Loki por presión de CPU y memoria quedan
+  como observaciones no bloqueantes; Loki terminó preparado y sin reinicios.
+- La evidencia conservada de la mitigación de `ISSUE-001` mantiene tres
+  aserciones por tres validadores, con nueve solicitudes y nueve respuestas
+  LIGHT.
 
 **Incidencia conocida no bloqueante**
 
@@ -293,16 +311,18 @@ corrección funcional está fuera del alcance de esta versión.
 La versión se cierra cuando un usuario provisionado completa los flujos OIDC
 con un certificado cliente temporal, Gateway rechaza las peticiones protegidas
 sin JWT, la administración exige su regla mTLS permanente y la autenticación de
-Keycloak, un certificado administrativo revocado es rechazado, el origen solo
-admite Cloudflare y el lock bloquea toda la plataforma. La regla mTLS general
-permanece activa y su retirada se reserva para `v0.0.14`. `ISSUE-001` puede
-permanecer mitigada y registrada al cierre; debe resolverse en `v0.0.13` antes
-de superar la regresión y las demos repetibles.
+Keycloak, el origen solo admite Cloudflare y el lock bloquea toda la plataforma.
+La regla mTLS general permanece activa y su retirada, junto con la prueba de
+revocación de un certificado administrativo desechable, se reserva para
+`v0.0.14`. `ISSUE-001` puede permanecer mitigada y registrada al cierre; debe
+resolverse en `v0.0.13` antes de superar la regresión y las demos repetibles.
 
 ## Fuera de alcance
 
 - Pruebas sistemáticas y corrección funcional de GUI y API.
 - Entrega de credenciales persistentes a clientes.
 - Pilotos con datos reales o compromisos de servicio.
+- Revocación real de un certificado administrativo; su prueba controlada se
+  realizará en `v0.0.14` con un certificado desechable y otro de respaldo.
 - Hardening completo, backups, restauración y alta disponibilidad.
 - Decisión GO/NO-GO de producción y apertura pública.

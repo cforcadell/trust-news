@@ -96,10 +96,10 @@ recoger los logs de Traefik.
 
 La última medición operativa disponible está resumida en
 [`version.md`](../version.md): 29 pods preparados, cero reinicios, nueve PVC
-`Bound` y nodo `Ready`. Todavía no es la línea base estable de cierre de la
-Fase 7. La memoria cercana al 80 % y `DNSConfigForming` siguen bajo
-observación; no deben convertirse en cifras permanentes dentro de este
-runbook.
+`Bound` y nodo `Ready`. Es la línea base estable de cierre de la Fase 7. La
+memoria al 76 %, `DNSConfigForming` y el fallo transitorio de planificación de
+Loki durante el rollout siguen bajo observación; no deben convertirse en cifras
+permanentes dentro de este runbook.
 
 ---
 
@@ -600,7 +600,6 @@ y la restauración aislada completa pertenecen a `v0.0.16`.
   Blockchain.
 - Verificar Gateway con y sin JWT.
 - Verificar la atribución y el acceso de las rutas administrativas.
-- Revocar un certificado administrativo desechable y demostrar su rechazo.
 - Probar que el lock bloquea todo el hostname y dejarlo en el estado operativo
   decidido.
 - Registrar la línea base estable.
@@ -619,6 +618,8 @@ y la restauración aislada completa pertenecen a `v0.0.16`.
 - Habilitar el lock durante la ventana de cambio.
 - Retirar únicamente `Temporary mTLS gate - assermetry.com`.
 - Mantener la asociación mTLS y la regla administrativa permanente.
+- Revocar un certificado administrativo desechable y demostrar su rechazo sin
+  afectar al certificado administrativo de respaldo.
 - Validar OIDC de usuario sin certificado, administración con certificado,
   WAF, rate limit, logs y rollback.
 - Abrir la beta solo después de superar esas comprobaciones.

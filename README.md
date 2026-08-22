@@ -405,7 +405,7 @@ Known limitations:
 | Version | Status | Main objective |
 |---|---|---|
 | `v0.0.12` | Closed | Cloudflare perimeter, controlled access and administrative protection |
-| `v0.0.13` | Next | Functional stabilization and repeatable private demo |
+| `v0.0.13` | Current | Functional stabilization and repeatable private demo |
 | `v0.0.14` | Planned | Closed beta by invitation and controlled removal of general mTLS |
 | `v0.0.15` | Planned | Design-partner pilot with explicit success criteria |
 | `v0.0.16` | Planned | Production hardening, recovery and operational readiness |

@@ -13,12 +13,16 @@ spec:
       labels:
         app: grafana
     spec:
+      securityContext:
+        fsGroup: 472
+        fsGroupChangePolicy: OnRootMismatch
       containers:
       - name: grafana
         # Cambia 'latest' por una versión estable como 11.5.2 o 10.4.8
         image: grafana/grafana:11.5.2
         ports:
         - containerPort: 3000
+          name: http
         resources:
           limits:
             memory: "512Mi"
@@ -26,3 +30,30 @@ spec:
           requests:
             memory: "256Mi"
             cpu: "200m"
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          periodSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          periodSeconds: 20
+          timeoutSeconds: 2
+          failureThreshold: 3
+        volumeMounts:
+          - name: grafana-data
+            mountPath: /var/lib/grafana
+      volumes:
+        - name: grafana-data
+          persistentVolumeClaim:
+            claimName: grafana-data

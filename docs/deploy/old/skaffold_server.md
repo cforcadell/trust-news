@@ -1,5 +1,9 @@
 # Despliegue Trust News en Hetzner
 
+> [!WARNING]
+> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
+> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+
 Este documento es el runbook operativo para el servidor Hetzner. Mantiene en un unico sitio:
 
 - instalacion inicial de un entorno vacio;

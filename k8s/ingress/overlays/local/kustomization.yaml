@@ -4,6 +4,11 @@ kind: Kustomization
 resources:
   - ../../base
 
+patches:
+  - path: patch-frontend-host.yaml
+  - path: patch-gateway-host.yaml
+  - path: patch-keycloak-host.yaml
+
 generatorOptions:
   disableNameSuffixHash: true
 

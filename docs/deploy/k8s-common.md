@@ -1,4 +1,4 @@
-# TrustNews Kubernetes - Procedimientos comunes
+# Assermetry Kubernetes - Procedimientos comunes
 
 Este documento concentra las partes compartidas por el despliegue local y el
 despliegue en servidor. Los runbooks especificos solo deben mantener lo que
@@ -11,7 +11,7 @@ cambia por entorno:
 
 ## 1. Namespaces
 
-Los namespaces usados por TrustNews son:
+Los namespaces usados por Assermetry son:
 
 ```text
 blockchain
@@ -36,6 +36,9 @@ kubectl get ns blockchain infra apis frontend
 | Infraestructura | `infra`, `infra-basic` | `infra-prod` |
 | Blockchain | `blockchain` | `blockchain-prod` |
 | APIs y frontend | `apis-frontend` | `apis-frontend-prod` |
+
+`infra` e `infra-basic` son alternativas locales. `infra-basic` omite la
+monitorización para un despliegue ligero y no tiene equivalente productivo.
 
 ---
 
@@ -208,25 +211,51 @@ Configuracion minima:
 - Realm: `TrustNews`.
 - Cliente frontend: `TrustNewsWeb`.
   - Root URL: URL publica o local del frontend.
+  - Home URL: URL publica o local del frontend, con `/` final.
   - Valid redirect URIs: `<frontend-url>/*`.
+  - Valid post logout redirect URIs: `<frontend-url>/*`.
   - Web Origins: URL publica o local del frontend, o `*` solo para pruebas.
+  - En produccion no conservar entradas localhost ni usar un comodin global.
 - Cliente backend: `TrustNewsApi`.
   - Client authentication: ON.
   - Service accounts roles: ON.
   - Guardar el client secret para clientes externos.
+  - No modificar ni rotar este cliente al cambiar las URLs de `TrustNewsWeb`.
 
-Obtener token:
+En producción, el pipeline `infra-prod` aplica y valida estas URLs mediante el
+script idempotente documentado en
+[`skaffold-server.md`](skaffold-server.md#65-alineación-idempotente-de-keycloak).
+Usar ese mismo script, en lugar de la consola web, para una recuperación manual.
+
+Para obtener un token local sin recurrir a TLS inseguro, abrir temporalmente el
+puerto HTTP interno de Keycloak solo en loopback dentro de la VM y ejecutar la
+peticion desde ella. Este salto no sale de la VM:
 
 ```bash
-curl -k -X POST <keycloak-url>/auth/realms/TrustNews/protocol/openid-connect/token \
+kubectl port-forward --address 127.0.0.1 -n infra svc/keycloak 18080:8080
+
+read -rsp "TrustNewsApi client secret: " TRUSTNEWS_API_SECRET
+printf '\n'
+curl --fail --show-error -X POST \
+  http://127.0.0.1:18080/auth/realms/TrustNews/protocol/openid-connect/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials" \
   -d "client_id=TrustNewsApi" \
-  -d "client_secret=<secret>"
+  --data-urlencode "client_secret=$TRUSTNEWS_API_SECRET"
+unset TRUSTNEWS_API_SECRET
 ```
+
+En produccion se usa el endpoint canonico con la cadena TLS verificada por
+`curl` y, mientras siga activa la regla temporal, `--cert <cert.pem>` y
+`--key <key.pem>`. No usar `-k` ni publicar el puerto interno de Keycloak.
 
 Las cuotas/clientes de negocio se crean por API de admin; no deben formar parte
 del bootstrap fijo.
+
+- Display name: nombre visible de la aplicacion, por ejemplo `Assermetry`.
+  Keycloak usa este valor en la pantalla de autenticacion (por ejemplo,
+  `Sign in to Assermetry`). Mantener `TrustNews` como nombre tecnico del realm
+  evita cambiar las URLs OIDC, el issuer y la configuracion de los clientes.
 
 ---
 
@@ -336,5 +365,10 @@ http://loki.infra.svc.cluster.local:3100
 Mongo Express:
 
 ```bash
-kubectl port-forward --address 0.0.0.0 -n infra svc/mongo-express 8081:8081
+kubectl port-forward --address 127.0.0.1 -n infra svc/mongo-express 8081:8081
 ```
+
+Este procedimiento compartido liga el listener a loopback. La excepción para
+acceder desde el host de la VM local está delimitada en
+[`skaffold-local.md`](skaffold-local.md#11-acceso-desde-el-host-de-la-vm); no
+aplica a producción.

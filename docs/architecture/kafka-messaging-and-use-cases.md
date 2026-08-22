@@ -1,8 +1,8 @@
-# Anexo: mensajeria Kafka y casos de uso TrustNews
+# Anexo: mensajeria Kafka y casos de uso Assermetry
 
 ## Vision general
 
-TrustNews usa Kafka como bus asincrono entre microservicios. El patron principal es:
+Assermetry usa Kafka como bus asincrono entre microservicios. El patron principal es:
 
 1. news-handler crea una orden y publica una peticion.
 2. Un microservicio especializado consume esa peticion.
@@ -163,7 +163,7 @@ Respuesta conceptual light_validation_completed:
 
 ## Caso de uso 3: validador RAG con evidence-search
 
-Objetivo: validar una asercion usando evidencias externas gestionadas por TrustNews, no por el proveedor LLM.
+Objetivo: validar una asercion usando evidencias externas gestionadas por Assermetry, no por el proveedor LLM.
 
 Configuracion del worker:
 

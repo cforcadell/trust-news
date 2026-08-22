@@ -23,6 +23,14 @@
 - `GET /validators/cache/{validator_hash}`: recupera detalle de un validador cacheado.
 - `GET /validators/cache/{validator_hash}/validations`: recupera validaciones asociadas a un validador, con filtros opcionales por proveedor/modelo.
 
+## Limites y trazabilidad
+
+El middleware de seguridad rechaza con `413` cualquier cuerpo que supere el
+maximo, incluido si llega fragmentado o sin `Content-Length`. Antes de invocar
+el proxy almacena como maximo ese volumen y reproduce el cuerpo para FastAPI.
+Cada respuesta genera un evento JSON `gateway_access` y devuelve
+`X-Request-ID`; no se registran tokens, query strings ni cuerpos.
+
 ## Daemons
 
 No arranca consumidores ni productores propios. Su cometido es actuar como proxy HTTP autenticado.
@@ -38,6 +46,16 @@ Al arrancar carga `.env`, configura logging, construye URLs internas de microser
 - `NEWS_CHAIN_URL`: URL interna del servicio blockchain.
 - `IPFS_API_URL`: URL interna del servicio IPFS.
 - `GENERATE_ASSERTIONS_URL`: URL interna del generador de aserciones.
-- `KEYCLOAK_SERVER_INNER_URL`: URL interna para consultar certificados JWKS.
-- `KEYCLOAK_SERVER_HOSTNAME`, `KEYCLOAK_SERVER_PORT`, `KEYCLOAK_SERVER_PATH`, `KEYCLOAK_REALM`: componen el issuer esperado del token.
+- `KEYCLOAK_ISSUER_URL`: issuer público exacto que debe contener el token.
+- `KEYCLOAK_JWKS_URL`: URL interna completa usada para descargar las claves
+  públicas de Keycloak. No altera el issuer que se valida.
+- `KEYCLOAK_SERVER_INNER_URL`: compatibilidad con configuraciones antiguas; solo
+  se utiliza para construir la URL JWKS cuando `KEYCLOAK_JWKS_URL` no está
+  definida.
+- `KEYCLOAK_REALM`: realm utilizado por el fallback de configuración local.
+- `GATEWAY_API_DOCS_ENABLED`: habilita `/docs`, `/redoc` y `/openapi.json`.
+  Los overlays productivos lo establecen a `false`.
+- `GATEWAY_MAX_REQUEST_BODY_BYTES`: maximo positivo del cuerpo HTTP; por
+  defecto `5242880` (5 MiB) y debe coincidir con el middleware de Traefik.
+
 - `PORT`: puerto de uvicorn si se ejecuta directamente.

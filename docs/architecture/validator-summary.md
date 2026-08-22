@@ -1,8 +1,8 @@
-# Validadores TrustNews: workers, tipos y comportamiento
+# Validadores Assermetry: workers, tipos y comportamiento
 
 ## Objetivo
 
-Este documento describe como funcionan los workers de validacion de TrustNews, que tipos de validadores existen, que algoritmo ejecuta cada uno y que modulos intervienen en el flujo.
+Este documento describe como funcionan los workers de validacion de Assermetry, que tipos de validadores existen, que algoritmo ejecuta cada uno y que modulos intervienen en el flujo.
 
 En la implementacion actual un worker es una instancia del microservicio `api/validate-asertions`. Cada worker se identifica por su `ACCOUNT_ADDRESS`, se registra como validador en blockchain, publica su configuracion en IPFS y Kafka, y, si su tipo es automatico, escucha solicitudes de validacion para ejecutar una decision factual..
 

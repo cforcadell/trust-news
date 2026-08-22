@@ -14,12 +14,16 @@ spec:
       labels:
         app: loki
     spec:
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
       containers:
       - name: loki
         # Usamos la 3.0.0 que es robusta y compatible con los dashboards actuales
         image: grafana/loki:3.0.0
         ports:
         - containerPort: 3100
+          name: http
         # Loki es intensivo en disco/memoria, conviene darle un respiro
         resources:
           limits:
@@ -31,3 +35,31 @@ spec:
         # Argumento básico para que funcione sin configuración compleja de S3
         args:
           - "-config.file=/etc/loki/local-config.yaml"
+        startupProbe:
+          httpGet:
+            path: /ready
+            port: http
+          periodSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          periodSeconds: 20
+          timeoutSeconds: 2
+          failureThreshold: 3
+        volumeMounts:
+          - name: loki-data
+            # Debe coincidir con common.path_prefix de local-config.yaml.
+            mountPath: /loki
+      volumes:
+        - name: loki-data
+          persistentVolumeClaim:
+            claimName: loki-data

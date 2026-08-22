@@ -8,6 +8,9 @@ variables:
   PROFILE:
     value: "apis-frontend-prod"
     description: "Perfil de Skaffold"
+  SKAFFOLD_VERSION: "v2.17.3"
+  HELM_VERSION: "v3.21.0"
+  HELM_LINUX_AMD64_SHA256: "0093eb572e3d2380f094df162ddb525e219249de88957afe24cfbb19632acd36"
   DOCKER_BUILDKIT: "1"
 
 .kube_access:
@@ -60,12 +63,18 @@ build:
         - web_classic/**
         - skaffold.yaml
         - k8s/apis/**
+        - k8s/infra/**
     - when: manual
 
   before_script:
     - apk add --no-cache curl bash
-    - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    - curl -Lo skaffold "https://storage.googleapis.com/skaffold/releases/$SKAFFOLD_VERSION/skaffold-linux-amd64"
     - install skaffold /usr/local/bin/
+    - curl -Lo /tmp/helm.tar.gz "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+    - echo "$HELM_LINUX_AMD64_SHA256  /tmp/helm.tar.gz" | sha256sum -c -
+    - tar -xzf /tmp/helm.tar.gz -C /tmp
+    - install /tmp/linux-amd64/helm /usr/local/bin/
+    - helm version --short
 
   script:
     - echo "Login registry"
@@ -112,6 +121,50 @@ check_mongodb_bootstrap:
         quit(profiles === 1 && normalization >= 3 && domains >= 500 ? 0 : 1);
       "'
 
+check_phase6_origin_tls:
+  stage: preflight
+  image: alpine:3.19
+  tags:
+    - hetzner-runner
+  extends: .kube_access
+
+  rules:
+    - if: '$PROFILE == "infra-prod" || $PROFILE == "apis-frontend-prod"'
+
+  before_script:
+    - !reference [.kube_access, before_script]
+    - apk add --no-cache openssl
+
+  script:
+    - echo "Comprobando el certificado de origen antes de desplegar prod-domain"
+    - |
+      test "$(kubectl get tlsstore default -n kube-system -o jsonpath='{.spec.defaultCertificate.secretName}')" = "trustnews-origin-tls" || {
+        echo "ERROR: TLSStore/default no referencia trustnews-origin-tls"
+        exit 1
+      }
+      test "$(kubectl get secret trustnews-origin-tls -n kube-system -o jsonpath='{.type}')" = "kubernetes.io/tls" || {
+        echo "ERROR: trustnews-origin-tls no es un Secret kubernetes.io/tls"
+        exit 1
+      }
+    - |
+      tls_tmp_dir="$(mktemp -d)"
+      trap 'rm -rf "$tls_tmp_dir"' EXIT
+      umask 077
+      kubectl get secret trustnews-origin-tls -n kube-system -o jsonpath='{.data.tls\.crt}' | base64 -d > "$tls_tmp_dir/tls.crt"
+      kubectl get secret trustnews-origin-tls -n kube-system -o jsonpath='{.data.tls\.key}' | base64 -d > "$tls_tmp_dir/tls.key"
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -noout >/dev/null
+      openssl pkey -in "$tls_tmp_dir/tls.key" -noout >/dev/null
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -noout -ext subjectAltName | grep -Eq 'DNS:assermetry\.com([,[:space:]]|$)'
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -checkend 2592000 -noout
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -pubkey -noout > "$tls_tmp_dir/cert.pub"
+      openssl pkey -in "$tls_tmp_dir/tls.key" -pubout > "$tls_tmp_dir/key.pub"
+      cmp -s "$tls_tmp_dir/cert.pub" "$tls_tmp_dir/key.pub" || {
+        echo "ERROR: el certificado y la clave de trustnews-origin-tls no forman pareja"
+        exit 1
+      }
+      openssl x509 -in "$tls_tmp_dir/tls.crt" -noout -subject -issuer -dates -fingerprint -sha256 -ext subjectAltName
+      echo "Certificado de origen y TLSStore validados"
+
 # ---------------------------------------------------------
 # DEPLOY
 # ---------------------------------------------------------
@@ -122,7 +175,10 @@ deploy:
     - hetzner-runner
   needs:
     - job: build
+      optional: true
     - job: check_mongodb_bootstrap
+      optional: true
+    - job: check_phase6_origin_tls
       optional: true
 
   rules:
@@ -131,18 +187,109 @@ deploy:
 
   before_script:
     - !reference [.kube_access, before_script]
-    - curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    - apk add --no-cache python3
+    - curl -Lo skaffold "https://storage.googleapis.com/skaffold/releases/$SKAFFOLD_VERSION/skaffold-linux-amd64"
     - install skaffold /usr/local/bin/
+    - curl -Lo /tmp/helm.tar.gz "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+    - echo "$HELM_LINUX_AMD64_SHA256  /tmp/helm.tar.gz" | sha256sum -c -
+    - tar -xzf /tmp/helm.tar.gz -C /tmp
+    - install /tmp/linux-amd64/helm /usr/local/bin/
+    - helm version --short
 
   script:
-    - echo "Deploy usando artefactos ya construidos"
-    - skaffold deploy --build-artifacts=build.json --profile=$PROFILE
+    - echo "Deploy con Skaffold $SKAFFOLD_VERSION"
+    - |
+      test -f build.json || {
+        echo "ERROR: falta build.json para el perfil $PROFILE"
+        exit 1
+      }
+      skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
 
     - echo "Verificando rollout"
     - |
       case "$PROFILE" in
+        traefik-prod)
+          kubectl rollout status deployment/traefik -n kube-system --timeout=180s
+          traefik_args="$(kubectl get deployment traefik -n kube-system -o jsonpath='{.spec.template.spec.containers[0].args}')"
+          test "$(kubectl get service traefik -n kube-system -o jsonpath='{.spec.externalTrafficPolicy}')" = "Local" || {
+            echo "ERROR: Traefik no preserva la IP de origen con externalTrafficPolicy=Local"
+            exit 1
+          }
+          case "$traefik_args" in
+            *--accesslog=true*) ;;
+            *)
+              echo "ERROR: Traefik no tiene access log activo"
+              exit 1
+              ;;
+          esac
+          case "$traefik_args" in
+            *--entryPoints.websecure.forwardedHeaders.trustedIPs=*) ;;
+            *)
+              echo "ERROR: Traefik no limita X-Forwarded-* a proxies conocidos"
+              exit 1
+              ;;
+          esac
+          case "$traefik_args" in
+            *--entryPoints.websecure.forwardedHeaders.insecure=true*)
+              echo "ERROR: Traefik confia en X-Forwarded-* de cualquier origen"
+              exit 1
+              ;;
+          esac
+          test "$(kubectl get configmap keycloak-env-config -n infra -o jsonpath='{.data.KC_PROXY_HEADERS}')" = "xforwarded" || {
+            echo "ERROR: Keycloak no usa KC_PROXY_HEADERS=xforwarded"
+            exit 1
+          }
+          ;;
         infra-prod)
+          kubectl rollout status statefulset/keycloak-db -n infra --timeout=180s
+          kubectl rollout status deployment/keycloak -n infra --timeout=180s
+          test "$(kubectl get configmap keycloak-env-config -n infra -o jsonpath='{.data.KC_HOSTNAME_URL}')" = "https://assermetry.com/auth" || {
+            echo "ERROR: KC_HOSTNAME_URL no usa el dominio definitivo"
+            exit 1
+          }
+          test "$(kubectl get configmap keycloak-env-config -n infra -o jsonpath='{.data.KC_HOSTNAME_ADMIN_URL}')" = "https://assermetry.com/auth" || {
+            echo "ERROR: KC_HOSTNAME_ADMIN_URL no usa el dominio definitivo"
+            exit 1
+          }
+          ./scripts/k8s/infra/reconcile-keycloak-web-prod.sh
+          kubectl port-forward -n infra svc/keycloak 18080:8080 >/tmp/keycloak-port-forward.log 2>&1 &
+          keycloak_pf_pid="$!"
+          trap 'kill "$keycloak_pf_pid" 2>/dev/null || true; wait "$keycloak_pf_pid" 2>/dev/null || true' EXIT
+          keycloak_discovery=""
+          for attempt in $(seq 1 30); do
+            if keycloak_discovery="$(curl -fsS \
+              -H 'Host: assermetry.com' \
+              -H 'X-Forwarded-For: 127.0.0.1' \
+              -H 'X-Forwarded-Host: assermetry.com' \
+              -H 'X-Forwarded-Proto: https' \
+              -H 'X-Forwarded-Port: 443' \
+              http://127.0.0.1:18080/auth/realms/TrustNews/.well-known/openid-configuration \
+              2>/tmp/keycloak-discovery-curl.err)"; then
+              break
+            fi
+            sleep 2
+          done
+          keycloak_issuer="$(printf '%s' "$keycloak_discovery" | tr -d '\n\r ' | sed -n 's/.*"issuer":"\([^"]*\)".*/\1/p')"
+          echo "Issuer OIDC observado: ${keycloak_issuer:-<ausente>}"
+          test "$keycloak_issuer" = "https://assermetry.com/auth/realms/TrustNews" || {
+            echo "ERROR: discovery OIDC no publica el issuer definitivo"
+            exit 1
+          }
+          kill "$keycloak_pf_pid" 2>/dev/null || true
+          wait "$keycloak_pf_pid" 2>/dev/null || true
+          trap - EXIT
           kubectl rollout status statefulset/mongodb -n infra --timeout=180s
+          kubectl rollout status deployment/loki -n infra --timeout=180s
+          kubectl rollout status deployment/grafana -n infra --timeout=180s
+          kubectl rollout status daemonset/fluent-bit -n infra --timeout=180s
+          test "$(kubectl get pvc loki-data -n infra -o jsonpath='{.spec.resources.requests.storage}')" = "5Gi" || {
+            echo "ERROR: loki-data no solicita 5Gi en infra-prod"
+            exit 1
+          }
+          test "$(kubectl get pvc grafana-data -n infra -o jsonpath='{.spec.resources.requests.storage}')" = "1Gi" || {
+            echo "ERROR: grafana-data no solicita 1Gi en infra-prod"
+            exit 1
+          }
           ;;
         blockchain-prod)
           kubectl rollout status statefulset/geth-miner -n blockchain --timeout=180s
@@ -216,4 +363,12 @@ rollback:
 
   script:
     - echo "Rollback automático"
-    - kubectl rollout undo deployment -n apis
+    - |
+      case "$PROFILE" in
+        apis-frontend-prod)
+          kubectl rollout undo deployment -n apis
+          ;;
+        *)
+          echo "Sin rollback automático para el perfil $PROFILE; conservar recursos y diagnosticar"
+          ;;
+      esac

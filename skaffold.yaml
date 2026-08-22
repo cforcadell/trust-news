@@ -25,6 +25,53 @@ profiles:
         - k8s/namespaces.yaml
 
   # ---------------------------------------------------------
+  # PERFIL: TRAEFIK
+  # ---------------------------------------------------------
+  - name: traefik
+    patches:
+      - op: remove
+        path: /deploy/kubectl
+    deploy:
+      helm:
+        flags:
+          upgrade:
+            - --atomic
+        releases:
+          - name: traefik
+            remoteChart: traefik
+            repo: https://traefik.github.io/charts
+            namespace: kube-system
+            version: 41.0.2
+            valuesFiles:
+              - k8s/traefik/values.yaml
+            upgradeOnChange: true
+            wait: true
+
+  # ---------------------------------------------------------
+  # PERFIL: TRAEFIK PROD
+  # ---------------------------------------------------------
+  - name: traefik-prod
+    patches:
+      - op: remove
+        path: /deploy/kubectl
+    deploy:
+      helm:
+        flags:
+          upgrade:
+            - --atomic
+        releases:
+          - name: traefik
+            remoteChart: traefik
+            repo: https://traefik.github.io/charts
+            namespace: kube-system
+            version: 41.0.2
+            valuesFiles:
+              - k8s/traefik/values.yaml
+              - k8s/traefik/values-prod.yaml
+            upgradeOnChange: true
+            wait: true
+
+  # ---------------------------------------------------------
   # PERFIL: BLOCKCHAIN
   # ---------------------------------------------------------
   - name: blockchain
@@ -37,6 +84,9 @@ profiles:
   # ---------------------------------------------------------
   # PERFIL: INFRA BASIC
   # ---------------------------------------------------------
+  # Los port-forward 0.0.0.0 de perfiles locales permiten acceder desde el
+  # host a la VM. Usarlos solo con un adaptador host-only/privado y firewall
+  # del guest limitado al host; no conectar la VM a una red puente no fiable.
   - name: infra-basic
     build:
       artifacts:
@@ -76,13 +126,13 @@ profiles:
         - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
-        - k8s/infra/frontend-logs/*.yaml
       kustomize:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/local
           - k8s/infra/mongo-express/overlays/local
           - k8s/infra/keycloak/overlays/local
+          - k8s/infra/frontend-logs/overlays/local
 
     portForward:
       - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
@@ -188,13 +238,13 @@ profiles:
         - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
-        - k8s/infra/frontend-logs/*.yaml
       kustomize:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/prod 
           - k8s/infra/mongo-express/overlays/prod
-          - k8s/infra/keycloak/overlays/prod
+          - k8s/infra/keycloak/overlays/prod-domain
+          - k8s/infra/frontend-logs/overlays/prod
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND PROD
@@ -252,13 +302,13 @@ profiles:
           - k8s/apis/evidence-search/overlays/prod
           - k8s/apis/news-handler/overlays/prod
           - k8s/apis/news-chain/overlays/prod
-          - k8s/apis/gateway/overlays/prod
+          - k8s/apis/gateway/overlays/prod-domain
           - k8s/apis/admin/overlays/prod
           - k8s/frontend
           # Traefik/K3s HTTPS edge routes. Keep host/final certificate
-          # details in k8s/ingress/overlays/prod once the public domain is known.
-          # See docs/k8s/skaffold-server.md#27-configurar-dominio-y-tls.
-          - k8s/ingress/overlays/prod
+          # details in k8s/ingress/overlays/prod-domain.
+          # See docs/deploy/skaffold-server.md#4-dominio-traefik-y-tls.
+          - k8s/ingress/overlays/prod-domain
     portForward:
-      - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
-      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 80, localPort: 10080, address: "0.0.0.0"}
+      - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "127.0.0.1"}
+      - {resourceType: service, resourceName: frontend-service, namespace: frontend, port: 80, localPort: 10080, address: "127.0.0.1"}

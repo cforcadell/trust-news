@@ -1,4 +1,4 @@
-# TrustNews - Flujo GitLab, GitHub y release
+# Assermetry - Flujo GitLab, GitHub y release
 
 Este documento describe el flujo operativo cuando el desarrollo se hace en la
 rama `postTFM`, el despliegue se lanza manualmente desde GitLab CI y despues se
@@ -118,24 +118,29 @@ kubectl logs deployment/news-handler -n apis --tail=80
 kubectl logs deployment/evidence-search -n apis --tail=80
 ```
 
-Comprobar frontend mediante tunel:
+La comprobacion principal se realiza contra el borde real, no contra
+`frontend-service`: el acceso directo al Service omite Traefik, Gateway,
+Keycloak y el enrutamiento canonico. Antes de probar, decidir y registrar el
+estado del lock; para la matriz funcional debe estar deshabilitado.
 
-```bash
-# En Hetzner
-kubectl port-forward service/frontend-service -n frontend 10443:443
+Desde un cliente autorizado con un certificado mTLS temporal valido, verificar
+`https://assermetry.com` con la cadena TLS del servidor validada:
 
-# En local
-ssh -i ./id_rsa_hetzner_deploy -p 2222 \
-  -L 9443:127.0.0.1:10443 \
-  <usuario>@<hetzner-ip>
-```
+- el frontend responde y los recursos se cargan;
+- discovery publica exactamente
+  `https://assermetry.com/auth/realms/TrustNews` como issuer;
+- una ruta protegida del Gateway rechaza sin JWT y funciona con un JWT valido;
+- `/backend/docs`, Swagger, Redoc y OpenAPI devuelven `403` o `404`;
+- las rutas administrativas requieren mTLS y la autenticacion de Keycloak;
+- Light y Blockchain completan sus recorridos cuando la release los afecta.
 
-Abrir:
+No desactivar la validacion TLS. Mientras la regla temporal siga activa, las
+peticiones de verificacion incluyen `--cert <cert.pem>` y `--key <key.pem>`.
 
-```text
-https://localhost:9443/
-https://localhost:9443/backend/docs
-```
+Si hace falta aislar Cloudflare durante un diagnostico, usar el tunel a
+Traefik de [`skaffold-server.md`](skaffold-server.md#43-diagnostico-por-tunel),
+preservando hostname, SNI y validacion de la CA de origen. Esa comprobacion es
+complementaria y no sustituye la prueba del borde publico.
 
 Ver tambien:
 
@@ -224,7 +229,9 @@ Formato sugerido de notas:
 
 ## Verificacion
 - Frontend accesible.
-- Gateway/API docs accesibles.
+- Gateway rechaza sin JWT y acepta un JWT valido.
+- Documentacion API no publica: `403` o `404`.
+- OIDC, mTLS y rutas administrativas verificados en el borde canonico.
 - Pods `apis` y `frontend` en estado correcto.
 ```
 

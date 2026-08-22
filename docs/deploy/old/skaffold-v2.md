@@ -1,5 +1,9 @@
 # TrustNews Kubernetes Deployment Guide v2
 
+> [!WARNING]
+> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
+> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+
 Esta version reorganiza `skaffold.md` sin sustituirlo. Mantiene el orden operativo original:
 
 1. Recrear cluster.

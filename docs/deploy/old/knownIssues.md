@@ -1,5 +1,8 @@
 # Known Issues & Troubleshooting - Guía de Operaciones
 
+> [!WARNING]
+> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
+> [`README.md`](README.md) y los runbooks vigentes antes de operar.
 
 
 ---

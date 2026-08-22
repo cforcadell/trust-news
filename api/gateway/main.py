@@ -9,6 +9,7 @@ from jose import jwt, JWTError
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from jose import jwt
+from gateway.security import RequestSecurityMiddleware
 from common.models.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -24,12 +25,43 @@ load_dotenv()
 
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
+
 logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("api-gateway")
+
+
+def positive_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+        if value <= 0:
+            raise ValueError
+        return value
+    except ValueError:
+        logger.warning("%s=%r no es un entero positivo; se usara %s", name, raw_value, default)
+        return default
+
+
+GATEWAY_MAX_REQUEST_BODY_BYTES = positive_int_env("GATEWAY_MAX_REQUEST_BODY_BYTES", 5_242_880)
+
+api_docs_enabled = os.getenv("GATEWAY_API_DOCS_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 app = FastAPI(
     title="Unified API Gateway",
     root_path="/backend",
+    docs_url="/docs" if api_docs_enabled else None,
+    redoc_url="/redoc" if api_docs_enabled else None,
+    openapi_url="/openapi.json" if api_docs_enabled else None,
+)
+app.add_middleware(
+    RequestSecurityMiddleware,
+    max_request_body_bytes=GATEWAY_MAX_REQUEST_BODY_BYTES,
+    logger=logger,
 )
 
 # ============================================================
@@ -40,14 +72,19 @@ NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain.apis.svc.cluster
 IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.local:8060")
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
 
-KEYCLOAK_SERVER_INNER_URL = os.getenv("KEYCLOAK_SERVER_INNER_URL", "http://localhost:8080")
-KEYCLOAK_SERVER_HOSTNAME = os.getenv("KEYCLOAK_SERVER_HOSTNAME", "https://localhost")
-KEYCLOAK_SERVER_PORT = os.getenv("KEYCLOAK_SERVER_PORT", "7443")
-KEYCLOAK_SERVER_PATH = os.getenv("KEYCLOAK_SERVER_PATH", "auth")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "TrustNews")
-
-KEYCLOAK_REALM_EXTERNAL_URL = f"{KEYCLOAK_SERVER_HOSTNAME}:{KEYCLOAK_SERVER_PORT}/{KEYCLOAK_SERVER_PATH}/realms/{KEYCLOAK_REALM}"
-KEYCLOAK_CERTS_URL = f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
+KEYCLOAK_ISSUER_URL = os.getenv(
+    "KEYCLOAK_ISSUER_URL",
+    f"https://localhost:7443/auth/realms/{KEYCLOAK_REALM}",
+).rstrip("/")
+KEYCLOAK_SERVER_INNER_URL = os.getenv(
+    "KEYCLOAK_SERVER_INNER_URL",
+    "http://localhost:8080/auth",
+).rstrip("/")
+KEYCLOAK_JWKS_URL = os.getenv(
+    "KEYCLOAK_JWKS_URL",
+    f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs",
+).rstrip("/")
 
 # ============================================================
 # Autenticación (Simple Bearer para Swagger)
@@ -57,11 +94,9 @@ security = HTTPBearer()
 async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)):
     """Valida el token JWT pegado en Swagger o enviado por el cliente."""
     token = auth.credentials
-    headers_for_keycloak = {"Host": "localhost"}
-    
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(KEYCLOAK_CERTS_URL, headers=headers_for_keycloak, ssl=False) as resp:
+            async with session.get(KEYCLOAK_JWKS_URL) as resp:
                 if resp.status != 200:
                     raise HTTPException(status_code=500, detail="Error contactando Keycloak")
                 jwks = await resp.json()
@@ -85,7 +120,7 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
         
         logger.info("=== Debug de JWT ===")
         logger.info(f"Issuer recibido (iss): {token_iss}")
-        logger.info(f"Issuer esperado      : {KEYCLOAK_REALM_EXTERNAL_URL}")
+        logger.info(f"Issuer esperado      : {KEYCLOAK_ISSUER_URL}")
         logger.info(f"Audience (aud)       : {token_aud}")
         logger.info("====================")
         # ============================================================
@@ -96,7 +131,7 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
             token,
             rsa_key,
             algorithms=["RS256"],
-            issuer=KEYCLOAK_REALM_EXTERNAL_URL,
+            issuer=KEYCLOAK_ISSUER_URL,
             options={"verify_aud": False}
         )
         

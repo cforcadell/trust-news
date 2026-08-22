@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "https://localhost:7443/auth/realms/TrustNews/protocol/openid-connect/token")
 AUTH_CLIENT_ID = os.getenv("AUTH_CLIENT_ID", "TrustNewsApi")
-AUTH_CLIENT_SECRET = os.getenv("AUTH_CLIENT_SECRET", "glFlzU7E6j25b6N9WAVAf2Y4xWd2opMz")
+AUTH_CLIENT_SECRET = os.getenv("AUTH_CLIENT_SECRET", "")
 
 
 @pytest.fixture(scope="session")

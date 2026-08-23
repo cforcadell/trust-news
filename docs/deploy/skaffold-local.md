@@ -377,6 +377,9 @@ kubectl get pvc -A
 docker system df
 ```
 
+Detener primero los procesos `skaffold dev` para evitar que vuelvan a importar
+imágenes mientras se ejecuta la limpieza.
+
 Limpiar imágenes no usadas dentro de los nodos Kind:
 
 ```bash
@@ -384,6 +387,56 @@ for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
   docker exec "$node" crictl rmi --prune || true
 done
 ```
+
+`crictl rmi --prune` puede conservar las imágenes temporales cargadas por
+Skaffold porque containerd mantiene referencias con nombres
+`import-<fecha>@sha256:<digest>`. Previsualizar siempre esas referencias antes
+de eliminarlas:
+
+```bash
+for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
+  echo "=== $node ==="
+  docker exec "$node" sh -c \
+    'ctr --namespace k8s.io images list -q | grep "^import-" || true'
+done
+```
+
+Cuando no haya despliegues de Skaffold activos, borrar las referencias
+temporales por su nombre exacto y solicitar después una nueva poda a CRI:
+
+```bash
+for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
+  echo "=== Limpiando $node ==="
+
+  docker exec "$node" sh -c '
+    ctr --namespace k8s.io images list -q |
+      grep "^import-" |
+      while read -r ref; do
+        ctr --namespace k8s.io images rm "$ref"
+      done
+
+    crictl rmi --prune
+  '
+done
+```
+
+Verificar que no quedan referencias temporales y medir el espacio recuperado:
+
+```bash
+for node in trust-news-control-plane trust-news-worker trust-news-worker2; do
+  echo "=== $node ==="
+  docker exec "$node" sh -c \
+    'ctr --namespace k8s.io images list -q | grep -c "^import-" || true'
+  docker exec "$node" du -sh /var/lib/containerd
+done
+
+df -h /
+```
+
+Cada contador debe quedar en `0`. Las imágenes necesarias se reconstruyen o
+se vuelven a cargar en el siguiente despliegue de Skaffold. Este procedimiento
+no elimina el clúster ni sus PVC. No borrar manualmente
+`/var/lib/containerd` ni los volúmenes Docker asociados a los nodos Kind.
 
 La eliminación de PVC solo pertenece a una reconstrucción local deliberada.
 Inspeccionar siempre antes:

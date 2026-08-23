@@ -5,6 +5,15 @@ import asyncio
 from fastapi import FastAPI, Request
 import uvicorn
 import os
+import sys
+import logging
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from common.utils.logging_utils import configure_single_line_json_logging
+
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
+logger = logging.getLogger("news-chain-client")
 
 # ========================================
 # CONFIG CLIENTE
@@ -34,7 +43,7 @@ def publish_new(hash_new: dict, hash_ipfs: dict, publisher: str, callback_url: s
     resp = requests.post(f"{API_URL}/publishNew", json=payload)
     if resp.status_code == 200 or resp.status_code == 202:
         data = resp.json()
-        print(f"Orden enviada: {data}")
+        logger.info(f"Orden enviada: {data}")
         return data["order_id"], data["status"]
     else:
         raise Exception(f"Error publicando noticia: {resp.text}")
@@ -49,7 +58,7 @@ async def callback_endpoint(req: Request):
     data = await req.json()
     order_id = data.get("order_id")
     cid = data.get("cid")
-    print(f"Callback recibido para order_id={order_id}, CID={cid}")
+    logger.info(f"Callback recibido para order_id={order_id}, CID={cid}")
 
     # Firmar y enviar la transacción al smart contract
     try:
@@ -68,9 +77,9 @@ async def callback_endpoint(req: Request):
         signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-        print(f"Transacción enviada al smart contract, hash={tx_hash.hex()}")
+        logger.info(f"Transacción enviada al smart contract, hash={tx_hash.hex()}")
     except Exception as e:
-        print(f"Error enviando transacción: {e}")
+        logger.exception(f"Error enviando transacción: {e}")
 
     return {"status": "ok"}
 
@@ -83,7 +92,7 @@ if __name__ == "__main__":
     hash_ipfs = {"hash_function": "0x12", "hash_size": "0x20", "digest": "0x" + "11"*32}
 
     order_id, status = publish_new(hash_new, hash_ipfs, ACCOUNT_ADDRESS, "http://localhost:8080/callback")
-    print(f"Orden creada: {order_id}, estado inicial: {status}")
+    logger.info(f"Orden creada: {order_id}, estado inicial: {status}")
 
     # Arrancar servidor para recibir callback
     uvicorn.run(app, host="0.0.0.0", port=8080)

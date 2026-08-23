@@ -25,7 +25,6 @@ from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 from readability import Document
-from loguru import logger
 from common.models.veredicto import Validacion
 from common.models.async_models import (
     GenerateAssertionsRequest,
@@ -76,6 +75,7 @@ from common.utils.ipfs_client import get_ipfs_text
 from common.utils.scoring import calculate_order_assertion_results as calculate_order_assertion_results_common
 from common.utils.validator_registry import light_validators_for_category
 from common.utils.mongo import build_mongo_uri_from_env
+from common.utils.logging_utils import configure_single_line_json_logging
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     EnrichedAssertion,
@@ -92,7 +92,8 @@ load_dotenv()
 # =========================================================
 # Config / Logging
 # =========================================================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
 logger = logging.getLogger("fake-news-orchestrator")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", DEFAULT_KAFKA_BOOTSTRAP)
@@ -1887,7 +1888,7 @@ async def get_order(
         created_datetime = order_object_id.generation_time
         order["created"] = created_datetime.strftime("%d/%m/%Y %H:%M:%S")
     except Exception as e:
-        print(f"Error processing ObjectId: {e}")
+        logger.error(f"Error processing ObjectId: {e}")
         order["created"] = "Format Error"
 
     order["_id"] = str(order_object_id)

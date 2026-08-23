@@ -26,6 +26,18 @@ entregan accesos persistentes a clientes.
 - Documentar la inicialización, limpieza y repetición de los datos.
 - Registrar versión, configuración y resultado sin guardar tokens, secretos ni
   datos personales.
+- Parametrizar mediante `HTTP_TIMEOUT` y `PUT /admin/config` el timeout de cada
+  intento contra el proveedor LLM, con un valor predeterminado de 60 segundos.
+- Unificar en JSON de una sola línea los logs de `admin`, `evidence-search`,
+  `gateway`, `generate-asertions`, `ipfs`, `news-chain`, `news-handler` y
+  `validate-asertions`, incluidos los registros de Uvicorn y las excepciones.
+- Escapar dentro del JSON los saltos de línea de mensajes y tracebacks para que
+  CRI, Fluent Bit y Loki conserven un único evento por registro, aunque Grafana
+  pueda presentarlo indentado cuando esté activado `Prettify JSON`.
+- Sustituir salidas directas y configuraciones de logging particulares que
+  eludan el formato común. El generador no registrará prompts ni cuerpos LLM
+  completos en nivel `INFO`; registrará proveedor, modelo, intento, estado,
+  duración, tamaños y tipo de error.
 - Fijar una línea base de latencia, errores y recursos.
 
 Resultado esperado: cada regresión parte del mismo estado y genera evidencia

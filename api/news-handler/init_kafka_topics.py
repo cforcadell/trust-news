@@ -1,5 +1,14 @@
 import os
+import sys
+import logging
 from kafka.admin import KafkaAdminClient, NewTopic
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from common.utils.logging_utils import configure_single_line_json_logging
+
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
+logger = logging.getLogger("news-handler-kafka-init")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "fake_news_requests")
@@ -21,9 +30,9 @@ def create_topics():
 
     try:
         admin_client.create_topics(new_topics=topics, validate_only=False)
-        print('Kafka topics created or already exist, including LIGHT validation topics.')
+        logger.info('Kafka topics created or already exist, including LIGHT validation topics.')
     except Exception as e:
-        print(f"Error creating topics: {e}")
+        logger.exception(f"Error creating topics: {e}")
     finally:
         admin_client.close()
 

@@ -11,7 +11,8 @@ configMapGenerator:
   namespace: apis
   behavior: merge  # <-- Esto es CLAVE para solo cambiar lo que indiques abajo
   literals:
-    - AI_PROVIDER="gemini"
+    - AI_PROVIDER="openrouter"
+    - OPENROUTER_MODEL="openai/gpt-5-nano"
   
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
 # secretGenerator:

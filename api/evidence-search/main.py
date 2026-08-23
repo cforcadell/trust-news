@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -13,6 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from common.models.async_models import EvidencePreferredDomainsMode
 from common.models.evidence_models import EvidenceSearchRequestV2
 from common.utils.domain_utils import normalize_domain
+from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
 
 sys.path.append(os.path.dirname(__file__))
@@ -24,6 +26,10 @@ from app.domain_router.resolver import resolve_domains
 from app.search.providers import search_with_provider
 
 load_dotenv()
+
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
+logger = logging.getLogger("evidence-search")
 
 MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
@@ -443,7 +449,7 @@ def attach_snippet_fallback(evidence: Dict[str, Any], fetch_status: str) -> Dict
     evidence["contexts"] = [context] if context else []
     evidence["fetch_status"] = fetch_status
     if fetch_status != "not_requested":
-        print(f"[evidence-search] fallback_to_snippet=true source_id={evidence.get('source_id')} fetch_status={fetch_status}")
+        logger.info(f"[evidence-search] fallback_to_snippet=true source_id={evidence.get('source_id')} fetch_status={fetch_status}")
     return evidence
 
 
@@ -474,7 +480,7 @@ async def build_evidences_with_optional_contexts(
     total_contexts = 0
 
     if EVIDENCE_FETCH_FULL_TEXT:
-        print(f"[evidence-search] full_text_enrichment_start=true assertion_id={assertion.get('assertion_id')}")
+        logger.info(f"[evidence-search] full_text_enrichment_start=true assertion_id={assertion.get('assertion_id')}")
 
     for idx, source in enumerate(raw_results[:max_results], start=1):
         evidence = evidence_from_source_v2(source, idx, domain_resolution)
@@ -493,10 +499,10 @@ async def build_evidences_with_optional_contexts(
             continue
 
         url = evidence.get("url") or ""
-        print(f"[evidence-search] downloading_url source_id={source_id} url={url}")
+        logger.info(f"[evidence-search] downloading_url source_id={source_id} url={url}")
         fetch_result = await fetch_main_text(url, timeout=EVIDENCE_HTTP_TIMEOUT, user_agent=EVIDENCE_USER_AGENT)
         evidence["fetch_status"] = fetch_result.status
-        print(f"[evidence-search] fetch_status source_id={source_id} status={fetch_result.status} error={fetch_result.error}")
+        logger.info(f"[evidence-search] fetch_status source_id={source_id} status={fetch_result.status} error={fetch_result.error}")
 
         if fetch_result.status != "ok":
             attach_snippet_fallback(evidence, fetch_result.status)
@@ -523,9 +529,9 @@ async def build_evidences_with_optional_contexts(
         evidence["document_length_chars"] = document_length
         evidence["chunks_total"] = len(chunks)
         evidence["contexts_total"] = len(contexts)
-        print(f"[evidence-search] document_length_chars source_id={source_id} value={document_length}")
-        print(f"[evidence-search] chunks_total source_id={source_id} value={len(chunks)}")
-        print(f"[evidence-search] contexts_selected source_id={source_id} value={len(contexts)}")
+        logger.info(f"[evidence-search] document_length_chars source_id={source_id} value={document_length}")
+        logger.info(f"[evidence-search] chunks_total source_id={source_id} value={len(chunks)}")
+        logger.info(f"[evidence-search] contexts_selected source_id={source_id} value={len(contexts)}")
 
         if not chunks or not contexts:
             attach_snippet_fallback(evidence, "no_ranked_chunks")
@@ -540,7 +546,7 @@ async def build_evidences_with_optional_contexts(
         total_contexts += len(contexts)
         evidences.append(evidence)
 
-    print(f"[evidence-search] total_contexts_returned={total_contexts}")
+    logger.info(f"[evidence-search] total_contexts_returned={total_contexts}")
     return evidences
 
 
@@ -635,7 +641,7 @@ async def clear_cache():
 
     # Remove every cache document and return the deleted count for operators.
     result = await cache_collection.delete_many({})
-    print(f"[evidence-search] cache_clear=true deleted_count={result.deleted_count}")
+    logger.info(f"[evidence-search] cache_clear=true deleted_count={result.deleted_count}")
     return {
         "status": "ok",
         "cache_collection": MONGO_CACHE_COLLECTION,
@@ -673,7 +679,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             response = dict(cached["response"])
             response["cached"] = True
             response["cache_key"] = cache_key
-            print(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
+            logger.info(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
             return response
 
     # Resolve contextual preferred domains only for LOCAL mode.
@@ -704,7 +710,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
 
     # Log the routing decision to make evidence selection auditable.
     logger_prefix = f"[domain-router] assertion_id={assertion.get('assertion_id')}"
-    print(
+    logger.info(
         f"{logger_prefix} preferred_domains_mode={preferred_domains_mode.value} "
         f"preferred_profile_id={preferred_profile_id if use_local_preferred_domains else None} "
         f"selected_profiles={domain_resolution.get('selected_profiles')}"
@@ -713,12 +719,12 @@ async def search_evidence(req: EvidenceSearchRequestV2):
     # Log the legacy rendered query list for easier debugging in existing logs.
     queries = build_queries_v2(assertion, domain_resolution, effective_search_policy)
     for query in queries:
-        print(f"[evidence-search] query='{query}'")
+        logger.info(f"[evidence-search] query='{query}'")
 
     # Build provider-ready requests and log their domain filters.
     search_requests = build_search_requests(assertion, domain_resolution, effective_search_policy)
     for search_request in search_requests:
-        print(
+        logger.info(
             "[evidence-search] search_request "
             f"provider='{SEARCH_PROVIDER}' "
             f"query='{search_request['query']}' "
@@ -755,7 +761,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
                 if len(raw_results) >= effective_search_policy["max_results"]:
                     break
             except Exception as e:
-                print(f"[evidence-search] search provider failed provider='{provider_name}' query='{query}': {e}")
+                logger.warning(f"[evidence-search] search provider failed provider='{provider_name}' query='{query}': {e}")
                 provider_errors.append({"provider": provider_name, "query": query, "error": str(e) or e.__class__.__name__})
 
         # Zero results is valid. Zero successful requests is a dependency failure.
@@ -823,7 +829,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             },
             upsert=True,
         )
-        print(f"[evidence-search] cache_store=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
+        logger.info(f"[evidence-search] cache_store=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
 
     # Return the fresh response to the validator service.
     return response

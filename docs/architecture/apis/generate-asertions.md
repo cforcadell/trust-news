@@ -21,7 +21,7 @@ Las `suggested_queries` deben ser autónomas e incorporar el contexto temporal, 
 
 ## Inicialización
 
-Al arrancar carga `.env`, configura logging, selecciona proveedor de IA, tópicos Kafka, prompt, temperatura, límites y reintentos. En `startup` lanza el consumidor Kafka en segundo plano. Si se ejecuta como script, arranca uvicorn en `PORT`.
+Al arrancar carga `.env`, configura logging JSON de una sola línea, selecciona proveedor de IA, tópicos Kafka, prompt, temperatura, límites y reintentos. Los saltos de línea de mensajes y excepciones se conservan escapados dentro del JSON para que CRI, Fluent Bit y Loki mantengan un único evento. Los prompts y cuerpos completos de las respuestas LLM no se registran en nivel `INFO`; se emiten metadatos como proveedor, modelo, duración y tamaños. En `startup` lanza el consumidor Kafka en segundo plano. Si se ejecuta como script, arranca uvicorn en `PORT`.
 
 ## Variables de entorno
 
@@ -37,7 +37,7 @@ Al arrancar carga `.env`, configura logging, selecciona proveedor de IA, tópico
 - `PROMPT`: prompt base usado para extraer aserciones.
 - `TEMPERATURE`: temperatura del modelo.
 - `MAX_ASSERTIONS`: máximo de aserciones devueltas.
-- `HTTP_TIMEOUT`: timeout de llamadas al proveedor.
+- `HTTP_TIMEOUT`: timeout total, en segundos, de cada intento contra el proveedor. Es modificable mediante `PUT /admin/config` (`http_timeout`) y su valor predeterminado es `60`.
 - `NUM_REINTENTOS` o `MAX_RETRIES`: número de reintentos.
 - `RETRY_DELAY`: espera entre reintentos.
 - `PORT`: puerto de uvicorn si se ejecuta directamente.

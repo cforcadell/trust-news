@@ -42,6 +42,7 @@ from common.models.async_models import (
 )
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN, DEFAULT_TOPIC_RESPONSES
 from common.utils.ipfs_client import get_ipfs_text, get_ipfs_json
+from common.utils.logging_utils import configure_single_line_json_logging
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     SourceDocumentStorage,
@@ -60,6 +61,10 @@ from aiokafka import AIOKafkaConsumer
 # =========================================================
 load_dotenv()
 
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
+logger = logging.getLogger("TrustNewsAPI")
+
 RPC_URL = os.getenv("RPC_URL")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 ACCOUNT_ADDRESS = Web3.to_checksum_address(os.getenv("ACCOUNT_ADDRESS"))
@@ -71,9 +76,6 @@ KAFKA_REQUEST_TOPIC = os.getenv("KAFKA_REQUEST_TOPIC", DEFAULT_TOPIC_REQUESTS_BL
 KAFKA_RESPONSE_TOPIC = os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES)
 
 IPFS_FASTAPI_URL = os.getenv("IPFS_FASTAPI_URL", "http://ipfs-fastapi:8060")
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("TrustNewsAPI")
 
 # =========================================================
 # Web3 / Contract

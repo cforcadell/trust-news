@@ -14,4 +14,3 @@ data:
   KAFKA_REQUEST_TOPIC: "fake_news_requests_ipfs"
   KAFKA_RESPONSE_TOPIC: "fake_news_responses"
   LOG_LEVEL: "INFO" # Lo subo a INFO para que veas si conecta en los logs
-  LOG_FORMAT: "%(asctime)s [%(levelname)s] %(name)s - %(message)s"

@@ -21,7 +21,7 @@ Carga `.env`, configura logging, URLs IPFS y tópicos Kafka. En `startup` lanza 
 ## Variables de entorno
 
 - `LOG_LEVEL`: nivel de logging.
-- `LOG_FORMAT`: formato de logs.
+- El formato de salida es JSON de una sola línea y es común al resto de servicios Python.
 - `KAFKA_BOOTSTRAP`: bootstrap Kafka.
 - `KAFKA_REQUEST_TOPIC`: tópico de solicitudes de subida IPFS.
 - `KAFKA_RESPONSE_TOPIC`: tópico de respuestas.

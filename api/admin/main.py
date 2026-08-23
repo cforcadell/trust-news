@@ -3,13 +3,13 @@ import os
 import json
 import math
 import asyncio
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from fastapi import FastAPI, HTTPException, Query
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiokafka import AIOKafkaConsumer
-from loguru import logger
 from pydantic import BaseModel, ValidationError
 from typing import Optional, List, Dict, Any
 
@@ -20,7 +20,12 @@ from typing import Optional, List, Dict, Any
 from common.utils.kafka_contracts import ACTION_TO_QUOTA_MODEL, BILLABLE_SERVICES, DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_RESPONSES
 from common.models.async_models import ValidatorType, default_validator_type_weights
 from common.models.quota_models import ClientCreate, ClientResponse, ClientStatus, ClientUpdate, QuotaDetail
+from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
+
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
+logger = logging.getLogger("admin")
 
 # =========================================================
 # Modelos API REST (Gestión de Cuotas y Clientes)

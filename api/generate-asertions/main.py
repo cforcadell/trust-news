@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import logging
+import time
 import uuid
 import httpx
 from typing import Any, List, Optional
@@ -11,6 +12,11 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, ValidationError
 from dotenv import load_dotenv
+from common.utils.logging_utils import (
+    configure_single_line_json_logging,
+    exception_message,
+    log_event,
+)
 
 # Cargar env
 load_dotenv()
@@ -18,7 +24,7 @@ load_dotenv()
 # Logging dinámico
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
-logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+configure_single_line_json_logging(log_level)
 logger = logging.getLogger("generate-assertions-worker")
 
 # Importa modelos pydantic
@@ -41,7 +47,12 @@ from common.utils.llm_json import extract_chat_content, parse_model_list
 # Config / constantes (desde env)
 # ============================================================
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
-logger.info(f"Proveedor de IA seleccionado: {AI_PROVIDER.upper()}")
+log_event(
+    logger,
+    logging.INFO,
+    "llm_provider_selected",
+    provider=AI_PROVIDER,
+)
 
 # Kafka
 BROKER_URL = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP))
@@ -93,7 +104,7 @@ def build_assertions_prompt(text: str) -> str:
     )
 
 # Timeouts / retries
-HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
+HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "60"))
 NUM_REINTENTOS = int(os.getenv("NUM_REINTENTOS", os.getenv("MAX_RETRIES", "3")))
 MAX_RETRIES = NUM_REINTENTOS
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))
@@ -244,7 +255,17 @@ async def call_mistral(text: str) -> List[Assertion]:
         raise HTTPException(status_code=500, detail="Mistral no está configurado en variables de entorno.")
 
     full_prompt = build_assertions_prompt(text)
-    logger.info(f"[generate-asertions] Mistral prompt:\n{full_prompt}")
+    log_event(
+        logger,
+        logging.INFO,
+        "llm_request_started",
+        provider="mistral",
+        model=MISTRAL_MODEL,
+        input_chars=len(text),
+        prompt_chars=len(full_prompt),
+        timeout_seconds=HTTP_TIMEOUT,
+        max_attempts=MAX_RETRIES,
+    )
     headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MISTRAL_MODEL,
@@ -256,12 +277,34 @@ async def call_mistral(text: str) -> List[Assertion]:
 
     async with aiohttp.ClientSession() as session:
         for attempt in range(1, MAX_RETRIES + 1):
+            attempt_started = time.monotonic()
+            response_status = None
             try:
                 async with session.post(MISTRAL_API_URL, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
+                    response_status = resp.status
                     text_resp = await resp.text()
-                    logger.info(f"[generate-asertions] Mistral response status={resp.status} body:\n{text_resp}")
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "llm_response_received",
+                        provider="mistral",
+                        model=MISTRAL_MODEL,
+                        attempt=attempt,
+                        status=resp.status,
+                        duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
+                        response_chars=len(text_resp),
+                    )
                     if resp.status != 200:
-                        logger.error(f"Mistral status {resp.status}: {text_resp}")
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "llm_response_error",
+                            provider="mistral",
+                            model=MISTRAL_MODEL,
+                            attempt=attempt,
+                            status=resp.status,
+                            response_chars=len(text_resp),
+                        )
                         if resp.status in [429, 500, 502, 503, 504]:
                             raise Exception(f"Error temporal Mistral: {resp.status}")
                         raise HTTPException(status_code=resp.status, detail="Error Mistral")
@@ -271,16 +314,49 @@ async def call_mistral(text: str) -> List[Assertion]:
                     try:
                         return parse_assertions_content(extract_chat_content(data))
                     except (ValueError, ValidationError) as e:
-                        logger.error(f"Mistral devolvió una respuesta inválida: {e}")
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "llm_response_invalid",
+                            provider="mistral",
+                            model=MISTRAL_MODEL,
+                            attempt=attempt,
+                            status=resp.status,
+                            error_type=type(e).__name__,
+                            error=exception_message(e),
+                        )
                         raise ValueError("Mistral devolvió un JSON con esquema incorrecto.")
 
             except HTTPException:
                 raise
             except Exception as e:
-                logger.warning(f"Intento {attempt} fallido Mistral: {e}")
+                error_detail = exception_message(e)
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "llm_attempt_failed",
+                    provider="mistral",
+                    model=MISTRAL_MODEL,
+                    attempt=attempt,
+                    max_attempts=MAX_RETRIES,
+                    status=response_status,
+                    duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
+                    error_type=type(e).__name__,
+                    error=error_detail,
+                )
                 if attempt == MAX_RETRIES:
-                    logger.exception("Fallo definitivo llamando a Mistral")
-                    raise HTTPException(status_code=503, detail=str(e))
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "llm_request_failed",
+                        provider="mistral",
+                        model=MISTRAL_MODEL,
+                        attempts=MAX_RETRIES,
+                        error_type=type(e).__name__,
+                        error=error_detail,
+                        exc_info=True,
+                    )
+                    raise HTTPException(status_code=503, detail=error_detail)
                 await asyncio.sleep(RETRY_DELAY)
     return []
 
@@ -293,7 +369,17 @@ async def call_gemini(text: str) -> List[Assertion]:
         raise HTTPException(status_code=500, detail="Gemini no está configurado en variables de entorno.")
 
     full_prompt = build_assertions_prompt(text)
-    logger.info(f"[generate-asertions] Gemini prompt:\n{full_prompt}")
+    log_event(
+        logger,
+        logging.INFO,
+        "llm_request_started",
+        provider="gemini",
+        model=GEMINI_MODEL,
+        input_chars=len(text),
+        prompt_chars=len(full_prompt),
+        timeout_seconds=HTTP_TIMEOUT,
+        max_attempts=MAX_RETRIES,
+    )
 
     api_endpoint = f"{GEMINI_API_URL}/models/{GEMINI_MODEL}:generateContent"
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
@@ -312,12 +398,34 @@ async def call_gemini(text: str) -> List[Assertion]:
 
     async with aiohttp.ClientSession() as session:
         for attempt in range(1, MAX_RETRIES + 1):
+            attempt_started = time.monotonic()
+            response_status = None
             try:
                 async with session.post(api_endpoint, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
+                    response_status = resp.status
                     text_resp = await resp.text()
-                    logger.info(f"[generate-asertions] Gemini response status={resp.status} body:\n{text_resp}")
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "llm_response_received",
+                        provider="gemini",
+                        model=GEMINI_MODEL,
+                        attempt=attempt,
+                        status=resp.status,
+                        duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
+                        response_chars=len(text_resp),
+                    )
                     if resp.status != 200:
-                        logger.error(f"Gemini status {resp.status}: {text_resp}")
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "llm_response_error",
+                            provider="gemini",
+                            model=GEMINI_MODEL,
+                            attempt=attempt,
+                            status=resp.status,
+                            response_chars=len(text_resp),
+                        )
                         if resp.status in [429, 500, 502, 503, 504]:
                             raise Exception(f"Error temporal Gemini: {resp.status}")
                         raise HTTPException(status_code=resp.status, detail="Error Gemini")
@@ -328,16 +436,50 @@ async def call_gemini(text: str) -> List[Assertion]:
                         json_string = data["candidates"][0]["content"]["parts"][0]["text"]
                         return parse_assertions_content(json_string)
                     except (KeyError, IndexError, ValueError, ValidationError) as e:
-                        logger.error(f"Gemini devolvió una respuesta inválida: {e}; raw: {text_resp}")
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "llm_response_invalid",
+                            provider="gemini",
+                            model=GEMINI_MODEL,
+                            attempt=attempt,
+                            status=resp.status,
+                            response_chars=len(text_resp),
+                            error_type=type(e).__name__,
+                            error=exception_message(e),
+                        )
                         raise ValueError("Gemini devolvió un JSON con esquema incorrecto.")
             
             except HTTPException:
                 raise
             except Exception as e:
-                logger.warning(f"Intento {attempt} fallido Gemini: {e}")
+                error_detail = exception_message(e)
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "llm_attempt_failed",
+                    provider="gemini",
+                    model=GEMINI_MODEL,
+                    attempt=attempt,
+                    max_attempts=MAX_RETRIES,
+                    status=response_status,
+                    duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
+                    error_type=type(e).__name__,
+                    error=error_detail,
+                )
                 if attempt == MAX_RETRIES:
-                    logger.exception("Fallo definitivo llamando a Gemini")
-                    raise HTTPException(status_code=503, detail=str(e))
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "llm_request_failed",
+                        provider="gemini",
+                        model=GEMINI_MODEL,
+                        attempts=MAX_RETRIES,
+                        error_type=type(e).__name__,
+                        error=error_detail,
+                        exc_info=True,
+                    )
+                    raise HTTPException(status_code=503, detail=error_detail)
                 await asyncio.sleep(RETRY_DELAY)
     return []
 
@@ -359,7 +501,17 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
     full_prompt = build_assertions_prompt(text)
     if contexto:
         full_prompt += f"\nContexto adicional:\n{contexto}"
-    logger.info(f"[generate-asertions] OpenRouter prompt:\n{full_prompt}")
+    log_event(
+        logger,
+        logging.INFO,
+        "llm_request_started",
+        provider="openrouter",
+        model=OPENROUTER_MODEL,
+        input_chars=len(text),
+        prompt_chars=len(full_prompt),
+        timeout_seconds=HTTP_TIMEOUT,
+        max_attempts=MAX_RETRIES,
+    )
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -374,10 +526,10 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
         "temperature": TEMPERATURE
     }
 
-    logger.info(f"Llamando a OpenRouter con prompt: {full_prompt[:200]}...")
-
     async with aiohttp.ClientSession() as session:
         for attempt in range(1, MAX_RETRIES + 1):
+            attempt_started = time.monotonic()
+            response_status = None
             try:
                 async with session.post(
                     OPENROUTER_API_URL,
@@ -385,11 +537,31 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
                     json=payload,
                     timeout=HTTP_TIMEOUT
                 ) as resp:
-
+                    response_status = resp.status
                     text_resp = await resp.text()
-                    logger.info(f"[generate-asertions] OpenRouter response status={resp.status} body:\n{text_resp}")
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "llm_response_received",
+                        provider="openrouter",
+                        model=OPENROUTER_MODEL,
+                        attempt=attempt,
+                        status=resp.status,
+                        duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
+                        response_chars=len(text_resp),
+                    )
 
                     if resp.status != 200:
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "llm_response_error",
+                            provider="openrouter",
+                            model=OPENROUTER_MODEL,
+                            attempt=attempt,
+                            status=resp.status,
+                            response_chars=len(text_resp),
+                        )
                         # Si es un error de cuota o temporal, el except Exception lo capturará para reintentar
                         if resp.status in [429, 500, 502, 503, 504]:
                              raise Exception(f"Error temporal del servidor: {resp.status}")
@@ -400,20 +572,61 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
                     try:
                         assertions = parse_assertions_content(extract_chat_content(data))
                     except (ValueError, ValidationError) as e:
-                        logger.error(f"OpenRouter devolvió una respuesta inválida: {e}")
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "llm_response_invalid",
+                            provider="openrouter",
+                            model=OPENROUTER_MODEL,
+                            attempt=attempt,
+                            status=resp.status,
+                            error_type=type(e).__name__,
+                            error=exception_message(e),
+                        )
                         raise ValueError("OpenRouter devolvió un JSON con esquema incorrecto.")
 
-                    logger.info(f"OpenRouter devolvió {len(assertions)} aserciones válidas")
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "llm_response_parsed",
+                        provider="openrouter",
+                        model=OPENROUTER_MODEL,
+                        attempt=attempt,
+                        assertions=len(assertions),
+                    )
                     return assertions
 
             except HTTPException as he:
                 # No reintentamos si es un error de cliente (4xx) definido explícitamente
                 raise he
             except Exception as e:
-                logger.warning(f"Intento {attempt}/{MAX_RETRIES} fallido OpenRouter: {str(e)}")
+                error_detail = exception_message(e)
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "llm_attempt_failed",
+                    provider="openrouter",
+                    model=OPENROUTER_MODEL,
+                    attempt=attempt,
+                    max_attempts=MAX_RETRIES,
+                    status=response_status,
+                    duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
+                    error_type=type(e).__name__,
+                    error=error_detail,
+                )
                 if attempt == MAX_RETRIES:
-                    logger.exception("Fallo definitivo tras reintentos llamando a OpenRouter")
-                    raise HTTPException(status_code=503, detail=f"Servicio no disponible: {str(e)}")
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "llm_request_failed",
+                        provider="openrouter",
+                        model=OPENROUTER_MODEL,
+                        attempts=MAX_RETRIES,
+                        error_type=type(e).__name__,
+                        error=error_detail,
+                        exc_info=True,
+                    )
+                    raise HTTPException(status_code=503, detail=f"Servicio no disponible: {error_detail}")
                 
                 await asyncio.sleep(RETRY_DELAY)
 
@@ -681,9 +894,21 @@ async def update_admin_config(config: AdminConfigUpdate):
             OPENROUTER_MODEL = config.openrouter.model
             set_runtime_env("OPENROUTER_MODEL", OPENROUTER_MODEL)
 
-    logger.info(
-        "Configuracion de generate-asertions actualizada en memoria: "
-        f"provider={AI_PROVIDER.upper()} max_assertions={MAX_ASSERTIONS} temperature={TEMPERATURE}"
+    log_event(
+        logger,
+        logging.INFO,
+        "runtime_config_updated",
+        provider=AI_PROVIDER,
+        model={
+            "mistral": MISTRAL_MODEL,
+            "gemini": GEMINI_MODEL,
+            "openrouter": OPENROUTER_MODEL,
+        }.get(AI_PROVIDER),
+        max_assertions=MAX_ASSERTIONS,
+        temperature=TEMPERATURE,
+        timeout_seconds=HTTP_TIMEOUT,
+        max_attempts=MAX_RETRIES,
+        retry_delay_seconds=RETRY_DELAY,
     )
     return {
         "status": "ok",

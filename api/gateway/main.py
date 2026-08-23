@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from jose import jwt
 from gateway.security import RequestSecurityMiddleware
+from common.utils.logging_utils import configure_single_line_json_logging
 from common.models.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -26,7 +27,7 @@ load_dotenv()
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 
-logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+configure_single_line_json_logging(log_level)
 logger = logging.getLogger("api-gateway")
 
 

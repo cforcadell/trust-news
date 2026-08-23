@@ -31,6 +31,7 @@ from common.models.protocol_models import (
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
 from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
 from common.utils.llm_json import strip_json_markdown
+from common.utils.logging_utils import configure_single_line_json_logging
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -57,10 +58,8 @@ class ProviderModelFilter(logging.Filter):
         return True
 
 # 1. Configuramos el formato global
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(levelname)s] %(provider_model)s: %(message)s"
-)
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
 
 # 2. LA MAGIA AQUÍ: Inyectamos el filtro en todos los handlers raíz
 for handler in logging.root.handlers:
@@ -1476,4 +1475,3 @@ async def startup_event():
             logger.error("Registro de validador en startup falló.")
     except Exception as e:
         logger.exception(f"Error en startup registrar validador: {e}")
-

@@ -356,6 +356,12 @@ Grafana/Loki:
 kubectl port-forward service/grafana -n infra 3300:3000
 ```
 
+Los servicios Python desplegados escriben JSON de una sola línea en `stdout`.
+Los saltos de línea incluidos en mensajes y tracebacks se escapan dentro del
+JSON, de modo que CRI, Fluent Bit y Loki conservan un evento por registro. Las
+utilidades CLI de estadísticas mantienen su salida tabular para uso interactivo
+y no forman parte de la ingestión normal de Kubernetes.
+
 Datasource Loki:
 
 ```text

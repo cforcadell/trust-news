@@ -1,122 +1,18 @@
 # Próximas versiones
 
 Este documento contiene únicamente las versiones posteriores a la versión en
-curso. El estado de `v0.0.12` está en [`version.md`](version.md) y las
-versiones publicadas en [`releases.md`](releases.md).
+curso. El estado de la versión en curso está en [`version.md`](version.md) y
+las versiones publicadas en [`releases.md`](releases.md).
 
 ## Resumen
 
 | Versión | Objetivo | Criterio principal de salida |
 | --- | --- | --- |
-| v0.0.13 | Estabilización funcional y demo repetible | Regresión GUI/API superada, sin P0/P1 y tres demos internas consecutivas |
 | v0.0.14 | Beta cerrada por invitación | Dos evaluaciones externas y un candidato a design partner |
 | v0.0.15 | Piloto con design partners | Un piloto con evidencia de valor y decisión explícita de continuidad |
 | v0.0.16 | Preparación de producción | Hardening y recuperación demostrados; riesgos resueltos o aceptados |
 | v0.9.0 | Release Candidate | Regresión integral y decisión formal GO/NO-GO |
 | v1.0.0 | Producción controlada | Caso repetible, compromiso contractual y operación aceptada |
-
-## v0.0.13 - Estabilización funcional y demo repetible
-
-### Objetivo
-
-Probar sistemáticamente la GUI y la API, corregir los problemas fundamentales y
-obtener una demo privada reproducible con datos sintéticos. El estado del lock
-se decide explícitamente para cada ventana y se comprueba antes y después de
-ella. Durante toda esta versión se conservan la regla mTLS general temporal para
-las rutas no administrativas y la regla mTLS administrativa permanente. No se
-entregan accesos persistentes a clientes.
-
-### Fase 13.1 - Preparación reproducible
-
-- Crear un conjunto fijo de datos sintéticos sin información de clientes.
-- Definir identidades pseudónimas de administrador, usuario y cliente API para
-  al menos dos organizaciones sintéticas.
-- Preparar casos Light y Blockchain con resultados comprobables.
-- Documentar la inicialización, limpieza y repetición de los datos.
-- Registrar versión, configuración y resultado sin guardar tokens, secretos ni
-  datos personales.
-- Fijar una línea base de latencia, errores y recursos.
-
-Resultado esperado: cada regresión parte del mismo estado y genera evidencia
-comparable.
-
-### Fase 13.2 - Regresión de GUI
-
-- Login, sesión, refresh, logout y expiración.
-- Navegación y control por rol.
-- Creación, consulta y seguimiento de órdenes.
-- Flujos completos Light y Blockchain.
-- Aserciones, validaciones, evidencias, validadores y enlaces entre entidades.
-- Filtros, búsqueda, paginación, cuotas y límites.
-- Estados vacíos, carga, error, timeout y reintento.
-- Español e inglés.
-- Chrome, Edge y Firefox, resoluciones habituales y comprobación móvil básica.
-- Ausencia de errores relevantes en consola y de mensajes que expongan trazas,
-  secretos o detalles internos.
-
-Resultado esperado: recorridos repetibles y sin defectos bloqueantes para una
-demo.
-
-### Fase 13.3 - Regresión de API y aislamiento
-
-- Definir `TrustNewsApi` como audiencia de la API y activar la validación de
-  `aud`.
-- Validar `azp` o `client_id` contra una lista explícita de clientes
-  presentadores.
-- Probar autenticación válida, ausente, expirada y manipulada.
-- Probar autorización de administrador, usuario y service account.
-- Derivar la organización server-side desde el token verificado o desde una
-  asociación interna inmutable.
-- Rechazar o ignorar de forma segura cualquier `client_id` u organización
-  aportados por el frontend para sustituir la identidad efectiva.
-- Demostrar aislamiento entre organizaciones en listados, detalles, órdenes,
-  aserciones, validaciones, evidencias, búsquedas, exportaciones y enlaces
-  indirectos.
-- Impedir que un administrador de cliente obtenga privilegios globales.
-- Cubrir creación y seguimiento de órdenes, cuotas, recomendaciones,
-  validadores, categorías y los modos Light y Blockchain.
-- Probar esquemas, campos ausentes, parámetros inválidos, límites de tamaño y
-  respuestas `400`, `401`, `403`, `404`, `409`, `413`, `429` y
-  `5xx`.
-- Comprobar timeouts, reintentos y compatibilidad entre Gateway y servicios.
-- Evitar que respuestas, errores o logs revelen datos de otra organización.
-- Ampliar los tests Python hasta disponer de una regresión de contrato
-  repetible.
-
-Resultado esperado: contratos estables y aislamiento completo aplicado en el
-servidor.
-
-### Fase 13.4 - Corrección y ensayos de demo
-
-Cada defecto se reproduce, documenta, clasifica, corrige y vuelve a probar junto
-con la regresión completa.
-
-- Resolver
-  [`ISSUE-001`](issues.md#issue-001---carrera-de-inicializacion-en-la-cache-de-validadores-light):
-  eliminar la carrera de inicialización de la caché LIGHT y superar todas sus
-  pruebas de concurrencia y despliegue sin refresco manual.
-
-- **P0:** seguridad, corrupción o pérdida de datos, o plataforma inaccesible.
-- **P1:** rompe autenticación, órdenes, Light, Blockchain o cuotas; permite
-  cambiar de organización, acceder a datos ajenos o elevar privilegios.
-- **P2:** degradación visible con alternativa temporal aceptable.
-- **P3:** problema cosmético o mejora no necesaria para la demo.
-
-Hay congelación funcional: no se incorporan X/Threads, reputación, LLM dedicado
-ni Cloudflare Tunnel.
-
-### Criterio de salida
-
-- No quedan defectos P0 ni P1.
-- `ISSUE-001` está resuelta y validada en Kind y Hetzner.
-- Los P2 aceptados están documentados.
-- GUI y API superan una regresión reproducible.
-- Login, Light y Blockchain funcionan en tres demos consecutivas; una se
-  ejecuta desde otra red o equipo con un certificado cliente temporal válido.
-- No existe bypass del aislamiento por organización.
-- La demo puede inicializarse, ejecutarse, limpiarse y cerrarse.
-- Existe un guion de demo y una lista de limitaciones conocidas.
-- La plataforma no se presenta como producción ni como alta disponibilidad.
 
 ## v0.0.14 - Beta cerrada por invitación
 
@@ -294,7 +190,7 @@ exige evidencia de restauración, no solo la existencia de ficheros de backup.
 
 Puede sustituirse el inbound HTTPS por un Named Tunnel iniciado desde el
 clúster, únicamente si un análisis explícito justifica el cambio. No forma parte
-de `v0.0.13` y se estima en 12 a 18 horas técnicas.
+de la versión en curso y se estima en 12 a 18 horas técnicas.
 
 Condiciones mínimas:
 
@@ -366,8 +262,8 @@ regla de lock continúa disponible y su activación está probada.
 ## Secuencia transversal
 
 1. Demo interna con datos sintéticos y operador presente.
-2. Demo externa guiada con identidad OIDC temporal y, mientras siga vigente
-   `v0.0.13`, certificado cliente temporal.
+2. Demo externa guiada con identidad OIDC temporal y, mientras siga vigente la
+   protección temporal de la versión en curso, certificado cliente temporal.
 3. Evaluación cerrada con credenciales persistentes y fecha final.
 4. Piloto con alcance, métricas y soporte pactados.
 5. Release Candidate sin nuevas funcionalidades.

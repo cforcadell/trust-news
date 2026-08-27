@@ -708,7 +708,7 @@ namespaces de la sección 13.1. La acción continúa siendo `Block`. No crear un
 segunda regla para este bloqueo: así, editar el mismo slot al abrir clientes
 permite retirar solo mTLS y conservar la protección de rutas.
 
-Mientras no se abra el servicio a clientes, la composición será:
+La composición durante la v0.0.13 será:
 
 1. maintenance lock, si se conserva;
 2. mTLS permanente de administración;
@@ -717,10 +717,9 @@ Mientras no se abra el servicio a clientes, la composición será:
 4. bloqueo de recursos no públicos;
 5. bloqueo de métodos inesperados del Gateway.
 
-Al abrir clientes, se editará la tercera regla en el mismo slot: se eliminará
-su condición mTLS, se conservará el bloqueo de namespaces y se cambiará el
-nombre a `Default deny - public path namespaces`. El mTLS administrativo no se
-modifica.
+La retirada de mTLS y el cambio de nombre para abrir clientes están fuera de
+este plan y se ejecutarán como primer paso de la v0.0.14, según
+[`next_releases.md`](next_releases.md).
 
 ### 11.2 URL Normalization
 
@@ -833,18 +832,47 @@ ajustes de código y preservación de query están documentados en
 
 ---
 
-## 13. Retirar el mTLS temporal y conservar `default deny`
+## 13. Estado que se entrega a la v0.0.14
 
-Este paso se ejecuta únicamente cuando se decida abrir el servicio a clientes.
+La retirada del mTLS temporal y la apertura a clientes no forman parte de la
+v0.0.13. Se ejecutarán como primer paso de la v0.0.14, con una ventana
+controlada y rollback preparado.
+
 Hasta entonces, la regla del punto 11 mantiene mTLS general y protección de
-rutas en el mismo slot. La combinación es operativamente válida porque una
-petición debe satisfacer ambas condiciones: certificado cliente válido y
-namespace permitido. No sustituye la autenticación, autorización ni el
-aislamiento que aplican Gateway y las APIs.
+rutas en el mismo slot. La combinación bloquea si no hay certificado cliente
+válido **o** si el path no pertenece a un namespace permitido. No sustituye la
+autenticación, autorización ni el aislamiento que aplican Gateway y las APIs.
 
-### 13.1 Expresión final
+### 13.1 Estado temporal validado
 
-Nombre final recomendado después de abrir clientes:
+Nombre temporal:
+
+```text
+Temporary mTLS and public path gate - assermetry.com
+```
+
+Expresión conceptual que debe conservarse validada en Cloudflare:
+
+```text
+(http.host eq "assermetry.com" and
+ (not cf.tls_client_auth.cert_verified or
+  not (
+    starts_with(http.request.uri.path, "/gui/") or
+    http.request.uri.path eq "/backend" or
+    starts_with(http.request.uri.path, "/backend/") or
+    http.request.uri.path eq "/auth" or
+    starts_with(http.request.uri.path, "/auth/")
+  )))
+```
+
+La condición `not cf.tls_client_auth.cert_verified` representa la condición
+mTLS temporal existente. Si la regla actual usa otra expresión equivalente,
+conservar esa expresión exacta y combinarla con `OR` con el bloqueo de
+namespaces. La acción es `Block`.
+
+### 13.2 Expresión final de la v0.0.14
+
+Nombre final después de abrir clientes:
 
 ```text
 Default deny - public path namespaces
@@ -876,34 +904,7 @@ WAF. Si cualquiera de esos redirects se desactiva accidentalmente, el
 La comparación se mantiene sensible a mayúsculas. Con URL Normalization activa,
 las Custom Rules reciben el path normalizado.
 
-### 13.2 Procedimiento sin abrir una ventana de acceso
-
-Como los cinco slots están ocupados, editar la regla temporal en el mismo slot
-es más seguro que borrarla y crear otra:
-
-1. Confirmar que el maintenance lock está activo.
-2. Confirmar que `/gui/` devuelve `403` a través de Cloudflare.
-3. Abrir `Security` > `Security rules`.
-4. Editar `Temporary mTLS and public path gate - assermetry.com`.
-5. Conservar previamente, en ubicación segura, su nombre, expresión y acción.
-6. Seleccionar `Edit expression` y eliminar únicamente la condición mTLS,
-   manteniendo la expresión de namespaces permitidos de la sección 13.1.
-7. Cambiar el nombre a `Default deny - public path namespaces`.
-8. Mantener la acción `Block` y el código WAF predeterminado `403`.
-9. Seleccionar `Deploy`.
-10. Si la interfaz permite reordenar, moverla al último lugar. De este modo las
-    reglas específicas de administración, recursos y métodos conservan una
-    atribución más precisa en Security Events.
-11. Confirmar que las cinco reglas siguen activas y que la regla mTLS
-    administrativa no ha sido modificada.
-
-La creación y edición de Custom Rules se realiza en `Security` >
-`Security rules`; Cloudflare documenta los campos y la acción `Block` en
-[Create a custom rule in the dashboard](https://developers.cloudflare.com/waf/custom-rules/create-dashboard/).
-
-Si existe un slot libre de forma verificable, también se puede crear la regla
-como draft, revisar, desplegar y solo entonces retirar la temporal. Nunca
-desactivar primero la protección temporal con el lock apagado.
+La edición se realizará en el primer paso de la v0.0.14, no durante este plan.
 
 ### 13.3 Alcance real de la regla
 
@@ -918,15 +919,17 @@ cada aplicación.
 
 ---
 
-## 14. Abrir y validar el servicio
+## 14. Validar el estado cerrado de la v0.0.13
 
 ### 14.1 Preparar rollback inmediato
 
 Antes de apagar el lock:
 
-- dejar abierta la pantalla de edición de `Default deny`;
+- dejar abierta la pantalla de edición de la regla temporal combinada;
 - tener disponible la expresión anterior del mTLS temporal;
 - confirmar acceso a GitLab y Hetzner;
+- disponer del certificado y la clave del cliente temporal, y de un certificado
+  temporal revocado para la prueba negativa;
 - confirmar que el certificado administrativo de respaldo está disponible;
 - elegir una ventana de observación sin otras modificaciones simultáneas.
 
@@ -939,16 +942,29 @@ Antes de apagar el lock:
    ahora.
 4. Ejecutar inmediatamente la matriz siguiente.
 
-### 14.3 Matriz externa sin certificado cliente
+### 14.3 Matriz externa con certificado cliente temporal
+
+Definir las rutas de los certificados solo en la sesión de terminal. No
+guardarlas en el repositorio ni imprimir certificados, claves o tokens:
+
+```bash
+read -rp 'Ruta del certificado cliente temporal: ' ASSERMETRY_CLIENT_CERT
+read -rp 'Ruta de la clave cliente temporal: ' ASSERMETRY_CLIENT_KEY
+
+CLIENT_TLS=(--cert "$ASSERMETRY_CLIENT_CERT" --key "$ASSERMETRY_CLIENT_KEY")
+```
 
 ```bash
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "${CLIENT_TLS[@]}" \
   https://assermetry.com/)" = "302"
 
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "${CLIENT_TLS[@]}" \
   https://assermetry.com/gui)" = "302"
 
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "${CLIENT_TLS[@]}" \
   https://assermetry.com/gui/)" = "200"
 
 for test_path in \
@@ -960,6 +976,7 @@ for test_path in \
   /backend-malicious \
   /auth-malicious; do
   observed_code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    "${CLIENT_TLS[@]}" \
     "https://assermetry.com${test_path}")"
   test "$observed_code" = "403" || {
     echo "FAIL ${test_path}: ${observed_code}"
@@ -972,24 +989,42 @@ Comprobar rutas conocidas:
 
 ```bash
 curl --fail --show-error \
+  "${CLIENT_TLS[@]}" \
   https://assermetry.com/auth/realms/TrustNews/.well-known/openid-configuration \
   -o /tmp/assermetry-public-discovery.json
 
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "${CLIENT_TLS[@]}" \
   https://assermetry.com/backend/docs)" = "403"
 
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "${CLIENT_TLS[@]}" \
   -X DELETE https://assermetry.com/backend/orders/deployment-probe)" = "403"
 ```
 
 Una ruta protegida válida del Gateway sin JWT debe llegar al Gateway y devolver
-`401` o `403` según el endpoint, no el bloqueo por path desconocido.
+`401` o `403` según el endpoint, no el bloqueo por path desconocido:
+
+```bash
+gateway_code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "${CLIENT_TLS[@]}" \
+  https://assermetry.com/backend/orders/list)"
+case "$gateway_code" in
+  401|403) ;;
+  *) echo "FAIL /backend/orders/list: ${gateway_code}"; exit 1 ;;
+esac
+echo "PASS /backend/orders/list: ${gateway_code}"
+```
 
 ### 14.4 Administración Keycloak
 
-Sin certificado cliente:
+Sin certificado cliente general, una ruta pública y una ruta administrativa
+deben quedar bloqueadas por sus reglas mTLS:
 
 ```bash
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  https://assermetry.com/gui/)" = "403"
+
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
   https://assermetry.com/auth/admin/)" = "403"
 ```
@@ -1013,9 +1048,25 @@ Resultado: la petición supera mTLS y llega a Keycloak, donde todavía se exige
 autenticación administrativa. Un certificado revocado debe seguir recibiendo
 `403`.
 
+Probar también el certificado temporal revocado contra `/gui/` y conservar solo
+el resultado HTTP:
+
+```bash
+read -rp 'Ruta del certificado cliente temporal revocado: ' ASSERMETRY_REVOKED_CERT
+read -rp 'Ruta de la clave cliente temporal revocada: ' ASSERMETRY_REVOKED_KEY
+
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cert "$ASSERMETRY_REVOKED_CERT" \
+  --key "$ASSERMETRY_REVOKED_KEY" \
+  https://assermetry.com/gui/)" = "403"
+
+unset ASSERMETRY_REVOKED_CERT ASSERMETRY_REVOKED_KEY
+unset ASSERMETRY_CLIENT_CERT ASSERMETRY_CLIENT_KEY CLIENT_TLS
+```
+
 ### 14.5 Regresión funcional pública
 
-Desde una ventana limpia y sin certificado cliente general:
+Desde una ventana limpia y con el certificado cliente temporal:
 
 - [ ] `/` redirige una sola vez a `/gui/`;
 - [ ] login, refresh y logout funcionan;
@@ -1027,7 +1078,7 @@ Desde una ventana limpia y sin certificado cliente general:
 - [ ] polling termina o presenta timeout/reintento;
 - [ ] roles, cuotas y aislamiento siguen funcionando;
 - [ ] consola del navegador no muestra errores relevantes;
-- [ ] no se necesita certificado cliente para uso normal;
+- [ ] el uso normal funciona con el certificado cliente temporal;
 - [ ] administración continúa exigiendo certificado.
 
 Repetir desde una segunda red para descartar dependencias de caché, allowlists o
@@ -1037,7 +1088,7 @@ sesión local.
 
 En Cloudflare `Security` > `Events` comprobar, sin exportar identificadores:
 
-- scanner paths atribuidos a `Default deny - public path namespaces`;
+- scanner paths atribuidos al gate temporal combinado;
 - `/backend/docs` atribuido al bloqueo de recursos no públicos;
 - `DELETE /backend/...` atribuido al bloqueo de métodos;
 - administración sin certificado atribuida al mTLS permanente;
@@ -1053,6 +1104,13 @@ la IP del origen en este documento.
 
 ### 15.1 Observación
 
+Mantener una ventana de observación de al menos 30 minutos y repetir la matriz
+de smoke cada 10 minutos desde la conexión autorizada y una conexión sin
+certificado. Registrar timestamp, ruta, código HTTP y resultado `PASS`/`FAIL`,
+sin guardar identificadores de Cloudflare, IP, tokens ni cuerpos de respuesta.
+La observación termina en `PASS` si no aparece ningún fallo P0/P1, ningún
+bloqueo inesperado de rutas permitidas y no hay una subida sostenida de `5xx`.
+
 Durante la ventana definida revisar:
 
 ```bash
@@ -1064,6 +1122,10 @@ kubectl get events -A --sort-by=.lastTimestamp
 
 En Grafana/Loki revisar tasas de `4xx`, `5xx`, errores OIDC, timeouts y reinicios
 sin copiar tokens, cuerpos, IP o datos personales.
+
+Comprobar además que los `403` esperados se atribuyen a la regla correcta y que
+las solicitudes permitidas llegan a Traefik/Gateway/Keycloak. Un `403` no basta
+por sí solo para demostrar que la regla correcta se ejecutó.
 
 Mantener los redirects en `302` durante esta fase. Cambiar a `301` únicamente
 cuando varias regresiones consecutivas sean correctas y se acepte el efecto de
@@ -1083,12 +1145,15 @@ caché de un redirect permanente.
 
 1. Activar inmediatamente el maintenance lock.
 2. Si se exige bloqueo absoluto, desactivar también los dos Single Redirects.
-3. Editar `Default deny - public path namespaces`.
+3. Editar la regla del mismo slot.
 4. Restaurar nombre, expresión combinada y acción de
   `Temporary mTLS and public path gate - assermetry.com`.
 5. Confirmar que el mTLS temporal vuelve a bloquear rutas no administrativas
-  sin certificado y que los namespaces no permitidos siguen bloqueados.
+   sin certificado y que los namespaces no permitidos siguen bloqueados.
 6. Mantener intacta la regla mTLS administrativa.
+7. Repetir la matriz mínima: `/gui/` con certificado temporal válido debe
+  responder `200`, sin certificado debe responder `403`, y un path fuera de
+  namespace debe responder `403` incluso con certificado válido.
 
 ### 15.4 Rollback Kubernetes
 
@@ -1108,6 +1173,11 @@ que el frontend ya no sirve.
 
 No borrar PVC ni Secrets y no hacer `git reset --hard` como rollback operativo.
 
+Después de cualquier rollback de Kubernetes, repetir como mínimo el smoke de
+`/gui/`, sus assets, discovery OIDC y una ruta válida del Gateway. Confirmar
+también que no se ha reintroducido el catch-all `/` ni se ha desalineado
+`TrustNewsWeb`.
+
 ---
 
 # Parte IV - Cierre e incorporación a `version.md`
@@ -1121,12 +1191,12 @@ No borrar PVC ni Secrets y no hacer `git reset --hard` como rollback operativo.
 - [ ] Redirects exactos activos con `302` y query preservada.
 - [ ] Antes de abrir clientes: gate temporal con mTLS general y bloqueo de
   namespaces no permitidos validado.
-- [ ] Al abrir clientes: condición mTLS retirada y `default deny` conservado en
-  el mismo slot.
+- [ ] La retirada de mTLS queda fuera de esta versión y se traslada al primer
+  paso de la v0.0.14.
 - [ ] Scanner paths y prefijos falsos bloqueados con `403`.
 - [ ] Administración sin certificado bloqueada.
 - [ ] Administración con certificado válido llega a Keycloak.
-- [ ] LIGHT y BLOCKCHAIN funcionan sin certificado general.
+- [ ] LIGHT y BLOCKCHAIN funcionan con el certificado cliente temporal.
 - [ ] Timeout, error y reintento del frontend comprobados.
 - [ ] Origen no accesible directamente desde una red no autorizada.
 - [ ] Sin defectos P0/P1 ni regresiones sostenidas durante la observación.
@@ -1147,7 +1217,7 @@ Solo después de completar la sección 16:
    - LIGHT por defecto y Blockchain mediante checkbox;
    - progreso, timeouts, errores y reintentos comprobados;
    - redirects exactos de Cloudflare activos;
-   - `default deny` activo y mTLS administrativo conservado;
+  - gate temporal combinado validado y mTLS administrativo conservado;
    - commit y referencias sanitizadas de pipelines/evidencias.
 3. Actualizar el estado o criterio de salida de la versión únicamente si el
    resto de fases de `v0.0.13` también lo permite.
@@ -1167,8 +1237,9 @@ Texto base sugerido para la promoción:
 - `TrustNewsWeb` alineado con redirects y post-logout `/gui/*`.
 - LIGHT es el modo predeterminado; Blockchain se activa mediante checkbox.
 - Progreso, timeout, errores y reintentos de aserciones/verificación validados.
-- Cloudflare usa redirects exactos de `/` y `/gui`, `default deny` de namespaces
-  públicos y conserva mTLS para la administración de Keycloak.
+- Cloudflare usa redirects exactos de `/` y `/gui`, el gate temporal combinado
+  de mTLS y namespaces públicos, y conserva mTLS para la administración de
+  Keycloak.
 - Regresión LIGHT/BLOCKCHAIN, OIDC, WAF y acceso al origen: PASS.
 ```
 

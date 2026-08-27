@@ -16,12 +16,11 @@ puntos anteriores se consideran OK.
 Probar sistemáticamente la GUI y la API, corregir los problemas fundamentales y
 obtener una demo privada reproducible con datos sintéticos. El estado del lock
 se decide explícitamente para cada ventana y se comprueba antes y después de
-ella. Mientras no se abra el servicio a clientes, se conserva un gate temporal
-que combina mTLS general para las rutas no administrativas con el bloqueo de
-namespaces no permitidos, además de la regla mTLS administrativa permanente. Al
-abrir clientes, se retirará únicamente la condición mTLS del gate y se
-conservará el bloqueo de namespaces. No se entregan accesos persistentes a
-clientes durante esta fase.
+ella. Durante esta versión se conserva un gate temporal que combina mTLS
+general para las rutas no administrativas con el bloqueo de namespaces no
+permitidos, además de la regla mTLS administrativa permanente. La retirada de
+mTLS y la apertura a clientes pertenecen a la v0.0.14. No se entregan accesos
+persistentes a clientes durante esta fase.
 
 ### Fase 13.1 - Preparación reproducible
 

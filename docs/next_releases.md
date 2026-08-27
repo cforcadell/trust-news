@@ -21,8 +21,26 @@ las versiones publicadas en [`releases.md`](releases.md).
 Permitir que un máximo de diez organizaciones externas evalúen la plataforma
 durante un periodo definido, con identidades pseudónimas y acceso OIDC
 provisionado manualmente. La retirada controlada de la regla mTLS general
-temporal pertenece a esta versión y se completa antes de abrir las evaluaciones
-externas.
+temporal pertenece a esta versión y es su primer paso operativo, antes de abrir
+las evaluaciones externas.
+
+### Primer paso: retirar mTLS temporal y conservar el gate de rutas
+
+Antes de abrir el acceso a cualquier cliente:
+
+1. Activar el maintenance lock y conservar disponible el rollback.
+2. Editar en el mismo slot `Temporary mTLS and public path gate - assermetry.com`.
+3. Eliminar únicamente la condición mTLS (`not cf.tls_client_auth.cert_verified`)
+  de la expresión combinada.
+4. Mantener la condición de bloqueo de namespaces no permitidos y la acción
+  `Block` con código `403`.
+5. Renombrar la regla a `Default deny - public path namespaces`.
+6. Validar `/gui/`, `/backend`, `/auth` y los paths desconocidos antes de abrir
+  el acceso.
+
+La transición conserva el mismo slot para evitar una ventana sin protección.
+El `default deny` de paths no sustituye la autenticación, autorización ni el
+aislamiento de Gateway y las APIs.
 
 ### Alcance
 

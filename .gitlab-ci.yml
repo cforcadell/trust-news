@@ -236,7 +236,7 @@ deploy:
               ;;
           esac
           case "$traefik_args" in
-            *--providers.kubernetesingress.strictprefixmatching=true*) ;;
+            *--providers.kubernetesingress.strictPrefixMatching=true*) ;;
             *)
               echo "ERROR: Traefik no aplica coincidencia estricta de prefijos Ingress"
               exit 1

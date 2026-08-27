@@ -250,22 +250,68 @@ button { font-family: inherit; }
 .sticky-actions { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
 .validation-mode-panel {
   margin-top: 14px;
-  display: grid;
-  grid-template-columns: minmax(150px, 190px) minmax(170px, 240px) minmax(240px, 1fr);
-  gap: 12px;
-  align-items: center;
   padding: 12px 14px;
   border: 1px solid var(--border-color);
   border-radius: 14px;
   background: rgba(148, 163, 184, .08);
 }
-.validation-mode-panel label {
-  color: var(--text-secondary);
+.blockchain-audit-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
   font-weight: 900;
   font-size: .86rem;
+  cursor: pointer;
 }
-.validation-mode-panel select { margin: 0; }
-.mode-help { color: var(--text-secondary); font-size: .86rem; font-weight: 700; }
+.blockchain-audit-toggle input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent-green);
+  cursor: pointer;
+}
+.validation-mode-info {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  color: var(--accent-color);
+  font-size: .72rem;
+  line-height: 1;
+}
+.validation-mode-tooltip {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: min(420px, calc(100vw - 72px));
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: #111c2f;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .34);
+  color: var(--text-secondary);
+  font-size: .8rem;
+  font-weight: 700;
+  line-height: 1.45;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+}
+.blockchain-audit-toggle:hover .validation-mode-tooltip,
+.blockchain-audit-toggle:focus-within .validation-mode-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
 button:disabled, .tab-button:disabled, .disabled-tab {
   cursor: not-allowed !important;
   opacity: .48;
@@ -379,15 +425,49 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
 .unknown { color: #94a3b8; font-weight: 900; }
 .loading { color: #fbbf24; } .error { color: #ff6878; font-weight: 900; }
 .result-ok { color: #3dffad; font-weight: 900; } .result-ko { color: #ff6878; font-weight: 900; }
-.validation-progress {
-  display: grid;
-  gap: 8px;
+.assertion-generation-progress,
+.assertion-generation-error,
+.assertion-generation-result {
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: rgba(10, 20, 38, .9);
 }
-.validation-progress span {
-  display: block;
+.assertion-generation-progress { display: grid; gap: 14px; }
+.assertion-generation-heading,
+.assertion-generation-error,
+.assertion-generation-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.assertion-generation-heading > div,
+.assertion-generation-error > div,
+.assertion-generation-result > div { display: grid; gap: 4px; min-width: 0; }
+.assertion-generation-heading strong,
+.assertion-generation-error strong,
+.assertion-generation-result strong { color: var(--text-primary); }
+.assertion-generation-heading [data-generation-elapsed],
+.assertion-generation-error p,
+.assertion-generation-result p {
   color: var(--text-secondary);
-  font-size: .88rem;
+  font-size: .84rem;
+  line-height: 1.45;
 }
+.assertion-generation-error p,
+.assertion-generation-result p { margin: 0; }
+.loading-spinner,
+.button-spinner {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid rgba(157, 178, 213, .28);
+  border-top-color: var(--accent-green);
+  animation: loading-spin .8s linear infinite;
+}
+.loading-spinner { width: 24px; height: 24px; }
+.button-spinner { width: 15px; height: 15px; margin-right: 8px; vertical-align: -2px; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
 .validation-progress-bar {
   height: 10px;
   width: 100%;
@@ -401,6 +481,71 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
   border-radius: 999px;
   transition: width .24s ease;
 }
+.validation-progress-fill.indeterminate {
+  width: 38%;
+  animation: assertion-progress 1.35s ease-in-out infinite;
+}
+@keyframes assertion-progress {
+  from { transform: translateX(-115%); }
+  to { transform: translateX(300%); }
+}
+.assertion-generation-stages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.assertion-generation-stages li {
+  position: relative;
+  padding: 8px 8px 8px 28px;
+  border-radius: 9px;
+  background: rgba(148, 163, 184, .07);
+  color: var(--text-muted);
+  font-size: .76rem;
+  font-weight: 800;
+}
+.assertion-generation-stages li::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+.assertion-generation-stages li.active { color: #6ee7c4; background: rgba(16, 214, 154, .1); }
+.assertion-generation-stages li.completed { color: var(--text-secondary); }
+.assertion-generation-stages li.completed::before { content: "✓"; width: auto; height: auto; background: transparent; }
+.assertion-generation-progress [data-generation-slow-note] {
+  margin: 0;
+  color: #f6c56f;
+  font-size: .82rem;
+}
+.assertion-generation-error {
+  border-color: rgba(255, 91, 110, .35);
+  background: rgba(127, 29, 29, .16);
+}
+.assertion-generation-error-icon,
+.order-polling-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 91, 110, .18);
+  color: #ff8b9a;
+  font-weight: 900;
+}
+.assertion-generation-error button { margin-top: 7px; padding: 8px 13px; width: max-content; }
+.assertion-generation-result + table { margin-top: 12px; }
+.assertion-generation-result.success { border-color: rgba(16, 214, 154, .3); background: rgba(16, 214, 154, .08); }
+.assertion-generation-result.empty { border-color: rgba(34, 211, 238, .28); background: rgba(34, 211, 238, .07); }
+.assertion-generation-result > span { color: var(--accent-green); font-size: 1.15rem; font-weight: 900; }
 
 /* Process flow */
 .process-flow { display: inline-flex; align-items: center; gap: 7px; margin-left: 0; margin-top: 8px; vertical-align: middle; flex-wrap: wrap; }
@@ -811,10 +956,6 @@ pre, .event-payload-pre {
   }
 }
 
-@media (max-width: 880px) {
-  .validation-mode-panel { grid-template-columns: 1fr; }
-}
-
 .validator-weights {
   display: flex;
   flex-wrap: wrap;
@@ -897,6 +1038,22 @@ pre, .event-payload-pre {
 .order-search-header #orderTopBar button,
 .order-back-button { border-radius: 7px; padding: 11px 20px; }
 .order-polling-state .status-value { display: none; }
+.order-polling-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(34, 211, 238, .26);
+  border-radius: 11px;
+  background: rgba(34, 211, 238, .07);
+}
+.order-polling-notice > div { display: grid; gap: 3px; }
+.order-polling-notice strong { color: var(--text-primary); }
+.order-polling-notice p { margin: 0; color: var(--text-secondary); font-size: .82rem; line-height: 1.4; }
+.order-polling-notice.warning { border-color: rgba(245, 158, 11, .32); background: rgba(245, 158, 11, .08); }
+.order-polling-notice.error { border-color: rgba(255, 91, 110, .35); background: rgba(127, 29, 29, .16); }
+.order-polling-notice button { width: max-content; margin-top: 7px; padding: 8px 13px; }
 #orderTabs {
   margin: 0 -28px;
   padding: 10px 22px 0;
@@ -1093,6 +1250,7 @@ pre, .event-payload-pre {
   .problems-card { grid-column: 1 / -1; }
 }
 @media (max-width: 720px) {
+  .assertion-generation-stages { grid-template-columns: 1fr; }
   #orderTabs { overflow-x: auto; flex-wrap: nowrap; }
   .assertion-counts, .summary-grid-secondary, .process-footer { grid-template-columns: 1fr; }
   .assertion-counts > div, .process-footer div { padding: 10px 0; border-right: 0; border-bottom: 1px solid var(--border-color); }

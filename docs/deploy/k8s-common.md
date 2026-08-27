@@ -210,11 +210,12 @@ Configuracion minima:
 
 - Realm: `TrustNews`.
 - Cliente frontend: `TrustNewsWeb`.
-  - Root URL: URL publica o local del frontend.
-  - Home URL: URL publica o local del frontend, con `/` final.
-  - Valid redirect URIs: `<frontend-url>/*`.
-  - Valid post logout redirect URIs: `<frontend-url>/*`.
-  - Web Origins: URL publica o local del frontend, o `*` solo para pruebas.
+  - Root URL: URL base del frontend con `/gui`, sin `/` final.
+  - Home URL: URL base del frontend con `/gui/` final.
+  - Valid redirect URIs: `<origen>/gui/*`.
+  - Valid post logout redirect URIs: `<origen>/gui/*`.
+  - Web Origins: solo el origen (`scheme://host[:port]`), sin path; usar `*`
+    exclusivamente en pruebas desechables.
   - En produccion no conservar entradas localhost ni usar un comodin global.
 - Cliente backend: `TrustNewsApi`.
   - Client authentication: ON.

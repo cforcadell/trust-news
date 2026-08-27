@@ -6,4 +6,5 @@ resources:
   - gateway-ingress.yaml
   - keycloak-ingress.yaml
   - frontend-ingress.yaml
+  - frontend-middleware.yaml
   - tls-store.yaml

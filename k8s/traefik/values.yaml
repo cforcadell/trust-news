@@ -7,6 +7,7 @@ ingressClass:
 providers:
   kubernetesIngress:
     enabled: true
+    strictPrefixMatching: true
   kubernetesCRD:
     enabled: true
 

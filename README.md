@@ -694,7 +694,7 @@ Main local URLs:
 
 | Service | URL |
 |---|---|
-| Frontend | `https://localhost:7443/` |
+| Frontend | `https://localhost:7443/gui/` |
 | Keycloak Admin | `https://localhost:7443/auth/admin/master/console/` |
 | Admin API | `http://localhost:8400/docs` |
 | Gateway | `https://localhost:7443/backend/docs` |
@@ -724,7 +724,8 @@ Current server workflow:
 8. Create the release from `main`.
 
 The controlled server entrypoint is `https://assermetry.com`. Cloudflare
-publishes only the frontend, `/backend` and `/auth`; internal services,
+redirects the exact root path to `/gui/` and publishes only `/gui`, `/backend`
+and `/auth`; internal services,
 databases, Kafka, IPFS, RPC and observability panels remain private. While the
 temporary general mTLS rule is active, an authorized client certificate is
 required before application authentication is evaluated.
@@ -790,6 +791,8 @@ then inspect live pods and logs with `kubectl`.
   origin accepts application HTTPS only from verified Cloudflare networks.
 - A temporary general mTLS rule protects non-administrative routes through
   `v0.0.13`. Its controlled removal is planned for `v0.0.14`.
+- The frontend is namespaced under `/gui/`; the controlled `v0.0.14` edge
+  cutover adds exact root redirects and a default-deny path allowlist.
 - Keycloak administrative routes retain permanent mTLS and still require
   Keycloak authentication after the certificate check.
 - The maintenance lock can block the complete hostname independently of OIDC,

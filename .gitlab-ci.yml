@@ -235,6 +235,13 @@ deploy:
               exit 1
               ;;
           esac
+          case "$traefik_args" in
+            *--providers.kubernetesingress.strictprefixmatching=true*) ;;
+            *)
+              echo "ERROR: Traefik no aplica coincidencia estricta de prefijos Ingress"
+              exit 1
+              ;;
+          esac
           test "$(kubectl get configmap keycloak-env-config -n infra -o jsonpath='{.data.KC_PROXY_HEADERS}')" = "xforwarded" || {
             echo "ERROR: Keycloak no usa KC_PROXY_HEADERS=xforwarded"
             exit 1
@@ -296,6 +303,20 @@ deploy:
           ;;
         apis-frontend-prod)
           kubectl rollout status deployment -n apis --timeout=120s
+          kubectl rollout status deployment/frontend-web -n frontend --timeout=120s
+          test "$(kubectl get ingress frontend-ingress -n frontend -o jsonpath='{.spec.rules[0].http.paths[0].path}')" = "/gui" || {
+            echo "ERROR: frontend-ingress no publica el frontend bajo /gui"
+            exit 1
+          }
+          test "$(kubectl get ingress frontend-ingress -n frontend -o jsonpath='{.metadata.annotations.traefik\.ingress\.kubernetes\.io/router\.middlewares}')" = "frontend-frontend-strip-gui@kubernetescrd" || {
+            echo "ERROR: frontend-ingress no referencia el middleware StripPrefix de /gui"
+            exit 1
+          }
+          test "$(kubectl get middleware frontend-strip-gui -n frontend -o jsonpath='{.spec.stripPrefix.prefixes[0]}')" = "/gui" || {
+            echo "ERROR: frontend-strip-gui no elimina el prefijo /gui"
+            exit 1
+          }
+          ./scripts/k8s/infra/reconcile-keycloak-web-prod.sh
           ;;
         *)
           echo "Perfil sin verificacion de rollout especifica: $PROFILE"

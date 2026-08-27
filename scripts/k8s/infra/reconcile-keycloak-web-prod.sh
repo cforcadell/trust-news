@@ -5,8 +5,9 @@ NAMESPACE="infra"
 DEPLOYMENT="keycloak"
 REALM="TrustNews"
 CLIENT_ID="TrustNewsWeb"
-KEYCLOAK_URL="https://assermetry.com/auth"
-FRONTEND_URL="https://assermetry.com"
+KEYCLOAK_URL="${KEYCLOAK_URL:-https://assermetry.com/auth}"
+FRONTEND_URL="${FRONTEND_URL:-https://assermetry.com/gui}"
+WEB_ORIGIN="${WEB_ORIGIN:-https://assermetry.com}"
 
 for command_name in kubectl python3; do
   command -v "$command_name" >/dev/null || {
@@ -17,13 +18,14 @@ done
 
 observed_state="$({
   kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -- \
-    sh -s -- "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL" <<'KEYCLOAK_SCRIPT'
+    sh -s -- "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL" "$WEB_ORIGIN" <<'KEYCLOAK_SCRIPT'
 set -eu
 
 realm="$1"
 client_id="$2"
 keycloak_url="$3"
 frontend_url="$4"
+web_origin="$5"
 kcadm=/opt/keycloak/bin/kcadm.sh
 config="/tmp/kcadm-reconcile-web-$$.config"
 trap 'rm -f "$config"' EXIT
@@ -68,7 +70,7 @@ client_uuid="$1"
   -s "rootUrl=$frontend_url" \
   -s "baseUrl=$frontend_url/" \
   -s "redirectUris=[\"$frontend_url/*\"]" \
-  -s "webOrigins=[\"$frontend_url\"]" \
+  -s "webOrigins=[\"$web_origin\"]" \
   -s "attributes.\"post.logout.redirect.uris\"=\"$frontend_url/*\"" \
   >/dev/null
 
@@ -91,7 +93,7 @@ printf '%s\n' "$observed_state" | python3 -c '
 import json
 import sys
 
-realm, client_id, keycloak_url, frontend_url = sys.argv[1:]
+realm, client_id, keycloak_url, frontend_url, web_origin = sys.argv[1:]
 try:
     state = json.load(sys.stdin)
 except (json.JSONDecodeError, TypeError) as error:
@@ -120,12 +122,12 @@ expected = {
     "rootUrl": frontend_url,
     "baseUrl": f"{frontend_url}/",
     "redirectUris": [f"{frontend_url}/*"],
-    "webOrigins": [frontend_url],
+    "webOrigins": [web_origin],
     "postLogoutRedirectUris": f"{frontend_url}/*",
 }
 
 if observed != expected:
-    print("ERROR: Keycloak web alignment differs from the production contract", file=sys.stderr)
+    print("ERROR: Keycloak web alignment differs from the configured web contract", file=sys.stderr)
     print(f"expected={json.dumps(expected, sort_keys=True)}", file=sys.stderr)
     print(f"observed={json.dumps(observed, sort_keys=True)}", file=sys.stderr)
     raise SystemExit(1)
@@ -133,6 +135,6 @@ if observed != expected:
 print(
     "keycloak_web_alignment=PASS "
     f"realm={realm} client={client_id} "
-    f"keycloak_url={keycloak_url} frontend_url={frontend_url}"
+    f"keycloak_url={keycloak_url} frontend_url={frontend_url} web_origin={web_origin}"
 )
-' "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL"
+' "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL" "$WEB_ORIGIN"

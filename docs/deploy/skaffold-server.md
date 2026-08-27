@@ -34,10 +34,12 @@ direcciones IP, huellas, tokens, certificados ni datos personales.
 | Entrada al origen | `TCP/443` solo desde las redes verificadas de Cloudflare |
 | Puertos cerrados | `80/tcp`, `6443/tcp` y el resto de puertos públicos de aplicación |
 
-Contrato público:
+Contrato público después de completar el cutover de `/gui`:
 
 ```text
-https://assermetry.com/          -> frontend
+https://assermetry.com/          -> 302 de Cloudflare a /gui/
+https://assermetry.com/gui       -> 302 de Cloudflare a /gui/
+https://assermetry.com/gui/      -> frontend
 https://assermetry.com/backend   -> Gateway
 https://assermetry.com/auth      -> Keycloak
 ```
@@ -57,11 +59,11 @@ Las cinco reglas personalizadas están ocupadas y conservan este orden:
 | 4 | `Permanent block - non-public resources` | Activa |
 | 5 | `Permanent block - unexpected backend methods` | Activa |
 
-El lock existe y puede bloquear todo el hostname. Su estado no se presupone:
-el operador lo habilita o deshabilita deliberadamente según la ventana de
-trabajo. Su estado observado actual es deshabilitado. Antes de cambiarlo se
-confirma el estado deseado y, al terminar, se deja registrado en la evidencia
-operativa, no en este runbook.
+El lock existe y, mientras no haya redirects en una fase anterior, puede
+bloquear todo el hostname. Su estado no se presupone: el operador lo habilita
+o deshabilita deliberadamente según la ventana de trabajo. Su estado observado
+actual es deshabilitado. Antes de cambiarlo se confirma el estado deseado y, al
+terminar, se deja registrado en la evidencia operativa, no en este runbook.
 
 La Free Managed Ruleset está habilitada. La única regla de rate limiting,
 `Expensive backend operations per IP`, protege las operaciones costosas del
@@ -79,6 +81,14 @@ activa:
 En `v0.0.14` se retirará únicamente la regla temporal. No se desasocia mTLS del
 hostname ni se elimina la regla administrativa.
 
+En esa misma ventana la regla temporal se sustituye por una regla permanente
+`default deny` de paths. Los Single Redirects de `/` y `/gui` no consumen slots
+de Custom Rules. Si se conserva el maintenance lock, la composición final sigue
+ocupando cinco reglas: lock, mTLS administrativo, recursos no públicos, métodos
+del Gateway y `default deny`. Si el lock se elimina por una decisión operativa
+separada, quedan cuatro; las tres reglas permanentes anteriores por sí solas no
+bloquean rutas como `/wp-admin/` en Cloudflare.
+
 ### 1.3 Traefik, observabilidad y línea base
 
 Traefik se instala mediante el perfil `traefik-prod`, fija el chart `41.0.2` y
@@ -86,6 +96,7 @@ usa:
 
 - `externalTrafficPolicy: Local`;
 - `forwardedHeaders.insecure: false`;
+- `kubernetesIngress.strictPrefixMatching: true`;
 - las redes oficiales de Cloudflare en `websecure.forwardedHeaders.trustedIPs`;
 - access logs JSON sin cabeceras ni parámetros de consulta;
 - upgrades Helm con `--atomic`.
@@ -258,8 +269,9 @@ done
 - `k8s/ingress/overlays/prod-domain`.
 
 Los tres Ingress usan `host: assermetry.com` y `websecure`. El frontend sirve
-HTTP dentro del clúster; Traefik termina TLS y enruta `/`, `/backend` y
-`/auth`.
+HTTP dentro del clúster; Traefik termina TLS y enruta `/gui`, `/backend` y
+`/auth`. Un middleware `StripPrefix` elimina `/gui` antes de entregar la
+petición al nginx del frontend. No existe un Ingress catch-all para `/`.
 
 No desplegar overlays `local` o `prod` con issuer `localhost` sobre Hetzner.
 
@@ -338,7 +350,7 @@ Para peticiones HTTP se preserva el hostname canónico:
 ```bash
 curl --resolve assermetry.com:9443:127.0.0.1 \
   --cacert origin_ca_rsa_root.pem \
-  https://assermetry.com:9443/
+  https://assermetry.com:9443/gui/
 ```
 
 El discovery debe seguir publicando:
@@ -367,8 +379,12 @@ No hay slots libres de reglas personalizadas en el plan actual.
 
 ### 5.2 Comportamiento esperado del lock
 
-Con el lock habilitado, todo `assermetry.com` queda bloqueado incluso para un
-usuario o administrador con certificado válido.
+Antes de crear los Single Redirects, con el lock habilitado todo
+`assermetry.com` queda bloqueado incluso para un usuario o administrador con
+certificado válido. Después de crearlos, `/` y `/gui` responden con el `302`
+antes de llegar al WAF; el destino `/gui/` y el resto del hostname sí quedan
+bloqueados. Si una ventana exige un `403` absoluto para todo el host, desactivar
+también esos dos redirects mientras el lock esté habilitado.
 
 Con el lock deshabilitado:
 
@@ -398,6 +414,42 @@ La regla de métodos del Gateway permite únicamente `GET`, `HEAD`, `POST` y
 `OPTIONS` bajo `/backend`.
 
 El límite de cuerpo es 5 MiB tanto en Traefik como en Gateway.
+
+### 5.4 Redirects y frontera pública tras retirar el mTLS general
+
+Crear dos Single Redirects, inicialmente con `302` y preservando la query:
+
+```text
+(http.host eq "assermetry.com" and http.request.uri.path eq "/")
+  -> https://assermetry.com/gui/
+
+(http.host eq "assermetry.com" and http.request.uri.path eq "/gui")
+  -> https://assermetry.com/gui/
+```
+
+No usar un redirect comodín del hostname: rutas desconocidas deben continuar
+hasta la regla WAF que las bloquea, no convertirse en `/gui/`.
+
+Después de comprobar `/gui/`, añadir como última Custom Rule:
+
+```text
+(http.host eq "assermetry.com" and
+ not (
+   starts_with(http.request.uri.path, "/gui/") or
+   http.request.uri.path eq "/backend" or
+   starts_with(http.request.uri.path, "/backend/") or
+   http.request.uri.path eq "/auth" or
+   starts_with(http.request.uri.path, "/auth/")
+ ))
+```
+
+Acción: `Block`. La comparación se mantiene sensible a mayúsculas. Conservar
+activadas URL Normalization, la Free Managed Ruleset y la regla de rate limit.
+Los redirects exactos se evalúan antes del WAF y son terminantes; por eso `/` y
+`/gui` no se exceptúan en el `default deny`. Si un redirect se deshabilita por
+error, el path queda bloqueado en lugar de alcanzar el origen.
+Esta allowlist reduce la superficie pública, pero no sustituye el WAF sobre
+payloads válidos dentro de `/backend`, `/auth` o `/gui`.
 
 ---
 
@@ -470,6 +522,11 @@ al componente cambiado. Para una actualización normal de aplicación:
 PROFILE=apis-frontend-prod
 ```
 
+La migración inicial a `/gui` modifica también Traefik. Con el lock habilitado,
+ejecutar primero `PROFILE=traefik-prod` y después
+`PROFILE=apis-frontend-prod`. Los despliegues posteriores que no cambien
+Traefik vuelven a usar únicamente el perfil de aplicación.
+
 El despliegue usa:
 
 ```bash
@@ -482,7 +539,8 @@ pipeline salvo en un procedimiento explícito de recuperación.
 ### 6.5 Alineación idempotente de Keycloak
 
 El job `deploy` de GitLab ejecuta automáticamente la alineación después del
-rollout de `infra-prod`. El script compartido actualiza `frontendUrl` del realm
+rollout de `infra-prod` y de `apis-frontend-prod`. El script compartido
+actualiza `frontendUrl` del realm
 `TrustNews` y las URLs, redirects, post-logout y Web Origins de
 `TrustNewsWeb`; después lee los campos y exige que coincidan exactamente con el
 contrato productivo. No crea clientes, no modifica `TrustNewsApi`, sus secretos,
@@ -499,6 +557,9 @@ ejecutar desde la raíz del repositorio, con `kubectl` y `python3` disponibles:
 El script termina con `keycloak_web_alignment=PASS` únicamente tras validar el
 estado leído de Keycloak. Si `TrustNewsWeb` no existe exactamente una vez, falla
 antes de modificar el realm o el cliente. Repetirlo conserva el mismo resultado.
+El contrato productivo esperado es Root URL `https://assermetry.com/gui`, Home
+URL `https://assermetry.com/gui/`, redirects y post-logout
+`https://assermetry.com/gui/*`, y Web Origin `https://assermetry.com`.
 
 ---
 
@@ -526,7 +587,7 @@ general es el resultado esperado.
 
 Con el lock deshabilitado y un certificado temporal válido:
 
-- frontend y discovery responden;
+- `/gui/`, sus assets y discovery responden;
 - el issuer es exactamente el canónico;
 - login, refresh y logout funcionan;
 - Gateway rechaza sin JWT y acepta un JWT válido;
@@ -534,6 +595,16 @@ Con el lock deshabilitado y un certificado temporal válido:
 - `/backend/docs`, Swagger, Redoc y OpenAPI devuelven `404` o son bloqueados en
   el borde;
 - las rutas administrativas requieren certificado y autenticación de Keycloak.
+
+En la ventana de retirada del certificado temporal se añade además:
+
+- `/` y `/gui` devuelven `302` hacia `/gui/` desde Cloudflare;
+- `/wp-admin/`, `/.env`, `/phpmyadmin/` y una ruta aleatoria devuelven `403`;
+- `/gui-malicious`, `/backend-malicious` y `/auth-malicious` devuelven `403`;
+- `/gui/`, `/backend/*` y `/auth/*` siguen llegando a sus controles propios;
+- login, refresh, logout, Light y Blockchain funcionan sin certificado de
+  usuario;
+- las rutas administrativas siguen rechazando clientes sin certificado.
 
 Desde una red externa debe comprobarse también que la IP directa del origen y
 los puertos `80` y `6443` no permiten acceso.
@@ -616,7 +687,10 @@ y la restauración aislada completa pertenecen a `v0.0.16`.
 ### 9.3 v0.0.14
 
 - Habilitar el lock durante la ventana de cambio.
-- Retirar únicamente `Temporary mTLS gate - assermetry.com`.
+- Desplegar y validar `/gui` antes de modificar la frontera de Cloudflare.
+- Crear los redirects exactos `/` y `/gui` hacia `/gui/` con `302`.
+- Sustituir `Temporary mTLS gate - assermetry.com` por el `default deny` de
+  paths; no abrir una ventana sin el lock.
 - Mantener la asociación mTLS y la regla administrativa permanente.
 - Revocar un certificado administrativo desechable y demostrar su rechazo sin
   afectar al certificado administrativo de respaldo.

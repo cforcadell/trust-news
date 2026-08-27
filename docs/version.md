@@ -45,6 +45,10 @@ comparable.
 
 ### Fase 13.2 - Regresión de GUI
 
+- Publicar la interfaz bajo `/gui/`, conservar `/backend` y `/auth` como
+  namespaces separados y probar primero el mismo contrato de Ingress en Kind.
+- Alinear `TrustNewsWeb` con redirects y post-logout bajo `/gui/*`, manteniendo
+  Web Origins limitado al origen sin path.
 - Login, sesión, refresh, logout y expiración.
 - Navegación y control por rol.
 - Creación, consulta y seguimiento de órdenes.

@@ -4,6 +4,7 @@
 // CONFIGURACIÓN GLOBAL
 // =========================================================
 const BACKEND_BASE = "/backend";
+const FRONTEND_BASE_PATH = "/gui/";
 
 const API = BACKEND_BASE;
 const TX_API = BACKEND_BASE;
@@ -11,8 +12,12 @@ const IPFS_API = BACKEND_BASE;
 const GENERATE_API = BACKEND_BASE;
 
 const MAX_EVENTS_ROWS = 15;
-const POLLING_DURATION = 0; // 20 segundos
-const POLLING_INTERVAL = 1000;  // 1 segundo
+const ASSERTIONS_REQUEST_TIMEOUT_MS = 90000;
+const ASSERTIONS_PROGRESS_SLOW_AFTER_MS = 20000;
+const POLLING_DURATION = 5 * 60 * 1000;
+const POLLING_INTERVAL = 3000;
+const POLLING_REQUEST_TIMEOUT_MS = 15000;
+const POLLING_MAX_CONSECUTIVE_ERRORS = 3;
 
 const TABLE_PAGE_SIZE_ORDERS = 10;   // cantidad por página
 let TABLE_PAGE_ORDERS = 1;           // página actual
@@ -81,6 +86,8 @@ function alertMessage(message, type = 'info', duration = 3000) {
 let currentOrderData = {};
 let currentOrderEvents = [];
 let restoringHistoryState = false;
+let assertionsGenerationInProgress = false;
+let activeOrderPollingSession = null;
 
 function buildHistoryUrl(state) {
     if (!state?.section) return window.location.pathname;
@@ -159,18 +166,11 @@ function shortHex(value) {
 }
 
 function getSelectedValidationMode() {
-    return document.getElementById("validationMode")?.value || "BLOCKCHAIN";
+    return document.getElementById("validationMode")?.checked ? "BLOCKCHAIN" : "LIGHT";
 }
 
 function isLightOrder(order) {
     return String(order?.validation_mode || "BLOCKCHAIN").toUpperCase() === "LIGHT";
-}
-
-function updateValidationModeHelp() {
-    const selected = getSelectedValidationMode();
-    document.querySelectorAll("[data-mode-help]").forEach(el => {
-        el.hidden = el.getAttribute("data-mode-help") !== selected;
-    });
 }
 
 function getValidationLiteral(value) {
@@ -226,7 +226,10 @@ function showSection(sectionId, reset = true, updateHistory = true) {
     if(reset) {
         // ===== RESET de inputs de usuario =====
         const inputs = activeSection.querySelectorAll("input:not([type=button]):not([type=submit]), textarea");
-        inputs.forEach(input => input.value = "");
+        inputs.forEach(input => {
+            if (input.type === "checkbox" || input.type === "radio") input.checked = false;
+            else input.value = "";
+        });
 
         // ===== RESET de tablas generadas dinámicamente =====
         const tables = activeSection.querySelectorAll("table");
@@ -257,38 +260,250 @@ function showSection(sectionId, reset = true, updateHistory = true) {
 // =========================================================
 // POLLING DE ÓRDENES
 // =========================================================
-async function pollOrder(orderId, startTime) {
-    const start = startTime || Date.now();
-    await loadOrderById(orderId, false);
+function isTerminalOrderStatus(status) {
+    const normalized = String(status || "").toUpperCase();
+    return normalized.startsWith("VALIDATED") || [
+        "ASSERTIONS_NOT_AVAILABLE",
+        "QUOTA_EXCEDED",
+        "NO_VALIDATORS_AVAILABLE",
+        "FAILED",
+        "ERROR"
+    ].includes(normalized);
+}
 
-    const detailsContainer = document.getElementById("fixedDetailsContainer");
-    const statusElement = detailsContainer.querySelector('.status-value') || document.querySelector('#tabContent .status-value');
-    const currentStatus = statusElement?.getAttribute('data-status') || 'UNKNOWN';
+function stopOrderPolling(session = activeOrderPollingSession) {
+    if (!session) return;
+    session.stopped = true;
+    if (session.timerId) window.clearTimeout(session.timerId);
+    if (session.controller) session.controller.abort();
+    if (activeOrderPollingSession === session) activeOrderPollingSession = null;
+}
 
-    if (currentStatus === 'VALIDATED' || (Date.now() - start > POLLING_DURATION)) {
-        statusElement?.classList.remove('polling', 'blinking');
-        console.log(`Polling finalizado para ${orderId}. Estado: ${currentStatus}`);
-        if (currentStatus === 'VALIDATED') await loadOrderById(orderId, true);
+function renderOrderPollingState(type, session, status = "") {
+    const container = document.getElementById("fixedDetailsContainer");
+    if (!container || !session) return;
+
+    const elapsedSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
+    const isError = type === "timeout" || type === "connection-error" || type === "terminal-error";
+    const messages = {
+        checking: {
+            title: t("messages.verificationChecking"),
+            detail: t("messages.verificationElapsed", { count: elapsedSeconds })
+        },
+        retrying: {
+            title: t("messages.verificationConnectionRetry", { current: session.consecutiveErrors, total: POLLING_MAX_CONSECUTIVE_ERRORS }),
+            detail: t("messages.verificationOrderPreserved", { orderId: session.orderId })
+        },
+        timeout: {
+            title: t("messages.verificationTimeoutTitle"),
+            detail: t("messages.verificationTimeoutError", { minutes: Math.round(POLLING_DURATION / 60000), orderId: session.orderId })
+        },
+        "connection-error": {
+            title: t("messages.verificationConnectionErrorTitle"),
+            detail: t("messages.verificationConnectionError", { orderId: session.orderId })
+        },
+        "terminal-error": {
+            title: t("messages.verificationTerminalErrorTitle"),
+            detail: t("messages.verificationTerminalError", { status: status || "-", orderId: session.orderId })
+        }
+    };
+    const copy = messages[type] || messages.checking;
+    const canRetry = type === "timeout" || type === "connection-error";
+
+    container.innerHTML = `
+        <div class="order-polling-notice ${isError ? "error" : type === "retrying" ? "warning" : "active"}" role="${isError ? "alert" : "status"}">
+            <span class="${isError ? "order-polling-icon" : "loading-spinner"}" aria-hidden="true">${isError ? "!" : ""}</span>
+            <div>
+                <strong>${safeText(copy.title)}</strong>
+                <p>${safeText(copy.detail)}</p>
+                ${canRetry ? `<button type="button" class="btn-secondary btn-retry-verification">${safeText(t("messages.retryVerification"))}</button>` : ""}
+            </div>
+        </div>
+        <span class="status-value" data-status="${safeText(status || currentOrderData?.status || "UNKNOWN")}"></span>
+    `;
+
+    container.querySelector(".btn-retry-verification")?.addEventListener("click", () => pollOrder(session.orderId));
+}
+
+async function runOrderPollingCycle(session) {
+    if (session.stopped || activeOrderPollingSession !== session) return;
+
+    if (Date.now() - session.startedAt >= POLLING_DURATION) {
+        stopOrderPolling(session);
+        renderOrderPollingState("timeout", session, currentOrderData?.status);
+        alertMessage(t("messages.verificationTimeoutTitle"), "error", 7000);
         return;
     }
 
-    setTimeout(() => pollOrder(orderId, start), POLLING_INTERVAL);
+    renderOrderPollingState(session.consecutiveErrors ? "retrying" : "checking", session, currentOrderData?.status);
+    const controller = new AbortController();
+    session.controller = controller;
+    const requestTimeoutId = window.setTimeout(() => controller.abort(), POLLING_REQUEST_TIMEOUT_MS);
+    const result = await loadOrderById(session.orderId, false, {
+        signal: controller.signal,
+        background: true,
+        isCurrent: () => activeOrderPollingSession === session && !session.stopped
+    });
+    window.clearTimeout(requestTimeoutId);
+    session.controller = null;
+
+    if (session.stopped || activeOrderPollingSession !== session) return;
+
+    if (result?.ok) {
+        session.consecutiveErrors = 0;
+        const status = String(result.data?.status || "UNKNOWN").toUpperCase();
+        if (isTerminalOrderStatus(status)) {
+            stopOrderPolling(session);
+            console.log(`Polling finalizado para ${session.orderId}. Estado: ${status}`);
+            if (status.startsWith("VALIDATED")) {
+                await loadOrderById(session.orderId, true);
+            } else {
+                renderOrderPollingState("terminal-error", session, status);
+                alertMessage(t("messages.verificationTerminalErrorTitle"), "error", 7000);
+            }
+            return;
+        }
+        renderOrderPollingState("checking", session, status);
+    } else {
+        session.consecutiveErrors += 1;
+        if (session.consecutiveErrors >= POLLING_MAX_CONSECUTIVE_ERRORS) {
+            stopOrderPolling(session);
+            renderOrderPollingState("connection-error", session, currentOrderData?.status);
+            alertMessage(t("messages.verificationConnectionErrorTitle"), "error", 7000);
+            return;
+        }
+        renderOrderPollingState("retrying", session, currentOrderData?.status);
+    }
+
+    session.timerId = window.setTimeout(() => runOrderPollingCycle(session), POLLING_INTERVAL);
+}
+
+function pollOrder(orderId) {
+    stopOrderPolling();
+    const session = {
+        orderId,
+        startedAt: Date.now(),
+        consecutiveErrors: 0,
+        timerId: null,
+        controller: null,
+        stopped: false
+    };
+    activeOrderPollingSession = session;
+    runOrderPollingCycle(session);
 }
 
 // ========================================================
 // OPERACIONES DE ASSERTIONS
 // ========================================================
 
-function renderAssertionsProgress(container, message, percent = 0) {
-    if (!container) return;
+function startAssertionsProgress(container) {
+    if (!container) return { stop() {} };
+
+    const startedAt = Date.now();
+    const stages = [
+        { after: 0, label: t("messages.assertionStageAnalyzing") },
+        { after: 6000, label: t("messages.assertionStageExtracting") },
+        { after: 15000, label: t("messages.assertionStagePreparing") }
+    ];
+
     container.innerHTML = `
-        <div class="validation-progress">
-            <span>${escapeHTML(message)}</span>
-            <div class="validation-progress-bar">
-                <div class="validation-progress-fill" style="width:${Math.min(100, Math.max(0, percent))}%;"></div>
+        <div class="assertion-generation-progress" role="status" aria-live="polite" aria-busy="true">
+            <div class="assertion-generation-heading">
+                <span class="loading-spinner" aria-hidden="true"></span>
+                <div>
+                    <strong data-generation-stage>${safeText(stages[0].label)}</strong>
+                    <span data-generation-elapsed aria-hidden="true"></span>
+                </div>
+            </div>
+            <div class="validation-progress-bar" aria-hidden="true">
+                <div class="validation-progress-fill indeterminate"></div>
+            </div>
+            <ol class="assertion-generation-stages" aria-hidden="true">
+                ${stages.map((stage, index) => `<li data-generation-step="${index}" class="${index === 0 ? "active" : ""}">${safeText(stage.label)}</li>`).join("")}
+            </ol>
+            <p data-generation-slow-note hidden>${safeText(t("messages.assertionsTakingLonger"))}</p>
+        </div>
+    `;
+
+    const update = () => {
+        const elapsed = Date.now() - startedAt;
+        const activeIndex = stages.reduce((selected, stage, index) => elapsed >= stage.after ? index : selected, 0);
+        const stageElement = container.querySelector("[data-generation-stage]");
+        const elapsedElement = container.querySelector("[data-generation-elapsed]");
+        const slowNote = container.querySelector("[data-generation-slow-note]");
+
+        if (stageElement) stageElement.textContent = stages[activeIndex].label;
+        if (elapsedElement) elapsedElement.textContent = t("messages.assertionElapsed", { count: Math.floor(elapsed / 1000) });
+        container.querySelectorAll("[data-generation-step]").forEach((step, index) => {
+            step.classList.toggle("completed", index < activeIndex);
+            step.classList.toggle("active", index === activeIndex);
+        });
+        if (slowNote) slowNote.hidden = elapsed < ASSERTIONS_PROGRESS_SLOW_AFTER_MS;
+    };
+
+    update();
+    const intervalId = window.setInterval(update, 1000);
+    return { stop: () => window.clearInterval(intervalId) };
+}
+
+function createFrontendRequestError(code, status = null) {
+    const error = new Error(code);
+    error.code = code;
+    error.status = status;
+    return error;
+}
+
+function assertionsErrorMessage(error) {
+    switch (error?.code) {
+        case "quota": return t("ui.quotaReached");
+        case "timeout": return t("messages.assertionTimeoutError", { seconds: Math.round(ASSERTIONS_REQUEST_TIMEOUT_MS / 1000) });
+        case "authentication": return t("messages.assertionAuthenticationError");
+        case "server": return t("messages.assertionServerError");
+        case "invalid_response": return t("messages.assertionInvalidResponseError");
+        case "request": return t("messages.assertionRequestError", { status: error.status || "-" });
+        default: return t("messages.assertionNetworkError");
+    }
+}
+
+function setAssertionsButtonLoading(loading) {
+    const button = document.getElementById("btn-generateAssertions");
+    if (!button) return;
+    button.disabled = loading;
+    button.classList.toggle("is-loading", loading);
+    button.setAttribute("aria-busy", String(loading));
+    button.innerHTML = loading
+        ? `<span class="button-spinner" aria-hidden="true"></span>${safeText(t("messages.generatingAssertions"))}`
+        : safeText(t("sections.generateAssertions"));
+}
+
+function renderAssertionsGenerationResult(container, count) {
+    if (!container) return;
+    const empty = count === 0;
+    container.insertAdjacentHTML("afterbegin", `
+        <div class="assertion-generation-result ${empty ? "empty" : "success"}" role="status">
+            <span aria-hidden="true">${empty ? "ⓘ" : "✓"}</span>
+            <div>
+                <strong>${safeText(empty ? t("messages.noAssertionsFound") : t("messages.assertionsGeneratedCount", { count }))}</strong>
+                <p>${safeText(empty ? t("messages.noAssertionsFoundHelp") : t("messages.assertionsReviewHelp"))}</p>
+            </div>
+        </div>
+    `);
+}
+
+function renderAssertionsGenerationError(container, error) {
+    if (!container) return;
+    const message = assertionsErrorMessage(error);
+    container.innerHTML = `
+        <div class="assertion-generation-error" role="alert">
+            <span class="assertion-generation-error-icon" aria-hidden="true">!</span>
+            <div>
+                <strong>${safeText(t("messages.assertionGenerationErrorTitle"))}</strong>
+                <p>${safeText(message)}</p>
+                <button type="button" class="btn-secondary btn-retry-assertions">${safeText(t("messages.retry"))}</button>
             </div>
         </div>
     `;
+    container.querySelector(".btn-retry-assertions")?.addEventListener("click", handleGenerateAssertions);
 }
 
 function normalizeGeneratedAssertion(assertion, fallbackIndex = 0) {
@@ -337,33 +552,83 @@ function decodeAssertionDraft(value) {
     }
 }
 
-async function generateAssertionsFromText(text) {
+async function generateAssertionsFromText(text, signal) {
+    const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
+        method: "POST",
+        headers: {
+            "Accept": "application/json"
+        },
+        body: JSON.stringify({ text }),
+        signal
+    });
+
+    if (!response) throw createFrontendRequestError("authentication");
+    if (response.status === 429) throw createFrontendRequestError("quota", response.status);
+    if (response.status === 401 || response.status === 403) throw createFrontendRequestError("authentication", response.status);
+    if (response.status === 408 || response.status === 504) throw createFrontendRequestError("timeout", response.status);
+    if (response.status >= 500) throw createFrontendRequestError("server", response.status);
+    if (!response.ok) throw createFrontendRequestError("request", response.status);
+
+    let data;
     try {
-        const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
-            method: "POST",
-            headers: {
-                "Accept": "application/json"
-            },
-            body: JSON.stringify({ text })
-        });
+        data = await response.json();
+    } catch (error) {
+        throw createFrontendRequestError("invalid_response", response.status);
+    }
 
-        // 🟢 NUEVO: Detectar si el usuario se ha quedado sin cuota (Status 429)
-        if (response.status === 429) {
-            alertMessage(t("ui.quotaReached"), "error", 5000);
-            return []; // Devolvemos un array vacío para no romper la tabla de la interfaz
-        }
+    const assertions = generatedAssertionsFromResponse(data);
+    console.info(`Aserciones generadas recibidas: ${assertions.length}`);
+    return assertions;
+}
 
-        // Si es otro tipo de error (500, 404, etc.)
-        if (!response.ok) throw new Error(`Error API: ${response.status}`);
+async function handleGenerateAssertions() {
+    if (assertionsGenerationInProgress) return;
 
-        const data = await response.json();
-        const assertions = generatedAssertionsFromResponse(data);
-        console.info(`Aserciones generadas recibidas: ${assertions.length}`);
-        return assertions;
-    } catch (err) {
-        console.error("Error al generar aserciones:", err);
-        alertMessage(t("ui.assertionsServiceError"), "error");
-        return [];
+    const text = document.getElementById("newsText")?.value.trim() || "";
+    const container = document.getElementById("news-assertions-container");
+    if (!text) {
+        alertMessage(t("messages.writeNews"), "error");
+        return;
+    }
+
+    assertionsGenerationInProgress = true;
+    setAssertionsButtonLoading(true);
+    const progress = startAssertionsProgress(container);
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, ASSERTIONS_REQUEST_TIMEOUT_MS);
+
+    alertMessage(t("messages.generatingAssertions"), "info");
+
+    try {
+        const assertions = await generateAssertionsFromText(text, controller.signal);
+        progress.stop();
+        renderEditableAssertionsTable(container, assertions);
+        renderAssertionsGenerationResult(container, assertions.length);
+        alertMessage(
+            assertions.length
+                ? t("messages.assertionsGeneratedCount", { count: assertions.length })
+                : t("messages.noAssertionsFound"),
+            assertions.length ? "success" : "info",
+            4500
+        );
+    } catch (error) {
+        progress.stop();
+        let normalizedError = error;
+        if (timedOut || error?.name === "AbortError") normalizedError = createFrontendRequestError("timeout");
+        else if (!error?.code) normalizedError = createFrontendRequestError("network");
+
+        console.error("Error al generar aserciones:", error);
+        renderAssertionsGenerationError(container, normalizedError);
+        alertMessage(assertionsErrorMessage(normalizedError), "error", 7000);
+    } finally {
+        window.clearTimeout(timeoutId);
+        progress.stop();
+        assertionsGenerationInProgress = false;
+        setAssertionsButtonLoading(false);
     }
 }
 
@@ -654,10 +919,19 @@ async function findOrder() {
 // =========================================================
 // CARGA CENTRAL DE ÓRDENES
 // =========================================================
-async function loadOrderById(orderId, cleanup = true) {
+async function loadOrderById(orderId, cleanup = true, options = {}) {
     const tabs = document.getElementById("orderTabs");
     const detailsContainer = document.getElementById("fixedDetailsContainer");
     const tabContent = document.getElementById("tabContent");
+    const background = Boolean(options.background);
+    const ownedController = options.signal ? null : new AbortController();
+    const requestSignal = options.signal || ownedController.signal;
+    const requestOptions = { signal: requestSignal };
+    const requestTimeoutId = ownedController
+        ? window.setTimeout(() => ownedController.abort(), POLLING_REQUEST_TIMEOUT_MS)
+        : null;
+
+    if (cleanup && !background) stopOrderPolling();
 
     if (cleanup) tabs.innerHTML = '';
 
@@ -666,26 +940,30 @@ async function loadOrderById(orderId, cleanup = true) {
     }
 
     try {
-        const res = await fetchWithAuth(`${API}/orders/${orderId}`);
+        const res = await fetchWithAuth(`${API}/orders/${orderId}`, requestOptions);
+
+        if (!res) throw createFrontendRequestError("authentication");
 
         if (!res.ok) {
             const errorText = await res.text();
-            detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
-                Error ${res.status}: No se pudo encontrar la orden <strong>${safeText(orderId)}</strong>.<br>
-                Mensaje: ${safeText(errorText || 'Error desconocido')}
-            </div>`;
-            tabs.innerHTML = tabContent.innerHTML = '';
-            alertMessage(t("messages.orderNotFound", { orderId }), 'error');
-            return;
+            if (!background) {
+                detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
+                    Error ${res.status}: No se pudo encontrar la orden <strong>${safeText(orderId)}</strong>.<br>
+                    Mensaje: ${safeText(errorText || 'Error desconocido')}
+                </div>`;
+                tabs.innerHTML = tabContent.innerHTML = '';
+                alertMessage(t("messages.orderNotFound", { orderId }), 'error');
+            }
+            return { ok: false, status: res.status };
         }
 
         let data;
         if (res.status !== 304) {
             data = await res.json();
-            currentOrderData = data;
+            if (background && options.isCurrent && !options.isCurrent()) return { ok: false, stale: true };
         } else {
             data = currentOrderData;
-            if (!data.order_id) return;
+            if (!data.order_id) return { ok: false, status: res.status };
         }
 
         let eventsData = currentOrderEvents;
@@ -693,9 +971,11 @@ async function loadOrderById(orderId, cleanup = true) {
         if (cleanup || res.status !== 304) {
             eventsData = [];
             try {
-                const resEv = await fetchWithAuth(`${API}/orders/${orderId}/events`);
+                const resEv = await fetchWithAuth(`${API}/orders/${orderId}/events`, requestOptions);
                 if (resEv.ok) eventsData = await resEv.json();
             } catch(e){ console.error("Error cargando eventos:", e); }
+            if (background && options.isCurrent && !options.isCurrent()) return { ok: false, stale: true };
+            currentOrderData = data;
             currentOrderEvents = eventsData;
 
             const lightMode = isLightOrder(data);
@@ -743,13 +1023,22 @@ async function loadOrderById(orderId, cleanup = true) {
         }
 
         detailsContainer.innerHTML = '<span class="status-value" data-status="' + safeText(data.status || "UNKNOWN") + '"></span>';
+        return { ok: true, data };
     } catch (error) {
-        detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
-            Error de conexión o JSON inválido: ${safeText(error.message)}
-        </div>`;
-        tabs.innerHTML = tabContent.innerHTML = '';
+        if (!background) {
+            const errorMessage = error?.name === "AbortError"
+                ? t("messages.orderLoadTimeoutError", { seconds: Math.round(POLLING_REQUEST_TIMEOUT_MS / 1000) })
+                : t("ui.connectionJsonError", { message: error.message || t("ui.unknownError") });
+            detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
+                ${safeText(errorMessage)}
+            </div>`;
+            tabs.innerHTML = tabContent.innerHTML = '';
+            alertMessage(t("messages.criticalOrderError"), 'error');
+        }
         console.error(error);
-        alertMessage(t("messages.criticalOrderError"), 'error');
+        return { ok: false, error };
+    } finally {
+        if (requestTimeoutId) window.clearTimeout(requestTimeoutId);
     }
 }
 
@@ -2626,32 +2915,7 @@ function initializeApp() {
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
     document.getElementById('btn-publishNew').addEventListener('click', publishNew);
     document.getElementById('btn-clearNews')?.addEventListener('click', clearNewsForm);
-    document.getElementById('validationMode')?.addEventListener('change', updateValidationModeHelp);
-    updateValidationModeHelp();
-
-    document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
-        const text = document.getElementById("newsText").value.trim();
-        const container = document.getElementById("news-assertions-container");
-        if (!text) {
-            alertMessage(t("messages.writeNews"), "warning");
-            return;
-        }
-        if (container) {
-            renderAssertionsProgress(container, t("messages.generatingAssertions"), 20);
-        }
-        alertMessage(t("messages.generatingAssertions"), "info");
-        const assertions = await generateAssertionsFromText(text);
-        if (container) {
-            if (!assertions || assertions.length === 0) {
-                renderAssertionsProgress(container, t("messages.assertionsGenerated"), 100);
-                container.innerHTML += `<div class="mt-4">${t("messages.noAssertionsFound") || "No se generaron aserciones."}</div>`;
-            } else {
-                renderAssertionsProgress(container, t("messages.assertionsGenerated"), 100);
-            }
-        }
-        renderEditableAssertionsTable(container, assertions);
-        alertMessage(t("messages.assertionsGenerated"), "success");
-    });
+    document.getElementById("btn-generateAssertions").addEventListener("click", handleGenerateAssertions);
 
     // 4. El resto de tus Listeners (Orders, TX, IPFS...)
     document.getElementById('btn-findOrder').addEventListener('click', findOrder);
@@ -3571,7 +3835,9 @@ initializeApp = function initializeAppUXIntegrated() {
     const logoutBtn = document.getElementById("btn-logout");
     if (logoutBtn && !logoutBtn.dataset.bound) {
         logoutBtn.dataset.bound = "true";
-        logoutBtn.addEventListener("click", () => keycloak.logout({ redirectUri: window.location.origin }));
+        logoutBtn.addEventListener("click", () => keycloak.logout({
+            redirectUri: new URL(FRONTEND_BASE_PATH, window.location.origin).href
+        }));
     }
 
     const badge = document.getElementById("sessionBadge");

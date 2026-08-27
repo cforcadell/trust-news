@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Assermetry</title>
-    <link rel="stylesheet" href="css/style.css?v=20260613-process-widgets-2">
+    <base href="/gui/">
+    <link rel="stylesheet" href="css/style.css?v=20260825-validation-feedback">
     <link rel="icon" type="image/svg+xml" href="img/assermetry_favicon.svg">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/auth/js/keycloak.js"></script>
@@ -82,15 +83,23 @@
                     <textarea id="newsText" placeholder="Escribe la noticia aquí para publicar, o el texto a buscar." data-i18n-placeholder="sections.newsText"></textarea>
 
                     <div class="validation-mode-panel">
-                        <label for="validationMode" data-i18n="ui.validationModeLabel">Modo de validación</label>
-                        <select id="validationMode" name="validation_mode">
-                            <option value="BLOCKCHAIN" selected>Blockchain</option>
-                            <option value="LIGHT">Light</option>
-                        </select>
-                        <div class="mode-help">
-                            <span data-mode-help="BLOCKCHAIN" data-i18n="ui.blockchainHelp">Validación completa con trazabilidad blockchain e IPFS</span>
-                            <span data-mode-help="LIGHT" data-i18n="ui.lightHelp" hidden>Validación rápida sin publicación en blockchain/IPFS</span>
-                        </div>
+                        <label class="blockchain-audit-toggle" for="validationMode">
+                            <input
+                                type="checkbox"
+                                id="validationMode"
+                                name="validation_mode"
+                                value="BLOCKCHAIN"
+                                aria-describedby="validationModeTooltip"
+                            >
+                            <span data-i18n="ui.blockchainAuditLabel">Auditar y trazabilidad con Blockchain</span>
+                            <span class="validation-mode-info" aria-hidden="true">?</span>
+                            <span
+                                id="validationModeTooltip"
+                                class="validation-mode-tooltip"
+                                role="tooltip"
+                                data-i18n="ui.blockchainAuditTooltip"
+                            >Al activar esta opción, los documentos de la verificación se publican en IPFS y su trazabilidad queda registrada en blockchain para facilitar su auditoría e integridad.</span>
+                        </label>
                     </div>
 
                     <div class="action-bar sticky-actions">
@@ -203,7 +212,7 @@
     </div>
 </main>
 
-<script src="js/i18n.js"></script>
-<script src="js/app.js?v=20260613-process-widgets-2"></script>
+<script src="js/i18n.js?v=20260825-validation-feedback"></script>
+<script src="js/app.js?v=20260825-validation-feedback"></script>
 </body>
 </html>

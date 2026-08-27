@@ -35,6 +35,12 @@ externas.
 - La regla mTLS general temporal se retira en una ventana controlada,
   manteniendo activos el lock, la regla mTLS administrativa y un rollback
   probado.
+- La interfaz queda publicada bajo `/gui/`; Cloudflare redirige únicamente `/`
+  y `/gui` a `/gui/` y bloquea por defecto cualquier path ajeno a `/gui`,
+  `/backend` y `/auth`.
+- URL Normalization, Free Managed Ruleset, rate limiting y el cierre del origen
+  a redes verificadas de Cloudflare permanecen activos: la allowlist de paths
+  no los sustituye.
 - Se valida el ciclo de revocación con un certificado administrativo
   desechable y un certificado de respaldo ya comprobado: el desechable supera
   mTLS antes de revocarlo y es rechazado después, sin perder el acceso de
@@ -72,6 +78,8 @@ externas.
 - Los límites no rompen login, refresh ni polling legítimos.
 - La regla mTLS general temporal está retirada y la administración continúa
   protegida por su regla mTLS permanente.
+- Rutas de escáner como `/wp-admin/`, `/.env` y paths aleatorios se bloquean en
+  Cloudflare y no alcanzan Hetzner.
 - Un certificado administrativo desechable revocado es rechazado y el
   certificado de respaldo conserva el acceso administrativo.
 - El alta número once se deriva a la lista de espera.
@@ -196,7 +204,7 @@ Condiciones mínimas:
 
 - `cloudflared` como workload restringido, con credencial externa, probes,
   límites, dos réplicas y `--no-autoupdate`.
-- Traefik sigue siendo el único router para `/`, `/backend` y `/auth`.
+- Traefik sigue siendo el único router para `/gui`, `/backend` y `/auth`.
 - El salto `cloudflared -> Traefik` valida el Origin CA y
   `originServerName=assermetry.com`; no se usa `noTLSVerify`.
 - `forwardedHeaders.insecure` permanece desactivado y solo se confían los

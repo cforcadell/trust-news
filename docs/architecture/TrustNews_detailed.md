@@ -889,7 +889,7 @@ Main local URLs exposed by Skaffold:
 
 | Service | URL |
 |---|---|
-| Frontend | https://localhost:7443 |
+| Frontend | https://localhost:7443/gui/ |
 | Keycloak admin console | https://localhost:7443/auth/admin/master/console/ |
 | Admin API | http://localhost:8400/docs |
 | Gateway | http://localhost:8500/docs |

@@ -16,7 +16,7 @@ Los procedimientos compartidos están en
 | Ámbito | Estado vigente |
 | --- | --- |
 | Clúster | Kind, nombre `trust-news` |
-| Entrada web | `https://localhost:7443`, conservando el hostname mediante redirección o túnel desde el host |
+| Entrada web | `https://localhost:7443/gui/`, conservando el hostname mediante redirección o túnel desde el host |
 | Ingress | Overlay `k8s/ingress/overlays/local` con `host: localhost` |
 | TLS | Secret local `trustnews-origin-tls` generado desde `web_classic/certs/*` |
 | Identidad | Keycloak con issuer `https://localhost:7443/auth/realms/TrustNews` |
@@ -60,7 +60,7 @@ redirige el puerto del hipervisor hacia la VM o se abre un túnel, por ejemplo:
 ssh -L 7443:127.0.0.1:7443 <usuario-vm>@<ip-privada-vm>
 ```
 
-Después se abre `https://localhost:7443` en el host. No sustituir el hostname
+Después se abre `https://localhost:7443/gui/` en el host. No sustituir el hostname
 por la IP de la VM para validar login u OIDC. Los paneles y APIs accedidos por
 port-forward directo, sin una regla de host canónica, sí pueden abrirse como
 `http://<ip-privada-vm>:<puerto>`. Si no se necesita acceso desde el host,
@@ -256,9 +256,23 @@ privada descrito en [1.1](#11-acceso-desde-el-host-de-la-vm).
 Rutas principales:
 
 ```text
-https://localhost:7443/
+https://localhost:7443/gui/
 https://localhost:7443/backend/docs
 https://localhost:7443/auth/admin/master/console/
+```
+
+Kind no reproduce los Single Redirects de Cloudflare: `/` debe quedar sin ruta
+y la GUI se prueba directamente en `/gui/`. El middleware de Traefik elimina
+ese prefijo antes de enviar la petición al nginx del frontend.
+
+Alinear de forma idempotente el cliente web local antes de probar login y
+logout:
+
+```bash
+KEYCLOAK_URL=https://localhost:7443/auth \
+FRONTEND_URL=https://localhost:7443/gui \
+WEB_ORIGIN=https://localhost:7443 \
+./scripts/k8s/infra/reconcile-keycloak-web-prod.sh
 ```
 
 El navegador puede mostrar un aviso por el certificado local.
@@ -301,7 +315,7 @@ criterio de red de [1.1](#11-acceso-desde-el-host-de-la-vm).
 
 | Servicio | URL | Perfil |
 | --- | --- | --- |
-| Frontend | `https://localhost:7443` | `apis-frontend` |
+| Frontend | `https://localhost:7443/gui/` | `apis-frontend` |
 | Admin API Swagger | `http://localhost:8400/docs` | `apis-frontend` |
 | Gateway Swagger | `http://localhost:8500/docs` | `apis-frontend` |
 | Evidence Search Swagger | `http://localhost:8074/docs` | `apis-frontend` |
@@ -330,18 +344,33 @@ Cloudflare.
 kubectl kustomize --load-restrictor=LoadRestrictionsNone \
   k8s/ingress/overlays/local > /tmp/assermetry-ingress-local.yaml
 
-rg -n 'host: localhost|gateway-strip-backend-prefix' \
+rg -n 'host: localhost|path: /gui|frontend-strip-gui|gateway-strip-backend-prefix' \
   /tmp/assermetry-ingress-local.yaml
 ```
 
 El render no debe contener `prod-domain`, el issuer público ni bloqueos
 exclusivos de Cloudflare.
 
+Comprobar además la frontera local después del despliegue:
+
+```bash
+curl --fail --show-error --cacert web_classic/certs/fullchain.pem \
+  -o /dev/null https://localhost:7443/gui/
+curl --fail --show-error --cacert web_classic/certs/fullchain.pem \
+  -o /dev/null https://localhost:7443/gui/css/style.css
+
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cacert web_classic/certs/fullchain.pem https://localhost:7443/)" = "404"
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cacert web_classic/certs/fullchain.pem https://localhost:7443/gui-malicious)" = "404"
+```
+
 ### 9.2 Matriz funcional
 
 La validación debe cubrir:
 
 - login, refresh, logout y expiración;
+- entrada exclusiva por `/gui/` y retorno de logout a `/gui/`;
 - navegación y autorización por rol;
 - polling y cuotas;
 - flujos Light y Blockchain;

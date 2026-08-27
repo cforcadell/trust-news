@@ -8,14 +8,20 @@ están en [`releases.md`](releases.md) y el roadmap está en
 
 **En curso.**
 
+**Punto de trabajo actual:** 11 de [`working.md`](working.md), iniciado. Los
+puntos anteriores se consideran OK.
+
 ## Objetivo
 
 Probar sistemáticamente la GUI y la API, corregir los problemas fundamentales y
 obtener una demo privada reproducible con datos sintéticos. El estado del lock
 se decide explícitamente para cada ventana y se comprueba antes y después de
-ella. Durante toda esta versión se conservan la regla mTLS general temporal para
-las rutas no administrativas y la regla mTLS administrativa permanente. No se
-entregan accesos persistentes a clientes.
+ella. Mientras no se abra el servicio a clientes, se conserva un gate temporal
+que combina mTLS general para las rutas no administrativas con el bloqueo de
+namespaces no permitidos, además de la regla mTLS administrativa permanente. Al
+abrir clientes, se retirará únicamente la condición mTLS del gate y se
+conservará el bloqueo de namespaces. No se entregan accesos persistentes a
+clientes durante esta fase.
 
 ### Fase 13.1 - Preparación reproducible
 

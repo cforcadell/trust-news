@@ -588,66 +588,97 @@ infraestructura o exista además un cambio explícito en ella.
 
 ## 10. Validar Hetzner antes de modificar la frontera Cloudflare
 
-Usar un túnel para probar el origen sin depender del WAF:
+La validación se ejecuta desde Windows. Abrir PowerShell y resolver la ruta de
+la clave SSH. En una primera terminal, crear el túnel y mantenerla abierta:
 
-```bash
-ssh -i ./id_rsa_hetzner_deploy -p 2222 \
-  -L 9443:127.0.0.1:9443 \
-  <usuario>@<hetzner-ip> \
-  -t "kubectl port-forward --address 127.0.0.1 \
-      -n kube-system svc/traefik 9443:443"
+```powershell
+$SshKey = (Resolve-Path .\id_rsa_hetzner_deploy).Path
+$HetznerTarget = "<usuario>@<hetzner-ip>"
+
+ssh.exe -i $SshKey -p 2222 -o ExitOnForwardFailure=yes `
+  -L 9443:127.0.0.1:9443 $HetznerTarget -t `
+  'sudo k3s kubectl port-forward --address 127.0.0.1 -n kube-system svc/traefik 9443:443'
 ```
 
-En otra terminal:
+La terminal debe quedar mostrando
+`Forwarding from 127.0.0.1:9443 -> 8443`. No usar el puerto local `443`, para
+evitar permisos elevados o conflictos en Windows.
 
-```bash
-openssl s_client \
-  -connect 127.0.0.1:9443 \
-  -servername assermetry.com \
-  -verify_hostname assermetry.com \
-  -CAfile origin_ca_rsa_root.pem \
-  -verify_return_error </dev/null
+En una segunda terminal PowerShell, comprobar primero que el extremo local del
+túnel está escuchando. Ejecutar cada bloque completo, no línea por línea:
 
-curl --fail --show-error \
-  --resolve assermetry.com:9443:127.0.0.1 \
-  --cacert origin_ca_rsa_root.pem \
-  https://assermetry.com:9443/gui/ -o /dev/null
+```powershell
+$Tunnel = Test-NetConnection 127.0.0.1 -Port 9443 -WarningAction SilentlyContinue
+if ($Tunnel.TcpTestSucceeded) {
+  "PASS tunnel 127.0.0.1:9443"
+} else {
+  throw "FAIL tunnel 127.0.0.1:9443"
+}
+```
 
-curl --fail --show-error \
-  --resolve assermetry.com:9443:127.0.0.1 \
-  --cacert origin_ca_rsa_root.pem \
-  https://assermetry.com:9443/gui/css/style.css -o /dev/null
+Después, resolver la ruta de `cloudflare-origin-ca-rsa-root.pem` y validar TLS,
+hostname, frontend y assets. `curl.exe`, con `--resolve`, `--noproxy` y
+`--cacert`, verifica la cadena del certificado y que sea válido para
+`assermetry.com`; no usar `-k` ni `--insecure`:
+
+```powershell
+$OriginCa = (Resolve-Path .\cloudflare-origin-ca-rsa-root.pem).Path
+$Resolve = "assermetry.com:9443:127.0.0.1"
+
+curl.exe --fail --show-error --noproxy assermetry.com `
+  --resolve $Resolve --cacert $OriginCa `
+  https://assermetry.com:9443/gui/ --output NUL
+if ($LASTEXITCODE -eq 0) {
+  "PASS /gui/"
+} else {
+  throw "FAIL /gui/"
+}
+
+curl.exe --fail --show-error --noproxy assermetry.com `
+  --resolve $Resolve --cacert $OriginCa `
+  https://assermetry.com:9443/gui/css/style.css --output NUL
+if ($LASTEXITCODE -eq 0) {
+  "PASS /gui/css/style.css"
+} else {
+  throw "FAIL /gui/css/style.css"
+}
 ```
 
 Comprobar que el origen no tiene catch-all:
 
-```bash
-for test_path in / /gui-malicious /backend-malicious /auth-malicious; do
-  observed_code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-    --resolve assermetry.com:9443:127.0.0.1 \
-    --cacert origin_ca_rsa_root.pem \
-    "https://assermetry.com:9443${test_path}")"
-  test "$observed_code" = "404" || {
-    echo "FAIL ${test_path}: ${observed_code}"
-    exit 1
+```powershell
+$TestPaths = @("/", "/gui-malicious", "/backend-malicious", "/auth-malicious")
+
+foreach ($TestPath in $TestPaths) {
+  $ObservedCode = curl.exe --silent --show-error --output NUL `
+    --write-out "%{http_code}" --noproxy assermetry.com `
+    --resolve $Resolve --cacert $OriginCa `
+    "https://assermetry.com:9443$TestPath"
+  if ($LASTEXITCODE -ne 0 -or $ObservedCode -ne "404") {
+    throw "FAIL ${TestPath}: ${ObservedCode}"
   }
-done
+  "PASS ${TestPath}: 404"
+}
 ```
 
-Validar discovery:
+Validar discovery y su issuer exacto:
 
-```bash
-curl --fail --show-error \
-  --resolve assermetry.com:9443:127.0.0.1 \
-  --cacert origin_ca_rsa_root.pem \
-  https://assermetry.com:9443/auth/realms/TrustNews/.well-known/openid-configuration \
-  -o /tmp/assermetry-prod-discovery.json
-```
+```powershell
+$DiscoveryFile = Join-Path $env:TEMP "assermetry-prod-discovery.json"
+Remove-Item $DiscoveryFile -Force -ErrorAction SilentlyContinue
 
-El issuer debe ser exactamente:
+curl.exe --fail --show-error --noproxy assermetry.com `
+  --resolve $Resolve --cacert $OriginCa `
+  https://assermetry.com:9443/auth/realms/TrustNews/.well-known/openid-configuration `
+  --output $DiscoveryFile
+if ($LASTEXITCODE -ne 0) { throw "FAIL OIDC discovery" }
 
-```text
-https://assermetry.com/auth/realms/TrustNews
+$Issuer = (Get-Content -Raw $DiscoveryFile | ConvertFrom-Json).issuer
+$ExpectedIssuer = "https://assermetry.com/auth/realms/TrustNews"
+if ($Issuer -ne $ExpectedIssuer) {
+  throw "FAIL issuer: ${Issuer}"
+}
+"PASS issuer: ${Issuer}"
 ```
 
 Si el origen falla, no modificar todavía redirects ni reglas Cloudflare.
@@ -664,23 +695,32 @@ En `Security` > `Security rules`, confirmar y registrar sin copiar Rule IDs:
 
 1. `Maintenance lock - assermetry.com`.
 2. `Permanent mTLS - Keycloak administration`.
-3. `Temporary mTLS gate - assermetry.com`.
+3. `Temporary mTLS and public path gate - assermetry.com`.
 4. `Permanent block - non-public resources`.
 5. `Permanent block - unexpected backend methods`.
 
 Guardar de forma segura la expresión de la regla temporal para rollback. No
 borrarla antes de tener el lock activo.
 
-La composición final será:
+Mientras el servicio siga cerrado a clientes, la expresión de esta regla debe
+ser la condición mTLS temporal existente `OR` la condición de bloqueo de
+namespaces de la sección 13.1. La acción continúa siendo `Block`. No crear una
+segunda regla para este bloqueo: así, editar el mismo slot al abrir clientes
+permite retirar solo mTLS y conservar la protección de rutas.
+
+Mientras no se abra el servicio a clientes, la composición será:
 
 1. maintenance lock, si se conserva;
 2. mTLS permanente de administración;
-3. bloqueo de recursos no públicos;
-4. bloqueo de métodos inesperados del Gateway;
-5. `Default deny - public path namespaces`.
+3. `Temporary mTLS and public path gate - assermetry.com` (mTLS general más
+  bloqueo de namespaces no permitidos);
+4. bloqueo de recursos no públicos;
+5. bloqueo de métodos inesperados del Gateway.
 
-Si el maintenance lock se elimina en otra decisión operativa, quedarán cuatro
-reglas. Las tres reglas permanentes existentes no son suficientes por sí solas.
+Al abrir clientes, se editará la tercera regla en el mismo slot: se eliminará
+su condición mTLS, se conservará el bloqueo de namespaces y se cambiará el
+nombre a `Default deny - public path namespaces`. El mTLS administrativo no se
+modifica.
 
 ### 11.2 URL Normalization
 
@@ -793,11 +833,18 @@ ajustes de código y preservación de query están documentados en
 
 ---
 
-## 13. Sustituir el mTLS temporal por `default deny`
+## 13. Retirar el mTLS temporal y conservar `default deny`
+
+Este paso se ejecuta únicamente cuando se decida abrir el servicio a clientes.
+Hasta entonces, la regla del punto 11 mantiene mTLS general y protección de
+rutas en el mismo slot. La combinación es operativamente válida porque una
+petición debe satisfacer ambas condiciones: certificado cliente válido y
+namespace permitido. No sustituye la autenticación, autorización ni el
+aislamiento que aplican Gateway y las APIs.
 
 ### 13.1 Expresión final
 
-Nombre recomendado:
+Nombre final recomendado después de abrir clientes:
 
 ```text
 Default deny - public path namespaces
@@ -837,10 +884,11 @@ es más seguro que borrarla y crear otra:
 1. Confirmar que el maintenance lock está activo.
 2. Confirmar que `/gui/` devuelve `403` a través de Cloudflare.
 3. Abrir `Security` > `Security rules`.
-4. Editar `Temporary mTLS gate - assermetry.com`.
+4. Editar `Temporary mTLS and public path gate - assermetry.com`.
 5. Conservar previamente, en ubicación segura, su nombre, expresión y acción.
-6. Cambiar el nombre a `Default deny - public path namespaces`.
-7. Seleccionar `Edit expression` y sustituir la expresión por la anterior.
+6. Seleccionar `Edit expression` y eliminar únicamente la condición mTLS,
+   manteniendo la expresión de namespaces permitidos de la sección 13.1.
+7. Cambiar el nombre a `Default deny - public path namespaces`.
 8. Mantener la acción `Block` y el código WAF predeterminado `403`.
 9. Seleccionar `Deploy`.
 10. Si la interfaz permite reordenar, moverla al último lugar. De este modo las
@@ -1036,10 +1084,10 @@ caché de un redirect permanente.
 1. Activar inmediatamente el maintenance lock.
 2. Si se exige bloqueo absoluto, desactivar también los dos Single Redirects.
 3. Editar `Default deny - public path namespaces`.
-4. Restaurar nombre, expresión y acción de
-   `Temporary mTLS gate - assermetry.com`.
+4. Restaurar nombre, expresión combinada y acción de
+  `Temporary mTLS and public path gate - assermetry.com`.
 5. Confirmar que el mTLS temporal vuelve a bloquear rutas no administrativas
-   sin certificado.
+  sin certificado y que los namespaces no permitidos siguen bloqueados.
 6. Mantener intacta la regla mTLS administrativa.
 
 ### 15.4 Rollback Kubernetes
@@ -1071,7 +1119,10 @@ No borrar PVC ni Secrets y no hacer `git reset --hard` como rollback operativo.
 - [ ] Traefik productivo con prefijos estrictos.
 - [ ] `/gui` desplegado y Keycloak alineado.
 - [ ] Redirects exactos activos con `302` y query preservada.
-- [ ] Regla mTLS temporal sustituida por `default deny`.
+- [ ] Antes de abrir clientes: gate temporal con mTLS general y bloqueo de
+  namespaces no permitidos validado.
+- [ ] Al abrir clientes: condición mTLS retirada y `default deny` conservado en
+  el mismo slot.
 - [ ] Scanner paths y prefijos falsos bloqueados con `403`.
 - [ ] Administración sin certificado bloqueada.
 - [ ] Administración con certificado válido llega a Keycloak.

@@ -279,16 +279,75 @@ function stopOrderPolling(session = activeOrderPollingSession) {
     if (activeOrderPollingSession === session) activeOrderPollingSession = null;
 }
 
+function getLatestOrderEvent(events = []) {
+    if (!Array.isArray(events) || events.length === 0) return null;
+
+    let latestEvent = events.at(-1);
+    let latestTimestamp = Number.NEGATIVE_INFINITY;
+    events.forEach(event => {
+        const timestamp = parseEventTimestamp(event?.timestamp)?.getTime();
+        if (Number.isFinite(timestamp) && timestamp >= latestTimestamp) {
+            latestEvent = event;
+            latestTimestamp = timestamp;
+        }
+    });
+    return latestEvent;
+}
+
+function summarizeOrderEvent(event) {
+    if (!event) return t("messages.verificationNoEvents");
+
+    const action = String(event.action || "").trim().toLowerCase();
+    const translationKey = `eventActions.${action}`;
+    const translatedAction = t(translationKey);
+    const actionSummary = translatedAction === translationKey
+        ? action.replaceAll("_", " ") || t("messages.verificationUnknownEvent")
+        : translatedAction;
+    const assertionId = event.payload?.idAssertion ?? event.payload?.assertion_id;
+
+    return assertionId === undefined || assertionId === null || assertionId === ""
+        ? actionSummary
+        : t("messages.verificationEventAssertion", { event: actionSummary, id: assertionId });
+}
+
+function formatPollingEventDate(value) {
+    const date = parseEventTimestamp(value) || new Date();
+    const language = window.I18N?.getLanguage?.() === "en" ? "en-GB" : "es-ES";
+    return date.toLocaleString(language, {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+    });
+}
+
+function resetPublishedOrderView() {
+    currentOrderData = {};
+    currentOrderEvents = [];
+    ["orderTabs", "fixedDetailsContainer", "tabContent"].forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = "";
+    });
+}
+
 function renderOrderPollingState(type, session, status = "") {
     const container = document.getElementById("fixedDetailsContainer");
     if (!container || !session) return;
 
     const elapsedSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
+    const latestEvent = getLatestOrderEvent(currentOrderEvents);
+    const progressDetail = t("messages.verificationElapsed", {
+        count: elapsedSeconds,
+        date: formatPollingEventDate(latestEvent?.timestamp),
+        event: summarizeOrderEvent(latestEvent)
+    });
     const isError = type === "timeout" || type === "connection-error" || type === "terminal-error";
     const messages = {
         checking: {
             title: t("messages.verificationChecking"),
-            detail: t("messages.verificationElapsed", { count: elapsedSeconds })
+            detail: progressDetail
         },
         retrying: {
             title: t("messages.verificationConnectionRetry", { current: session.consecutiveErrors, total: POLLING_MAX_CONSECUTIVE_ERRORS }),
@@ -322,7 +381,9 @@ function renderOrderPollingState(type, session, status = "") {
         <span class="status-value" data-status="${safeText(status || currentOrderData?.status || "UNKNOWN")}"></span>
     `;
 
-    container.querySelector(".btn-retry-verification")?.addEventListener("click", () => pollOrder(session.orderId));
+    container.querySelector(".btn-retry-verification")?.addEventListener("click", () => pollOrder(session.orderId, {
+        followProcess: session.followProcess
+    }));
 }
 
 async function runOrderPollingCycle(session) {
@@ -342,6 +403,7 @@ async function runOrderPollingCycle(session) {
     const result = await loadOrderById(session.orderId, false, {
         signal: controller.signal,
         background: true,
+        preferredTabKey: session.followProcess ? "process" : null,
         isCurrent: () => activeOrderPollingSession === session && !session.stopped
     });
     window.clearTimeout(requestTimeoutId);
@@ -356,7 +418,8 @@ async function runOrderPollingCycle(session) {
             stopOrderPolling(session);
             console.log(`Polling finalizado para ${session.orderId}. Estado: ${status}`);
             if (status.startsWith("VALIDATED")) {
-                await loadOrderById(session.orderId, true);
+                await loadOrderById(session.orderId, true, { preferredTabKey: "summary" });
+                activateOrderTab("summary");
             } else {
                 renderOrderPollingState("terminal-error", session, status);
                 alertMessage(t("messages.verificationTerminalErrorTitle"), "error", 7000);
@@ -378,14 +441,16 @@ async function runOrderPollingCycle(session) {
     session.timerId = window.setTimeout(() => runOrderPollingCycle(session), POLLING_INTERVAL);
 }
 
-function pollOrder(orderId) {
+function pollOrder(orderId, options = {}) {
     stopOrderPolling();
+    if (options.resetView) resetPublishedOrderView();
     const session = {
         orderId,
         startedAt: Date.now(),
         consecutiveErrors: 0,
         timerId: null,
         controller: null,
+        followProcess: Boolean(options.followProcess),
         stopped: false
     };
     activeOrderPollingSession = session;
@@ -773,7 +838,7 @@ async function publishNew() {
     document.getElementById("orderId").value = newOrderId;
     updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
     alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
-    pollOrder(newOrderId);
+    pollOrder(newOrderId, { resetView: true, followProcess: true });
 }
 
 async function publishWithAssertions() {
@@ -835,7 +900,7 @@ async function publishWithAssertions() {
         document.getElementById("orderId").value = newOrderId;
         updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
         alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
-        pollOrder(newOrderId);
+        pollOrder(newOrderId, { resetView: true, followProcess: true });
 
         return data;
     } catch (error) {
@@ -992,7 +1057,8 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
 
             if (cleanup || tabs.children.length === 0) {
                 tabs.innerHTML = '';
-                const defaultTabKey = String(data.status || "").startsWith("VALIDATED") ? "summary" : "process";
+                const defaultTabKey = options.preferredTabKey
+                    || (String(data.status || "").startsWith("VALIDATED") ? "summary" : "process");
                 sections.forEach((s) => {
                     const btn = document.createElement("button");
                     btn.innerText = s.name;
@@ -1014,7 +1080,14 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
                     if(s.key === defaultTabKey) renderTabContent(s.key, s.data, orderAssertions, data, eventsData);
                 });
             } else {
-                const activeTab = tabs.querySelector('.activeTab');
+                const preferredTab = options.preferredTabKey
+                    ? tabs.querySelector(`[data-tab-key="${options.preferredTabKey}"]`)
+                    : null;
+                if (preferredTab && !preferredTab.disabled) {
+                    tabs.querySelectorAll(".activeTab").forEach(button => button.classList.remove("activeTab"));
+                    preferredTab.classList.add("activeTab");
+                }
+                const activeTab = preferredTab || tabs.querySelector('.activeTab');
                 if (activeTab) {
                     const sec = sections.find(s => s.key === activeTab.dataset.tabKey);
                     if (sec && !sec.disabled) renderTabContent(sec.key, sec.data, orderAssertions, data, eventsData);
@@ -3786,7 +3859,13 @@ window.addEventListener("trustnews:languagechange", () => {
             if (translatedName) button.textContent = translatedName;
         });
 
-        if (detailsContainer) {
+        if (detailsContainer && activeOrderPollingSession) {
+            renderOrderPollingState(
+                activeOrderPollingSession.consecutiveErrors ? "retrying" : "checking",
+                activeOrderPollingSession,
+                currentOrderData.status
+            );
+        } else if (detailsContainer) {
             detailsContainer.innerHTML = `<span class="status-value" data-status="${safeText(currentOrderData.status || "UNKNOWN")}"></span>`;
         }
 

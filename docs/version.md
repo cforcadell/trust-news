@@ -8,8 +8,10 @@ están en [`releases.md`](releases.md) y el roadmap está en
 
 **En curso.**
 
-**Punto de trabajo actual:** 11 de [`working.md`](working.md), iniciado. Los
-puntos anteriores se consideran OK.
+**Punto de trabajo actual:** 13 de [`working.md`](working.md), completado a nivel
+de configuración. El estado temporal que se entrega a la v0.0.14 queda definido
+y configurado; permanecen pendientes las pruebas de regresión y la evidencia de
+cierre descritas en `working.md` antes de considerar cerrada la v0.0.13.
 
 ## Objetivo
 

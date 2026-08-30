@@ -8,10 +8,11 @@ están en [`releases.md`](releases.md) y el roadmap está en
 
 **En curso.**
 
-**Punto de trabajo actual:** 13 de [`working.md`](working.md), completado a nivel
-de configuración. El estado temporal que se entrega a la v0.0.14 queda definido
-y configurado; permanecen pendientes las pruebas de regresión y la evidencia de
-cierre descritas en `working.md` antes de considerar cerrada la v0.0.13.
+**Último hito completado:** publicación de la interfaz bajo `/gui/`, validada en
+Kind y desplegada después en Hetzner. La frontera pública, los redirects de
+Cloudflare, la integración OIDC y los flujos LIGHT y BLOCKCHAIN quedaron
+verificados. El gate temporal con mTLS general se conserva hasta la v0.0.14,
+junto con el mTLS administrativo permanente.
 
 ## Objetivo
 
@@ -70,6 +71,27 @@ comparable.
 
 Resultado esperado: recorridos repetibles y sin defectos bloqueantes para una
 demo.
+
+#### Resultado verificado - publicación bajo `/gui/`
+
+- Despliegue validado primero en Kind y después en Hetzner desde el mismo
+  commit, con los pipelines productivos completados correctamente.
+- Frontend servido exclusivamente bajo `/gui/`, con prefijos estrictos,
+  eliminación del prefijo en Traefik y sin un Ingress catch-all para `/`.
+- `TrustNewsWeb` alineado con redirects, orígenes web y post-logout bajo
+  `/gui/*`; login, refresh y logout validados.
+- LIGHT establecido como modo predeterminado y BLOCKCHAIN activable mediante
+  checkbox, con publicación, IPFS y trazabilidad comprobados.
+- Progreso, timeout, errores y reintentos de generación de aserciones y polling
+  verificados en la interfaz.
+- Cloudflare configurado con redirects exactos `302` para `/` y `/gui`,
+  preservación de query y bloqueo de paths ajenos a `/gui/`, `/backend` y
+  `/auth`.
+- Gate temporal combinado de mTLS y namespaces públicos validado, manteniendo
+  el mTLS específico para la administración de Keycloak.
+- Regresión de rutas, OIDC, LIGHT/BLOCKCHAIN, WAF y protección del origen
+  completada sin defectos P0/P1 ni regresiones sostenidas durante la
+  observación.
 
 ### Fase 13.3 - Regresión de API y aislamiento
 

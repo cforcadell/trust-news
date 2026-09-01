@@ -250,8 +250,55 @@ En produccion se usa el endpoint canonico con la cadena TLS verificada por
 `curl` y, mientras siga activa la regla temporal, `--cert <cert.pem>` y
 `--key <key.pem>`. No usar `-k` ni publicar el puerto interno de Keycloak.
 
-Las cuotas/clientes de negocio se crean por API de admin; no deben formar parte
-del bootstrap fijo.
+### Alta de cuotas para usuarios del frontend
+
+Las cuotas/clientes de negocio se crean mediante la API de `admin`; no deben
+formar parte del bootstrap fijo ni insertarse directamente en MongoDB. En local,
+la API y su interfaz Swagger están disponibles en:
+
+```text
+http://localhost:8400/docs
+```
+
+Para un usuario del frontend, copiar su `ID` (el UUID del usuario, no el nombre
+de usuario) desde el realm `TrustNews` de Keycloak. El `client_id` que utiliza el
+Gateway se construye con el formato:
+
+```text
+user_<keycloak_user_id>
+```
+
+Crear el cliente con `POST /clients`. El siguiente ejemplo da de alta 100 usos
+para generación y 100 para validación; ajustar ambos límites según corresponda:
+
+```bash
+curl --fail --show-error -X POST \
+  http://127.0.0.1:8400/clients \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "user-7d6c0b75-52af-4204-8288-9055d9218d02",
+    "client_id": "user_7d6c0b75-52af-4204-8288-9055d9218d02",
+    "limits": {
+      "news_generation": 100,
+      "blockchain_validation": 100
+    }
+  }'
+```
+
+`consumed` se inicializa a cero, `status` a `Active` y `active_date` a la fecha
+UTC actual cuando esos campos no se envían. La API persiste el documento en
+`newsdb.clients_quotas`.
+
+Verificar el alta:
+
+```bash
+curl --fail --show-error \
+  http://127.0.0.1:8400/clients/user_7d6c0b75-52af-4204-8288-9055d9218d02
+```
+
+Si `POST /clients` responde `400` con `El cliente ya existe`, consultar primero
+el registro anterior y actualizar sus límites mediante
+`PATCH /clients/{client_id}` en Swagger, en lugar de crear un duplicado.
 
 - Display name: nombre visible de la aplicacion, por ejemplo `Assermetry`.
   Keycloak usa este valor en la pantalla de autenticacion (por ejemplo,

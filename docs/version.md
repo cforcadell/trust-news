@@ -27,7 +27,7 @@ persistentes a clientes durante esta fase.
 
 ### Fase 13.1 - Preparación reproducible
 
-- Crear un conjunto fijo de datos sintéticos sin información de clientes.
+
 - Definir identidades pseudónimas de administrador, usuario y cliente API para
   al menos dos organizaciones sintéticas.
 - Preparar casos Light y Blockchain con resultados comprobables.
@@ -153,3 +153,109 @@ ni Cloudflare Tunnel.
 - La demo puede inicializarse, ejecutarse, limpiarse y cerrarse.
 - Existe un guion de demo y una lista de limitaciones conocidas.
 - La plataforma no se presenta como producción ni como alta disponibilidad.
+
+## Análisis fusionado de pruebas de dos IAs (2026-09-01)
+
+Las pruebas de validación realizadas con Codex y Copilot coinciden en que el
+problema central no es una falta de flujo, sino una falta de coherencia entre la
+representación del resultado y la evidencia que la sustenta. Ambos análisis
+concluyen que Assermetry debe pasar de un modelo de «veredicto opaco» a un
+modelo de «análisis explicable y revisable por humanos».
+
+### Síntesis del diagnóstico
+
+- La categoría automática de aserciones y la extracción de afirmaciones no son
+  todavía suficientemente fiables para beta cerrada.
+- El estado del proceso, la decisión final y la representación temporal se
+  mezclan en la misma pantalla.
+- Las decisiones de consenso y los desempates no se explican de forma legible.
+- Los errores de validadores y los timeouts se tratan como resultados válidos,
+  cuando no generan evidencia y deben estar separados de `UNKNOWN`.
+- La interfaz prioriza la lista de validadores y las fuentes sobre la evidencia
+  principal, cuando el usuario necesita ver primero: afirmación, veredicto,
+  unidad de medida, evidencia y fuente.
+- El lenguaje de la experiencia sigue teniendo ambigüedad entre "publicar",
+  "validar" y "auditar con blockchain"; esto debe simplificarse antes del piloto.
+- La experiencia móvil y la internacionalización degradan la confianza del
+  producto aunque el flujo básico funcione.
+
+### Bloques funcionales priorizados
+
+Los hallazgos se agrupan en nueve bloques que deben resolverse en este orden:
+
+1. Coherencia temporal y de estado.
+2. Consenso y veredicto.
+3. Errores y reintentos de validadores.
+4. Revisión humana de aserciones.
+5. Evidencia principal y informe reutilizable.
+6. Lenguaje y modos de operación.
+7. Trabajos asíncronos y progreso persistente.
+8. Responsive, navegación y accesibilidad.
+9. Ambigüedad semántica y numérica.
+
+Esta secuencia es coherente con el roadmap de [`next_releases.md`](next_releases.md):
+los puntos 1 a 5 son correcciones de rigor y de confianza que deben cerrarse
+antes de abrir evaluaciones con clientes; el resto refuerzan la experiencia y la
+operación del piloto.
+
+### Incidencias abiertas derivadas
+
+Estas incidencias se han dado de alta en [`issues.md`](issues.md) y deben ser
+la base de la ejecución técnica del ciclo de estabilización:
+
+- [`ISSUE-005`](issues.md#issue-005---fechas-zonas-horarias-y-estados-temporales-inconsistentes-en-la-gui-de-resultados)
+- [`ISSUE-006`](issues.md#issue-006---estado-provisionalfinal-mezclado-en-la-pantalla-de-proceso)
+- [`ISSUE-007`](issues.md#issue-007---veredicto-global-y-calculo-de-consenso-no-explican-empates-ni-decisiones)
+- [`ISSUE-008`](issues.md#issue-008---validadores-con-timeout-tratados-como-resultado-v-alido)
+- [`ISSUE-009`](issues.md#issue-009---flujo-de-extraccion-y-clasificacion-de-afirmaciones-no-revisable)
+- [`ISSUE-010`](issues.md#issue-010---resultado-no-presenta-evidencia-principal-ni-informe-reutilizable)
+
+### Recomendaciones de implementación
+
+- Separar `process_status` y `decision_status` en la API y en la UI: el proceso
+  puede terminar sin que la decisión sea definitiva.
+- Definir `TRUE`, `FALSE`, `UNKNOWN` y `NO_CONSENSUS` como categorías de
+  decisión; no mezclar un empate con una falsedad determinada.
+- Diferenciar `timeout` o `error` de `UNKNOWN`: un fallo de validación no equivale
+  a un resultado de evidencia.
+- Hacer el flujo `texto → afirmaciones → revisión → validación` obligatorio en la
+  experiencia humana; la validación automática queda como modo operativo para
+  integraciones y backends.
+- Mostrar obligatorio el resumen de evidencia principal por afirmación: texto
+  original, veredicto, fuente principal, fecha, enlace y fragmento de apoyo o
+  contradicción.
+- Sustituir la etiqueta de publicación por "Validar contenido" y simplificar el
+  selector entre validación rápida y validación auditable, sin vender blockchain
+  como garantía de verdad.
+- Introducir progresos persistentes con un panel de validaciones activas y un
+  aviso de finalización para el usuario.
+- Corregir antes del piloto la experiencia móvil, la internacionalización y la
+  accesibilidad base.
+
+### Plan de implementación recomendado
+
+- v0.0.13.x: corrección de rigor y consistencia.
+  - `ISSUE-005`, `ISSUE-006`, `ISSUE-007`, `ISSUE-008`.
+  - Lenguaje de producto y eliminación de mensajes ambiguos.
+- v0.0.14: revisión humana y evidencia.
+  - `ISSUE-009`, `ISSUE-010`.
+  - flujo revisable de afirmaciones, resumen de evidencia de la orden y
+    generación de informe compartible.
+- v0.0.15: piloto con design partners.
+  - seguimiento de validaciones activas, selector de modo, experiencias
+    responsive/a11y y telemetría para comparar tasa de edición, rechazo y
+    consenso.
+
+### Criterio de salida para la fase actual
+
+La versión en curso solo se considera estable cuando:
+
+- la GUI distingue proceso y decisión sin contradicciones;
+- los empates se presentan como `NO_CONSENSO` y no como decisión arbitraria;
+- los errores de validación quedan separados de `UNKNOWN` y no se ocultan;
+- el usuario puede revisar y corregir las afirmaciones antes de validar;
+- la evidencia principal es visible sin abrir varios acordeones;
+- las fechas y los formatos se renderizan de forma consistente en la zona del
+  usuario.
+
+Este criterio encaja con la intención del roadmap de `[next_releases.md](next_releases.md)`: cerrar la base de confianza antes de abrir la beta cerrada y el piloto con design partners.

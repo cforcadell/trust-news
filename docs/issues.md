@@ -250,3 +250,256 @@ Marcar como **Resuelto** cuando el tunel solo acepte la clave fijada, una clave
 incorrecta falle antes de cualquier acceso a Kubernetes y el pipeline no use
 confianza obtenida dinamicamente. La clave valida debe seguir permitiendo los
 preflight y despliegues de todos los perfiles.
+
+---
+
+## v0.0.13 - Correccion de consistencia, consenso y evidencia de validacion
+
+### ISSUE-005 - Fechas, zonas horarias y estados temporales inconsistentes en la GUI de resultados
+
+| Campo | Valor |
+| --- | --- |
+| Fecha de deteccion | 2026-09-01 |
+| Entorno | Frontend y API de validacion; perfiles LIGHT y BLOCKCHAIN |
+| Fase | Regresion de GUI y validacion de ordenes |
+| Estado | **Abierto** |
+| Prioridad | **P0** |
+| Version objetivo | `v0.0.13` |
+| Componentes | `web`, `gateway`, `api`, `validate-asertions`, `news-handler` |
+
+#### Comportamiento detectado
+
+En una misma pantalla aparecen eventos con hora local y hora de orden no
+alineadas, la orden muestra un tiempo de finalizacion distinto del del mensaje
+"Ultima validacion recibida hace 120 min" y la UI mezcla fechas naive con
+fechas renderizadas en zona del usuario. El mismo contenido puede mostrarse con
+formato estadounidense o sin zona horaria, incluso cuando la validacion acaba de
+terminar.
+
+#### Riesgo
+
+El usuario puede interpretar que el resultado tiene una antiguedad distinta a la
+real, o que los eventos se produjeron en un orden distinto del que ocurrieron.
+Esto afecta directamente a la confianza, a la auditable y a la reproducibilidad
+operativa.
+
+#### Correccion prevista
+
+1. Normalizar todas las fechas a UTC ISO 8601 con offset (`2026-08-31T18:19:27.431Z`).
+2. Renderizar en la zona horaria del usuario, con formato local y con locale ES.
+3. Separar `process_status` y `decision_status` en el modelo de la UI y del API.
+4. Sustituir mensajes relativos ambiguos por `hace 2 min` solo si se calcula a
+   partir del mismo timestamp origen.
+5. Probar trazas sobre horas de inicio, fin, orden y ultimo evento en la misma
+   pantalla.
+
+#### Criterio de resolucion
+
+Marcar como **Resuelto** cuando la GUI muestre siempre una fecha unificada por
+evento, la zona horaria del usuario sea aplicada de forma consistente y la UI no
+mezcle estados temporales con decisiones definitivas.
+
+### ISSUE-006 - Estado provisional/final mezclado en la pantalla de proceso
+
+| Campo | Valor |
+| --- | --- |
+| Fecha de deteccion | 2026-09-01 |
+| Entorno | Frontend validacion |
+| Fase | Salida de resultado |
+| Estado | **Abierto** |
+| Prioridad | **P0** |
+| Version objetivo | `v0.0.13` |
+| Componentes | `web`, `api`, `validate-asertions` |
+
+#### Comportamiento detectado
+
+Cuando la validacion alcanza el 100 %, la pestaña de proceso sigue mostrando
+"Resultado provisional" y "Este resultado puede cambiar" aunque el estado del
+proceso ya se considera completado. El componente sigue visualmente abierto y el
+usuario percibe que el resultado no esta cerrado.
+
+#### Riesgo
+
+El estado final se ve contradictorio con la realidad del flujo. Esto puede llevar
+a que se publican conclusiones con una semantica inestable, especialmente en
+entornos de demostracion, beta y pilotos externos.
+
+#### Correccion prevista
+
+1. Introducir un estado formal de decision (`PROVISIONAL`, `FINAL`, `NO_CONSENSUS`).
+2. Mantener `process_status` distinto de `decision_status`.
+3. Cuando un proceso termine correctamente, mostrar `Resultado definitivo` y
+   ocultar la advertencia provisional.
+4. Probar mensajes en estados `RUNNING`, `COMPLETED`, `COMPLETED_WITH_ERRORS` y
+   `NO_CONSENSUS`.
+
+#### Criterio de resolucion
+
+La pantalla debe mostrar un estado coherente y no volver a comunicar un resultado
+como provisional una vez que el sistema haya terminado el calculo final.
+
+### ISSUE-007 - Veredicto global y calculo de consenso no explican empates ni decisiones
+
+| Campo | Valor |
+| --- | --- |
+| Fecha de deteccion | 2026-09-01 |
+| Entorno | Frontend y motor de evaluacion |
+| Fase | Consolidacion del resultado |
+| Estado | **Abierto** |
+| Prioridad | **P0** |
+| Version objetivo | `v0.0.13` |
+| Componentes | `validate-asertions`, `gateway`, `web` |
+
+#### Comportamiento detectado
+
+La interfaz puede mostrar un veredicto global "Desmentida" o "Falsa" aunque la
+afirmacion haya recibido un reparto como `FALSE 50 %` y `UNKNOWN 50 %`. El
+sistema decide sin explicar la regla de desempate ni la diferencia entre votos y
+resultado factico final.
+
+#### Riesgo
+
+El usuario no sabe si el sistema aplica un criterio oculto, si hay empate o si la
+decision es una conclusion del producto. Esto destruye la confianza en la
+valoracion de resultados y complica la auditabilidad.
+
+#### Correccion prevista
+
+1. Evitar que un empate se resuelva automaticamente a favor de uno de los
+   resultados.
+2. Introducir `NO_CONSENSUS` y mostrar la distribucion exacta de votos.
+3. Diferenciar claramente `consenso de validadores` de `resultado factual`.
+4. Mostrar siempre la desglose por afirmacion y la distribucion por validador.
+5. Probar escenarios `TRUE/TRUE/UNKNOWN`, `FALSE/UNKNOWN/UNKNOWN` y empate 50/50.
+
+#### Criterio de resolucion
+
+Una afirmacion con empate no puede resolverse como efectiva sin explicacion y sin
+un estado de consenso declarado. La interfaz debe mostrar la distribucion de
+votos y la regla aplicada.
+
+### ISSUE-008 - Validadores con timeout tratados como resultado valido
+
+| Campo | Valor |
+| --- | --- |
+| Fecha de deteccion | 2026-09-01 |
+| Entorno | Backend de validacion y frontend |
+| Fase | Reintentos y tratamiento de errores |
+| Estado | **Abierto** |
+| Prioridad | **P0** |
+| Version objetivo | `v0.0.13` |
+| Componentes | `news-handler`, `validate-asertions`, `web` |
+
+#### Comportamiento detectado
+
+Uno de los validadores termina con `The read operation timed out` y la UI lo
+presenta como un resultado valido, sin distinguir la ausencia de evidencia del
+resultado `UNKNOWN`.
+
+#### Riesgo
+
+Se produce una mezcla entre resultado de validacion y fallo tecnico. Eso reduce la
+fiabilidad del consenso y puede ocultar una degradacion del sistema.
+
+#### Correccion prevista
+
+1. Diferenciar `ERROR`, `TIMEOUT`, `UNKNOWN` y `NO_RESULT` directamente en el
+   modelo.
+2. Mostrar una alerta legible en español con el validador afectado y la
+   afirmacion implicada.
+3. Permitir reintento granular de una validacion individual sin repetir el
+   conjunto completo.
+4. Registrar metricas de fallo por validador y por afirmacion.
+
+#### Criterio de resolucion
+
+Un timeout no debe contarse como voto ni como evidencia; la UI debe indicar que
+se ha producido una falla tecnica y cual es el impacto sobre el consenso.
+
+### ISSUE-009 - Flujo de extraccion y clasificacion de afirmaciones no revisable
+
+| Campo | Valor |
+| --- | --- |
+| Fecha de deteccion | 2026-09-01 |
+| Entorno | Flujo de validacion de contenido |
+| Fase | Generacion y revision de aserciones |
+| Estado | **Abierto** |
+| Prioridad | **P1** |
+| Version objetivo | `v0.0.14` |
+| Componentes | `generate-asertions`, `web`, `api` |
+
+#### Comportamiento detectado
+
+Se detectan afirmaciones sin permitir una revision humana previa. La categoria que
+asignan puede ser incorrecta, como en el caso de contenido demografico que se
+clasifica como ECONOMIA. El flujo actual publica directamente, sin revision ni
+edicion.
+
+#### Riesgo
+
+Los errores de extraccion y de clasificacion pueden arrastrarse al resultado
+final, degradando la calidad de la validacion y la reputacion del producto.
+
+#### Correccion prevista
+
+1. Cambiar el flujo a `texto -> afirmaciones detectadas -> revisión -> validación`.
+2. Permitir editar, eliminar, añadir y re-categorizar afirmaciones antes de
+   validarlas.
+3. Corregir la taxonomia desde prompts y ejemplos para distinguir demografia,
+   economia, salud, tecnologia, etc.
+4. Probar casos con expresiones aproximadas y ambiguas.
+
+#### Criterio de resolucion
+
+Un usuario debe poder revisar, corregir y confirmar el conjunto de afirmaciones
+antes de iniciar la validacion formal.
+
+### ISSUE-010 - Resultado no presenta evidencia principal ni informe reutilizable
+
+| Campo | Valor |
+| --- | --- |
+| Fecha de deteccion | 2026-09-01 |
+| Entorno | Frontend y exportacion de resultados |
+| Fase | Evidencia y pilotaje |
+| Estado | **Abierto** |
+| Prioridad | **P1** |
+| Version objetivo | `v0.0.14` |
+| Componentes | `web`, `api`, `evidence-search` |
+
+#### Comportamiento detectado
+
+La pantalla principal exige navegar entre validadores y fuentes para recuperar
+la conclusion. No existe un resumen principal de evidencia por afirmacion ni un
+informe descargable o compartible con contenido original, veredicto, fuente,
+fecha, enlace y limitaciones.
+
+#### Riesgo
+
+La herramienta resulta dificil de usar para analistas, periodistas y equipos de
+comunicacion, y su valor real queda oculto si no puede exportarse en formato de
+trabajo.
+
+#### Correccion prevista
+
+1. Mostrar por cada afirmacion: original, veredicto, fuente principal, fecha,
+   enlace y fragmento relevante.
+2. Crear un informe reutilizable con texto original, afirmaciones, veredictos,
+   fuentes y limitaciones del analisis.
+3. Incluir metadata de procedencia, contexto de contenido generado por IA y
+   banderas de revision humana, si aplica.
+4. Probar la exportacion en formato texto y PDF o HTML.
+
+#### Criterio de resolucion
+
+El usuario debe poder comprender la conclusion de la orden sin recorrer la
+totalidad de los detalles de validacion, y compartir el resultado con una
+evidencia clara y legible.
+
+---
+
+Las incidencias anteriores resumen el diagnostico fusionado de la prueba de dos
+IAs y se incorporan a la linea de trabajo de la `v0.0.13` y la `v0.0.14`.
+La prioridad P0 corresponde a correcciones de coherencia y confianza que deben
+resolverse antes de abrir la beta cerrada; la prioridad P1 corresponde a la
+revision humana y a la evidencia primera que necesita un piloto con design
+partners.

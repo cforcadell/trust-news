@@ -565,7 +565,12 @@ async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Ass
                         # Si es un error de cuota o temporal, el except Exception lo capturará para reintentar
                         if resp.status in [429, 500, 502, 503, 504]:
                              raise Exception(f"Error temporal del servidor: {resp.status}")
-                        raise HTTPException(status_code=resp.status, detail=f"Error OpenRouter: {text_resp}")
+                        # El cuerpo puede incluir contenido del proveedor o del
+                        # modelo. Conservamos únicamente el estado observable.
+                        raise HTTPException(
+                            status_code=resp.status,
+                            detail=f"Error OpenRouter (status {resp.status})",
+                        )
 
                     data = await resp.json()
                     
@@ -738,9 +743,29 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
     # Construir respuesta tipada (AssertionsGeneratedResponse)
     try:
         assertions_document = build_generated_document(req.payload.text, assertion_objs, req.payload.validation_mode)
-        logger.info(f"[generate-asertions] generated assertions-document-v2 assertions={len(assertions_document.assertions)}")
+        log_event(
+            logger,
+            logging.INFO,
+            "assertions_document_generated",
+            provider=AI_PROVIDER,
+            model={
+                "mistral": MISTRAL_MODEL,
+                "gemini": GEMINI_MODEL,
+                "openrouter": OPENROUTER_MODEL,
+            }.get(AI_PROVIDER),
+            assertions=len(assertions_document.assertions),
+        )
         for assertion in assertions_document.assertions:
-            logger.info(f"[generate-asertions] assertion_id={assertion.assertion_id} categoryId={assertion.categoryId} subcategory={assertion.subcategory} location={[loc.country_code or loc.name for loc in assertion.context.locations]} entities={[ent.name for ent in assertion.context.entities]} temporal={[item.value for item in assertion.context.temporal_context]}")
+            logger.debug(
+                "[generate-asertions] assertion_id=%s categoryId=%s "
+                "subcategory=%s location=%s entities=%s temporal=%s",
+                assertion.assertion_id,
+                assertion.categoryId,
+                assertion.subcategory,
+                [loc.country_code or loc.name for loc in assertion.context.locations],
+                [ent.name for ent in assertion.context.entities],
+                [item.value for item in assertion.context.temporal_context],
+            )
         payload = AssertionGeneratedPayload(
             text=req.payload.text,
             assertions=assertion_objs,
@@ -987,4 +1012,9 @@ async def shutdown_event():
 if __name__ == "__main__":
     import uvicorn
     logger.info("Iniciando worker (uvicorn) - FastAPI + Kafka consumer")
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8001")))
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8001")),
+        log_config=None,
+    )

@@ -394,4 +394,11 @@ app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8500")))
+    # La configuración común ya está instalada. Evita que Uvicorn vuelva a
+    # sustituirla por sus formatters de texto en el arranque programático.
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8500")),
+        log_config=None,
+    )

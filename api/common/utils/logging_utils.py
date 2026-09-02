@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 
+UVICORN_LOGGER_NAMES = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
+
 class SingleLineJsonFormatter(logging.Formatter):
     """Render every log record as one JSON object on one physical line."""
 
@@ -51,6 +54,7 @@ def configure_single_line_json_logging(level: int) -> None:
     """Configure application and Uvicorn handlers with one-line JSON logs."""
 
     logging.basicConfig(level=level)
+    logging.captureWarnings(True)
     formatter = SingleLineJsonFormatter()
 
     root_logger = logging.getLogger()
@@ -60,7 +64,7 @@ def configure_single_line_json_logging(level: int) -> None:
 
     # Uvicorn configures these handlers before importing the ASGI app when it
     # is launched from the CLI, so include them in the same logging contract.
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    for logger_name in UVICORN_LOGGER_NAMES:
         for handler in logging.getLogger(logger_name).handlers:
             handler.setFormatter(formatter)
 

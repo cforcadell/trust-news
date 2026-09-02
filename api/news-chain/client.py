@@ -95,4 +95,4 @@ if __name__ == "__main__":
     logger.info(f"Orden creada: {order_id}, estado inicial: {status}")
 
     # Arrancar servidor para recibir callback
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8080, log_config=None)

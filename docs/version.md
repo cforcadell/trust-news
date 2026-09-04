@@ -51,6 +51,13 @@ persistentes a clientes durante esta fase.
 Resultado esperado: cada regresión parte del mismo estado y genera evidencia
 comparable.
 
+El runner y los casos sintéticos de esta fase se mantienen en
+[`web_classic/test`](../web_classic/test/README.md). `run-regression.js` ejecuta
+Light y Blockchain, aplica oráculos funcionales y genera manifiesto, resumen y
+capturas sanitizadas. Una ejecución solo acredita estado reproducible cuando se
+activa `ASSERMETRY_REQUIRE_MANAGED_STATE=true` con hooks idempotentes de
+preparación y limpieza; las escrituras Blockchain e IPFS no se revierten.
+
 ### Fase 13.2 - Regresión de GUI
 
 - Publicar la interfaz bajo `/gui/`, conservar `/backend` y `/auth` como

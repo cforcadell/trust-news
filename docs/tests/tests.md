@@ -24,3 +24,18 @@ pytest ./test_validator_api.py  --> Validates validation assertion and validator
 
 
 ```
+
+## Regresión reproducible de la GUI
+
+Los casos sintéticos Light y Blockchain, sus oráculos, las identidades
+pseudónimas y el ciclo de preparación/limpieza están documentados en
+[`web_classic/test/README.md`](../../web_classic/test/README.md).
+
+Validación local del paquete, sin abrir Chrome:
+
+```bash
+node web_classic/test/run-regression.js --validate
+```
+
+La ejecución completa requiere las credenciales pseudónimas indicadas en esa
+documentación y devuelve código distinto de cero ante cualquier regresión.

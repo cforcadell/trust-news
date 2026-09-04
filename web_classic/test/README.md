@@ -1,109 +1,286 @@
-# Prueba E2E visual del frontend clásico
+# Regresión reproducible del frontend clásico
 
-`ui-smoke-test.js` automatiza con Chrome una comprobación funcional y visual de
-`web_classic`. Utiliza directamente Chrome DevTools Protocol y no necesita
-Playwright, Selenium ni dependencias npm.
+Este directorio contiene dos niveles de ejecución:
 
-La prueba ignora el certificado autofirmado de `localhost`. Está pensada para el
-entorno local/Kind y no para producción.
+- `ui-smoke-test.js` ejecuta un único escenario mediante Chrome DevTools
+  Protocol, sin Playwright, Selenium ni dependencias npm;
+- `run-regression.js` valida y ejecuta de forma secuencial los casos sintéticos
+  Light y Blockchain, agrega sus resultados y devuelve error si falla cualquier
+  comprobación.
 
-## Qué comprueba
+El runner está pensado para el entorno local/Kind servido en
+`https://localhost:7443/gui/`. Chrome acepta el certificado autofirmado dentro
+de un perfil temporal aislado.
 
-Ejecuta exactamente cuatro escenarios dentro de una misma sesión:
+## Contenido
 
-1. Abre el frontend, pasa por Keycloak e inicia sesión.
-2. Envía una noticia y crea **una única orden**.
-3. Sigue esa misma orden hasta un estado final o hasta el timeout, y revisa sus
-   pestañas de resultado.
-4. Cambia el viewport a tamaño móvil y captura el resultado y el formulario.
+```text
+web_classic/test/
+├── run-regression.js
+├── ui-smoke-test.js
+├── identities.example.json
+└── cases/
+    ├── light.json
+    ├── light-news.txt
+    ├── blockchain.json
+    └── blockchain-news.txt
+```
 
-Por tanto, cuatro pruebas no significan cuatro órdenes. Solo el escenario 2
-modifica datos, consume cuotas y crea una orden. Los escenarios 1, 3 y 4 son
-comprobaciones de acceso, lectura y presentación.
+Los textos son sintéticos. Los resultados esperados son invariantes
+estructurales y operativas; no se compara literalmente el texto producido por
+un LLM.
+
+## Qué se comprueba
+
+Cada escenario:
+
+1. abre el frontend y completa el login de Keycloak;
+2. publica exactamente una noticia con el modo indicado;
+3. exige un `order_id` UUID válido;
+4. sigue la orden hasta un estado terminal;
+5. falla ante timeout, `ERROR`, `FAILED`, `QUOTA_EXCEDED`,
+   `ASSERTIONS_NOT_AVAILABLE`, `NO_VALIDATORS_AVAILABLE` o cualquier estado no
+   permitido por el caso;
+6. comprueba modo, campos de orden, aserciones, validaciones, validadores
+   pendientes y pestañas habilitadas/deshabilitadas;
+7. falla ante respuestas HTTP o errores de consola no incluidos expresamente
+   en la lista permitida;
+8. captura vistas de escritorio y móvil.
+
+El caso Blockchain exige además `cid`, `post_id`, `tx_hash` y la pestaña IPFS
+habilitada. El caso Light exige esa pestaña deshabilitada.
 
 ## Requisitos
 
-- Node.js 22 o posterior, por el soporte nativo de `fetch` y `WebSocket`.
-- Google Chrome. Por defecto se utiliza `/usr/bin/google-chrome`.
-- El perfil `apis-frontend` levantado y accesible en
-  `https://localhost:7443/gui/`.
-- Un usuario de Keycloak con cuotas suficientes.
+- Node.js 22 o posterior, por el soporte nativo de `fetch`, `WebSocket` y
+  `AbortSignal.timeout`.
+- Google Chrome; por defecto `/usr/bin/google-chrome`.
+- El perfil `apis-frontend` desplegado y accesible.
+- Dos usuarios pseudónimos de Keycloak con cuotas suficientes: uno asociado a
+  `org-alpha` y otro a `org-beta`.
+- Validadores disponibles para las categorías generadas.
 
-## Uso
+`identities.example.json` define los alias y los nombres de variables para
+administradores, usuarios y clientes API de las dos organizaciones. No contiene
+usuarios reales, contraseñas ni secretos.
 
-Desde la raíz del repositorio:
+## Validar el paquete sin ejecutar la aplicación
+
+La validación comprueba los JSON, modos, identidades y ficheros de noticias, sin
+abrir Chrome ni necesitar credenciales:
 
 ```bash
-export ASSERMETRY_USERNAME=codex
-read -rsp "Password de Keycloak: " ASSERMETRY_PASSWORD
-export ASSERMETRY_PASSWORD
+node web_classic/test/run-regression.js --validate
+```
+
+Se escriben `manifest.json` y `summary.json` en un directorio temporal y el
+proceso termina con código cero si los casos son válidos.
+
+## Ejecutar Light y Blockchain
+
+Las contraseñas se leen de forma interactiva y se mantienen únicamente en
+variables de entorno del runner:
+
+```bash
+export ASSERMETRY_ORG_ALPHA_USERNAME=regression-alpha-user
+read -rsp "Password org-alpha: " ASSERMETRY_ORG_ALPHA_PASSWORD
+export ASSERMETRY_ORG_ALPHA_PASSWORD
 printf '\n'
 
-node web_classic/test/ui-smoke-test.js
+export ASSERMETRY_ORG_BETA_USERNAME=regression-beta-user
+read -rsp "Password org-beta: " ASSERMETRY_ORG_BETA_PASSWORD
+export ASSERMETRY_ORG_BETA_PASSWORD
+printf '\n'
+
+node web_classic/test/run-regression.js
+
+unset ASSERMETRY_ORG_ALPHA_PASSWORD ASSERMETRY_ORG_BETA_PASSWORD
+```
+
+El orquestador asigna un perfil nuevo de Chrome a cada escenario y ejecuta los
+casos secuencialmente. Las credenciales de una organización no se entregan al
+escenario de la otra y Chrome se inicia con las variables sensibles eliminadas
+de su entorno.
+
+La línea final es una de estas:
+
+```text
+REGRESSION_RESULT PASS
+REGRESSION_RESULT FAIL
+```
+
+Un `PASS` sin ciclo de datos configurado certifica las comprobaciones
+funcionales, pero `summary.json` mantiene `managedState: false`. Para afirmar
+que la ejecución parte de un estado reproducible debe usarse el modo estricto
+descrito a continuación.
+
+## Inicialización y limpieza
+
+La API pública no ofrece una operación segura para borrar una orden completa y
+una ejecución Blockchain deja efectos no reversibles en IPFS y en la cadena.
+El orquestador no borra colecciones, PVC ni datos ajenos.
+
+La preparación y la limpieza se integran mediante dos ejecutables controlados
+por el operador:
+
+```bash
+export ASSERMETRY_SETUP_HOOK=/ruta/segura/setup-regression
+export ASSERMETRY_CLEANUP_HOOK=/ruta/segura/cleanup-regression
+export ASSERMETRY_REQUIRE_MANAGED_STATE=true
+
+node web_classic/test/run-regression.js
+```
+
+Los hooks se ejecutan directamente, sin `shell`, argumentos ni interpolación.
+Reciben estas variables:
+
+| Variable | Significado |
+| --- | --- |
+| `ASSERMETRY_RUN_ID` | Identificador único de la ejecución. |
+| `ASSERMETRY_ARTIFACTS_DIR` | Directorio donde leer o escribir evidencia. |
+| `ASSERMETRY_CASES` | Lista separada por comas de los casos ejecutados. |
+
+Contrato recomendado:
+
+- `setup` crea o restablece exclusivamente cuotas y datos de las identidades
+  sintéticas declaradas;
+- ambos hooks son idempotentes;
+- `cleanup` lee los `report.json`, actúa únicamente sobre los IDs incluidos en
+  `createdResources` y conserva evidencia de lo retirado;
+- no se intenta revertir una transacción Blockchain ni eliminar contenido IPFS
+  por su CID;
+- cualquier error devuelve un código distinto de cero.
+
+Con `ASSERMETRY_REQUIRE_MANAGED_STATE=true`, la ausencia o el fallo de uno de
+los hooks hace fallar la regresión. Sin esa variable, los hooks son opcionales y
+su estado queda reflejado en el informe.
+
+## Repetir tres veces
+
+Una vez configurados hooks idempotentes, pueden obtenerse tres ejecuciones
+comparables:
+
+```bash
+for repetition in 1 2 3; do
+  ASSERMETRY_RUN_ID="regression-${repetition}" \
+    ASSERMETRY_ARTIFACTS_DIR="/tmp/assermetry-regression-${repetition}" \
+    node web_classic/test/run-regression.js || break
+done
+```
+
+Cada repetición debe terminar en `PASS`, partir de las mismas cuotas/datos y
+mantener las mismas invariantes. Los IDs, timestamps, duraciones y textos LLM
+pueden variar.
+
+## Línea base de Kubernetes
+
+El orquestador puede capturar una fotografía de nodos, pods, reinicios, consumo
+de CPU/memoria y PVC mediante operaciones de solo lectura:
+
+```bash
+ASSERMETRY_CAPTURE_K8S_BASELINE=true \
+  node web_classic/test/run-regression.js
+```
+
+Esto crea `kubernetes-baseline.json`. Si la captura debe ser obligatoria:
+
+```bash
+ASSERMETRY_REQUIRE_K8S_BASELINE=true \
+  node web_classic/test/run-regression.js
+```
+
+En el segundo caso, cualquier fallo de `kubectl` hace fallar la ejecución.
+
+## Ejecutar un único caso
+
+El runner individual mantiene un modo interactivo compatible:
+
+```bash
+export ASSERMETRY_USERNAME=regression-alpha-user
+read -rsp "Password: " ASSERMETRY_PASSWORD
+export ASSERMETRY_PASSWORD
+
+ASSERMETRY_CASE_FILE=web_classic/test/cases/light.json \
+  node web_classic/test/ui-smoke-test.js
 
 unset ASSERMETRY_PASSWORD
 ```
 
-Por defecto se utiliza el contenido de `docs/fake_news/news.txt` y se crea una
-validación `LIGHT`.
+Sin `ASSERMETRY_CASE_FILE` usa `docs/fake_news/news.txt` y modo Light, pero esa
+ejecución es un smoke manual y no sustituye el paquete sintético completo.
 
-La ejecución imprime progresivamente estados como:
+## Configuración
 
-```text
-TEST_1_OK acceso_y_autenticacion
-TEST_2_OK order_id=<uuid>
-ORDER_STATUS VALIDATION_PENDING
-TEST_3_DONE final_status=<estado>
-TEST_4_OK responsive
-REPORT /tmp/assermetry-ui-<fecha>/report.json
-ORDERS_CREATED 1
-```
-
-## Configuración opcional
-
-| Variable | Valor predeterminado | Uso |
+| Variable | Predeterminado | Uso |
 | --- | --- | --- |
 | `ASSERMETRY_URL` | `https://localhost:7443/gui/` | URL del frontend. |
-| `ASSERMETRY_USERNAME` | Obligatoria | Usuario de Keycloak. |
-| `ASSERMETRY_PASSWORD` | Obligatoria | Contraseña de Keycloak. No se escribe en el informe. |
-| `ASSERMETRY_NEWS` | Vacía | Texto literal que se validará. Tiene prioridad sobre el fichero. |
-| `ASSERMETRY_NEWS_FILE` | `docs/fake_news/news.txt` | Fichero con el texto que se validará. |
-| `ASSERMETRY_VALIDATION_MODE` | `LIGHT` | `LIGHT` o `BLOCKCHAIN`. |
-| `ASSERMETRY_RESULT_TIMEOUT_MS` | `300000` | Espera máxima del resultado. |
-| `ASSERMETRY_ARTIFACTS_DIR` | Directorio fechado en `/tmp` | Destino del informe y las capturas. |
-| `ASSERMETRY_MOBILE_WIDTH` | `390` | Ancho del viewport móvil. |
-| `ASSERMETRY_MOBILE_HEIGHT` | `844` | Alto del viewport móvil. |
-| `ASSERMETRY_DEBUG_PORT` | `9223` | Puerto local de Chrome DevTools. |
-| `CHROME_BIN` | `/usr/bin/google-chrome` | Ruta del ejecutable de Chrome. |
+| `ASSERMETRY_CASES` | Casos Light y Blockchain incluidos | Lista de JSON separada por comas. |
+| `ASSERMETRY_CASE_FILE` | Vacío | Caso usado por el runner individual. |
+| `ASSERMETRY_RUN_ID` | Fecha y hora | Identificador de ejecución. |
+| `ASSERMETRY_ARTIFACTS_DIR` | Directorio fechado en `/tmp` | Evidencia agregada. |
+| `ASSERMETRY_ORG_ALPHA_USERNAME` | Obligatoria | Usuario pseudónimo del caso Light. |
+| `ASSERMETRY_ORG_ALPHA_PASSWORD` | Obligatoria | Contraseña del caso Light; nunca se informa. |
+| `ASSERMETRY_ORG_BETA_USERNAME` | Obligatoria | Usuario pseudónimo del caso Blockchain. |
+| `ASSERMETRY_ORG_BETA_PASSWORD` | Obligatoria | Contraseña del caso Blockchain; nunca se informa. |
+| `ASSERMETRY_RESULT_TIMEOUT_MS` | Valor del caso | Límite de seguimiento. |
+| `ASSERMETRY_CDP_TIMEOUT_MS` | `15000` | Timeout de cada operación CDP. |
+| `ASSERMETRY_DEBUG_PORT` | `9223` | Primer puerto CDP; se incrementa por caso. |
+| `ASSERMETRY_MOBILE_WIDTH` | `390` | Ancho móvil. |
+| `ASSERMETRY_MOBILE_HEIGHT` | `844` | Alto móvil. |
+| `CHROME_BIN` | `/usr/bin/google-chrome` | Ejecutable de Chrome. |
+| `ASSERMETRY_STOP_ON_FAILURE` | `false` | No iniciar más casos tras el primero fallido. |
+| `ASSERMETRY_SETUP_HOOK` | Vacío | Ejecutable de preparación idempotente. |
+| `ASSERMETRY_CLEANUP_HOOK` | Vacío | Ejecutable de limpieza acotada. |
+| `ASSERMETRY_REQUIRE_MANAGED_STATE` | `false` | Exigir preparación y limpieza. |
+| `ASSERMETRY_CAPTURE_K8S_BASELINE` | `false` | Capturar recursos de Kubernetes. |
+| `ASSERMETRY_REQUIRE_K8S_BASELINE` | `false` | Exigir una captura completa. |
+| `ASSERMETRY_PROVIDER` | Vacío | Metadato no secreto del proveedor. |
+| `ASSERMETRY_MODEL` | Vacío | Metadato no secreto del modelo. |
+| `ASSERMETRY_HTTP_TIMEOUT_SECONDS` | Vacío | Metadato del timeout LLM. |
 
-Ejemplo usando otro texto y modo Blockchain:
+`ASSERMETRY_NEWS`, `ASSERMETRY_NEWS_FILE` y
+`ASSERMETRY_VALIDATION_MODE` siguen disponibles para el smoke individual. El
+orquestador los elimina de cada proceso hijo para que no sobrescriban los casos
+versionados.
 
-```bash
-ASSERMETRY_NEWS_FILE=/ruta/noticia.txt \
-ASSERMETRY_VALIDATION_MODE=BLOCKCHAIN \
-node web_classic/test/ui-smoke-test.js
-```
+El directorio de artefactos debe ser nuevo o estar vacío. El runner nunca
+mezcla ni sobrescribe evidencia de una ejecución anterior.
 
 ## Artefactos
 
-La ruta final se muestra en la línea `REPORT`. El directorio contiene:
+```text
+assermetry-regression-<run-id>/
+├── manifest.json
+├── summary.json
+├── kubernetes-baseline.json       # opcional
+├── synthetic-light-01/
+│   ├── report.json
+│   └── 01-...06-*.png
+└── synthetic-blockchain-01/
+    ├── report.json
+    └── 01-...06-*.png
+```
 
-- `report.json`: estados, contenido visible, respuestas HTTP fallidas, mensajes
-  de consola y datos de la orden;
-- `01-login-desktop.png` y `02-home-desktop.png`;
-- `03-after-submit-desktop.png` y `04-result-desktop.png`;
-- `05-result-mobile.png` y `06-home-mobile.png`.
+`manifest.json` registra commit, estado limpio/sucio del repositorio, versiones
+de Node/Chrome, casos y metadatos no secretos. `summary.json` agrega duración,
+órdenes creadas, comprobaciones y fallos HTTP.
 
-Los artefactos pueden contener el texto validado, el ID de usuario efectivo, el
-ID de orden y evidencias recuperadas. No contienen la contraseña, pero deben
-tratarse como datos de prueba y eliminarse cuando ya no sean necesarios.
+Los informes no guardan contraseñas, tokens, query strings, prompts, respuestas
+LLM completas, texto completo de la noticia, orden o pestañas. Los textos se
+representan mediante tamaño y SHA-256. Las capturas sí contienen datos visibles
+de las identidades pseudónimas y deben conservarse con la misma protección que
+el resto de la evidencia de prueba.
 
-## Alcance y precauciones
+## Resultado y código de salida
 
-- La prueba acepta certificados no confiables únicamente en el Chrome temporal.
-- Cada ejecución completa crea una orden real y consume sus cuotas asociadas.
-- No se deben ejecutar varias instancias con el mismo
-  `ASSERMETRY_DEBUG_PORT`.
-- El perfil temporal de Chrome se elimina al terminar.
-- El informe describe lo que mostró la aplicación; no sustituye una auditoría
-  de accesibilidad ni una verificación factual independiente.
+El código es cero únicamente cuando:
+
+- se ejecutan todos los casos solicitados;
+- todos sus checks terminan en `PASS`;
+- no hay estados terminales, errores HTTP o errores de consola inesperados;
+- los hooks obligatorios terminan correctamente;
+- la línea base obligatoria se captura por completo.
+
+Un fallo sigue generando `report.json` y `summary.json` siempre que haya sido
+posible inicializar sus directorios, facilitando el diagnóstico sin convertir
+el error en un falso positivo.

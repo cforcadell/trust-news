@@ -39,6 +39,19 @@ La primera ejecución Python sin dependencias dio 12 PASS, 2 FAIL y 8 errores
 de importación. Se preparó un venv temporal y se repitió: el resultado válido
 para evaluar código es **75/2**, no los errores de preparación.
 
+## Corrección posterior de ISSUE-011
+
+`api/tests/test_validator_validation_isolation.py`: **15 PASS**. Pruebas HTTP
+Gateway → News Handler con autenticación sustituida por claims sintéticos y
+colecciones simuladas: dos propietarios, rol admin, identidad ausente,
+suplantación por query, textos/enlaces y estadísticas sin datos ajenos.
+No comprueban JWT real, MongoDB real ni el despliegue. Pendiente desplegar ambos
+servicios y repetir con dos identidades; 012 conserva el trabajo de organizaciones.
+
+Regresión local tras el cambio: **90 PASS, 2 FAIL**; permanecen únicamente los
+dos fallos anteriores (015 y 016). Evidencia temporal: `issue011.xml` y
+`issue011.log` en el directorio de artefactos indicado abajo.
+
 ## Límites y evidencia
 
 - Una cuenta de pruebas proporcionada por el operador para ambos casos. Los
@@ -98,7 +111,7 @@ completa de un área.
 | Fechas, estado, consenso y contadores | Fallido: 005–007, 014, 019 |
 | Errores/timeout | Unitarios correctos; fallo inducido y reintento sin duplicados pendientes (008) |
 | Evidencia y calidad factual | Fallido/carencia: 013, 015, 017; revisión e informe en 14 |
-| JWT, roles y dos organizaciones | Bloqueantes de código 011–012; prueba completa pendiente |
+| JWT, roles y dos organizaciones | 011 corregida y probada localmente; despliegue pendiente. 012 abierta |
 | Cuotas, filtros, búsqueda, paginación, contratos y HTTP negativos | Pendiente más allá de unitarios existentes |
 | ES/EN, navegadores, móvil, teclado y foco | Móvil y textos fallidos (020); Edge/Firefox/accesibilidad pendientes |
 | Caché, despliegue, recursos y demos | Concurrencia 001, línea base y tres demos pendientes |

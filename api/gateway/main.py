@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import Any, List
+from urllib.parse import urlencode, quote
 import aiohttp
 from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, status
 from fastapi.responses import JSONResponse
@@ -346,16 +347,21 @@ async def proxy_get_validator_cache_validations(
     """
     Enruta la petición para recuperar las validaciones asociadas a un validador cacheado.
     """
-    query_params = [
-        f"include_validations={str(include_validations).lower()}",
-        f"include_order_link={str(include_order_link).lower()}"
-    ]
+    # This endpoint is owner-scoped, including for trust-admin. Never forward
+    # a client-supplied identity or use a realm role as global data access.
+    if not isinstance(auth_payload.get("sub"), str) or not auth_payload["sub"].strip():
+        raise HTTPException(status_code=401, detail="Identidad autenticada ausente")
+    query_params = {
+        "client_id": get_computed_client_id(auth_payload),
+        "include_validations": str(include_validations).lower(),
+        "include_order_link": str(include_order_link).lower(),
+    }
     if provider:
-        query_params.append(f"provider={provider}")
+        query_params["provider"] = provider
     if model:
-        query_params.append(f"model={model}")
+        query_params["model"] = model
 
-    target_url = f"{NEWS_HANDLER_URL}/validators/cache/{validator_hash}/validations?{'&'.join(query_params)}"
+    target_url = f"{NEWS_HANDLER_URL}/validators/cache/{quote(validator_hash, safe='')}/validations?{urlencode(query_params)}"
     return await proxy_request(request, target_url)
 
 @router.get("/orders/{order_id}", tags=["Orders"])

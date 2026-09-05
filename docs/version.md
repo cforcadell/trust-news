@@ -64,7 +64,9 @@ pendiente ni resuelven los hallazgos actuales.
 
 ### Fase 13.3 - Regresión de API y aislamiento
 
-**Pendiente de cierre; bloqueantes confirmados en código (011–012).**
+**Pendiente de cierre.** 011 corregida con 15 pruebas locales; falta validación
+en despliegue. 012 sigue abierta. El endpoint corregido limita los datos al
+propietario efectivo, incluso para `trust-admin`; no introduce acceso global.
 
 - Validar firma, emisor, audiencia `TrustNewsApi` y presentadores `azp/client_id`;
   tokens válidos, ausentes, expirados y manipulados.

@@ -1,9 +1,9 @@
 # Incidencias de Assermetry
 
 Revisión: **2026-09-05**. Resumen del inventario histórico y de la regresión
-[registrada aquí](testing-v0.0.13.md). No se han aplicado correcciones de código
-ni cerrado incidencias durante esta revisión. Evidencia de código local no
-implica explotación demostrada en el despliegue.
+[registrada aquí](testing-v0.0.13.md). La revisión inicial no modificó código.
+Actualización posterior: 011 implementada, pendiente de validar en despliegue.
+Evidencia de código local no implica explotación demostrada en el despliegue.
 
 ## Gestión
 
@@ -29,7 +29,8 @@ cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
 | 008 | P1 | Pendiente de validación; exclusión de errores ya implementada | 13 |
 | 009 | P1 | Abierto; edición opcional ya existe | 14 |
 | 010 | P1 | Abierto; evidencia detallada ya existe | 14 |
-| 011–014 | P1 | Abiertos; confirmados en código/sondas locales | 13 |
+| 011 | P1 | Pendiente de validación en despliegue; 15 pruebas locales correctas | 13 |
+| 012–014 | P1 | Abiertos; confirmados en código/sondas locales | 13 |
 | 015 | P1 | Abierto; fallo reproducido con perfil versionado | 13 |
 | 016 | P1 | Abierto; falsos positivos y diagnóstico incompleto | 13 |
 | 017 | P1 | Abierto; carencia de evaluación factual | 13, ampliar en 14 |
@@ -128,13 +129,18 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-011 - Consulta de validaciones sin aislamiento efectivo
 
-- **Confirmado en código y sonda con colección simulada:** Gateway omite identidad
-  y ámbito en `/validators/cache/{hash}/validations`; News Handler usa
-  `admin=True` por defecto y consulta solo por validador. Puede incluir texto y
-  enlaces de órdenes ajenas. No se han consultado datos ajenos en el entorno.
-- **Cierre:** ámbito derivado del token, rechazo por defecto y filtro obligatorio;
-  dos organizaciones no acceden a validaciones/órdenes ajenas por ninguna ruta
-  indirecta. Separar administrador de organización y global.
+- **Causa:** Gateway omitía identidad en `/validators/cache/{hash}/validations`;
+  News Handler asumía `admin=True` y podía devolver órdenes ajenas.
+- **Implementado:** Gateway deriva el propietario del token y codifica los
+  filtros; News Handler exige identidad y filtra validaciones, textos, enlaces
+  y estadísticas. El parámetro `admin` no amplía acceso, tampoco `trust-admin`.
+- **Validación local:** 15 pruebas HTTP Gateway → News Handler con dos
+  propietarios y colecciones simuladas; incluyen suplantación por parámetros,
+  identidad ausente, ámbito vacío y órdenes huérfanas.
+- **Pendiente:** desplegar Gateway y News Handler y repetir con dos identidades
+  reales. Este endpoint interno confía en la identidad transmitida por Gateway;
+  no debe exponerse directamente. La asociación a organizaciones y el modelo de
+  roles globales siguen en 012; no se acredita aislamiento de todas las rutas.
 
 ### ISSUE-012 - JWT sin validación de audiencia ni cliente presentador
 

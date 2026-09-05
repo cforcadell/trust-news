@@ -414,7 +414,7 @@ async def calculate_validation_response_time_seconds(order_id: str, id_assertion
     return max(0.0, round((response_ms - request_ms) / 1000.0, 3))
 
 
-async def get_validator_stats(validator: str, since: Optional[datetime] = None) -> dict:
+async def get_validator_stats(validator: str, since: Optional[datetime] = None, allowed_order_ids: Optional[List[str]] = None) -> dict:
     """Count requests/responses for the current validator configuration window."""
     validator_filter = {"$regex": f"^{re.escape(str(validator or ''))}$", "$options": "i"}
     since_ms = datetime_to_event_ms(since)
@@ -428,9 +428,13 @@ async def get_validator_stats(validator: str, since: Optional[datetime] = None) 
     }
     if since_ms is not None:
         request_query["timestamp"] = {"$gte": since_ms}
+    if allowed_order_ids is not None:
+        request_query["order_id"] = {"$in": allowed_order_ids}
     requests_sent = await events_collection.count_documents(request_query)
 
     validation_query = {"idValidator": validator_filter, "execution_status": ValidationExecutionStatus.COMPLETED.value}
+    if allowed_order_ids is not None:
+        validation_query["order_id"] = {"$in": allowed_order_ids}
     if since is not None:
         validation_query["created_at"] = {"$gte": since.isoformat()}
     successful_responses = await validations_collection.count_documents(validation_query)
@@ -450,10 +454,10 @@ async def get_validator_stats(validator: str, since: Optional[datetime] = None) 
     }
 
 
-async def enrich_validator_for_ui(validator: dict) -> dict:
+async def enrich_validator_for_ui(validator: dict, allowed_order_ids: Optional[List[str]] = None) -> dict:
     enriched = dict(validator)
     validator_hash = enriched.get("validator", "")
-    enriched["stats"] = await get_validator_stats(validator_hash, validator_stats_since(enriched))
+    enriched["stats"] = await get_validator_stats(validator_hash, validator_stats_since(enriched), allowed_order_ids)
     enriched.setdefault("categories", [])
     return enriched
 
@@ -1979,16 +1983,20 @@ async def get_validator_with_validations_cache(
     model: Optional[str] = Query(None),
     include_validations: bool = Query(False, description="Optional parameter, default no, to recover validations made"),
     include_order_link: bool = Query(False, description="Optional parameter, default no, to include order_id link information"),
-    client_id: Optional[str] = Query(None, description="ID del cliente"),
-    admin: bool = Query(True, description="Indica si es administrador")
+    client_id: str = Query(..., min_length=1, description="Identidad efectiva transmitida por Gateway"),
 ):
+    # Internal endpoint: Gateway supplies the verified identity. Missing scope
+    # must never turn into a global query, even when details are not requested.
+    if not client_id.strip():
+        raise HTTPException(status_code=400, detail="Identidad del cliente vacía")
     validator = get_cached_validator_config(validator_hash)
     if not validator:
         await load_validators_cache_from_chain()
         validator = get_cached_validator_config(validator_hash)
     if not validator:
         raise HTTPException(status_code=404, detail="Validator not found in cache")
-    validator = await enrich_validator_for_ui(validator)
+    allowed_orders = await orders_collection.distinct("order_id", {"client_id": client_id})
+    validator = await enrich_validator_for_ui(validator, allowed_orders)
 
     config = validator.get("config") or {}
     if provider and str(config.get("provider", "")).lower() != provider.lower():
@@ -1998,10 +2006,7 @@ async def get_validator_with_validations_cache(
 
     validations = []
     if include_validations:
-        query = {"idValidator": validator_hash}
-        if not admin and client_id:
-            allowed_orders = await orders_collection.distinct("order_id", {"client_id": client_id})
-            query["order_id"] = {"$in": allowed_orders}
+        query = {"idValidator": validator_hash, "order_id": {"$in": allowed_orders}}
         cursor = validations_collection.find(query, {"_id": 0}).sort("timestamp", -1)
         validations = await cursor.to_list(length=1000)
         if include_order_link:
@@ -2011,7 +2016,7 @@ async def get_validator_with_validations_cache(
         orders_by_id = {}
         if order_ids:
             orders_cursor = orders_collection.find(
-                {"order_id": {"$in": order_ids}},
+                {"order_id": {"$in": order_ids}, "client_id": client_id},
                 {"_id": 0, "order_id": 1, "text": 1, "assertions": 1, "validators": 1}
             )
             async for order in orders_cursor:

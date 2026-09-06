@@ -2,7 +2,7 @@
 
 Revisión: **2026-09-05**. Resumen del inventario histórico y de la regresión
 [registrada aquí](testing-v0.0.13.md). La revisión inicial no modificó código.
-Actualización posterior: 011 implementada, pendiente de validar en despliegue.
+Actualización 2026-09-06: 011, 012 y 018 solucionadas, pendientes de desplegar en Hetzner.
 Evidencia de código local no implica explotación demostrada en el despliegue.
 
 ## Gestión
@@ -29,12 +29,13 @@ cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
 | 008 | P1 | Pendiente de validación; exclusión de errores ya implementada | 13 |
 | 009 | P1 | Abierto; edición opcional ya existe | 14 |
 | 010 | P1 | Abierto; evidencia detallada ya existe | 14 |
-| 011 | P1 | Pendiente de validación en despliegue; 15 pruebas locales correctas | 13 |
-| 012–014 | P1 | Abiertos; confirmados en código/sondas locales | 13 |
+| 011 | P1 | Solucionada; pendiente de desplegar en Hetzner | 13 |
+| 012 | P1 | Solucionada; pendiente de desplegar en Hetzner | 13 |
+| 013–014 | P1 | Abiertos; confirmados en código/sondas locales | 13 |
 | 015 | P1 | Abierto; fallo reproducido con perfil versionado | 13 |
 | 016 | P1 | Abierto; falsos positivos y diagnóstico incompleto | 13 |
 | 017 | P1 | Abierto; carencia de evaluación factual | 13, ampliar en 14 |
-| 018 | P1 | Abierto; esquema de enlace sin validar | 13 |
+| 018 | P1 | Solucionada; pendiente de desplegar en Hetzner | 13 |
 | 019 | P1 | Abierto; contadores contradictorios en GUI | 13 |
 | 020 | P2 | Abierto; desbordamiento y mezcla de idiomas | 13 |
 
@@ -129,6 +130,8 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-011 - Consulta de validaciones sin aislamiento efectivo
 
+- **Estado:** solucionada; pendiente de desplegar en Hetzner.
+
 - **Causa:** Gateway omitía identidad en `/validators/cache/{hash}/validations`;
   News Handler asumía `admin=True` y podía devolver órdenes ajenas.
 - **Implementado:** Gateway deriva el propietario del token y codifica los
@@ -137,18 +140,26 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 - **Validación local:** 15 pruebas HTTP Gateway → News Handler con dos
   propietarios y colecciones simuladas; incluyen suplantación por parámetros,
   identidad ausente, ámbito vacío y órdenes huérfanas.
-- **Pendiente:** desplegar Gateway y News Handler y repetir con dos identidades
+- **Pendiente:** desplegar Gateway y News Handler en Hetzner y repetir con dos identidades
   reales. Este endpoint interno confía en la identidad transmitida por Gateway;
-  no debe exponerse directamente. La asociación a organizaciones y el modelo de
-  roles globales siguen en 012; no se acredita aislamiento de todas las rutas.
+  no debe exponerse directamente. Las organizaciones son uniusuarias; no se acredita aislamiento de todas las rutas.
 
 ### ISSUE-012 - JWT sin validación de audiencia ni cliente presentador
 
-- **Confirmado:** `get_current_user` valida firma/emisor, pero desactiva `aud` y
-  no exige una lista de `azp/client_id`. La identidad computada no demuestra
-  asociación a organización. Fuente: `api/gateway/main.py`.
-- **Cierre:** audiencia `TrustNewsApi`, presentadores permitidos y asociación
-  server-side; pruebas negativas de token válido para otra API/cliente y roles.
+- **Estado:** solucionada; pendiente de desplegar en Hetzner.
+
+- **Causa original:** `get_current_user` desactivaba la validación de `aud` y
+  no exigía una lista de `azp/client_id`. Fuente: `api/gateway/main.py`.
+- **Implementado:** audiencia obligatoria `TrustNewsGateway` y lista de clientes
+  permitidos. Verificación local: 6 pruebas de helpers y 11 sondas con JWT
+  firmados correctas; estas últimas aún no están incorporadas a la suite.
+- **Despliegue:** configurar Keycloak y comprobar tokens nuevos de ambos clientes
+  en Hetzner. Revisar la compatibilidad de `sh` con `<<<` en el script de
+  reconciliación; la comprobación local con `sh -n` falla.
+- **Cierre:** audiencia `TrustNewsGateway`, presentadores permitidos
+  (`TrustNewsWeb` y `TrustNewsApi`) y pruebas negativas de token válido para
+  otra API/cliente. Las organizaciones son uniusuarias; no se introduce un
+  modelo adicional de roles organizativos.
 
 ### ISSUE-013 - Veredictos sin evidencia comprobada y atribución automática
 
@@ -205,12 +216,22 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-018 - Enlaces de evidencia sin validar el esquema
 
+- **Estado:** solucionada; pendiente de desplegar en Hetzner.
+
 - **Reproducido en renderizado aislado:** `renderEvidenceLinks` conserva
   `href="javascript:void(0)"`; `safeText` escapa HTML, pero no valida protocolos.
   El modelo acepta fuentes como diccionarios libres. No se ha ejecutado un
   payload en el navegador ni probado explotación con la CSP desplegada.
 - **Cierre:** aceptar solo HTTP(S) en servidor y cliente; texto inerte para URLs
   inválidas; pruebas con esquemas peligrosos y enlaces malformados.
+- **Implementado (2026-09-06):** saneamiento en los modelos de evidencia y
+  validación de enlaces en el renderizado. URLs malformadas no invalidan el
+  objeto completo; se conservan en `url_text`/`source_url_text`, solo para
+  mostrar texto escapado. Se rechazan hosts ausentes o inválidos, puertos
+  inválidos, esquemas peligrosos y caracteres ambiguos.
+- **Validación local:** 38 pruebas Python de URLs/modelos y 15 pruebas de las
+  funciones reales de renderizado correctas. Regresión: 134 PASS y los dos
+  fallos conocidos de 015/016. Pendiente desplegar en Hetzner y comprobarlo en navegador.
 
 ### ISSUE-019 - Total de validaciones contradictorio durante el proceso
 

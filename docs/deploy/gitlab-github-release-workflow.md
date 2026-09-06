@@ -99,6 +99,15 @@ publicadas en el GitLab Registry. El job `deploy` ejecuta:
 skaffold deploy --build-artifacts=build.json --profile=$PROFILE
 ```
 
+La verificación posterior del pipeline ejecuta
+`scripts/k8s/infra/reconcile-keycloak-web-prod.sh` cuando el perfil es
+`infra-prod` o `apis-frontend-prod`. Este paso es obligatorio para Hetzner:
+alinea las URLs productivas y configura la audiencia OIDC
+`TrustNewsGateway` para `TrustNewsWeb` y `TrustNewsApi`. No debe sustituirse
+por comandos manuales ni añadirse un client secret al YAML; el script usa la
+configuración administrativa del pod de Keycloak y el pipeline solo debe
+tener las variables protegidas de acceso al clúster.
+
 Antes de `apis-frontend-prod`, el job `check_mongodb_bootstrap` valida que
 MongoDB tenga el perfil `default` de dominios y las taxonomias de normalizacion.
 Si falla, desplegar `infra-prod` o ejecutar el bootstrap documentado en

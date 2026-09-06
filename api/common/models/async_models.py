@@ -14,6 +14,7 @@ from common.models.protocol_models import (
     build_assertions_document_v2,
     build_assertion_validation_payload_v2,
 )
+from common.utils.evidence import EvidenceItem
 
 
 # ============================================================
@@ -424,8 +425,8 @@ class ValidationCompletedPayload(BaseModel):
     tx_hash: Optional[str] = None
     validator_alias: str = ""
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
-    sources: Optional[List[Dict[str, Any]]] = None
-    evidence_used: Optional[List[Dict[str, Any]]] = None
+    sources: Optional[List[EvidenceItem]] = None
+    evidence_used: Optional[List[EvidenceItem]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
     search_policy: Optional[Dict[str, Any]] = None
     execution_status: ValidationExecutionStatus
@@ -485,8 +486,8 @@ class LightValidationResponsePayload(BaseModel):
     verdict: Optional[Validacion] = None
     description: str
     confidence: Optional[float | str] = None
-    sources: Optional[List[Dict[str, Any]]] = None
-    evidence_used: Optional[List[Dict[str, Any]]] = None
+    sources: Optional[List[EvidenceItem]] = None
+    evidence_used: Optional[List[EvidenceItem]] = None
     assertion_validation_payload: Optional[Dict[str, Any]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
     search_policy: Optional[Dict[str, Any]] = None
@@ -520,8 +521,8 @@ class ValidatorAPIResponse(BaseModel):
     resultado: str
     descripcion: str
     confidence: Optional[str] = None
-    sources: Optional[List[Dict[str, Any]]] = None
-    evidence_used: Optional[List[Dict[str, Any]]] = None
+    sources: Optional[List[EvidenceItem]] = None
+    evidence_used: Optional[List[EvidenceItem]] = None
 
 # ============================================================
 # 🔹 CONSISTENCY MODELS

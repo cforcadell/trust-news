@@ -64,11 +64,12 @@ pendiente ni resuelven los hallazgos actuales.
 
 ### Fase 13.3 - Regresión de API y aislamiento
 
-**Pendiente de cierre.** 011 corregida con 15 pruebas locales; falta validación
-en despliegue. 012 sigue abierta. El endpoint corregido limita los datos al
+**Pendiente de cierre de fase.** 011, 012 y 018 solucionadas; pendientes de
+desplegar en Hetzner y validar allí. El endpoint corregido limita los datos al
 propietario efectivo, incluso para `trust-admin`; no introduce acceso global.
 
-- Validar firma, emisor, audiencia `TrustNewsApi` y presentadores `azp/client_id`;
+- Validar firma, emisor, audiencia `TrustNewsGateway` y presentadores
+  `azp/client_id`; `TrustNewsApi` sigue siendo un cliente permitido de servicio.
   tokens válidos, ausentes, expirados y manipulados.
 - Organización derivada en servidor, roles de usuario/admin/service account y
   separación de administrador de organización/global; sin suplantación desde UI.

@@ -39,6 +39,9 @@ La primera ejecución Python sin dependencias dio 12 PASS, 2 FAIL y 8 errores
 de importación. Se preparó un venv temporal y se repitió: el resultado válido
 para evaluar código es **75/2**, no los errores de preparación.
 
+Estado actualizado 2026-09-06: **011, 012 y 018 solucionadas; pendientes de
+desplegar en Hetzner**. La validación del despliegue sigue pendiente.
+
 ## Corrección posterior de ISSUE-011
 
 `api/tests/test_validator_validation_isolation.py`: **15 PASS**. Pruebas HTTP
@@ -46,11 +49,38 @@ Gateway → News Handler con autenticación sustituida por claims sintéticos y
 colecciones simuladas: dos propietarios, rol admin, identidad ausente,
 suplantación por query, textos/enlaces y estadísticas sin datos ajenos.
 No comprueban JWT real, MongoDB real ni el despliegue. Pendiente desplegar ambos
-servicios y repetir con dos identidades; 012 conserva el trabajo de organizaciones.
+servicios en Hetzner y repetir con dos identidades.
 
 Regresión local tras el cambio: **90 PASS, 2 FAIL**; permanecen únicamente los
 dos fallos anteriores (015 y 016). Evidencia temporal: `issue011.xml` y
 `issue011.log` en el directorio de artefactos indicado abajo.
+
+## Verificación posterior de ISSUE-012 — 2026-09-06
+
+6 pruebas de helpers y 11 sondas locales con JWT firmados RS256 correctas.
+Las sondas llaman a `get_current_user` sustituyendo la descarga de JWKS;
+comprueban audiencia, presentador, emisor y expiración. No están incorporadas
+a la suite. Pendiente desplegar en Hetzner y verificar tokens nuevos de ambos
+clientes. Revisar antes la compatibilidad del script de Keycloak: usa `<<<`
+dentro de un bloque invocado con `sh` y falla con el `sh -n` local.
+
+## Corrección posterior de ISSUE-018 — 2026-09-06
+
+Árbol local sin commitear. El servidor conserva URLs peligrosas o malformadas
+como texto de evidencia, sin rechazar el modelo completo ni permitir su uso
+como enlace. El cliente solo crea enlaces HTTP(S) válidos y escapa el texto.
+
+- `api/tests/test_evidence_urls.py`: **38 PASS**, incluidos modelos reales,
+  ambos campos de evidencia, hosts/puertos inválidos y conservación del texto.
+- `node web_classic/test/evidence-links.test.js`: **15 PASS**, usando las
+  funciones reales de la aplicación en un contexto Node aislado; esquemas
+  peligrosos, URLs malformadas, escape HTML y enlaces HTTP(S) válidos.
+- `node --check web_classic/app/js/app.js`: correcto.
+- Suite Python local con las exclusiones de integración indicadas abajo:
+  **134 PASS, 2 FAIL**; permanecen los fallos conocidos de 015 y 016.
+
+No se ha desplegado ni ejecutado esta corrección en navegador. La prueba de
+renderizado comprueba HTML generado, no interacción con el DOM ni CSP.
 
 ## Límites y evidencia
 
@@ -111,7 +141,7 @@ completa de un área.
 | Fechas, estado, consenso y contadores | Fallido: 005–007, 014, 019 |
 | Errores/timeout | Unitarios correctos; fallo inducido y reintento sin duplicados pendientes (008) |
 | Evidencia y calidad factual | Fallido/carencia: 013, 015, 017; revisión e informe en 14 |
-| JWT, roles y dos organizaciones | 011 corregida y probada localmente; despliegue pendiente. 012 abierta |
+| JWT, roles y dos organizaciones | 011 y 012 solucionadas; pendientes de desplegar en Hetzner |
 | Cuotas, filtros, búsqueda, paginación, contratos y HTTP negativos | Pendiente más allá de unitarios existentes |
 | ES/EN, navegadores, móvil, teclado y foco | Móvil y textos fallidos (020); Edge/Firefox/accesibilidad pendientes |
 | Caché, despliegue, recursos y demos | Concurrencia 001, línea base y tres demos pendientes |

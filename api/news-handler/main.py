@@ -1944,7 +1944,7 @@ async def list_news(
     news_list = await cursor.to_list(length=1000)
 
     if not news_list:
-        raise HTTPException(status_code=404, detail="No hay noticias registradas")
+        return []
 
     for news in news_list:
         oid = ObjectId(news["_id"])

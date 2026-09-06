@@ -3386,6 +3386,18 @@ function evidenceUrlHost(url) {
     }
 }
 
+function safeEvidenceUrl(value) {
+    try {
+        if (typeof value !== "string") return "";
+        const text = value.trim();
+        if (!/^https?:\/\/[^/?#]/i.test(text) || /[\s\u0000-\u001f\u007f\\]/u.test(text)) return "";
+        const url = new URL(text);
+        return ["http:", "https:"].includes(url.protocol) && url.hostname ? url.href : "";
+    } catch {
+        return "";
+    }
+}
+
 function firstEvidenceContextText(src = {}) {
     const contexts = Array.isArray(src.contexts) ? src.contexts : [];
     const chunks = Array.isArray(src.chunks) ? src.chunks : [];
@@ -3455,7 +3467,9 @@ function renderEvidenceLinks(info = {}) {
     if (!items.length) return "";
 
     const rows = items.slice(0, 6).map((src, index) => {
-        const url = src.url || src.source_url || "";
+        const linkUrl = src.url || src.source_url || "";
+        const url = linkUrl || src.url_text || src.source_url_text || "";
+        const safeUrl = safeEvidenceUrl(linkUrl);
         const title = evidenceDisplayTitle(src, index, url);
         const excerpt = evidenceDecisionText(src);
         const reason = src.reason || src.why_selected || src.description || "";
@@ -3473,7 +3487,7 @@ function renderEvidenceLinks(info = {}) {
         ].filter(Boolean).join(" · ");
         return `
             <li>
-                <div class="evidence-title">${url ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer">${safeText(title)}</a>` : safeText(title)}</div>
+                <div class="evidence-title">${safeUrl ? `<a href="${safeText(safeUrl)}" target="_blank" rel="noopener noreferrer">${safeText(title)}</a>` : safeText(title)}</div>
                 ${url ? `<div class="evidence-url">${safeText(url)}</div>` : ""}
                 ${excerpt ? `<div class="evidence-reason"><strong>Fragmento:</strong> ${safeText(compactText(excerpt, 260))}</div>` : ""}
                 ${reason ? `<div class="evidence-reason"><strong>Motivo:</strong> ${safeText(compactText(reason, 220))}</div>` : ""}

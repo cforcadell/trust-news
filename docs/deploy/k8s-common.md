@@ -223,6 +223,24 @@ Configuracion minima:
   - Guardar el client secret para clientes externos.
   - No modificar ni rotar este cliente al cambiar las URLs de `TrustNewsWeb`.
 
+El Gateway protege su API con la audiencia `TrustNewsGateway`. Configurar en
+Keycloak un client scope OIDC, por ejemplo `trustnews-gateway-audience`, con un
+mapper de tipo **Audience** que emita `TrustNewsGateway` en el access token.
+Asignar ese scope como **Default** a `TrustNewsWeb` y `TrustNewsApi`. La
+audiencia identifica al recurso protegido; los clientes presentadores siguen
+siendo `TrustNewsWeb` y `TrustNewsApi`.
+
+El mapper debe tener:
+
+- Included Client Audience o Custom Audience: `TrustNewsGateway`.
+- Add to access token: activado.
+- Add to ID token: desactivado.
+
+El Gateway acepta solo tokens con `aud` conteniendo `TrustNewsGateway` y con
+`azp` o `client_id` igual a uno de los clientes permitidos. Después de cambiar
+Keycloak hay que solicitar tokens nuevos; los tokens existentes no se
+actualizan.
+
 En producción, el pipeline `infra-prod` aplica y valida estas URLs mediante el
 script idempotente documentado en
 [`skaffold-server.md`](skaffold-server.md#65-alineación-idempotente-de-keycloak).

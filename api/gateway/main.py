@@ -87,6 +87,22 @@ KEYCLOAK_JWKS_URL = os.getenv(
     "KEYCLOAK_JWKS_URL",
     f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs",
 ).rstrip("/")
+KEYCLOAK_EXPECTED_AUDIENCE = os.getenv("KEYCLOAK_EXPECTED_AUDIENCE", "TrustNewsGateway").strip()
+KEYCLOAK_ALLOWED_CLIENT_IDS = {
+    value.strip()
+    for value in os.getenv("KEYCLOAK_ALLOWED_CLIENT_IDS", "TrustNewsWeb,TrustNewsApi").split(",")
+    if value.strip()
+}
+
+
+def presenting_client_id(payload: dict[str, Any]) -> str:
+    return str(payload.get("azp") or payload.get("client_id") or "").strip()
+
+
+def validate_presenting_client(payload: dict[str, Any]) -> None:
+    client_id = presenting_client_id(payload)
+    if not client_id or client_id not in KEYCLOAK_ALLOWED_CLIENT_IDS:
+        raise HTTPException(status_code=401, detail="Cliente JWT no autorizado")
 
 # ============================================================
 # Autenticación (Simple Bearer para Swagger)
@@ -113,29 +129,15 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
         if not rsa_key:
             raise HTTPException(status_code=401, detail="Clave de token no válida")
 
-        # ============================================================
-        # INICIO: Logs añadidos para aud y iss
-        # ============================================================
-        unverified_claims = jwt.get_unverified_claims(token)
-        token_iss = unverified_claims.get("iss", "No especificado")
-        token_aud = unverified_claims.get("aud", "No especificado")
-        
-        logger.info("=== Debug de JWT ===")
-        logger.info(f"Issuer recibido (iss): {token_iss}")
-        logger.info(f"Issuer esperado      : {KEYCLOAK_ISSUER_URL}")
-        logger.info(f"Audience (aud)       : {token_aud}")
-        logger.info("====================")
-        # ============================================================
-        # FIN: Logs añadidos para aud y iss
-        # ============================================================
-
         payload = jwt.decode(
             token,
             rsa_key,
             algorithms=["RS256"],
             issuer=KEYCLOAK_ISSUER_URL,
-            options={"verify_aud": False}
+            audience=KEYCLOAK_EXPECTED_AUDIENCE,
+            options={"verify_aud": True, "require_aud": True},
         )
+        validate_presenting_client(payload)
         
         user = payload.get('preferred_username') or payload.get('client_id') or "service-account"
         logger.info(f"Token validado para: {user}")
@@ -180,6 +182,8 @@ async def proxy_request(request: Request, target_url: str):
 # Función auxiliar para extraer el client_id con la fórmula solicitada
 def get_computed_client_id(payload: dict) -> str:
     sub = payload.get("sub", "unknown_sub")
+    # Keep the historical owner key stable; azp/client_id is only an
+    # authentication constraint, not part of the user's effective identity.
     token_client_id = payload.get("client_id")
     
     if token_client_id:

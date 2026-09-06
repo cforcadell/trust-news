@@ -538,13 +538,20 @@ pipeline salvo en un procedimiento explícito de recuperación.
 
 ### 6.5 Alineación idempotente de Keycloak
 
-El job `deploy` de GitLab ejecuta automáticamente la alineación después del
-rollout de `infra-prod` y de `apis-frontend-prod`. El script compartido
-actualiza `frontendUrl` del realm
-`TrustNews` y las URLs, redirects, post-logout y Web Origins de
-`TrustNewsWeb`; después lee los campos y exige que coincidan exactamente con el
-contrato productivo. No crea clientes, no modifica `TrustNewsApi`, sus secretos,
-usuarios ni roles, y no muestra credenciales.
+La reconciliación es un requisito del despliegue en Hetzner, no un paso manual
+opcional. El YAML de GitLab la ejecuta automáticamente después del rollout de
+`infra-prod` y de `apis-frontend-prod`. El script compartido:
+
+- actualiza y verifica `frontendUrl` del realm `TrustNews`;
+- verifica las URLs, redirects, post-logout y Web Origins de `TrustNewsWeb`;
+- crea o recrea el client scope `trustnews-gateway-audience`;
+- configura el mapper de audiencia `TrustNewsGateway` en el access token;
+- asigna ese scope por defecto a `TrustNewsWeb` y `TrustNewsApi`;
+- verifica que los clientes y el mapper quedaron aplicados.
+
+`TrustNewsApi` sigue siendo el cliente backend; `TrustNewsGateway` es la
+audiencia del recurso protegido. El script no crea usuarios ni roles y no
+imprime credenciales.
 
 No ejecutar un segundo paso manual después de un pipeline correcto. Si el job
 falla o se necesita recuperar una configuración modificada fuera del pipeline,
@@ -560,6 +567,11 @@ antes de modificar el realm o el cliente. Repetirlo conserva el mismo resultado.
 El contrato productivo esperado es Root URL `https://assermetry.com/gui`, Home
 URL `https://assermetry.com/gui/`, redirects y post-logout
 `https://assermetry.com/gui/*`, y Web Origin `https://assermetry.com`.
+
+Después de una reconciliación correcta, los usuarios deben cerrar sesión y
+volver a autenticarse para obtener un access token nuevo con
+`aud=["TrustNewsGateway"]`. Un login correcto con un token antiguo no acredita
+la configuración de audiencia.
 
 ---
 

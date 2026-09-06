@@ -275,6 +275,11 @@ WEB_ORIGIN=https://localhost:7443 \
 ./scripts/k8s/infra/reconcile-keycloak-web-prod.sh
 ```
 
+Este mismo paso crea o verifica el client scope `trustnews-gateway-audience`
+y lo asigna por defecto a `TrustNewsWeb` y `TrustNewsApi`, de modo que los
+nuevos access tokens incluyan `aud=TrustNewsGateway`. Si ya había una sesión
+abierta, cerrar sesión y volver a iniciar para obtener un token nuevo.
+
 El navegador puede mostrar un aviso por el certificado local.
 
 No usar el port-forward directo del frontend para validar la aplicación

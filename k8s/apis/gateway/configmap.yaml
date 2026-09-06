@@ -14,6 +14,8 @@ data:
   KEYCLOAK_REALM: "TrustNews"
   KEYCLOAK_ISSUER_URL: "https://localhost:7443/auth/realms/TrustNews"
   KEYCLOAK_JWKS_URL: "http://keycloak.infra.svc.cluster.local:8080/auth/realms/TrustNews/protocol/openid-connect/certs"
+  KEYCLOAK_EXPECTED_AUDIENCE: "TrustNewsGateway"
+  KEYCLOAK_ALLOWED_CLIENT_IDS: "TrustNewsWeb,TrustNewsApi"
 
   # La documentación interactiva solo se mantiene en local.
   GATEWAY_API_DOCS_ENABLED: "true"

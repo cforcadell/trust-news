@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 from common.models.async_models import Assertion, ValidationErrorDetails, ValidationExecutionStatus, ValidationMode, ValidatorConfig
 from common.models.veredicto import Validacion
 from common.models.protocol_models import CategoryId
+from common.utils.evidence import EvidenceItem
 
 
 class EventRecord(BaseModel):
@@ -26,8 +27,8 @@ class ValidationRecord(BaseModel):
     categoryId: Optional[CategoryId] = None
     assertion_index: Optional[int] = None
     correlation_id: Optional[str] = None
-    sources: List[Dict[str, Any]] = Field(default_factory=list)
-    evidence_used: List[Dict[str, Any]] = Field(default_factory=list)
+    sources: List[EvidenceItem] = Field(default_factory=list)
+    evidence_used: List[EvidenceItem] = Field(default_factory=list)
     confidence: Optional[float | str] = None
     execution_status: ValidationExecutionStatus
     error: Optional[str] = None
@@ -64,8 +65,8 @@ class AssertionResultDetail(BaseModel):
     effective_weight: float
     result: str
     description: str = ""
-    sources: List[Dict[str, Any]] = Field(default_factory=list)
-    evidence_used: List[Dict[str, Any]] = Field(default_factory=list)
+    sources: List[EvidenceItem] = Field(default_factory=list)
+    evidence_used: List[EvidenceItem] = Field(default_factory=list)
 
 
 class AssertionResult(BaseModel):

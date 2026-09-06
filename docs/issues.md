@@ -1,8 +1,8 @@
 # Incidencias de Assermetry
 
-Revisión: **2026-09-05**. Resumen del inventario histórico y de la regresión
+Revisión: **2026-09-06**. Resumen del inventario histórico y de la regresión
 [registrada aquí](testing-v0.0.13.md). La revisión inicial no modificó código.
-Actualización 2026-09-06: 011, 012 y 018 solucionadas, pendientes de desplegar en Hetzner.
+Actualización 2026-09-06: 011, 012 y 018 solucionadas y desplegadas en Hetzner.
 Evidencia de código local no implica explotación demostrada en el despliegue.
 
 ## Gestión
@@ -29,13 +29,14 @@ cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
 | 008 | P1 | Pendiente de validación; exclusión de errores ya implementada | 13 |
 | 009 | P1 | Abierto; edición opcional ya existe | 14 |
 | 010 | P1 | Abierto; evidencia detallada ya existe | 14 |
-| 011 | P1 | Solucionada; pendiente de desplegar en Hetzner | 13 |
-| 012 | P1 | Solucionada; pendiente de desplegar en Hetzner | 13 |
-| 013–014 | P1 | Abiertos; confirmados en código/sondas locales | 13 |
+| 011 | P1 | Solucionada y desplegada en Hetzner | 13 |
+| 012 | P1 | Solucionada y desplegada en Hetzner | 13 |
+| 013 | P1 | Validada localmente el 2026-09-06; pendiente de despliegue y validación completa | 13 |
+| 014 | P1 | Abierta; confirmada en código/sondas locales | 13 |
 | 015 | P1 | Abierto; fallo reproducido con perfil versionado | 13 |
 | 016 | P1 | Abierto; falsos positivos y diagnóstico incompleto | 13 |
 | 017 | P1 | Abierto; carencia de evaluación factual | 13, ampliar en 14 |
-| 018 | P1 | Solucionada; pendiente de desplegar en Hetzner | 13 |
+| 018 | P1 | Solucionada y desplegada en Hetzner | 13 |
 | 019 | P1 | Abierto; contadores contradictorios en GUI | 13 |
 | 020 | P2 | Abierto; desbordamiento y mezcla de idiomas | 13 |
 
@@ -130,7 +131,7 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-011 - Consulta de validaciones sin aislamiento efectivo
 
-- **Estado:** solucionada; pendiente de desplegar en Hetzner.
+- **Estado:** solucionada y desplegada en Hetzner (2026-09-06).
 
 - **Causa:** Gateway omitía identidad en `/validators/cache/{hash}/validations`;
   News Handler asumía `admin=True` y podía devolver órdenes ajenas.
@@ -146,7 +147,7 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-012 - JWT sin validación de audiencia ni cliente presentador
 
-- **Estado:** solucionada; pendiente de desplegar en Hetzner.
+- **Estado:** solucionada y desplegada en Hetzner (2026-09-06).
 
 - **Causa original:** `get_current_user` desactivaba la validación de `aud` y
   no exigía una lista de `azp/client_id`. Fuente: `api/gateway/main.py`.
@@ -163,14 +164,22 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-013 - Veredictos sin evidencia comprobada y atribución automática
 
-- **Reproducido:** `parse_validator_api_response` acepta TRUE sin fuentes. En
-  `validate_payload_v2`, la búsqueda completa se copia a
-  `evidence_used` si el modelo no selecciona evidencia. Un prompt que exige
-  citas no impone el contrato en el servidor.
-- **Cierre:** para búsqueda/RAG exigir URL, fragmento y pertenencia a evidencia
-  recuperada; distinguir recuperada de utilizada; rechazar atribuciones inventadas.
-  Sin soporte, abstenerse o indicar resultado sin evidencia; el voto de memoria
-  no debe presentarse como verificación documental. Probar citas falsas y vacías.
+- **Validada localmente (2026-09-06):** RAG exige URL, fragmento y pertenencia
+  al corpus recuperado por el servidor. Un veredicto documental TRUE/FALSE sin
+  soporte se degrada a UNKNOWN; las citas inventadas, vacías o ajenas al corpus
+  se rechazan. Se distinguen evidencia recuperada, `evidence_used` y
+  `sources_declared`.
+- **Tipos:** memoria y búsqueda delegada pueden emitir una señal sin fuentes,
+  identificada respectivamente como `MODEL_KNOWLEDGE` y
+  `PROVIDER_SEARCH_UNVERIFIED`; no se presentan como evidencia documental. RAG
+  conserva únicamente evidencia comprobada.
+- **Evidencia:** pruebas de grounding, contratos y UI; orden LIGHT
+  `943346a6-1071-45f2-b97c-f10d746c150a` ejecutada con tres validadores RAG y
+  persistencia de evidencias verificadas/rechazadas en MongoDB.
+- **Pendiente de cierre formal:** prueba de extremo a extremo de los tres tipos
+  y de los recorridos Kafka/IPFS/MongoDB/navegador en el entorno objetivo. La
+  comprobación de implicación semántica entre afirmación y cita se mantiene como
+  alcance de ISSUE-017.
 
 ### ISSUE-014 - Resumen rompe al faltar resultados ponderados
 
@@ -216,7 +225,7 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-018 - Enlaces de evidencia sin validar el esquema
 
-- **Estado:** solucionada; pendiente de desplegar en Hetzner.
+- **Estado:** solucionada y desplegada en Hetzner (2026-09-06).
 
 - **Reproducido en renderizado aislado:** `renderEvidenceLinks` conserva
   `href="javascript:void(0)"`; `safeText` escapa HTML, pero no valida protocolos.
@@ -231,7 +240,8 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
   inválidos, esquemas peligrosos y caracteres ambiguos.
 - **Validación local:** 38 pruebas Python de URLs/modelos y 15 pruebas de las
   funciones reales de renderizado correctas. Regresión: 134 PASS y los dos
-  fallos conocidos de 015/016. Pendiente desplegar en Hetzner y comprobarlo en navegador.
+  fallos conocidos de 015/016. El despliegue en Hetzner está realizado; queda
+  registrar la comprobación funcional en navegador si se requiere para el cierre.
 
 ### ISSUE-019 - Total de validaciones contradictorio durante el proceso
 

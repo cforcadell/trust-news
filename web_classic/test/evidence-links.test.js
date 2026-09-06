@@ -6,11 +6,12 @@ const vm = require('node:vm');
 
 // Exercise the actual rendering functions without booting the application.
 const source = fs.readFileSync(path.join(__dirname, '../app/js/app.js'), 'utf8');
-const context = vm.createContext({ URL, t: () => 'Evidencias' });
-for (const name of ['escapeHTML', 'safeText', 'compactText', 'validationEvidenceItems',
+const context = vm.createContext({ URL, t: key => key });
+for (const name of ['escapeHTML', 'safeText', 'compactText', 'validationEvidenceItems', 'validationEvidenceSelection',
     'isGenericEvidenceLabel', 'evidenceUrlHost', 'safeEvidenceUrl',
     'firstEvidenceContextText', 'evidenceDisplayTitle', 'evidenceDecisionText',
-    'evidenceSupportsLabel', 'renderEvidenceLinks']) {
+    'evidenceSupportsLabel', 'evidenceValidationResult', 'renderEvidenceValidationBadge',
+    'renderEvidenceLinks']) {
     const start = source.indexOf(`function ${name}(`);
     assert.ok(start >= 0, `Missing function ${name}`);
     const end = source.indexOf('\n}', start) + 2;
@@ -44,4 +45,52 @@ test('server display-only fields never become links, even with an HTTP URL', () 
     const html = context.renderEvidenceLinks({ sources: [{ url_text: 'https://example.test' }] });
     assert.doesNotMatch(html, /<a\b/);
     assert.ok(html.includes('https://example.test'));
+});
+
+test('retrieved evidence is explicitly distinguished from evidence used', () => {
+    const retrieved = [{
+        source_id: 'source-1',
+        url: 'https://example.test/report',
+        snippet: 'Retrieved text'
+    }];
+    const html = context.renderEvidenceLinks({
+        evidence_used: [],
+        evidence_search_response: { evidences: retrieved }
+    });
+
+    assert.ok(html.includes('ui.retrievedEvidenceNotUsed'));
+    assert.ok(html.includes('Retrieved text'));
+    assert.doesNotMatch(html, /ui\.usedEvidence/);
+});
+
+test('verified evidence used takes precedence over the retrieved collection', () => {
+    const html = context.renderEvidenceLinks({
+        evidence_used: [{ url: 'https://example.test/used', evidence_text: 'Used text' }],
+        evidence_search_response: {
+            evidences: [{ url: 'https://example.test/retrieved', snippet: 'Retrieved text' }]
+        }
+    });
+
+    assert.ok(html.includes('ui.usedEvidence'));
+    assert.ok(html.includes('Used text'));
+    assert.doesNotMatch(html, /Retrieved text/);
+});
+
+test('provider-declared sources are explicitly shown as unverified', () => {
+    const info = {
+        sources_declared: [{ url: 'https://example.test/provider', evidence_text: 'Provider text' }],
+        evidence_validation: {
+            status: 'UNVERIFIED',
+            basis: 'PROVIDER_SEARCH_UNVERIFIED',
+            original_verdict: 'TRUE',
+            effective_verdict: 'TRUE'
+        }
+    };
+
+    const evidenceHtml = context.renderEvidenceLinks(info);
+    const badgeHtml = context.renderEvidenceValidationBadge(info);
+    assert.ok(evidenceHtml.includes('ui.providerDeclaredSources'));
+    assert.ok(evidenceHtml.includes('Provider text'));
+    assert.ok(badgeHtml.includes('ui.providerSearchUnverified'));
+    assert.ok(badgeHtml.includes('TRUE → TRUE'));
 });

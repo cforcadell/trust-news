@@ -261,7 +261,7 @@ def evidence_from_source_v2(source: Dict[str, Any], rank: int, domain_resolution
     trust_score = float(matched.get("trust_score", 0.3) or 0.3)
 
     # Preserve useful provider text and add stable ids for downstream validator prompts.
-    return {
+    evidence = {
         "source_id": f"source-{rank}",
         "title": source.get("title") or url,
         "url": url,
@@ -274,6 +274,10 @@ def evidence_from_source_v2(source: Dict[str, Any], rank: int, domain_resolution
         "why_selected": matched.get("reason") or "Matched contextual search policy",
         "matched_profiles": matched.get("matched_profiles", []),
     }
+    if source.get("_routing_placeholder"):
+        evidence["is_placeholder"] = True
+        evidence["evidence_status"] = "ROUTING_PLACEHOLDER"
+    return evidence
 
 
 def source_type_for_domain(domain: str) -> str:
@@ -785,6 +789,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
                 "title": domain_cfg.get("reason") or domain_cfg["domain"],
                 "content": "Domain selected by contextual routing; configure API_KEY_PROVIDER for live snippets.",
                 "score": domain_cfg.get("weight", 0.0),
+                "_routing_placeholder": True,
             })
 
     # Normalize raw provider results into the public evidence response contract.

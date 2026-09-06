@@ -760,7 +760,9 @@ async def blockchain_event_listener():
                                             "validator_alias", ""
                                         ),
                                         sources=validation_json.get("sources") or [],
+                                        sources_declared=validation_json.get("sources_declared") or [],
                                         evidence_used=validation_json.get("evidence_used") or [],
+                                        evidence_validation=validation_json.get("evidence_validation"),
                                         evidence_search_response=validation_json.get("evidence_search_response"),
                                         execution_status=ValidationExecutionStatus.COMPLETED,
                                     ),

@@ -15,14 +15,14 @@
 
 ## Evidencia de decisión
 
-Los validadores que usan búsqueda online o RAG deben devolver evidencia auditable cuando se decantan por `TRUE` o `FALSE`.
+Solo los validadores RAG producen evidencia documental comprobable por Assermetry.
 
-- `VALIDATOR_TYPE=2` (`LLM_SEARCH_VALIDATION`) rellena `sources` con enlaces concretos. Cada entrada debe incluir `url`, `title` si está disponible, `evidence_text`, `supports` y `reason`.
+- `VALIDATOR_TYPE=2` (`LLM_SEARCH_VALIDATION`) delega la búsqueda al proveedor. Puede devolver `TRUE`, `FALSE` o `UNKNOWN` sin fuentes. Los enlaces opcionales se publican en `sources_declared` y se etiquetan como `PROVIDER_SEARCH_UNVERIFIED`; no se convierten en `evidence_used` porque el servidor no dispone del corpus consultado para comprobarlos.
 - `VALIDATOR_TYPE=3` (`RAG_EVIDENCE_VALIDATION`) rellena `evidence_used` usando exclusivamente las evidencias proporcionadas por `evidence-search`. Cada entrada debe incluir `source_id`, `url`, `evidence_text`, `supports`, `reason` y, cuando exista, `context_id` o `chunk_id`.
 - `evidence_text` debe ser el fragmento breve o dato concreto que justifica el veredicto. En RAG debe estar presente literalmente en los contextos aportados al prompt.
 - `supports` indica si la evidencia apoya la aserción: `true` si la confirma, `false` si la contradice. No significa “apoya el veredicto”.
 - `descripcion`, `reason` y `evidence_text` no deben referirse a fuentes genéricas como “fuente 1”, “CONTEXTO 1” o “las evidencias”; deben mencionar enlaces, dominios o títulos concretos y el fragmento usado.
-- Si no hay enlace o fragmento suficiente para confirmar o contradecir la aserción, el validador debe devolver `UNKNOWN`.
+- El validador online devuelve `UNKNOWN` cuando el proveedor no dispone de información suficiente; la ausencia de fuentes declaradas no invalida por sí sola su voto no documental.
 - `VALIDATOR_TYPE=1` (`LLM_MEMORY_VALIDATION`) no inventa enlaces; si necesita evidencias externas para decidir, devuelve `UNKNOWN`.
 
 Ejemplo RAG:

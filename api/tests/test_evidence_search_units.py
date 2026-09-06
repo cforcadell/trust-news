@@ -161,6 +161,22 @@ def test_evidence_from_source_v2_preserves_domain_resolution_metadata():
     assert result["matched_profiles"] == ["entity_INE"]
 
 
+def test_evidence_from_source_v2_marks_routing_placeholder_as_non_evidentiary():
+    result = evidence.evidence_from_source_v2(
+        {
+            "url": "https://example.test/",
+            "title": "Routing preview",
+            "content": "No live provider configured",
+            "_routing_placeholder": True,
+        },
+        1,
+        {"preferred_domains": []},
+    )
+
+    assert result["is_placeholder"] is True
+    assert result["evidence_status"] == "ROUTING_PLACEHOLDER"
+
+
 def test_exa_result_normalization_uses_highlights_and_preserves_text():
     result = search_providers.normalize_exa_result({
         "url": "https://idescat.cat/demo",

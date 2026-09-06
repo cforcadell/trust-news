@@ -64,8 +64,8 @@ pendiente ni resuelven los hallazgos actuales.
 
 ### Fase 13.3 - Regresión de API y aislamiento
 
-**Pendiente de cierre de fase.** 011, 012 y 018 solucionadas; pendientes de
-desplegar en Hetzner y validar allí. El endpoint corregido limita los datos al
+**Pendiente de cierre de fase.** 011, 012 y 018 solucionadas y desplegadas en
+Hetzner; queda validar allí con evidencias de ejecución. El endpoint corregido limita los datos al
 propietario efectivo, incluso para `trust-admin`; no introduce acceso global.
 
 - Validar firma, emisor, audiencia `TrustNewsGateway` y presentadores

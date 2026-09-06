@@ -34,26 +34,14 @@ data:
     Busca evidencias actuales en Internet cuando sea necesario.
     Usa el contexto de la aserción para formular la búsqueda: origin=explicit prima sobre origin=inferred, y origin=inferred se usa cuando falta contexto explícito.
     Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
-    Explica porque has tomado su decision de forma breve y objetiva usando enlaces concretos.
-    No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las fuentes" ni referencias genéricas en descripcion, reason ni evidence_text.
-    Si devuelves TRUE o FALSE, sources debe contener al menos un enlace concreto con el fragmento o dato específico que te ha hecho decidir.
-    En descripcion menciona el enlace, dominio o título concreto usado, no su índice interno.
-    evidence_text debe ser un fragmento breve o dato concreto encontrado en esa URL; no inventes citas ni atribuyas texto no comprobado.
-    supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
-    Si no encuentras enlaces o fragmentos suficientes para apoyar o contradecir la aserción, devuelve UNKNOWN.
+    Explica por qué has tomado la decisión de forma breve y objetiva.
+    La búsqueda se realiza dentro del proveedor y Assermetry no puede comprobar el corpus consultado.
+    No es obligatorio devolver fuentes. Si el proveedor expone enlaces concretos puedes incluirlos en sources, pero se tratarán como fuentes declaradas no comprobadas, nunca como evidencia documental verificada.
+    No inventes enlaces, citas ni atribuciones. Si no tienes información suficiente, devuelve UNKNOWN.
     Devuelve exclusivamente JSON válido:
     {
       "resultado": "TRUE | FALSE | UNKNOWN",
-      "descripcion": "Justificación breve basada en enlaces concretos",
-      "sources": [
-        {
-          "url": "string",
-          "title": "string",
-          "evidence_text": "Fragmento o dato concreto encontrado en ese enlace",
-          "supports": true,
-          "reason": "string"
-        }
-      ]
+      "descripcion": "Justificación breve y objetiva"
     }
 
   RAG_EVIDENCE_VALIDATION_PROMPT: |

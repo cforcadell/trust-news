@@ -102,6 +102,65 @@ def test_light_error_contract_has_no_verdict_and_keeps_evidence():
     assert response.payload.evidence_search_response["evidences"]
 
 
+def test_light_contract_keeps_evidence_grounding_result():
+    response = LightValidationResponse(
+        order_id="order-grounded",
+        payload={
+            "order_id": "order-grounded",
+            "assertion_index": 0,
+            "idAssertion": "1",
+            "validator_id": "validator-1",
+            "categoryId": 1,
+            "verdict": Validacion.UNKNOWN,
+            "description": "Sin soporte documental comprobable",
+            "evidence_used": [],
+            "evidence_validation": {
+                "status": "UNSUPPORTED",
+                "basis": "RETRIEVED_EVIDENCE",
+                "original_verdict": "TRUE",
+                "effective_verdict": "UNKNOWN",
+            },
+            "timestamp": "2026-05-16T00:00:01+00:00",
+            "correlation_id": "order-grounded:1:validator-1",
+            "execution_status": ValidationExecutionStatus.COMPLETED,
+        },
+    )
+
+    assert response.payload.evidence_validation["status"] == "UNSUPPORTED"
+    assert response.payload.evidence_validation["original_verdict"] == "TRUE"
+
+
+def test_light_contract_keeps_provider_declared_sources_separate_from_evidence_used():
+    response = LightValidationResponse(
+        order_id="order-provider-search",
+        payload={
+            "order_id": "order-provider-search",
+            "assertion_index": 0,
+            "idAssertion": "1",
+            "validator_id": "validator-search",
+            "categoryId": 1,
+            "verdict": Validacion.TRUE,
+            "description": "Resultado de búsqueda gestionada por el proveedor",
+            "sources_declared": [{"url": "https://example.test/report"}],
+            "evidence_used": [],
+            "evidence_validation": {
+                "status": "UNVERIFIED",
+                "basis": "PROVIDER_SEARCH_UNVERIFIED",
+                "original_verdict": "TRUE",
+                "effective_verdict": "TRUE",
+            },
+            "timestamp": "2026-05-16T00:00:01+00:00",
+            "correlation_id": "order-provider-search:1:validator-search",
+            "execution_status": ValidationExecutionStatus.COMPLETED,
+        },
+    )
+
+    assert response.payload.verdict == Validacion.TRUE
+    assert response.payload.evidence_used == []
+    assert response.payload.sources_declared[0]["url"] == "https://example.test/report"
+    assert response.payload.evidence_validation["basis"] == "PROVIDER_SEARCH_UNVERIFIED"
+
+
 def test_blockchain_error_contract_has_no_verdict():
     response = ValidationCompletedResponse(
         payload={

@@ -32,6 +32,7 @@ from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_
 from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
 from common.utils.llm_json import strip_json_markdown
 from common.utils.logging_utils import configure_single_line_json_logging
+from common.utils.evidence import evaluate_evidence_grounding
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -97,26 +98,14 @@ DEFAULT_SEARCH_PROMPT = """Actúa como validador factual con búsqueda online.
 Busca evidencias actuales en Internet cuando sea necesario.
 Usa el contexto de la aserción para formular la búsqueda: origin=explicit prima sobre origin=inferred, y origin=inferred se usa cuando falta contexto explícito.
 Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
-Explica porque has tomado su decision de forma breve y objetiva usando enlaces concretos.
-No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las fuentes" ni referencias genéricas en descripcion, reason ni evidence_text.
-Si devuelves TRUE o FALSE, sources debe contener al menos un enlace concreto con el fragmento o dato específico que te ha hecho decidir.
-En descripcion menciona el enlace, dominio o título concreto usado, no su índice interno.
-evidence_text debe ser un fragmento breve o dato concreto encontrado en esa URL; no inventes citas ni atribuyas texto no comprobado.
-supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
-Si no encuentras enlaces o fragmentos suficientes para apoyar o contradecir la aserción, devuelve UNKNOWN.
+Explica por qué has tomado la decisión de forma breve y objetiva.
+La búsqueda se realiza dentro del proveedor y Assermetry no puede comprobar el corpus consultado.
+No es obligatorio devolver fuentes. Si el proveedor expone enlaces concretos puedes incluirlos en sources, pero se tratarán como fuentes declaradas no comprobadas, nunca como evidencia documental verificada.
+No inventes enlaces, citas ni atribuciones. Si no tienes información suficiente, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
   "resultado": "TRUE | FALSE | UNKNOWN",
-  "descripcion": "Justificación breve basada en enlaces concretos",
-  "sources": [
-    {
-      "url": "string",
-      "title": "string",
-      "evidence_text": "Fragmento o dato concreto encontrado en ese enlace",
-      "supports": true,
-      "reason": "string"
-    }
-  ]
+  "descripcion": "Justificación breve y objetiva"
 }"""
 
 DEFAULT_RAG_PROMPT = """Actúa como validador factual estricto.
@@ -487,10 +476,45 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         verdict, description, extras = parse_validator_api_response(result_text)
     except Exception as exc:
         raise ValidationExecutionFailure("LLM_RESPONSE_PARSE", exc, evidences, evidence_response) from exc
-    if evidences and not extras.get("sources"):
-        extras["sources"] = evidences
-    if evidences and not extras.get("evidence_used"):
-        extras["evidence_used"] = evidences
+
+    # A prompt is not a security boundary: verify documentary citations on the
+    # server and never infer that every retrieved source was used by the model.
+    # Only RAG has a server-retrieved corpus. Online-search validators are a
+    # useful provider signal, but their private search trace is not documentary
+    # evidence that this service can verify.
+    documentary_validator = uses_evidence_search()
+    declared_sources = extras.get("sources") or []
+    claimed_evidence = extras.get("evidence_used") or []
+    if uses_online_search():
+        claimed_evidence = declared_sources
+    elif not documentary_validator:
+        claimed_evidence = claimed_evidence or declared_sources
+    grounding = evaluate_evidence_grounding(
+        verdict,
+        claimed_evidence,
+        evidences,
+        require_grounding=documentary_validator,
+        non_documentary_basis=(
+            "PROVIDER_SEARCH_UNVERIFIED" if uses_online_search() else "MODEL_KNOWLEDGE"
+        ),
+    )
+    extras["sources"] = []
+    extras["sources_declared"] = declared_sources if uses_online_search() else []
+    extras["evidence_used"] = grounding["evidence_used"]
+    extras["evidence_validation"] = grounding["validation"]
+    effective_verdict = Validacion[grounding["effective_verdict"]]
+    if effective_verdict == Validacion.UNKNOWN and verdict in {Validacion.TRUE, Validacion.FALSE}:
+        description = (
+            "No se emite un veredicto documental: la respuesta del validador no "
+            "contiene evidencia recuperada y comprobable que apoye la decisión."
+        )
+        logger.warning(
+            "[validate-asertions] unsupported_documentary_verdict=true "
+            f"assertion_id={payload_v2.assertion.assertion_id} "
+            f"original_verdict={verdict.name} "
+            f"issues={grounding['validation'].get('issues', [])}"
+        )
+    verdict = effective_verdict
     return verdict, description, extras, evidence_response
 
 def openrouter_model_for_current_type(model: str) -> str:
@@ -772,7 +796,9 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "description": description,
             "confidence": extras.get("confidence"),
             "sources": extras.get("sources", []),
+            "sources_declared": extras.get("sources_declared", []),
             "evidence_used": extras.get("evidence_used", []),
+            "evidence_validation": extras.get("evidence_validation"),
             "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
             "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
@@ -842,7 +868,7 @@ def verificar_asercion_con_evidencias(texto: Any, contexto: Optional[str] = None
     if isinstance(texto, dict) and texto.get("schema_version") == "assertion-validation-payload-v2":
         payload_v2 = AssertionValidationPayloadV2(**texto)
         verdict, description, extras, _evidence_response = validate_payload_v2(payload_v2)
-        return json.dumps({"resultado": verdict.name, "descripcion": description, **extras}, ensure_ascii=False), extras.get("sources", []) or extras.get("evidence_used", []) or []
+        return json.dumps({"resultado": verdict.name, "descripcion": description, **extras}, ensure_ascii=False), extras.get("evidence_used", []) or extras.get("sources_declared", []) or extras.get("sources", []) or []
     raise ValueError("validate-asertions accepts assertion-validation-payload-v2 for automatic validation flows")
 
 
@@ -921,7 +947,9 @@ async def registrar_validacion_internal(
             "estado": int(veredicto.estado),
             "descripcion": veredicto.texto,
             "sources": extras.get("sources", []),
+            "sources_declared": extras.get("sources_declared", []),
             "evidence_used": extras.get("evidence_used", []),
+            "evidence_validation": extras.get("evidence_validation"),
             "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
         }

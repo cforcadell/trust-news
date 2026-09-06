@@ -155,7 +155,12 @@ Respuesta conceptual light_validation_completed:
     "description": "...",
     "confidence": "HIGH",
     "sources": [],
+    "sources_declared": [],
     "evidence_used": [],
+    "evidence_validation": {
+      "status": "UNVERIFIED | VERIFIED | UNSUPPORTED | NOT_APPLICABLE",
+      "basis": "PROVIDER_SEARCH_UNVERIFIED | RETRIEVED_EVIDENCE | MODEL_KNOWLEDGE"
+    },
     "correlation_id": "order:assertion:validator",
     "error": null
   }
@@ -196,7 +201,9 @@ Comportamiento:
 
 - El worker no llama a evidence-search; la busqueda online se deriva de `VALIDATOR_TYPE=2`.
 - Para OpenRouter, envia el modelo con sufijo :online.
-- El prompt pide buscar evidencias actuales y devolver fuentes si el proveedor lo permite.
+- El prompt pide buscar información actual; no exige fuentes porque Assermetry no recibe el corpus privado del proveedor.
+- El voto se conserva con `basis=PROVIDER_SEARCH_UNVERIFIED`.
+- Los enlaces opcionales se publican como `sources_declared`; nunca como `evidence_used`.
 
 ## Caso de uso 5: validador humano o determinista
 

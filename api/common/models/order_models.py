@@ -28,7 +28,9 @@ class ValidationRecord(BaseModel):
     assertion_index: Optional[int] = None
     correlation_id: Optional[str] = None
     sources: List[EvidenceItem] = Field(default_factory=list)
+    sources_declared: List[EvidenceItem] = Field(default_factory=list)
     evidence_used: List[EvidenceItem] = Field(default_factory=list)
+    evidence_validation: Optional[Dict[str, Any]] = None
     confidence: Optional[float | str] = None
     execution_status: ValidationExecutionStatus
     error: Optional[str] = None
@@ -66,7 +68,9 @@ class AssertionResultDetail(BaseModel):
     result: str
     description: str = ""
     sources: List[EvidenceItem] = Field(default_factory=list)
+    sources_declared: List[EvidenceItem] = Field(default_factory=list)
     evidence_used: List[EvidenceItem] = Field(default_factory=list)
+    evidence_validation: Optional[Dict[str, Any]] = None
 
 
 class AssertionResult(BaseModel):

@@ -3261,6 +3261,17 @@ function getAssertionResult(orderData, assertionId) {
     return orderData?.assertion_results?.[String(assertionId)] || null;
 }
 
+function assertionStatusClass(assertionResult, approvedCount, rejectedCount, unknownCount, errorCount) {
+    if (assertionResult?.winner === "TRUE") return "true";
+    if (assertionResult?.winner === "FALSE") return "false";
+    if (assertionResult?.winner === "UNKNOWN") return "unknown";
+    if (approvedCount > rejectedCount) return "true";
+    if (rejectedCount > approvedCount) return "false";
+    if (unknownCount > 0) return "unknown";
+    if (errorCount > 0) return "error";
+    return "unknown";
+}
+
 function isValidationError(validation = {}) {
     return validation.execution_status === "ERROR";
 }
@@ -3362,15 +3373,22 @@ function renderPreferredDomainsBadge(info) {
 }
 
 function validationEvidenceItems(info = {}) {
+    return validationEvidenceSelection(info).items;
+}
+
+function validationEvidenceSelection(info = {}) {
     const candidates = [
-        info.evidence_used,
-        info.payload?.evidence_used,
-        info.sources,
-        info.payload?.sources,
-        info.evidence_search_response?.evidences,
-        info.payload?.evidence_search_response?.evidences
+        { kind: "used", items: info.evidence_used },
+        { kind: "used", items: info.payload?.evidence_used },
+        { kind: "provider-declared", items: info.sources_declared },
+        { kind: "provider-declared", items: info.payload?.sources_declared },
+        { kind: "legacy-declared", items: info.sources },
+        { kind: "legacy-declared", items: info.payload?.sources },
+        { kind: "retrieved", items: info.evidence_search_response?.evidences },
+        { kind: "retrieved", items: info.payload?.evidence_search_response?.evidences }
     ];
-    return candidates.find(items => Array.isArray(items) && items.length) || [];
+    return candidates.find(candidate => Array.isArray(candidate.items) && candidate.items.length)
+        || { kind: "none", items: [] };
 }
 
 function isGenericEvidenceLabel(value) {
@@ -3436,11 +3454,43 @@ function allValidationEvidenceItems(info = {}) {
     return [
         info.evidence_used,
         info.payload?.evidence_used,
+        info.sources_declared,
+        info.payload?.sources_declared,
         info.sources,
         info.payload?.sources,
         info.evidence_search_response?.evidences,
         info.payload?.evidence_search_response?.evidences
     ].filter(items => Array.isArray(items) && items.length).flat();
+}
+
+function evidenceValidationResult(info = {}) {
+    return info.evidence_validation || info.payload?.evidence_validation || null;
+}
+
+function renderEvidenceValidationBadge(info = {}) {
+    const validation = evidenceValidationResult(info);
+    if (!validation) return "";
+    const basisLabels = {
+        RETRIEVED_EVIDENCE: t("ui.retrievedEvidenceBasis"),
+        PROVIDER_SEARCH_UNVERIFIED: t("ui.providerSearchUnverified"),
+        MODEL_KNOWLEDGE: t("ui.modelKnowledgeBasis")
+    };
+    const statusLabels = {
+        VERIFIED: t("ui.evidenceVerified"),
+        PARTIALLY_VERIFIED: t("ui.evidencePartiallyVerified"),
+        UNSUPPORTED: t("ui.evidenceUnsupported"),
+        INVALID: t("ui.evidenceInvalid")
+    };
+    const basisLabel = basisLabels[validation.basis] || validation.basis || "";
+    const statusLabel = statusLabels[validation.status] || "";
+    const label = [basisLabel, statusLabel].filter(Boolean).join(" · ") || validation.status;
+    const details = [
+        validation.status,
+        validation.original_verdict && validation.effective_verdict
+            ? `${validation.original_verdict} → ${validation.effective_verdict}`
+            : ""
+    ].filter(Boolean).join(" · ");
+    return `<span class="evidence-validation-badge" title="${safeText(details)}">${safeText(label)}</span>`;
 }
 
 function evidenceReferenceLabel(info = {}, sourceNumber = 0) {
@@ -3463,8 +3513,17 @@ function replaceGenericEvidenceReferences(text, info = {}) {
 }
 
 function renderEvidenceLinks(info = {}) {
-    const items = validationEvidenceItems(info);
+    const selection = validationEvidenceSelection(info);
+    const items = selection.items;
     if (!items.length) return "";
+
+    const summaryLabel = selection.kind === "used"
+        ? t("ui.usedEvidence", { count: items.length })
+        : selection.kind === "retrieved"
+            ? t("ui.retrievedEvidenceNotUsed", { count: items.length })
+            : selection.kind === "provider-declared"
+                ? t("ui.providerDeclaredSources", { count: items.length })
+                : t("ui.declaredEvidence", { count: items.length });
 
     const rows = items.slice(0, 6).map((src, index) => {
         const linkUrl = src.url || src.source_url || "";
@@ -3498,7 +3557,7 @@ function renderEvidenceLinks(info = {}) {
 
     return `
         <details class="validator-evidence-summary">
-            <summary>${t("ui.viewEvidence", { count: items.length })}</summary>
+            <summary>${safeText(summaryLabel)}</summary>
             <ul>${rows}</ul>
         </details>
     `;
@@ -3531,13 +3590,13 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         const unknownCount = literals.filter(v => v === "Unknown").length;
         const errorCount = Object.values(validatorsObj).filter(isValidationError).length;
 
-        let status = "unknown";
-        if (assertionResult?.winner === "TRUE") status = "true";
-        else if (assertionResult?.winner === "FALSE") status = "false";
-        else if (approvedCount > rejectedCount) status = "true";
-        else if (rejectedCount > approvedCount) status = "false";
-        else if (unknownCount > 0) status = "pending";
-        else if (errorCount > 0) status = "error";
+        const status = assertionStatusClass(
+            assertionResult,
+            approvedCount,
+            rejectedCount,
+            unknownCount,
+            errorCount
+        );
 
         const validatorsHtml = Object.entries(validatorsObj).map(([validator, info]) => {
             const validationError = isValidationError(info);
@@ -3561,6 +3620,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
                     <div class="validator-desc">${safeText(desc)}</div>
                     <div class="validator-meta">
                         ${validationError ? `<span class="validation-error-badge">${safeText(info.error_details?.stage || "VALIDATION")} · ${safeText(info.error_details?.code || "ERROR")}</span>` : ""}
+                        ${renderEvidenceValidationBadge(info)}
                         ${weightHtml}
                         <div class="validator-response-time" title="${safeText(t("ui.requestResponseTime"))}"><span class="clock-icon" aria-hidden="true"></span>${safeText(responseTime)}</div>
                     </div>
@@ -3827,7 +3887,9 @@ async function showValidatorValidations(validatorHash) {
                 order_id: v.order_id,
                 response_time_seconds: v.response_time_seconds,
                 sources: v.sources || v.payload?.sources || [],
+                sources_declared: v.sources_declared || v.payload?.sources_declared || [],
                 evidence_used: v.evidence_used || v.payload?.evidence_used || [],
+                evidence_validation: v.evidence_validation || v.payload?.evidence_validation || null,
                 evidence_search_response: v.evidence_search_response || v.payload?.evidence_search_response || null,
                 search_policy: v.search_policy || v.payload?.search_policy || null,
                 payload: v.payload || {}

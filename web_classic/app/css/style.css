@@ -982,6 +982,17 @@ pre, .event-payload-pre {
 .preferred-domains-on { color: #b9ffe7; background: rgba(16, 214, 154, .10); border-color: rgba(16, 214, 154, .28); }
 .preferred-domains-off { color: #cbd5e1; background: rgba(100, 116, 139, .09); border-color: rgba(100, 116, 139, .20); }
 .preferred-domains-unknown { color: #ffe2a8; background: rgba(245, 158, 11, .09); border-color: rgba(245, 158, 11, .22); }
+.evidence-validation-badge {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #ffe2a8;
+  background: rgba(245, 158, 11, .09);
+  border: 1px solid rgba(245, 158, 11, .22);
+  font-size: .72rem;
+  font-weight: 800;
+}
 .validator-evidence-summary {
   grid-area: evidence;
   min-width: 0;

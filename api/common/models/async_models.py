@@ -426,7 +426,9 @@ class ValidationCompletedPayload(BaseModel):
     validator_alias: str = ""
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
     sources: Optional[List[EvidenceItem]] = None
+    sources_declared: Optional[List[EvidenceItem]] = None
     evidence_used: Optional[List[EvidenceItem]] = None
+    evidence_validation: Optional[Dict[str, Any]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
     search_policy: Optional[Dict[str, Any]] = None
     execution_status: ValidationExecutionStatus
@@ -487,7 +489,9 @@ class LightValidationResponsePayload(BaseModel):
     description: str
     confidence: Optional[float | str] = None
     sources: Optional[List[EvidenceItem]] = None
+    sources_declared: Optional[List[EvidenceItem]] = None
     evidence_used: Optional[List[EvidenceItem]] = None
+    evidence_validation: Optional[Dict[str, Any]] = None
     assertion_validation_payload: Optional[Dict[str, Any]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
     search_policy: Optional[Dict[str, Any]] = None

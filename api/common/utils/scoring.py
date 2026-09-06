@@ -31,7 +31,9 @@ def validation_weight_detail(
         "result": result,
         "description": validation.get("text", ""),
         "sources": validation.get("sources") or (validation.get("payload") or {}).get("sources") or [],
+        "sources_declared": validation.get("sources_declared") or (validation.get("payload") or {}).get("sources_declared") or [],
         "evidence_used": validation.get("evidence_used") or (validation.get("payload") or {}).get("evidence_used") or [],
+        "evidence_validation": validation.get("evidence_validation") or (validation.get("payload") or {}).get("evidence_validation"),
     }
 
 

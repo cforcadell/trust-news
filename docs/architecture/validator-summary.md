@@ -68,8 +68,10 @@ Para cualquier tipo automatico el flujo base es:
 4. Construir el prompt con prompt especifico del tipo, contexto de noticia serializado, evidencias solo en RAG y texto de la asercion.
 5. Enviar el prompt al proveedor configurado (`mistral`, `gemini`, `openrouter` o `grok`).
 6. Parsear JSON del modelo con `resultado`, `descripcion` y, opcionalmente, `confidence`, `sources` y `evidence_used`.
-7. Aceptar como resultado efectivo solo `TRUE`, `FALSE` o `UNKNOWN`; cualquier otra etiqueta devuelta por el modelo se degrada a `UNKNOWN`.
-8. Devolver por Kafka en LIGHT o registrar en IPFS/blockchain en BLOCKCHAIN.
+7. Para RAG, comprobar las referencias contra el corpus recuperado y convertir a `UNKNOWN` cualquier `TRUE`/`FALSE` sin soporte comprobable.
+8. Para búsqueda online delegada, conservar el voto como señal no documental y mover sus enlaces opcionales a `sources_declared` con base `PROVIDER_SEARCH_UNVERIFIED`.
+9. Para memoria, identificar la base como `MODEL_KNOWLEDGE` y no publicar citas como evidencia utilizada.
+10. Devolver por Kafka en LIGHT o registrar en IPFS/blockchain en BLOCKCHAIN.
 
 ## Clasificacion por comportamiento
 
@@ -87,13 +89,13 @@ El worker usa el prompt `LLM_MEMORY_VALIDATION_PROMPT`. El modelo razona sobre l
 
 **Algoritmo:** inferencia con LLM y capacidad online del proveedor.
 
-El worker usa `LLM_SEARCH_VALIDATION_PROMPT`, que pide buscar evidencias actuales y devolver fuentes. No llama al microservicio `evidence-search`; delega la capacidad de busqueda al proveedor/modelo.
+El worker usa `LLM_SEARCH_VALIDATION_PROMPT` y delega la capacidad de búsqueda al proveedor/modelo. No llama al microservicio `evidence-search` y, por tanto, no exige fuentes ni presenta los enlaces opcionales del proveedor como evidencia comprobada.
 
 En OpenRouter, cuando `VALIDATOR_TYPE=2`, el modelo se transforma automaticamente con sufijo `:online`. Por ejemplo, `openai/gpt-5-mini` pasa a `openai/gpt-5-mini:online`.
 
 **Variables clave:** `VALIDATOR_TYPE=2`, `LLM_SEARCH_VALIDATION_PROMPT`.
 
-**Uso esperado:** validador con mas contexto temporal que el tipo 1, pero con menos control sobre recuperacion y ranking de fuentes que RAG. Su peso es medio (`0.50`).
+**Uso esperado:** señal no documental con más contexto temporal que el tipo 1, pero sin control ni comprobación del corpus consultado. Sus fuentes opcionales quedan como `sources_declared` y su base es `PROVIDER_SEARCH_UNVERIFIED`. Su peso es medio (`0.50`).
 
 ### 3. RAG con evidencias (`RAG_EVIDENCE_VALIDATION`)
 

@@ -1405,18 +1405,26 @@ function buildVerificationSummary(order, events = []) {
     let confirmedAssertions = 0;
     let contradictedAssertions = 0;
     let inconclusiveAssertions = 0;
+    let noConsensusAssertions = 0;
+    let insufficientEvidenceAssertions = 0;
+    let noValidResponsesAssertions = 0;
 
     assertionIds.forEach(assertionId => {
         const weighted = weightedResults[String(assertionId)];
         if (weighted) {
-            if (!Number(weighted.validations_count || 0)) return;
-            const scores = weighted.scores || {};
+            const scores = weighted.distribution?.raw_weight || weighted.scores || {};
             validatorVotes.true += scores.TRUE || 0;
             validatorVotes.false += scores.FALSE || 0;
             validatorVotes.unknown += scores.UNKNOWN || 0;
-            if (weighted.winner === "TRUE") confirmedAssertions++;
-            else if (weighted.winner === "FALSE") contradictedAssertions++;
-            else inconclusiveAssertions++;
+            const verdict = weighted.verdict || weighted.winner || "UNKNOWN";
+            if (verdict === "TRUE") confirmedAssertions++;
+            else if (verdict === "FALSE") contradictedAssertions++;
+            else {
+                inconclusiveAssertions++;
+                if (weighted.decision_status === "NO_CONSENSUS") noConsensusAssertions++;
+                else if (weighted.decision_status === "NO_VALID_RESPONSES") noValidResponsesAssertions++;
+                else insufficientEvidenceAssertions++;
+            }
             return;
         }
 
@@ -1445,8 +1453,8 @@ function buildVerificationSummary(order, events = []) {
     const totalAssertions = assertionIds.size;
     const scoredAssertions = confirmedAssertions + contradictedAssertions + inconclusiveAssertions;
     const unscoredAssertions = Math.max(0, totalAssertions - scoredAssertions);
-    const hasMixedResult = [confirmedAssertions, contradictedAssertions, inconclusiveAssertions].filter(Boolean).length > 1;
     let statusKey = "inconclusive";
+    let documentStatus = "INCONCLUSIVE";
 
     if (totalValidations > 0 && completedValidations < totalValidations) {
         statusKey = "pending";
@@ -1454,27 +1462,37 @@ function buildVerificationSummary(order, events = []) {
         statusKey = "error";
     } else if (totalAssertions === 0) {
         statusKey = completedValidations > 0 ? "inconclusive" : "pending";
-    } else if (contradictedAssertions > confirmedAssertions && contradictedAssertions >= inconclusiveAssertions) {
-        statusKey = "contradicted";
-    } else if (inconclusiveAssertions > confirmedAssertions && inconclusiveAssertions >= contradictedAssertions) {
-        statusKey = "inconclusive";
-    } else if (confirmedAssertions > 0 && contradictedAssertions === 0 && confirmedAssertions >= inconclusiveAssertions) {
-        statusKey = inconclusiveAssertions > 0 ? "partial" : "verified";
-    } else if (hasMixedResult) {
+    } else if (confirmedAssertions > 0 && contradictedAssertions > 0) {
+        statusKey = "mixed";
+        documentStatus = "MIXED";
+    } else if (inconclusiveAssertions > 0 && (confirmedAssertions > 0 || contradictedAssertions > 0)) {
         statusKey = "partial";
+        documentStatus = "PARTIALLY_VERIFIED";
+    } else if (contradictedAssertions > 0) {
+        statusKey = "contradicted";
+        documentStatus = "CONTRADICTED";
+    } else if (confirmedAssertions > 0) {
+        statusKey = "verified";
+        documentStatus = "SUPPORTED";
     }
 
     const statusMap = {
         verified: { statusLabel: t("summary.verified"), statusIcon: "🟢" },
         partial: { statusLabel: t("summary.partial"), statusIcon: "🟡" },
+        mixed: { statusLabel: t("summary.mixed"), statusIcon: "🟡" },
         contradicted: { statusLabel: t("summary.contradicted"), statusIcon: "🔴" },
         inconclusive: { statusLabel: t("summary.inconclusive"), statusIcon: "🟠" },
         pending: { statusLabel: t("summary.pending"), statusIcon: "⚪" },
         error: { statusLabel: "Validation error", statusIcon: "🔴" }
     };
 
-    const joinWord = window.I18N?.getLanguage() === "en" ? " and " : " y ";
-    const assertionBreakdown = `${pluralizeEs(confirmedAssertions, t("summary.confirmedOne"), t("summary.confirmedMany"))}, ${pluralizeEs(contradictedAssertions, t("summary.disprovedOne"), t("summary.disprovedMany"))}${joinWord}${pluralizeEs(inconclusiveAssertions, t("summary.inconclusiveOne"), t("summary.inconclusiveMany"))}`;
+    const assertionBreakdown = [
+        pluralizeEs(confirmedAssertions, t("summary.confirmedOne"), t("summary.confirmedMany")),
+        pluralizeEs(contradictedAssertions, t("summary.disprovedOne"), t("summary.disprovedMany")),
+        pluralizeEs(noConsensusAssertions, t("summary.noConsensusOne"), t("summary.noConsensusMany")),
+        pluralizeEs(insufficientEvidenceAssertions, t("summary.insufficientOne"), t("summary.insufficientMany")),
+        pluralizeEs(noValidResponsesAssertions, t("summary.noResponsesOne"), t("summary.noResponsesMany"))
+    ].join(", ");
     const knownAssertions = confirmedAssertions + contradictedAssertions;
     const confidenceLabel = knownAssertions > 0
         ? t("summary.confirmedAmongVerified", { confirmed: confirmedAssertions, known: knownAssertions })
@@ -1489,7 +1507,7 @@ function buildVerificationSummary(order, events = []) {
         conclusionText = t("summary.verifiedConclusion", { breakdown: assertionBreakdown });
     } else if (statusKey === "contradicted") {
         conclusionText = t("summary.disprovedConclusion", { breakdown: assertionBreakdown });
-    } else if (statusKey === "partial") {
+    } else if (statusKey === "partial" || statusKey === "mixed") {
         conclusionText = t("summary.partialConclusion", { breakdown: assertionBreakdown });
     } else {
         conclusionText = t("summary.inconclusiveConclusion", { breakdown: assertionBreakdown });
@@ -1497,6 +1515,7 @@ function buildVerificationSummary(order, events = []) {
 
     return {
         statusKey,
+        documentStatus,
         statusLabel: statusMap[statusKey].statusLabel,
         statusIcon: statusMap[statusKey].statusIcon,
         confidenceLabel,
@@ -1505,6 +1524,9 @@ function buildVerificationSummary(order, events = []) {
         confirmedAssertions,
         contradictedAssertions,
         inconclusiveAssertions,
+        noConsensusAssertions,
+        insufficientEvidenceAssertions,
+        noValidResponsesAssertions,
         unscoredAssertions,
         errorValidations,
         validValidations: completedValidations - errorValidations,
@@ -1521,9 +1543,12 @@ function buildVerificationSummary(order, events = []) {
 
 function assertionOutcome(orderData, assertionId) {
     const result = getAssertionResult(orderData, assertionId);
-    if (result?.winner === "TRUE") return "confirmed";
-    if (result?.winner === "FALSE") return "contradicted";
-    if (result?.winner === "UNKNOWN") return "inconclusive";
+    if (result) {
+        const verdict = result.verdict || result.winner || "UNKNOWN";
+        if (verdict === "TRUE") return "confirmed";
+        if (verdict === "FALSE") return "contradicted";
+        return result.decision_status === "NO_VALID_RESPONSES" ? "error" : "inconclusive";
+    }
 
     const validators = orderData?.validations?.[String(assertionId)] || {};
     const completed = completedValidations(validators);
@@ -1559,9 +1584,10 @@ function renderOrderSummary(container, data, events = []) {
     const contradictedPercent = percentage(summary.contradictedAssertions, scoredAssertions);
     const inconclusivePercent = scoredAssertions > 0 ? Math.max(0, 100 - confirmedPercent - contradictedPercent) : 0;
     const totalWeight = summary.validatorVotes.true + summary.validatorVotes.false + summary.validatorVotes.unknown;
-    const truePercent = percentage(summary.validatorVotes.true, totalWeight);
-    const falsePercent = percentage(summary.validatorVotes.false, totalWeight);
-    const unknownPercent = totalWeight > 0 ? Math.max(0, 100 - truePercent - falsePercent) : 0;
+    const decisiveWeight = summary.validatorVotes.true + summary.validatorVotes.false;
+    const truePercent = percentage(summary.validatorVotes.true, decisiveWeight);
+    const falsePercent = decisiveWeight > 0 ? Math.max(0, 100 - truePercent) : 0;
+    const unknownPercent = percentage(summary.validatorVotes.unknown, totalWeight);
     const progressPercent = percentage(summary.completedValidations, summary.totalValidations || summary.completedValidations);
     const problematic = assertions
         .map((assertion, index) => ({ assertion, assertionId: getAssertionId(assertion, index + 1) }))
@@ -1595,7 +1621,7 @@ function renderOrderSummary(container, data, events = []) {
                     <div class="assertion-counts">
                         <div><i class="confirmed">✓</i><strong>${summary.confirmedAssertions} ${t("ui.confirmed")}</strong><small>${t("ui.confirmedHelp")}</small></div>
                         <div><i class="contradicted">×</i><strong>${summary.contradictedAssertions} ${t("ui.disproved")}</strong><small>${t("ui.disprovedHelp")}</small></div>
-                        <div><i class="inconclusive">?</i><strong>${summary.inconclusiveAssertions} ${t("ui.inconclusive")}</strong><small>${t("ui.inconclusiveHelp")}</small></div>
+                        <div><i class="inconclusive">?</i><strong>${summary.inconclusiveAssertions} ${t("ui.inconclusive")}</strong><small>${summary.noConsensusAssertions} ${t("decision.noConsensusShort")} · ${summary.insufficientEvidenceAssertions} ${t("decision.insufficientShort")} · ${summary.noValidResponsesAssertions} ${t("decision.noResponsesShort")}</small></div>
                     </div>
                 </article>
 
@@ -1604,10 +1630,10 @@ function renderOrderSummary(container, data, events = []) {
                     <div class="vote-content">
                         <div class="vote-donut" style="--true:${truePercent * 3.6}deg;--false:${(truePercent + falsePercent) * 3.6}deg"><span>◎</span></div>
                         <div class="vote-legend">
-                            <div><i class="confirmed"></i><span>${t("ui.inFavor")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.true)} (${truePercent}%)</b></div>
-                            <div><i class="contradicted"></i><span>${t("ui.against")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.false)} (${falsePercent}%)</b></div>
-                            <div><i class="inconclusive"></i><span>${t("ui.noConclusion")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.unknown)} (${unknownPercent}%)</b></div>
-                            <strong>${t("ui.weightedTotal")}: ${formatMaxTwoDecimals(totalWeight)}</strong>
+                            <div><i class="confirmed"></i><span>TRUE · ${t("decision.weight")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.true)} (${truePercent}% ${t("decision.ofDecisiveWeight")})</b></div>
+                            <div><i class="contradicted"></i><span>FALSE · ${t("decision.weight")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.false)} (${falsePercent}% ${t("decision.ofDecisiveWeight")})</b></div>
+                            <div><i class="inconclusive"></i><span>UNKNOWN · ${t("decision.abstentionWeight")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.unknown)} (${unknownPercent}% ${t("decision.ofCompletedWeight")})</b></div>
+                            <strong>${t("decision.completedWeight")}: ${formatMaxTwoDecimals(totalWeight)}</strong>
                         </div>
                     </div>
                 </article>
@@ -1753,7 +1779,11 @@ function renderOrderProcess(container, orderData, events = []) {
     const pending = summary.pendingValidations;
     const complete = String(orderData?.status || "").toUpperCase().startsWith("VALIDATED");
     const currentStage = stages[stage.currentIndex]?.label || t("ui.process");
-    const provisional = summary.confirmedAssertions > summary.contradictedAssertions ? { label: t("ui.clearTrend"), className: "confirmed" } : summary.contradictedAssertions > summary.confirmedAssertions ? { label: t("ui.disprovedTrend"), className: "contradicted" } : { label: t("ui.noClearTrend"), className: "inconclusive" };
+    const provisional = summary.inconclusiveAssertions === 0 && summary.confirmedAssertions > 0 && summary.contradictedAssertions === 0
+        ? { label: t("ui.clearTrend"), className: "confirmed" }
+        : summary.inconclusiveAssertions === 0 && summary.contradictedAssertions > 0 && summary.confirmedAssertions === 0
+            ? { label: t("ui.disprovedTrend"), className: "contradicted" }
+            : { label: t("ui.noClearTrend"), className: "inconclusive" };
     const recent = rows.slice(-4).reverse();
     const ratio = total ? `${received}/${total}` : String(received);
     const stageHtml = stages.map((item, index) => {
@@ -1866,7 +1896,7 @@ function renderDetails(container, data, events = []) {
                 <span class="summary-kicker">${t("summary.resultByAssertion")}</span>
                 <span class="summary-chip chip-confirmed">✅ ${t("summary.confirmed")}: ${summary.confirmedAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
                 <span class="summary-chip chip-contradicted">❌ ${t("summary.disproved")}: ${summary.contradictedAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
-                <span class="summary-chip chip-inconclusive">❔ ${t("summary.notConclusive")}: ${summary.inconclusiveAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
+                <span class="summary-chip chip-inconclusive">❔ ${t("summary.notConclusive")}: ${summary.inconclusiveAssertions} ${t("summary.of")} ${summary.totalAssertions} · ${summary.noConsensusAssertions} ${t("decision.noConsensusShort")} · ${summary.insufficientEvidenceAssertions} ${t("decision.insufficientShort")}</span>
             </div>
             <div class="verification-ai-row">
                 <div class="validation-progress">
@@ -3143,7 +3173,7 @@ function renderVotePill(count, label, className) {
 
 function renderSummaryVoteChip(value, label, className) {
     const zeroClass = Number(value || 0) === 0 ? " summary-chip-zero" : "";
-    return `<span class="summary-chip ${className}${zeroClass}">${formatMaxTwoDecimals(value)} ${safeText(label)}</span>`;
+    return `<span class="summary-chip ${className}${zeroClass}">${safeText(label)} · ${safeText(t("decision.weight"))} ${formatMaxTwoDecimals(value)}</span>`;
 }
 
 function compactText(value, size = 90) {
@@ -3262,9 +3292,13 @@ function getAssertionResult(orderData, assertionId) {
 }
 
 function assertionStatusClass(assertionResult, approvedCount, rejectedCount, unknownCount, errorCount) {
-    if (assertionResult?.winner === "TRUE") return "true";
-    if (assertionResult?.winner === "FALSE") return "false";
-    if (assertionResult?.winner === "UNKNOWN") return "unknown";
+    if (assertionResult) {
+        const verdict = assertionResult.verdict || assertionResult.winner || "UNKNOWN";
+        if (verdict === "TRUE") return "true";
+        if (verdict === "FALSE") return "false";
+        if (assertionResult.decision_status === "NO_VALID_RESPONSES") return "error";
+        return "unknown";
+    }
     if (approvedCount > rejectedCount) return "true";
     if (rejectedCount > approvedCount) return "false";
     if (unknownCount > 0) return "unknown";
@@ -3280,26 +3314,78 @@ function completedValidations(validators = {}) {
     return Object.values(validators).filter(validation => validation?.execution_status === "COMPLETED");
 }
 
-function scorePercent(value) {
-    const n = Number(value || 0);
-    return `${formatMaxTwoDecimals(n * 100)}%`;
+function formatWeightPercent(value) {
+    const formatted = formatMaxTwoDecimals(Number(value || 0) * 100);
+    return `${window.I18N?.getLanguage?.() === "es" ? formatted.replace(".", ",") : formatted} %`;
 }
 
 function renderScorePill(value, label, className) {
-    const roundedPercent = Number(formatMaxTwoDecimals(Number(value || 0) * 100));
-    const zeroClass = roundedPercent === 0 ? " vote-pill-zero" : "";
-    return `<span class="vote-pill ${className}${zeroClass}">${safeText(label)} ${scorePercent(value)}</span>`;
+    const numericWeight = Number(value || 0);
+    const zeroClass = numericWeight === 0 ? " vote-pill-zero" : "";
+    return `<span class="vote-pill ${className}${zeroClass}">${safeText(label)} · ${safeText(t("decision.weight"))} ${formatMaxTwoDecimals(numericWeight)}</span>`;
+}
+
+function decisionPresentation(result = {}) {
+    const verdict = result.verdict || result.winner || "UNKNOWN";
+    const status = result.decision_status || (verdict === "UNKNOWN" ? "INSUFFICIENT_EVIDENCE" : "WEIGHTED_MAJORITY");
+    const reason = result.reason_code || "";
+    const distribution = result.distribution || {};
+    const share = distribution.decisive_share?.[verdict] || 0;
+    const coverage = distribution.decisive_coverage || 0;
+    const counts = result.counts || {
+        decisive: result.validations_count || 0,
+        abstentions: 0,
+        errors: result.errors_count || 0
+    };
+    const titleKeys = {
+        "TRUE:CONSENSUS": "decision.trueConsensus",
+        "FALSE:CONSENSUS": "decision.falseConsensus",
+        "TRUE:WEIGHTED_MAJORITY": "decision.trueMajority",
+        "FALSE:WEIGHTED_MAJORITY": "decision.falseMajority",
+        "UNKNOWN:NO_CONSENSUS": "decision.noConsensus",
+        "UNKNOWN:INSUFFICIENT_EVIDENCE": "decision.insufficientEvidence",
+        "UNKNOWN:NO_VALID_RESPONSES": "decision.noValidResponses"
+    };
+    let explanation = "";
+    if (status === "WEIGHTED_MAJORITY") {
+        explanation = t("decision.winnerShare", { percent: formatWeightPercent(share) });
+    } else if (reason === "TRUE_FALSE_WEIGHT_TIE") {
+        explanation = t("decision.tieReason");
+    } else if (reason === "DECISIVE_COVERAGE_TOO_LOW") {
+        explanation = t("decision.lowCoverageReason", { percent: formatWeightPercent(coverage) });
+    } else if (reason === "NO_DECISIVE_VALIDATIONS") {
+        explanation = t("decision.noDecisiveReason");
+    } else if (reason === "ALL_VALIDATIONS_FAILED") {
+        explanation = t("decision.allFailedReason");
+    } else if (reason === "NO_COMPLETED_VALIDATIONS") {
+        explanation = t("decision.noCompletedReason");
+    }
+    return {
+        verdict,
+        status,
+        title: t(titleKeys[`${verdict}:${status}`] || "decision.inconclusive"),
+        explanation,
+        countsText: t("decision.counts", {
+            decisive: Number(counts.decisive || 0),
+            abstentions: Number(counts.abstentions || 0),
+            errors: Number(counts.errors || 0)
+        })
+    };
 }
 
 function renderScorePills(result) {
-    const scores = result?.scores || {TRUE: 0, FALSE: 0, UNKNOWN: 0};
-    const errors = Number(result?.errors_count || 0);
+    const scores = result?.distribution?.raw_weight || result?.scores || {TRUE: 0, FALSE: 0, UNKNOWN: 0};
+    const errors = Number(result?.counts?.errors ?? result?.errors_count ?? 0);
+    const decision = decisionPresentation(result);
     return `
-        <div class="vote-pills score-pills">
-            ${renderScorePill(scores.TRUE, "TRUE", "vote-true")}
-            ${renderScorePill(scores.FALSE, "FALSE", "vote-false")}
-            ${renderScorePill(scores.UNKNOWN, "UNKNOWN", "vote-unknown")}
-            ${errors ? `<span class="vote-pill vote-error">ERROR ${errors}</span>` : ""}
+        <div class="consensus-result">
+            <div class="consensus-decision"><strong>${safeText(decision.title)}</strong>${decision.explanation ? `<span>${safeText(decision.explanation)}</span>` : ""}<small>${safeText(decision.countsText)}</small></div>
+            <div class="vote-pills score-pills">
+                ${renderScorePill(scores.TRUE, "TRUE", "vote-true")}
+                ${renderScorePill(scores.FALSE, "FALSE", "vote-false")}
+                ${renderScorePill(scores.UNKNOWN, "UNKNOWN", "vote-unknown")}
+                ${errors ? `<span class="vote-pill vote-error">ERROR ${errors}</span>` : ""}
+            </div>
         </div>
     `;
 }
@@ -3633,7 +3719,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         html += `
             <details class="validation-node">
                 <summary class="validation-summary">
-                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult?.winner ? ` → ${safeText(assertionResult.winner)}` : errorCount ? " → ERROR" : ""}</div>
+                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult ? ` → ${safeText(assertionResult.verdict || assertionResult.winner || "UNKNOWN")}` : errorCount ? " → ERROR" : ""}</div>
                     ${assertionResult ? renderScorePills(assertionResult) : `<div class="vote-pills">
                         ${renderVotePill(approvedCount, "True", "vote-true")}
                         ${renderVotePill(rejectedCount, "False", "vote-false")}

@@ -84,3 +84,62 @@ def test_start_light_flow_updates_order_with_minimal_document(monkeypatch):
     assert "assertion_index" not in assertion_item
 
     assert "assertions_document" not in order_update
+
+
+def test_legacy_validation_weight_fallback_is_marked(monkeypatch):
+    module = load_news_handler_module()
+    order = {
+        "validations": {
+            "1": {
+                "legacy-validator": {
+                    "approval": "TRUE",
+                    "execution_status": "COMPLETED",
+                }
+            }
+        }
+    }
+    monkeypatch.setattr(
+        module,
+        "get_cached_validator_config",
+        lambda _: {"validator_type": 3, "reputation": 0.8, "config": {"name": "Legacy"}},
+    )
+
+    module.attach_validator_config_snapshots(order)
+
+    validation = order["validations"]["1"]["legacy-validator"]
+    assert validation["legacy_dynamic_weight"] is True
+    assert validation["validator_config"]["validator_type"] == 3
+
+
+def test_validation_log_persists_frozen_weight_fields(monkeypatch):
+    module = load_news_handler_module()
+    inserted = {}
+
+    class FakeCollection:
+        async def insert_one(self, document):
+            inserted.update(document)
+
+    monkeypatch.setattr(module, "validations_collection", FakeCollection())
+    snapshot = module.validation_weight_snapshot(
+        {"validator_type": 3, "reputation": 0.8},
+        {"RAG_EVIDENCE_VALIDATION": 0.75},
+    )
+    asyncio.run(
+        module.log_validation(
+            "order-1",
+            "post-1",
+            "assertion-1",
+            "validator-1",
+            module.Validacion.TRUE,
+            "0x123",
+            snapshot,
+            module.ValidationExecutionStatus.COMPLETED,
+        )
+    )
+
+    assert inserted["validator_type"] == "RAG_EVIDENCE_VALIDATION"
+    assert inserted["validator_type_weight"] == 0.75
+    assert inserted["reputation_at_validation"] == 0.8
+    assert inserted["effective_weight"] == pytest.approx(0.6)
+    assert inserted["weights_policy_version"] == "validator-weights-v1"
+    assert inserted["legacy_dynamic_weight"] is False

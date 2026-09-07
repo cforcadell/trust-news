@@ -72,7 +72,10 @@ from common.utils.kafka_contracts import (
 from common.models.order_models import EventRecord as EventModel
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.ipfs_client import get_ipfs_text
-from common.utils.scoring import calculate_order_assertion_results as calculate_order_assertion_results_common
+from common.utils.scoring import (
+    calculate_order_assertion_results as calculate_order_assertion_results_common,
+    validation_weight_snapshot,
+)
 from common.utils.validator_registry import light_validators_for_category
 from common.utils.mongo import build_mongo_uri_from_env
 from common.utils.logging_utils import configure_single_line_json_logging
@@ -481,11 +484,14 @@ def attach_validator_config_snapshots(order: dict) -> dict:
         if not isinstance(validators_by_assertion, dict):
             continue
         for validator_hash, validation in validators_by_assertion.items():
-            if not isinstance(validation, dict) or validation.get("validator_config"):
+            if not isinstance(validation, dict):
                 continue
-            validator_config = get_cached_validator_config(validator_hash)
-            if validator_config:
-                validation["validator_config"] = validator_summary_for_ui(validator_config)
+            if "effective_weight" not in validation:
+                validation["legacy_dynamic_weight"] = True
+            if not validation.get("validator_config"):
+                validator_config = get_cached_validator_config(validator_hash)
+                if validator_config:
+                    validation["validator_config"] = validator_summary_for_ui(validator_config)
     return order
 
 
@@ -726,6 +732,16 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
         "created_at": datetime.now(timezone.utc).isoformat(),
         "response_time_seconds": response_time_seconds
     }
+    for field in (
+        "validator_type",
+        "validator_type_weight",
+        "reputation_at_validation",
+        "effective_weight",
+        "weights_policy_version",
+        "legacy_dynamic_weight",
+    ):
+        if field in payload:
+            val_doc[field] = payload[field]
     await validations_col.insert_one(val_doc)
     logger.info(f"[{order_id}] 🟢 Validación registrada en MongoDB (Assertion={id_assertion}, Validator={id_validator}).")
 
@@ -1207,6 +1223,7 @@ async def process_kafka_message(data: dict):
                 response_ms = int(time.time() * 1000)
                 response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
                 validator_config_snapshot = get_cached_validator_config(id_val)
+                weight_snapshot = validation_weight_snapshot(validator_config_snapshot, validator_type_weights)
                 validations[id_assert][id_val] = {
                     "approval": status_val,
                     "text": description,
@@ -1226,10 +1243,11 @@ async def process_kafka_message(data: dict):
                     "execution_status": execution_status.value,
                     "error": error,
                     "error_details": payload.get("error_details"),
-                    "response_time_seconds": response_time_seconds
+                    "response_time_seconds": response_time_seconds,
+                    **weight_snapshot,
                 }
                 await update_order(order_id, {"$set": {"validations": validations, "updated_at": datetime.now(timezone.utc).isoformat()}})
-                validation_payload = {**payload, "validator_config": validator_config_snapshot}
+                validation_payload = {**payload, "validator_config": validator_config_snapshot, **weight_snapshot}
                 validation_payload.pop("assertion_index", None)
                 await log_validation(order_id, order_id, id_assert, id_val, status_val, None, validation_payload, execution_status, response_time_seconds)
 
@@ -1301,6 +1319,7 @@ async def process_kafka_message(data: dict):
                 response_ms = int(time.time() * 1000)
                 response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
                 validator_config_snapshot = get_cached_validator_config(id_val)
+                weight_snapshot = validation_weight_snapshot(validator_config_snapshot, validator_type_weights)
 
                 validations[id_assert][id_val] = {
                     "approval": status_val,
@@ -1317,14 +1336,25 @@ async def process_kafka_message(data: dict):
                     "execution_status": execution_status.value,
                     "error": payload.get("error"),
                     "error_details": payload.get("error_details"),
-                    "response_time_seconds": response_time_seconds
+                    "response_time_seconds": response_time_seconds,
+                    **weight_snapshot,
                 }
 
                 await update_order(order_id, {"$set": {"validations": validations}})
                 logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
 
                 # Registrar validación en colección 'validations'
-                await log_validation(order_id, postId, id_assert, id_val, status_val, tx_hash, {**payload, "validator_config": validator_config_snapshot}, execution_status, response_time_seconds)
+                await log_validation(
+                    order_id,
+                    postId,
+                    id_assert,
+                    id_val,
+                    status_val,
+                    tx_hash,
+                    {**payload, "validator_config": validator_config_snapshot, **weight_snapshot},
+                    execution_status,
+                    response_time_seconds,
+                )
 
                 validators_cfg = doc.get("validators", [])
                 total_pending = 0

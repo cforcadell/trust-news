@@ -31,7 +31,7 @@ def test_result_normalization():
     assert normalize_validation_result(3) == "UNKNOWN"
 
 
-def test_weighted_score_formula_divides_by_validator_count():
+def test_weighted_score_formula_preserves_raw_weight():
     validations = [
         (ValidatorType.LLM_MEMORY_VALIDATION, 1.0, "TRUE"),
         (ValidatorType.LLM_SEARCH_VALIDATION, 1.0, "TRUE"),
@@ -39,10 +39,10 @@ def test_weighted_score_formula_divides_by_validator_count():
     ]
     scores = {"TRUE": 0.0, "FALSE": 0.0, "UNKNOWN": 0.0}
     for validator_type, reputation, result in validations:
-        scores[normalize_validation_result(result)] += get_validator_type_weight(validator_type) * reputation / len(validations)
+        scores[normalize_validation_result(result)] += get_validator_type_weight(validator_type) * reputation
 
-    assert round(scores["TRUE"], 4) == 0.25
-    assert round(scores["FALSE"], 4) == 0.3333
+    assert scores["TRUE"] == 0.75
+    assert scores["FALSE"] == 1.0
     assert max(scores, key=scores.get) == "FALSE"
 
 

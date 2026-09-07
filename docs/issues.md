@@ -1,6 +1,6 @@
 # Incidencias de Assermetry
 
-Revisión: **2026-09-06**. Resumen del inventario histórico y de la regresión
+Revisión: **2026-09-07**. Resumen del inventario histórico y de la regresión
 [registrada aquí](testing-v0.0.13.md). La revisión inicial no modificó código.
 Actualización 2026-09-06: 011, 012 y 018 solucionadas y desplegadas en Hetzner.
 Evidencia de código local no implica explotación demostrada en el despliegue.
@@ -25,13 +25,13 @@ cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
 | 003–004 | P1 | Abiertos; configuración confirmada | 16; decisión de aplazamiento pendiente para cerrar 13 |
 | 005 | P1 | Abierto; reproducido en GUI y funciones | 13 |
 | 006 | P1 | Abierto; contradicción confirmada en renderizado | 13 |
-| 007 | P1 | Abierto; empates reproducidos | 13 |
+| 007 | P1 | Solucionada y validada localmente el 2026-09-07; pendiente de despliegue | 13 |
 | 008 | P1 | Pendiente de validación; exclusión de errores ya implementada | 13 |
 | 009 | P1 | Abierto; edición opcional ya existe | 14 |
 | 010 | P1 | Abierto; evidencia detallada ya existe | 14 |
 | 011 | P1 | Solucionada y desplegada en Hetzner | 13 |
 | 012 | P1 | Solucionada y desplegada en Hetzner | 13 |
-| 013 | P1 | Validada localmente el 2026-09-06; pendiente de despliegue y validación completa | 13 |
+| 013 | P1 | Validada localmente y desplegada en Hetzner el 2026-09-06 | 13 |
 | 014 | P1 | Abierta; confirmada en código/sondas locales | 13 |
 | 015 | P1 | Abierto; fallo reproducido con perfil versionado | 13 |
 | 016 | P1 | Abierto; falsos positivos y diagnóstico incompleto | 13 |
@@ -94,12 +94,37 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-007 - Veredicto global y calculo de consenso no explican empates ni decisiones
 
-- **Reproducido:** `calculate_assertion_result` usa `max`: TRUE/FALSE empatados
-  produce TRUE; FALSE/UNKNOWN produce FALSE. Depende del orden de las claves.
-- **GUI:** el resumen Blockchain muestra «Desmentida» con una afirmación
-  desmentida y otra no concluyente; debe explicitar el alcance de la conclusión.
-- **Cierre:** empate explícito `NO_CONSENSUS`, sin verdad asignada arbitrariamente;
-  explicar pesos, abstenciones y distribución. Un peso no es probabilidad de verdad.
+- **Estado:** solucionada y validada localmente (2026-09-07). Pendiente de
+  desplegar y comprobar con recorridos reales LIGHT/BLOCKCHAIN en navegador.
+- **Causa:** `calculate_assertion_result` normalizaba el acumulado por número de
+  respuestas y seleccionaba con `max` entre TRUE/FALSE/UNKNOWN. Los empates se
+  resolvían por orden de claves, UNKNOWN competía como afirmación factual y la
+  GUI reutilizaba los scores como porcentajes sin explicar la decisión.
+- **Política implementada:** `consensus-v2`, centralizada en
+  `api/common/utils/scoring.py`, con cobertura decisiva mínima `0.5` (se exige
+  que sea estrictamente superior) y `tie_epsilon=1e-9`. Distingue `CONSENSUS`,
+  `WEIGHTED_MAJORITY`, `NO_CONSENSUS`, `INSUFFICIENT_EVIDENCE` y
+  `NO_VALID_RESPONSES`; UNKNOWN es abstención y ERROR queda excluido.
+- **Contrato:** añade `verdict`, `decision_status`, `reason_code`, pesos brutos,
+  cuota de peso decisivo, cobertura, abstención, margen, conteos y versión de
+  política. `winner` y `scores` se conservan como aliases legacy: `winner` es
+  nulo sin decisión factual y `scores` representa ahora pesos brutos, no
+  probabilidades ni el promedio anterior.
+- **Reproducibilidad:** las nuevas respuestas LIGHT y BLOCKCHAIN guardan tipo,
+  peso de tipo, reputación, peso efectivo y `validator-weights-v1`. Los registros
+  anteriores mantienen el fallback a caché/configuración actual y se identifican
+  mediante `legacy_dynamic_weight=true`; no se reescribe Blockchain ni MongoDB.
+- **GUI:** presenta motivo, votos decisivos, abstenciones, errores y peso
+  TRUE/FALSE/UNKNOWN en ES/EN. Los porcentajes se etiquetan como cuota de peso
+  decisivo/completado. El estado documental es conservador (`SUPPORTED`,
+  `CONTRADICTED`, `MIXED`, `PARTIALLY_VERIFIED`, `INCONCLUSIVE`); FALSE+UNKNOWN
+  es parcial y no «Desmentida».
+- **Pruebas:** 38 pruebas focalizadas Python y las suites Node de consenso,
+  estado y evidencias pasan. Regresión Python: **181 PASS, 2 FAIL**; permanecen
+  exactamente los fallos conocidos de 015 y 016. Sintaxis JS correcta.
+- **Pendiente para ISSUE-017:** calibración con corpus de evaluación,
+  `min_winner_share` u otros umbrales estadísticos, y revisión del peso
+  `HUMAN=0.1`. Ese valor no expresa autoridad epistemológica automática.
 
 ### ISSUE-008 - Validadores con timeout tratados como resultado valido
 

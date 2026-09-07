@@ -1,6 +1,6 @@
 # v0.0.13 — Estabilización y demo repetible
 
-**En curso. Revisión: 2026-09-05.** LIGHT y BLOCKCHAIN completan el recorrido
+**En curso. Revisión: 2026-09-07.** LIGHT y BLOCKCHAIN completan el recorrido
 básico, pero la regresión Python tiene dos fallos y quedan defectos de
 seguridad, evidencia y presentación. **No se acredita aún una web fiable de
 verificación factual.** Resultados en [testing-v0.0.13.md](testing-v0.0.13.md);
@@ -45,6 +45,11 @@ reproducible. El contrato operativo sigue en
 **En curso.** Login y recorridos LIGHT/BLOCKCHAIN pasan el smoke. Hay fallos
 confirmados en fechas, estado final, resumen, contadores y móvil.
 
+ISSUE-007 está solucionada y validada localmente: consenso `consensus-v2`,
+incertidumbre explícita, pesos reproducibles y resumen documental conservador.
+Falta comprobar el cambio desplegado con ambos recorridos en navegador; no se
+consideran resueltas por ello las incidencias 005, 006, 014, 019 ni 020.
+
 Cobertura de cierre:
 
 - Login, refresh, logout, expiración, navegación y roles.
@@ -88,7 +93,7 @@ probar → registrar → corregir → validar → resolver/reabrir.
 | Orden | Resultado buscado | Incidencias |
 | --- | --- | --- |
 | 1 | Identidad, aislamiento y enlaces seguros | 011, 012, 018; decisión sobre 003–004 |
-| 2 | Evidencia y fuentes pertinentes; consenso sin arbitrariedad | 013, 015, 007, 017 |
+| 2 | Evidencia y fuentes pertinentes; consenso sin arbitrariedad | 013 y 007 validadas localmente; 015 y 017 pendientes |
 | 3 | UI estable y estado comprensible | 014, 005, 006, 008, 019, 020 |
 | 4 | Despliegue LIGHT estable y regresión que detecta fallos | 001, 016 |
 | 5 | Regresión completa y demos | Matriz de pruebas y criterios siguientes |

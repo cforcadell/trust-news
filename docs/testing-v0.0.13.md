@@ -102,6 +102,33 @@ ISSUE-013 queda validada localmente. Pendiente para su cierre formal: prueba de
 flujo completo con workers reales para los tres tipos, persistencia
 Kafka/IPFS/MongoDB y comprobación en navegador.
 
+## Corrección de ISSUE-007 — 2026-09-07
+
+Se sustituyó la elección implícita por `max` por la política versionada
+`consensus-v2`. El scoring común conserva pesos brutos, trata UNKNOWN como
+abstención, excluye ERROR y emite estado/motivo explícitos. LIGHT y BLOCKCHAIN
+continúan usando la misma función. Las nuevas validaciones congelan los datos
+de ponderación; los registros antiguos sin snapshot se marcan como fallback
+dinámico legacy.
+
+- Scoring, pesos predeterminados y persistencia/snapshot de News Handler:
+  **38 PASS**. Incluye permutaciones, empate exacto y dentro de epsilon,
+  abstenciones, solo errores, pesos corruptos, compatibilidad histórica y
+  equivalencia LIGHT/BLOCKCHAIN.
+- `node --test web_classic/test/assertion-status.test.js
+  web_classic/test/evidence-links.test.js
+  web_classic/test/consensus-ui.test.js`: **3 suites PASS**. Los cinco casos de
+  decisión, resumen de varias afirmaciones, FALSE+UNKNOWN, ES/EN y ausencia de
+  presentación del peso como probabilidad quedan cubiertos con funciones reales.
+- `node --check web_classic/app/js/app.js` y `i18n.js`: correcto.
+- Regresión Python local con las seis exclusiones indicadas: **181 PASS, 2
+  FAIL**. Son los fallos preexistentes de 015 (`idescat.cat`) y 016 (captura de
+  stdout frente a logging); no se cambiaron sus expectativas.
+
+No se ejecutaron integraciones externas ni navegador/Kubernetes en esta sesión.
+La calibración de umbrales de mayoría, la evaluación factual y la revisión del
+peso HUMAN quedan en ISSUE-017; los pesos no son probabilidades.
+
 ## Límites y evidencia
 
 - Una cuenta de pruebas proporcionada por el operador para ambos casos. Los
@@ -158,7 +185,7 @@ completa de un área.
 | Área | Estado actual / trabajo pendiente |
 | --- | --- |
 | Login y órdenes LIGHT/BLOCKCHAIN | Smoke correcto; refresh/logout/expiración y recuperación pendientes |
-| Fechas, estado, consenso y contadores | Fallido: 005–007, 014, 019 |
+| Fechas, estado, consenso y contadores | 007 validada localmente; fallido: 005, 006, 014, 019 |
 | Errores/timeout | Unitarios correctos; fallo inducido y reintento sin duplicados pendientes (008) |
 | Evidencia y calidad factual | 013 validada localmente; fallido/carencia: 015, 017; revisión e informe en 14 |
 | JWT, roles y dos organizaciones | 011 y 012 solucionadas y desplegadas en Hetzner; validación con identidades reales pendiente |

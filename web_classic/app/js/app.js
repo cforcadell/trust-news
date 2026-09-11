@@ -21,6 +21,11 @@ const POLLING_MAX_CONSECUTIVE_ERRORS = 3;
 
 const TABLE_PAGE_SIZE_ORDERS = 10;   // cantidad por página
 let TABLE_PAGE_ORDERS = 1;           // página actual
+let TABLE_FILTERS_ORDERS = {};        // filtros activos por columna
+const VALIDATOR_VALIDATIONS_PAGE_SIZE = 5;
+let VALIDATOR_VALIDATIONS_PAGE = 1;
+let VALIDATOR_VALIDATIONS_FILTERS = {};
+let VALIDATOR_VALIDATIONS_EXPANDED = new Set();
 
 const CATEGORY_IDS = window.I18N?.getCategoryIds() || [];
 
@@ -2167,6 +2172,21 @@ function changeTablePage(delta) {
     renderTableData(container, container._fullData);
 }
 
+function goToTablePage(page) {
+    TABLE_PAGE_ORDERS = Math.max(1, Number(page) || 1);
+    const container = document.getElementById("listTabContent");
+    renderTableData(container, container._fullData);
+}
+
+function setOrdersColumnFilter(column, value) {
+    const text = String(value || "").trim();
+    if (text) TABLE_FILTERS_ORDERS[column] = text;
+    else delete TABLE_FILTERS_ORDERS[column];
+    TABLE_PAGE_ORDERS = 1;
+    const container = document.getElementById("listTabContent");
+    renderTableData(container, container._fullData);
+}
+
 
 function renderEventsTable(container, events) {
     if (!events?.length) {
@@ -3054,8 +3074,7 @@ function safeText(value) {
     return escapeHTML(String(value));
 }
 
-function validatorTypeLabel(value) {
-    if (value === null || value === undefined || value === "") return "-";
+function validatorTypeId(value) {
     const enumToId = {
         LLM_MEMORY_VALIDATION: 1,
         LLM_SEARCH_VALIDATION: 2,
@@ -3063,7 +3082,12 @@ function validatorTypeLabel(value) {
         DETERMINISTIC_VALIDATION: 4,
         HUMAN: 5
     };
-    const typeId = enumToId[value] || Number(value);
+    return enumToId[value] || Number(value);
+}
+
+function validatorTypeLabel(value) {
+    if (value === null || value === undefined || value === "") return "-";
+    const typeId = validatorTypeId(value);
     return Number.isFinite(typeId) && typeId >= 1 && typeId <= 5 ? t(`ui.validatorTypes.${typeId}`) : String(value);
 }
 
@@ -3184,20 +3208,12 @@ function compactText(value, size = 90) {
 
 // Tabla de órdenes/listados con columnas más visuales, badges de estado y hashes compactos.
 function renderTableData(container, data) {
+    const isOrdersContainer = container.id === "listTabContent";
     if (!data?.length) {
         container.innerHTML = `<p class="empty-state">${safeText(t("ui.noData"))}</p>`;
         container._fullData = data || [];
         return;
     }
-
-    const isOrdersContainer = container.id === "listTabContent";
-    const totalItems = data.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / TABLE_PAGE_SIZE_ORDERS));
-    if (TABLE_PAGE_ORDERS < 1) TABLE_PAGE_ORDERS = 1;
-    if (TABLE_PAGE_ORDERS > totalPages) TABLE_PAGE_ORDERS = totalPages;
-
-    const start = (TABLE_PAGE_ORDERS - 1) * TABLE_PAGE_SIZE_ORDERS;
-    const pageData = data.slice(start, start + TABLE_PAGE_SIZE_ORDERS);
 
     let keys;
     if (isOrdersContainer) {
@@ -3211,6 +3227,22 @@ function renderTableData(container, data) {
         data.forEach(row => Object.keys(row).forEach(k => keysSet.add(k)));
         keys = Array.from(keysSet);
     }
+
+    const filteredData = isOrdersContainer ? data.filter(row => Object.entries(TABLE_FILTERS_ORDERS).every(([key, filter]) => {
+        const value = row[key];
+        const display = [value, (key === "status" ? t(`status.${value}`) : ""), (key === "created_at" || key === "updated_at" ? formatAnyDate(value) : "")]
+            .filter(item => item !== null && item !== undefined)
+            .map(item => typeof item === "object" ? JSON.stringify(item) : String(item))
+            .join(" ");
+        return display.toLocaleLowerCase().includes(filter.toLocaleLowerCase());
+    })) : data;
+    const totalItems = filteredData.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / TABLE_PAGE_SIZE_ORDERS));
+    if (TABLE_PAGE_ORDERS < 1) TABLE_PAGE_ORDERS = 1;
+    if (TABLE_PAGE_ORDERS > totalPages) TABLE_PAGE_ORDERS = totalPages;
+
+    const start = (TABLE_PAGE_ORDERS - 1) * TABLE_PAGE_SIZE_ORDERS;
+    const pageData = filteredData.slice(start, start + TABLE_PAGE_SIZE_ORDERS);
 
     const headerLabels = {
         order_id: "Order ID",
@@ -3268,17 +3300,19 @@ function renderTableData(container, data) {
                     return `<td>${safeText(val)}</td>`;
             }
         }).join("")}</tr>`;
-    }).join("");
+    }).join("") || `<tr><td class="table-no-results" colspan="${keys.length}">${safeText(t("ui.noFilterResults"))}</td></tr>`;
 
     container.innerHTML = `
         <table class="compact-table visual-orders-table">
-            <thead><tr>${keys.map(k => `<th>${headerLabels[k] || safeText(k)}</th>`).join("")}</tr></thead>
+            <thead><tr>${keys.map(k => `<th><span>${headerLabels[k] || safeText(k)}</span>${isOrdersContainer ? `<input class="table-column-filter" type="search" value="${safeText(TABLE_FILTERS_ORDERS[k] || "")}" oninput="setOrdersColumnFilter('${safeText(k)}', this.value)" placeholder="${safeText(t("ui.filter"))}" aria-label="${safeText(t("ui.filterColumn", { column: headerLabels[k] || k }))}">` : ""}</th>`).join("")}</tr></thead>
             <tbody>${rows}</tbody>
         </table>
         <div class="pagination">
+            <button onclick="goToTablePage(1)" ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}>${t("ui.firstPage")}</button>
             <button onclick="changeTablePage(-1)" ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}>${t("ui.previous")}</button>
             <span class="vote-pill vote-true">${t("ui.pageOf", { page: TABLE_PAGE_ORDERS, total: totalPages })}</span>
             <button onclick="changeTablePage(1)" ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}>${t("ui.next")}</button>
+            <button onclick="goToTablePage(${totalPages})" ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}>${t("ui.lastPage")}</button>
         </div>
         <p style="color:var(--text-secondary);font-size:.82rem;margin:10px 0 0;">${t("ui.showingOrders", { shown: pageData.length, total: totalItems })}</p>
     `;
@@ -3391,18 +3425,12 @@ function renderScorePills(result) {
 }
 
 function preferredDomainsStatusFromPolicy(usePreferredDomains) {
-    const mode = String(usePreferredDomains || "NONE").toUpperCase();
-    const labels = {
-        NONE: "No",
-        LOCAL: "Local",
-        EXT_OFFICIAL_FIRST: "Official first",
-        EXT_ONLY_OFFICIAL: "Only official",
-    };
-    if (!labels[mode]) return null;
+    const mode = normalizePreferredDomainsMode(usePreferredDomains);
+    if (!mode) return null;
     return {
         enabled: mode !== "NONE",
-        label: labels[mode],
-        title: `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=${mode}`,
+        label: t(`ui.sourcePolicies.${mode}.label`),
+        title: t(`ui.sourcePolicies.${mode}.hint`),
         className: mode === "NONE" ? "preferred-domains-off" : "preferred-domains-on",
     };
 }
@@ -3431,8 +3459,8 @@ function preferredDomainsStatusFromEvidenceResponse(response) {
     if (preferredDomains.length || hasSiteQueries) {
         return {
             enabled: true,
-            label: preferredDomains.length ? `${t("ui.yes")} (${preferredDomains.length})` : t("ui.yes"),
-            title: preferredDomains.map(item => item.domain).filter(Boolean).join(", "),
+            label: t("ui.sourcePolicies.LOCAL.label"),
+            title: t("ui.sourcePolicies.LOCAL.hint"),
             className: "preferred-domains-on"
         };
     }
@@ -3449,13 +3477,13 @@ function preferredDomainsInfoForValidation(info = {}) {
     );
     return preferredDomainsStatusFromPolicy(explicitPolicy)
         || preferredDomainsStatusFromEvidenceResponse(info.evidence_search_response || info.payload?.evidence_search_response)
-        || { enabled: null, label: t("ui.noRecord"), title: "Sin política explícita en esta validación", className: "preferred-domains-unknown" };
+        || { enabled: null, label: t("ui.noRecord"), title: t("ui.sourcePolicyUnknown"), className: "preferred-domains-unknown" };
 }
 
 function renderPreferredDomainsBadge(info) {
     if (!info) return "";
     const title = info.title ? ` title="${safeText(info.title)}"` : "";
-    return `<span class="preferred-domains-badge ${info.className}"${title}>preferred domains: ${safeText(info.label)}</span>`;
+    return `<span class="preferred-domains-badge ${info.className}" tabindex="0"${title} aria-label="${safeText(info.title || info.label)}">${safeText(info.label)}</span>`;
 }
 
 function validationEvidenceItems(info = {}) {
@@ -3691,27 +3719,30 @@ function renderValidationsTree(container, validations, assertions, orderData = n
             let desc = validationError ? (info.error_details?.message || info.error || info.text || "Validation failed") : (info.text || t("ui.noDescription"));
             if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
             desc = replaceGenericEvidenceReferences(desc, info);
-            const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
+            const tx = info.tx_hash ? `<div class="validator-tx" title="${safeText(t("ui.transactionHash"))}"><a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a></div>` : "";
             const responseTime = formatDurationSeconds(info.response_time_seconds);
             const validatorTooltip = renderValidatorProviderModelTitle(info);
             const weightedDetail = assertionResult?.details?.find(d => String(d.validator).toLowerCase() === String(validator).toLowerCase());
-            const typeLabel = weightedDetail ? validatorTypeLabel(weightedDetail.validator_type) : validatorTypeLabel(info.validator_config?.config?.type || info.config?.type || info.validator_type);
-            const preferredDomainsBadge = renderPreferredDomainsBadge(preferredDomainsInfoForValidation(info));
-            const reputationHtml = weightedDetail ? `<span>rep ${safeText(formatMaxTwoDecimals(weightedDetail.reputation))}</span>` : "";
-            const weightHtml = `<div class="validator-weights"><span>${safeText(typeLabel)}</span>${reputationHtml}${preferredDomainsBadge}</div>`;
+            const type = weightedDetail?.validator_type ?? info.validator_config?.config?.type ?? info.config?.type ?? info.validator_config?.type ?? info.validator_type;
+            const typeId = validatorTypeId(type);
+            const typeLabel = typeId >= 1 && typeId <= 5 ? validatorTypeLabel(type) : t("ui.validatorUnknown");
+            const typeHint = t(typeId >= 1 && typeId <= 5 ? `ui.validatorTypeHints.${typeId}` : "ui.validatorUnknownHint");
+            const typeBadge = `<span class="validator-type-badge" tabindex="0" title="${safeText(typeHint)}" aria-label="${safeText(`${typeLabel}. ${typeHint}`)}">${safeText(typeLabel)}<span aria-hidden="true" class="validator-type-info">ⓘ</span></span>`;
+            const preferredDomainsBadge = typeId === 3 ? renderPreferredDomainsBadge(preferredDomainsInfoForValidation(info)) : "";
+            const evidenceHtml = renderEvidenceLinks(info);
             return `
-                <div class="validator-card${validationError ? " validation-error-card" : ""}">
+                <div class="validator-card${validationError ? " validation-error-card" : ""}${tx ? " has-transaction" : ""}">
                     <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${safeText(info.validator_alias || validator)}</a></div>
                     <div class="validator-result ${litClass}">${lit}</div>
                     <div class="validator-desc">${safeText(desc)}</div>
                     <div class="validator-meta">
+                        ${typeBadge}
+                        ${preferredDomainsBadge}
                         ${validationError ? `<span class="validation-error-badge">${safeText(info.error_details?.stage || "VALIDATION")} · ${safeText(info.error_details?.code || "ERROR")}</span>` : ""}
-                        ${renderEvidenceValidationBadge(info)}
-                        ${weightHtml}
-                        <div class="validator-response-time" title="${safeText(t("ui.requestResponseTime"))}"><span class="clock-icon" aria-hidden="true"></span>${safeText(responseTime)}</div>
+                        <div class="validator-response-time" title="${safeText(t("ui.requestResponseTime"))}"><span class="clock-icon" aria-hidden="true"></span><span class="validator-duration-label">${safeText(t("ui.validationDuration"))}</span> ${safeText(responseTime)}</div>
                     </div>
-                    <div class="validator-tx" title="${safeText(t("ui.transactionHash"))}">${tx}</div>
-                    ${renderEvidenceLinks(info)}
+                    ${tx}
+                    ${evidenceHtml}
                 </div>
             `;
         }).join("");
@@ -3744,39 +3775,98 @@ function renderValidatorValidationsByOrder(container, groupedOrders) {
         return;
     }
 
-    let html = `<div class="validation-tree">`;
+    const orders = Object.entries(groupedOrders).map(([orderId, orderData]) => {
+        const validations = Object.values(orderData.validations || {}).flatMap(validators => Object.values(validators || {}));
+        const literals = validations.map(validation => getValidationLiteral(validation.approval));
+        return {
+            orderId,
+            orderData,
+            title: compactText(orderData.text || t("ui.noNewsTextShort"), 110),
+            assertionsCount: Object.keys(orderData.validations || {}).length,
+            trueCount: literals.filter(value => value === "True").length,
+            falseCount: literals.filter(value => value === "False").length,
+            unknownCount: literals.filter(value => value === "Unknown").length
+        };
+    });
+    const filteredOrders = orders.filter(order => Object.entries(VALIDATOR_VALIDATIONS_FILTERS).every(([column, filter]) => {
+        const values = {
+            order: order.orderId,
+            text: order.title,
+            assertions: order.assertionsCount,
+            result: `${order.trueCount} True ${order.falseCount} False ${order.unknownCount} Unknown`
+        };
+        return String(values[column] ?? "").toLocaleLowerCase().includes(filter.toLocaleLowerCase());
+    }));
+    const totalPages = Math.max(1, Math.ceil(filteredOrders.length / VALIDATOR_VALIDATIONS_PAGE_SIZE));
+    VALIDATOR_VALIDATIONS_PAGE = Math.min(Math.max(1, VALIDATOR_VALIDATIONS_PAGE), totalPages);
+    const visibleOrders = filteredOrders.slice((VALIDATOR_VALIDATIONS_PAGE - 1) * VALIDATOR_VALIDATIONS_PAGE_SIZE, VALIDATOR_VALIDATIONS_PAGE * VALIDATOR_VALIDATIONS_PAGE_SIZE);
+    const columns = [
+        ["order", t("ui.order")], ["text", t("ui.newsSummary")], ["assertions", t("ui.assertions")], ["result", t("ui.validationResult")], ["actions", t("ui.actions")]
+    ];
+    const filterInput = (column, label) => column === "actions" ? "" : `<input class="table-column-filter" type="search" value="${safeText(VALIDATOR_VALIDATIONS_FILTERS[column] || "")}" oninput="setValidatorValidationsFilter('${column}', this.value)" placeholder="${safeText(t("ui.filter"))}" aria-label="${safeText(t("ui.filterColumn", { column: label }))}">`;
+    const rows = visibleOrders.map(order => {
+        const safeOrder = String(order.orderId).replace(/'/g, "\\'");
+        const isExpanded = VALIDATOR_VALIDATIONS_EXPANDED.has(order.orderId);
+        return `<tr>
+            <td><a class="order-id-link" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${safeOrder}')">${t("ui.order")} ${shortValue(order.orderId, 20)}</a></td>
+            <td>${safeText(order.title)}</td>
+            <td><span class="vote-pill vote-unknown">${order.assertionsCount}</span></td>
+            <td><div class="vote-pills validation-result-pills">${renderVotePill(order.trueCount, "True", "vote-true")}${renderVotePill(order.falseCount, "False", "vote-false")}${renderVotePill(order.unknownCount, "Unknown", "vote-unknown")}</div></td>
+            <td><button class="btn-secondary btn-small" onclick="toggleValidatorValidationDetails('${safeOrder}')">${isExpanded ? t("ui.hideDetails") : t("ui.viewDetails")}</button></td>
+        </tr>`;
+    }).join("") || `<tr><td class="table-no-results" colspan="${columns.length}">${safeText(t("ui.noFilterResults"))}</td></tr>`;
 
-    for (const [orderId, orderData] of Object.entries(groupedOrders)) {
-        const assertionsCount = Object.keys(orderData.validations || {}).length;
-        const titleText = compactText(orderData.text || t("ui.noNewsTextShort"), 110);
-        const safeOrder = String(orderId).replace(/'/g, "\\'");
-        html += `
-            <details class="validation-node order-validation-node" open>
-                <summary class="validation-summary order-validation-summary">
-                    <div>
-                        <div class="assertion-title">${t("ui.order")} ${shortValue(orderId, 26)}</div>
-                        <div class="text-muted">(${safeText(titleText)})</div>
-                    </div>
-                    <div class="vote-pills">
-                        <span class="vote-pill vote-unknown">${assertionsCount} ${t("ui.assertions").toLowerCase()}</span>
-                        <a class="btn-secondary btn-small" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${safeOrder}');">${t("ui.viewOrder")}</a>
-                    </div>
-                </summary>
-                <div class="order-validation-content">
-                    <div id="validator-order-${safeText(orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}"></div>
-                </div>
-            </details>
-        `;
-    }
+    container.innerHTML = `
+        <div class="table-shell validator-validations-table-shell">
+            <table class="compact-table visual-orders-table">
+                <thead><tr>${columns.map(([column, label]) => `<th><span>${safeText(label)}</span>${filterInput(column, label)}</th>`).join("")}</tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <button onclick="goToValidatorValidationsPage(1)" ${VALIDATOR_VALIDATIONS_PAGE === 1 ? "disabled" : ""}>${t("ui.firstPage")}</button>
+            <button onclick="goToValidatorValidationsPage(${VALIDATOR_VALIDATIONS_PAGE - 1})" ${VALIDATOR_VALIDATIONS_PAGE === 1 ? "disabled" : ""}>${t("ui.previous")}</button>
+            <span class="vote-pill vote-true">${t("ui.pageOf", { page: VALIDATOR_VALIDATIONS_PAGE, total: totalPages })}</span>
+            <button onclick="goToValidatorValidationsPage(${VALIDATOR_VALIDATIONS_PAGE + 1})" ${VALIDATOR_VALIDATIONS_PAGE === totalPages ? "disabled" : ""}>${t("ui.next")}</button>
+            <button onclick="goToValidatorValidationsPage(${totalPages})" ${VALIDATOR_VALIDATIONS_PAGE === totalPages ? "disabled" : ""}>${t("ui.lastPage")}</button>
+        </div>
+        <p class="table-result-count">${safeText(t("ui.showingOrders", { shown: visibleOrders.length, total: filteredOrders.length }))}</p>
+        <div class="validator-validation-details"></div>`;
+    container._groupedOrders = groupedOrders;
+    renderExpandedValidatorValidationDetails(container, visibleOrders);
+}
 
-    html += `</div>`;
-    container.innerHTML = html;
+function renderExpandedValidatorValidationDetails(container, visibleOrders) {
+    const details = container.querySelector(".validator-validation-details");
+    if (!details) return;
+    const expandedOrders = visibleOrders.filter(order => VALIDATOR_VALIDATIONS_EXPANDED.has(order.orderId));
+    details.innerHTML = expandedOrders.map(order => `<div class="order-validation-content"><h4>${t("ui.order")} ${shortValue(order.orderId, 26)}</h4><div id="validator-order-${safeText(order.orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}"></div></div>`).join("");
+    expandedOrders.forEach(order => {
+        const target = document.getElementById(`validator-order-${String(order.orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+        if (target) renderValidationsTree(target, order.orderData.validations, order.orderData.assertions, order.orderData);
+    });
+}
 
-    for (const [orderId, orderData] of Object.entries(groupedOrders)) {
-        const targetId = `validator-order-${String(orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-        const target = document.getElementById(targetId);
-        if (target) renderValidationsTree(target, orderData.validations, orderData.assertions, orderData);
-    }
+function setValidatorValidationsFilter(column, value) {
+    const text = String(value || "").trim();
+    if (text) VALIDATOR_VALIDATIONS_FILTERS[column] = text;
+    else delete VALIDATOR_VALIDATIONS_FILTERS[column];
+    VALIDATOR_VALIDATIONS_PAGE = 1;
+    const container = document.getElementById("validatorValidationsTree");
+    if (container?._groupedOrders) renderValidatorValidationsByOrder(container, container._groupedOrders);
+}
+
+function goToValidatorValidationsPage(page) {
+    VALIDATOR_VALIDATIONS_PAGE = Math.max(1, Number(page) || 1);
+    const container = document.getElementById("validatorValidationsTree");
+    if (container?._groupedOrders) renderValidatorValidationsByOrder(container, container._groupedOrders);
+}
+
+function toggleValidatorValidationDetails(orderId) {
+    if (VALIDATOR_VALIDATIONS_EXPANDED.has(orderId)) VALIDATOR_VALIDATIONS_EXPANDED.delete(orderId);
+    else VALIDATOR_VALIDATIONS_EXPANDED.add(orderId);
+    const container = document.getElementById("validatorValidationsTree");
+    if (container?._groupedOrders) renderValidatorValidationsByOrder(container, container._groupedOrders);
 }
 
 
@@ -3991,6 +4081,9 @@ async function showValidatorValidations(validatorHash) {
         `;
 
         if (validations.length) {
+            VALIDATOR_VALIDATIONS_PAGE = 1;
+            VALIDATOR_VALIDATIONS_FILTERS = {};
+            VALIDATOR_VALIDATIONS_EXPANDED = new Set();
             const tree = document.getElementById("validatorValidationsTree");
             renderValidatorValidationsByOrder(tree, groupedOrders);
         }

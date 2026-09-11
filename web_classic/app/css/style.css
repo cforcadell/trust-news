@@ -382,6 +382,37 @@ th {
   font-size: .72rem;
   font-weight: 900;
 }
+.visual-orders-table th { min-width: 150px; padding: 9px 12px; }
+.visual-orders-table th > span { display: block; margin-bottom: 7px; }
+.table-column-filter {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(148, 163, 184, .30);
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: rgba(7, 13, 26, .62);
+  color: #eaf2ff;
+  font: 700 .73rem/1.2 inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.table-column-filter::placeholder { color: var(--text-muted); opacity: 1; }
+.table-column-filter:focus { outline: 2px solid var(--accent-color); outline-offset: 1px; border-color: var(--accent-color); }
+.table-no-results { padding: 24px 14px; color: var(--text-secondary); text-align: center; }
+.validator-validations-table-shell { max-height: 360px; }
+.validation-result-pills { justify-content: flex-start; min-width: max-content; }
+.table-result-count { color: var(--text-secondary); font-size: .82rem; margin: 10px 0 0; }
+.validator-validation-details { display: grid; gap: 12px; margin-top: 14px; }
+.validator-validation-details .order-validation-content {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-green);
+  border-radius: 12px;
+  background: rgba(7, 13, 26, .50);
+}
+.validator-validation-details h4 { margin: 0 0 10px; font-size: .9rem; }
 td { color: #f1f5f9; }
 tr:hover td { background: rgba(148, 163, 184, .035); }
 .table-shell table { min-width: 980px; }
@@ -617,10 +648,10 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
 .validator-grid { display: grid; gap: 10px; padding: 0 14px 14px; }
 .validator-card {
   display: grid;
-  grid-template-columns: minmax(190px, 1.05fr) 86px minmax(300px, 2fr) minmax(150px, .9fr) minmax(104px, .55fr);
+  grid-template-columns: minmax(190px, 1.05fr) 66px minmax(380px, 3fr) 180px;
   grid-template-areas:
-    "name result desc meta tx"
-    "evidence evidence evidence evidence evidence";
+    "name result desc meta"
+    "evidence result desc meta";
   gap: 10px 14px;
   padding: 12px;
   border-radius: 14px;
@@ -629,11 +660,68 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
   align-items: start;
   min-width: 0;
 }
+.validator-card.has-transaction {
+  grid-template-columns: minmax(190px, 1.05fr) 66px minmax(300px, 3fr) 180px minmax(104px, .55fr);
+  grid-template-areas:
+    "name result desc meta tx"
+    "evidence result desc meta tx";
+}
+.validator-card:has(.validator-evidence-summary[open]) {
+  grid-template-areas:
+    "name result desc meta"
+    "evidence evidence evidence evidence";
+}
+.validator-card.has-transaction:has(.validator-evidence-summary[open]) {
+  grid-template-areas:
+    "name result desc meta tx"
+    "evidence evidence evidence evidence evidence";
+}
 .validator-card .validator-name { grid-area: name; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; color: #dbeafe; font-weight: 800; }
 .validator-result { grid-area: result; font-weight: 900; white-space: nowrap; }
 .validator-desc { grid-area: desc; min-width: 0; color: #e2e8f0; line-height: 1.45; max-height: 120px; overflow: auto; overflow-wrap: anywhere; }
 .validator-desc pre { margin: 0; }
-.validator-meta { grid-area: meta; display: grid; gap: 6px; min-width: 0; }
+.validator-meta {
+  grid-area: meta;
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent-color);
+  border-radius: 0 10px 10px 0;
+  background: var(--bg-surface-2);
+}
+.validator-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid var(--accent-color);
+  border-radius: 8px;
+  color: var(--accent-color);
+  font-size: .8rem;
+  font-weight: 800;
+  line-height: 1.4;
+  cursor: help;
+}
+.validator-type-info { flex-shrink: 0; font-size: .85rem; }
+.validator-type-badge:focus-visible,
+.preferred-domains-badge:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
+.validator-duration-label { color: var(--text-secondary); font-family: inherit; font-weight: 400; }
+.validator-meta .preferred-domains-badge {
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: .78rem;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: help;
+}
 .validator-response-time { color: var(--accent-color); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 900; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
 .clock-icon {
   position: relative;
@@ -777,7 +865,15 @@ pre, .event-payload-pre {
   :root { --sidebar-width: 232px; }
   .news-grid { grid-template-columns: 1fr; }
   .validator-card {
-    grid-template-columns: minmax(0, 1fr) 86px minmax(220px, 1.5fr);
+    grid-template-columns: minmax(0, 1fr) 86px;
+    grid-template-areas:
+      "name result"
+      "desc desc"
+      "meta meta"
+      "evidence evidence";
+  }
+  .validator-card.has-transaction {
+    grid-template-columns: minmax(0, 1fr) 86px minmax(104px, .55fr);
     grid-template-areas:
       "name result tx"
       "desc desc desc"
@@ -1006,7 +1102,7 @@ pre, .event-payload-pre {
   cursor: pointer;
   border: 1px solid rgba(34, 211, 238, .28);
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 4px 8px;
   color: #bdf4ff;
   background: rgba(34, 211, 238, .08);
   font-size: .76rem;

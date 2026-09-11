@@ -201,7 +201,7 @@
             requestResponseTime: "Tiempo petición-respuesta", transactionHash: "Hash de transacción", invalidDate: "Fecha inválida",
             visualStageFlow: "Flujo visual de etapas ({mode})", processProgress: "Progreso del proceso", stagesReached: "{reached} / {total} etapas alcanzadas",
             currentPhase: "Fase actual", recentActivity: "Actividad reciente", changesCount: "{count} cambios", noActivity: "Sin actividad registrada.",
-            sinceOrderCreation: "Desde la creación de la orden", previous: "‹ Anterior", next: "Siguiente ›", created: "Creado", updated: "Actualizado", pending: "Pendientes", textHash: "Hash texto",
+            sinceOrderCreation: "Desde la creación de la orden", previous: "‹ Anterior", next: "Siguiente ›", firstPage: "« Primera", lastPage: "Última »", filter: "Filtrar", filterColumn: "Filtrar por {column}", noFilterResults: "No hay órdenes que coincidan con los filtros.", created: "Creado", updated: "Actualizado", pending: "Pendientes", textHash: "Hash texto",
             viewDetail: "Ver detalle →", noOrderValidations: "No hay validaciones disponibles para esta orden.", noEvents: "No hay eventos registrados.", noAssertionsAvailable: "No hay aserciones disponibles.",
             clearTrend: "Tendencia confirmada", disprovedTrend: "Tendencia desmentida", noClearTrend: "Sin tendencia clara",
             field: "Campo", value: "Valor", blockTransactions: "Transacciones del bloque", ipfsContent: "Contenido IPFS",
@@ -211,7 +211,22 @@
             enterContract: "Introduce una dirección o nombre de contrato", searchingContract: "Buscando contrato...", contractFound: "Contrato encontrado.", contractSearchError: "Error al buscar el contrato.", invalidContract: "Error al obtener el contrato o el ID no es válido.",
             text: "Texto", domain: "Dominio", reputation: "Reputación", verdict: "Veredicto", searchTextRequired: "Introduce un texto a buscar.",
             categoriesMap: { "1": "ECONOMÍA", "2": "DEPORTES", "3": "POLÍTICA", "4": "TECNOLOGÍA", "5": "SALUD", "6": "ENTRETENIMIENTO", "7": "CIENCIA", "8": "CULTURA", "9": "MEDIO AMBIENTE", "10": "SOCIAL" },
-            validatorTypes: { "1": "LLM memoria", "2": "LLM con búsqueda", "3": "RAG con evidencias", "4": "Determinista", "5": "Humano" },
+            validationDuration: "Duración", validatorUnknown: "Validador sin identificar", validatorUnknownHint: "No se ha registrado el tipo de validador.",
+            sourcePolicyUnknown: "No se ha registrado cómo se seleccionaron las fuentes.", validationResult: "Resultado", viewDetails: "Ver detalle", hideDetails: "Ocultar detalle",
+            validatorTypeHints: {
+                "1": "Evalúa la afirmación con el conocimiento de la IA, sin consultar internet.",
+                "2": "La IA busca en internet para evaluar la afirmación.",
+                "3": "Busca documentos y contrasta la afirmación con los fragmentos recuperados.",
+                "4": "Comprueba la afirmación mediante reglas predefinidas.",
+                "5": "Una persona revisa la afirmación y emite su valoración."
+            },
+            sourcePolicies: {
+                NONE: { label: "Búsqueda abierta", hint: "Busca en internet sin priorizar un catálogo de dominios." },
+                LOCAL: { label: "Dominios Preseleccionados antes de buscar evidencias", hint: "Busca en internet usando dominios seleccionados del catálogo propio. Puede ampliar la búsqueda según la configuración." },
+                EXT_OFFICIAL_FIRST: { label: "Prioriza fuentes oficiales al buscador de evidencias", hint: "Pide al buscador que priorice organismos y autoridades oficiales. Puede consultar otras fuentes." },
+                EXT_ONLY_OFFICIAL: { label: "Restringe fuentes oficiales al buscador de evidencias", hint: "Pide al buscador que limite los resultados a fuentes oficiales, si lo permite. No amplía la búsqueda a otras fuentes." }
+            },
+            validatorTypes: { "1": "IA sin búsqueda", "2": "IA con búsqueda web", "3": "Verificación con fuentes", "4": "Verificación por reglas", "5": "Revisión humana" },
             searchingPrevious: "Buscando verificaciones previas...", resultsFound: "Se encontraron {count} resultados.", searchError: "Error de conexión o datos inválidos al buscar.", resultsLoadError: "Error al cargar los resultados.",
             eventsCount: "Eventos ({count} total)", localServiceError: "Error al conectar con el servicio local.", detailLabel: "Detalle"
         },
@@ -490,7 +505,7 @@
             requestResponseTime: "Request-response time", transactionHash: "Transaction hash", invalidDate: "Invalid date",
             visualStageFlow: "Visual stage flow ({mode})", processProgress: "Process progress", stagesReached: "{reached} / {total} stages reached",
             currentPhase: "Current phase", recentActivity: "Recent activity", changesCount: "{count} changes", noActivity: "No activity recorded.",
-            sinceOrderCreation: "Since the order was created", previous: "‹ Previous", next: "Next ›", created: "Created", updated: "Updated", pending: "Pending", textHash: "Text hash",
+            sinceOrderCreation: "Since the order was created", previous: "‹ Previous", next: "Next ›", firstPage: "« First", lastPage: "Last »", filter: "Filter", filterColumn: "Filter by {column}", noFilterResults: "No orders match the filters.", created: "Created", updated: "Updated", pending: "Pending", textHash: "Text hash",
             viewDetail: "View detail →", noOrderValidations: "No validations are available for this order.", noEvents: "No events recorded.", noAssertionsAvailable: "No assertions are available.",
             clearTrend: "Confirmed trend", disprovedTrend: "Disproved trend", noClearTrend: "No clear trend",
             field: "Field", value: "Value", blockTransactions: "Block transactions", ipfsContent: "IPFS content",
@@ -500,7 +515,22 @@
             enterContract: "Enter a contract address or name", searchingContract: "Searching contract...", contractFound: "Contract found.", contractSearchError: "Error searching for the contract.", invalidContract: "Could not retrieve the contract or the ID is invalid.",
             text: "Text", domain: "Domain", reputation: "Reputation", verdict: "Verdict", searchTextRequired: "Enter text to search.",
             categoriesMap: { "1": "ECONOMY", "2": "SPORTS", "3": "POLITICS", "4": "TECHNOLOGY", "5": "HEALTH", "6": "ENTERTAINMENT", "7": "SCIENCE", "8": "CULTURE", "9": "ENVIRONMENT", "10": "SOCIAL" },
-            validatorTypes: { "1": "Memory LLM", "2": "Search LLM", "3": "Evidence RAG", "4": "Deterministic", "5": "Human" },
+            validationDuration: "Duration", validatorUnknown: "Unspecified validator", validatorUnknownHint: "The validator type was not recorded.",
+            sourcePolicyUnknown: "How sources were selected was not recorded.", validationResult: "Result", viewDetails: "View details", hideDetails: "Hide details",
+            validatorTypeHints: {
+                "1": "Assesses the claim using AI knowledge, without searching the internet.",
+                "2": "The AI searches the web to assess the claim.",
+                "3": "Searches for documents and checks the claim against retrieved passages.",
+                "4": "Checks the claim using predefined rules.",
+                "5": "A person reviews the claim and provides an assessment."
+            },
+            sourcePolicies: {
+                NONE: { label: "Open web search", hint: "Searches the web without prioritizing a domain catalog." },
+                LOCAL: { label: "Selected presources", hint: "Searches the web using domains selected from the internal catalog. May broaden the search depending on configuration." },
+                EXT_OFFICIAL_FIRST: { label: "Official sources first", hint: "Asks the search provider to prioritize official institutions and authorities. May consult other sources." },
+                EXT_ONLY_OFFICIAL: { label: "Official sources only", hint: "Asks the search provider to restrict results to official sources where supported. Does not broaden the search to other sources." }
+            },
+            validatorTypes: { "1": "AI without search", "2": "AI with web search", "3": "Source-based verification", "4": "Rule-based verification", "5": "Human review" },
             searchingPrevious: "Searching previous verifications...", resultsFound: "{count} results found.", searchError: "Connection error or invalid search data.", resultsLoadError: "Error loading results.",
             eventsCount: "Events ({count} total)", localServiceError: "Error connecting to the local service.", detailLabel: "Detail"
         },

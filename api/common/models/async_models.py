@@ -235,7 +235,6 @@ class ValidatorConfig(BaseModel):
     online_search_enabled: Optional[bool] = None
     evidence_search_url: Optional[str] = None
     evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
-    evidence_search_preferred_profile_id: Optional[str] = None
 
 
 class ValidatorConfigOnChain(BaseModel):

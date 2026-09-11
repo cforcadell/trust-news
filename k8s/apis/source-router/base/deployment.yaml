@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source-router
+  namespace: apis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: source-router
+  template:
+    metadata:
+      labels:
+        app: source-router
+    spec:
+      containers:
+        - name: source-router
+          image: source-router
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8075
+          envFrom:
+            - configMapRef:
+                name: source-router-config
+            - secretRef:
+                name: source-router-enc
+            - secretRef:
+                name: mongodb-app-secret
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8075
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8075
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000

@@ -12,8 +12,8 @@ data:
 
   VALIDATOR_TYPE: "1"
   EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
+  SOURCE_ROUTER_URL: "http://source-router.apis.svc.cluster.local:8075"
   EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS: "NONE"
-  EVIDENCE_SEARCH_PREFERRED_PROFILE_ID: "default"
 
   LLM_MEMORY_VALIDATION_PROMPT: |
     Actúa como validador factual prudente.

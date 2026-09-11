@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: source-router-config
+  namespace: apis
+data:
+  MONGO_DBNAME: "newsdb"
+  SOURCE_ROUTES_COLLECTION: "source_routes"
+  SOURCE_ROUTER_VERSION: "source-router-hybrid-v1"
+  SOURCE_ROUTE_REFRESH_SECONDS: "2592000"
+  SOURCE_ROUTER_DISCOVERY_MAX_RESULTS: "12"
+  SOURCE_ROUTER_MAX_SOURCES: "8"
+  SEARCH_PROVIDER: "exa"
+  SEARCH_API_URL: "https://api.exa.ai/search"
+  SEARCH_TIMEOUT: "30"
+  SEARCH_MAX_RETRIES: "2"
+  LLM_PROVIDER: "openrouter"
+  LLM_MODEL: "google/gemini-2.5-flash-lite"
+  OPENROUTER_API_URL: "https://openrouter.ai/api/v1/chat/completions"
+  LLM_TIMEOUT: "60"
+  LLM_MAX_RETRIES: "3"

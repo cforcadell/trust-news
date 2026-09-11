@@ -1,7 +1,7 @@
 # Pruebas iterativas de v0.0.13
 
 **Revisión 2026-09-05. Resultado global: NO APTO para cierre.**
-El flujo básico funciona; quedan dos fallos Python y defectos que el smoke no
+El flujo básico funciona; la regresión Python actual pasa y quedan defectos que el smoke no
 comprueba. Plan de versión en [version.md](version.md); criterios de corrección
 en [issues.md](issues.md).
 
@@ -17,7 +17,7 @@ Python 3.12; entorno Python temporal con dependencias de los servicios.
 | --- | --- | --- |
 | Validación del paquete | 2 casos válidos | JSON/casos, sin aplicación |
 | Sintaxis JS de app y runner individual | Correcta | No garantiza comportamiento |
-| Python local, sin integraciones externas | **75 PASS, 2 FAIL** | Scoring, contratos, logs, seguridad de cuerpos y búsqueda |
+| Python local, sin integraciones externas | **199 PASS** (2026-09-08) | Scoring, contratos, providers comunes, routing, logs, seguridad y búsqueda |
 | LIGHT, 04/09 19:13 UTC | **23/23 PASS**, 126,32 s de escenario | VALIDATED; 3 aserciones, 9 validaciones, 0 pendientes |
 | BLOCKCHAIN, intento del 04/09 | **FAIL; sesión interrumpida** | Terminó el 05/09 redirigida a login; duración de unas 20 h no utilizable como latencia |
 | BLOCKCHAIN repetido, 05/09 15:29 UTC | **26/26 PASS**, 123,77 s de escenario | VALIDATED; 2 aserciones, 6 validaciones, CID/post/transacción presentes |
@@ -131,6 +131,38 @@ peso HUMAN quedan en ISSUE-017; los pesos no son probabilidades.
 
 ## Límites y evidencia
 
+## ISSUE-015 — Source Router dinámico (2026-09-08)
+
+Validación local sobre el árbol de trabajo de `postTFM`:
+
+- 80 pruebas focalizadas: `common/llm`, `common/search`, `source-router`, orquestación validator,
+  Evidence Search, grounding, JSON LLM y modos; todas correctas.
+- Regresión Python sin las seis integraciones externas históricas: **199 PASS**,
+  sin fallos y con dos avisos deprecados de FastAPI/Pydantic.
+- `py_compile` de los módulos nuevos/modificados y `bash -n` del bootstrap:
+  correctos.
+- Kustomize local/prod de Source Router, Evidence Search y worker LOCAL:
+  correcto con `LoadRestrictionsNone`.
+- Skaffold no está instalado en el entorno; se validó sintaxis YAML y que los
+  perfiles local/prod contienen artifact y overlay de Source Router.
+
+Casos cubiertos de forma determinista: Catalunya/demografía prioriza autoridad
+regional; España acepta autoridad nacional propia; política monetaria UE acepta
+autoridad supranacional; salud pública global acepta autoridad global; una
+jurisdicción desconocida no recibe fallback estático. Una autoridad nacional
+ajena queda `NOT_ELIGIBLE` incluso con relevancia semántica 1.0.
+
+La primera resolución de una ruta MISSING ejecuta SearchProvider, una llamada
+LLM batch, eligibility/ranking y persistencia. La segunda devuelve FRESH desde
+Mongo sin repetir búsqueda ni clasificación. Se cubren refresh STALE, stale
+fallback, fallo sin ruta previa, dominio inventado, ranking determinista y GET
+Mongo-only. Los tests de validator demuestran el orden Source Router → Evidence
+Search para LOCAL y la ausencia de ambas dependencias en no-RAG.
+
+No se hicieron llamadas reales a Exa/OpenRouter, no se levantó Mongo/Kubernetes
+ni se ejecutaron LIGHT/BLOCKCHAIN completos. Por ello ISSUE-015 queda validada
+localmente, no acreditada todavía en el despliegue.
+
 - Una cuenta de pruebas proporcionada por el operador para ambos casos. Los
   alias org-alpha/org-beta del runner son metadatos del JSON, **no dos
   identidades efectivas**. Sin prueba de aislamiento, admin o cliente API.
@@ -187,7 +219,7 @@ completa de un área.
 | Login y órdenes LIGHT/BLOCKCHAIN | Smoke correcto; refresh/logout/expiración y recuperación pendientes |
 | Fechas, estado, consenso y contadores | 007 validada localmente; fallido: 005, 006, 014, 019 |
 | Errores/timeout | Unitarios correctos; fallo inducido y reintento sin duplicados pendientes (008) |
-| Evidencia y calidad factual | 013 validada localmente; fallido/carencia: 015, 017; revisión e informe en 14 |
+| Evidencia y calidad factual | 013 y 015 validadas localmente; carencia: 017; revisión e informe en 14 |
 | JWT, roles y dos organizaciones | 011 y 012 solucionadas y desplegadas en Hetzner; validación con identidades reales pendiente |
 | Cuotas, filtros, búsqueda, paginación, contratos y HTTP negativos | Pendiente más allá de unitarios existentes |
 | ES/EN, navegadores, móvil, teclado y foco | Móvil y textos fallidos (020); Edge/Firefox/accesibilidad pendientes |

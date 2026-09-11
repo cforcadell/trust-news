@@ -1,4 +1,5 @@
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -254,11 +255,9 @@ def test_build_search_requests_groups_same_query_by_domain():
 
 
 @pytest.mark.asyncio
-async def test_search_evidence_logs_final_search_calls(monkeypatch, capsys):
+async def test_search_evidence_logs_final_search_calls(monkeypatch, caplog):
     original_provider = evidence.SEARCH_PROVIDER
-    original_api_key = evidence.API_KEY_PROVIDER
     evidence.SEARCH_PROVIDER = "exa"
-    evidence.API_KEY_PROVIDER = "fake-key"
 
     calls = []
 
@@ -267,66 +266,52 @@ async def test_search_evidence_logs_final_search_calls(monkeypatch, capsys):
         return {"results": []}
 
     monkeypatch.setattr(evidence, "search_with_provider", fake_search_with_provider)
-    async def fake_load_profile_bundle(profile_id="default"):
-        calls.append({"profile_id": profile_id})
-        selection_policy = SimpleNamespace(
-            max_domains=3, max_results=3, max_queries_per_domain=2, fallback_to_general_search=True
-        )
-        return SimpleNamespace(profile_id="custom-profile", selection_policy=selection_policy), {}, "v1"
-
-    monkeypatch.setattr(evidence, "load_profile_bundle", fake_load_profile_bundle)
-    monkeypatch.setattr(evidence, "normalize_assertion", lambda assertion, configs: assertion)
-    monkeypatch.setattr(
-        evidence,
-        "resolve_domains",
-        lambda assertion, profiles, max_domains=None: {
-            "selected_profiles": ["p1"],
-            "preferred_domains": [{"domain": "ine.es"}, {"domain": "sepe.es"}],
-            "fallback_used": False,
-            "reason": "test",
-        },
-    )
     monkeypatch.setattr(evidence, "cache_collection", None)
 
     req = SimpleNamespace(
         assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
         search_policy=SimpleNamespace(
             use_preferred_domains="LOCAL",
-            preferred_profile_id="custom-profile",
             max_domains=3,
             max_results=3,
             max_queries_per_domain=2,
+            # The validator's default policy requests a fallback, but LOCAL must
+            # never broaden a route selected by source-router.
             fallback_to_general_search=True,
+            include_domains=["ine.es", "sepe.es"],
+            model_dump=lambda mode=None: {
+                "use_preferred_domains": "LOCAL", "max_domains": 3, "max_results": 3,
+                "max_queries_per_domain": 2, "fallback_to_general_search": True,
+                "include_domains": ["ine.es", "sepe.es"],
+            },
         ),
     )
 
     try:
-        await evidence.search_evidence(req)
+        with caplog.at_level(logging.INFO, logger="evidence-search"):
+            response = await evidence.search_evidence(req)
     finally:
         evidence.SEARCH_PROVIDER = original_provider
-        evidence.API_KEY_PROVIDER = original_api_key
 
-    captured = capsys.readouterr().out
-    assert "search_request" in captured
-    assert "preferred_profile_id=custom-profile" in captured
-    assert "include_domains=['ine.es', 'sepe.es']" in captured or "include_domains=['sepe.es', 'ine.es']" in captured
-    assert calls[0] == {"profile_id": "custom-profile"}
     assert len([call for call in calls if "provider" in call]) == 1
+    assert calls[0]["include_domains"] == ["ine.es", "sepe.es"]
+    assert response["search_policy"]["fallback_to_general_search"] is False
+    assert any("search_request" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio
 async def test_search_provider_registry_can_switch_to_exa(monkeypatch):
+    import common.search.factory as search_factory
     calls = []
 
     class FakeExaProvider(search_providers.SearchProvider):
         name = "exa"
 
-        async def search(self, query, max_sources, include_domains=None, external_source_policy="none"):
-            calls.append((query, max_sources, include_domains, external_source_policy))
-            return {"results": []}
+        async def search(self, request):
+            calls.append((request.query, request.max_results, request.include_domains, request.external_source_policy))
+            return []
 
-    monkeypatch.setattr(search_providers, "registry", search_providers.SearchProviderRegistry())
-    search_providers.registry.register("exa", FakeExaProvider())
+    monkeypatch.setitem(search_factory._providers, "exa", FakeExaProvider())
 
     result = await search_providers.search_with_provider("exa", "foo", 5, include_domains=["one.es"])
 
@@ -355,9 +340,7 @@ def test_merge_search_results_keeps_same_domain_results_and_dedupes_urls():
 @pytest.mark.asyncio
 async def test_search_evidence_raises_when_all_provider_requests_fail(monkeypatch):
     original_provider = evidence.SEARCH_PROVIDER
-    original_api_key = evidence.API_KEY_PROVIDER
     evidence.SEARCH_PROVIDER = "exa"
-    evidence.API_KEY_PROVIDER = "fake-key"
 
     async def failing_search(*args, **kwargs):
         raise RuntimeError("provider unavailable")
@@ -368,11 +351,11 @@ async def test_search_evidence_raises_when_all_provider_requests_fail(monkeypatc
         assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
         search_policy=SimpleNamespace(
             use_preferred_domains="NONE",
-            preferred_profile_id=None,
             max_domains=3,
             max_results=3,
             max_queries_per_domain=2,
             fallback_to_general_search=True,
+            include_domains=[],
         ),
     )
 
@@ -381,10 +364,27 @@ async def test_search_evidence_raises_when_all_provider_requests_fail(monkeypatc
             await evidence.search_evidence(req)
     finally:
         evidence.SEARCH_PROVIDER = original_provider
-        evidence.API_KEY_PROVIDER = original_api_key
 
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail["code"] == "EVIDENCE_PROVIDER_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_local_requires_domains_selected_by_caller():
+    req = SimpleNamespace(
+        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
+        search_policy=SimpleNamespace(use_preferred_domains="LOCAL", include_domains=[]),
+    )
+    with pytest.raises(evidence.HTTPException) as exc_info:
+        await evidence.search_evidence(req)
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == "LOCAL_INCLUDE_DOMAINS_REQUIRED"
+
+
+def test_evidence_search_has_no_source_router_client():
+    source = Path(evidence.__file__).read_text()
+    assert "SOURCE_ROUTER_URL" not in source
+    assert "/routes/resolve" not in source
 
 @pytest.mark.parametrize(
     "mode,expected_request_modes",
@@ -407,25 +407,25 @@ def test_non_local_modes_preserve_external_planning_without_local_domains(mode, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["NONE", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])
 async def test_non_local_modes_do_not_load_mongo_profiles(monkeypatch, mode):
-    original_api_key = evidence.API_KEY_PROVIDER
-    evidence.API_KEY_PROVIDER = ""
+    async def fake_search(*args, **kwargs):
+        return {"results": []}
 
-    async def forbidden_profile_load(*args, **kwargs):
-        raise AssertionError("non-LOCAL mode must not read evidence_domain_profiles")
-
-    monkeypatch.setattr(evidence, "load_profile_bundle", forbidden_profile_load)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
     monkeypatch.setattr(evidence, "cache_collection", None)
     req = SimpleNamespace(
         assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
         search_policy=SimpleNamespace(
-            use_preferred_domains=mode, preferred_profile_id="ignored", max_domains=3,
+            use_preferred_domains=mode, max_domains=3,
             max_results=3, max_queries_per_domain=2, fallback_to_general_search=True,
             mode="official_first",
+            include_domains=[],
+            model_dump=lambda **_kwargs: {
+                "use_preferred_domains": mode, "max_domains": 3, "max_results": 3,
+                "max_queries_per_domain": 2, "fallback_to_general_search": True,
+                "mode": "official_first", "include_domains": [],
+            },
         ),
     )
-    try:
-        response = await evidence.search_evidence(req)
-    finally:
-        evidence.API_KEY_PROVIDER = original_api_key
+    response = await evidence.search_evidence(req)
     assert response["search_policy"]["domain_scoring_enabled"] is False
     assert response["search_policy"]["selected_domains"] == []

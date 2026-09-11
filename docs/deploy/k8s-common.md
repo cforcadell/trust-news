@@ -190,16 +190,15 @@ scripts/k8s/init-mongodb-server.sh
 Este paso:
 
 - crea o actualiza el usuario de aplicacion;
-- crea indices de `news`, `clients_quotas`, `events`, `validations` y `evidence_search_cache`;
-- reemplaza el perfil `default` de `evidence_domain_profiles`;
-- inserta o actualiza `evidence_normalization_configs`;
+- crea indices de `news`, `clients_quotas`, `events`, `validations`, `source_routes` y `evidence_search_cache`;
+- elimina las colecciones estáticas obsoletas `evidence_domain_profiles` y `evidence_normalization_configs`;
 - limpia por defecto `evidence_search_cache`.
 
 Verificacion:
 
 ```bash
 kubectl exec -it mongodb-0 -n infra -- sh -c \
-  'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$MONGO_APP_DATABASE" --quiet --eval "const p=db.evidence_domain_profiles.findOne({profile_id: \"default\"}); printjson({profiles: db.evidence_domain_profiles.countDocuments({profile_id: \"default\"}), normalization: db.evidence_normalization_configs.countDocuments({}), domains: p ? p.domains.length : 0})"'
+  'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$MONGO_APP_DATABASE" --quiet --eval "printjson({routes: db.source_routes.countDocuments({}), cache: db.evidence_search_cache.countDocuments({})})"'
 ```
 
 ---
@@ -325,39 +324,29 @@ el registro anterior y actualizar sus límites mediante
 
 ---
 
-## 8. Evidence Search
+## 8. Source Router y Evidence Search
 
-La configuracion contextual vive en MongoDB, coleccion
-`evidence_domain_profiles`.
-
-Seeds versionados:
-
-```text
-api/evidence-search/config/evidence-domain-profile-default.json
-api/evidence-search/config/evidence-normalization-configs.json
-```
-
-Dry-run:
+`source-router` mantiene rutas dinámicas en `source_routes`. En MISS/STALE usa
+el proveedor de búsqueda y el LLM configurados; en FRESH solo consulta Mongo.
+Crear fuera del repositorio `search-secret`, `source-router-llm-secret` y
+`mongodb-app-secret`. Evidence Search recibe `include_domains` para LOCAL y
+solo recupera/rankea evidencia. No existen seeds ni allowlists.
 
 ```bash
-python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
+kubectl create secret generic source-router-llm-secret -n apis \
+  --from-env-file=source-router.env
 ```
 
-Carga real del perfil `default` sin borrar otros perfiles:
-
-```bash
-python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
-```
-
-Tras cambiar perfiles o taxonomias se debe limpiar `evidence_search_cache`
-mediante `DELETE /admin/cache`, porque los documentos anteriores permanecen
-hasta el TTL.
+La caché de Evidence Search se limpia mediante `DELETE /admin/cache`; las
+rutas no usan TTL destructivo y se refrescan según `refresh_after`.
 
 Reiniciar el servicio:
 
 ```bash
 kubectl rollout restart deployment/evidence-search -n apis
 kubectl logs deployment/evidence-search -n apis
+kubectl rollout restart deployment/source-router -n apis
+kubectl logs deployment/source-router -n apis
 ```
 
 ---
@@ -394,8 +383,7 @@ Colecciones principales:
 | `events` | `news-handler` | Eventos del flujo por `order_id`. |
 | `validations` | `news-handler` | Validaciones por orden/asercion/validador. |
 | `clients_quotas` | `admin` | Clientes y cuotas disponibles/consumidas. |
-| `evidence_domain_profiles` | `evidence-search` | Perfil `default` y dominios preferentes. |
-| `evidence_normalization_configs` | `evidence-search` | Taxonomias off-chain. |
+| `source_routes` | `source-router` | Memoria dinámica FRESH/STALE de rutas y fuentes clasificadas. |
 | `evidence_search_cache` | `evidence-search` | Cache v2 de busquedas de evidencias. |
 
 ---

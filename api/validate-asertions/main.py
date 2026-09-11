@@ -31,6 +31,7 @@ from common.models.protocol_models import (
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
 from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
 from common.utils.llm_json import strip_json_markdown
+from common.llm import LLMRequest, complete
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.evidence import evaluate_evidence_grounding
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
@@ -151,7 +152,7 @@ RAG_EVIDENCE_VALIDATION_PROMPT = os.getenv("RAG_EVIDENCE_VALIDATION_PROMPT", "")
 VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.LLM_MEMORY_VALIDATION)))))
 EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
-EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", "default")
+SOURCE_ROUTER_URL = os.getenv("SOURCE_ROUTER_URL", "http://source-router.apis.svc.cluster.local:8075")
 AUTOMATIC_VALIDATOR_TYPES = {
     ValidatorType.LLM_MEMORY_VALIDATION,
     ValidatorType.LLM_SEARCH_VALIDATION,
@@ -196,7 +197,6 @@ class AdminConfigResponse(BaseModel):
     online_search_enabled: bool
     evidence_search_url: str
     evidence_search_use_preferred_domains: EvidencePreferredDomainsMode
-    evidence_search_preferred_profile_id: str
     private_key: Optional[str] = None
     account_address: str
     api_key: Optional[str] = None
@@ -212,7 +212,6 @@ class AdminConfigUpdate(BaseModel):
     validator_type: Optional[int] = None
     evidence_search_url: Optional[str] = None
     evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
-    evidence_search_preferred_profile_id: Optional[str] = None
     private_key: Optional[str] = None
     account_address: Optional[str] = None
     api_key: Optional[str] = None
@@ -224,6 +223,10 @@ class AIValidator(ABC):
     @abstractmethod
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
         pass
+
+
+class SourceRouterRequestError(RuntimeError):
+    pass
 
 
 def is_automatic_validator() -> bool:
@@ -244,10 +247,6 @@ def selected_validation_prompt() -> str:
     if VALIDATOR_TYPE == ValidatorType.RAG_EVIDENCE_VALIDATION:
         return RAG_EVIDENCE_VALIDATION_PROMPT
     return LLM_MEMORY_VALIDATION_PROMPT
-
-
-def current_evidence_search_preferred_profile_id() -> str:
-    return str(os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID) or "").strip() or "default"
 
 
 def current_evidence_search_use_preferred_domains() -> EvidencePreferredDomainsMode:
@@ -323,7 +322,6 @@ def normalize_admin_config_response() -> AdminConfigResponse:
         online_search_enabled=uses_online_search(),
         evidence_search_url=EVIDENCE_SEARCH_URL,
         evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
-        evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
         private_key=mask_secret(PRIVATE_KEY),
         account_address=ACCOUNT_ADDRESS,
         api_key=mask_secret(API_KEY),
@@ -436,7 +434,11 @@ def validation_error_details(failure: ValidationExecutionFailure) -> ValidationE
     else:
         message = str(cause) or cause.__class__.__name__
 
-    if failure.stage == "EVIDENCE_SEARCH" and status_code:
+    if failure.stage == "SOURCE_ROUTER" and status_code:
+        code = f"SOURCE_ROUTER_HTTP_{status_code}"
+    elif failure.stage == "SOURCE_ROUTER":
+        code = "SOURCE_ROUTER_FAILED"
+    elif failure.stage == "EVIDENCE_SEARCH" and status_code:
         code = f"EVIDENCE_SEARCH_HTTP_{status_code}"
     elif failure.stage == "EVIDENCE_SEARCH":
         code = "EVIDENCE_SEARCH_FAILED"
@@ -462,6 +464,8 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
     logger.info(f"[validate-asertions] received assertion-validation-payload-v2 mode={payload_v2.mode} assertion_id={payload_v2.assertion.assertion_id}")
     try:
         evidences, evidence_response = fetch_evidences_for_payload(payload_v2)
+    except SourceRouterRequestError as exc:
+        raise ValidationExecutionFailure("SOURCE_ROUTER", exc, [], None) from exc
     except Exception as exc:
         raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], None) from exc
     try:
@@ -534,15 +538,69 @@ def current_evidence_search_policy() -> Dict[str, Any]:
         "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
         "fallback_to_general_search": True,
     }
-    if preferred_domains_mode == EvidencePreferredDomainsMode.LOCAL:
-        policy["preferred_profile_id"] = current_evidence_search_preferred_profile_id()
     return policy
+
+
+def claim_type_for_assertion(assertion) -> str:
+    preferred = {str(item).strip().lower() for item in assertion.search_hints.preferred_source_types}
+    subcategory = str(assertion.subcategory or "").lower()
+    if preferred & {"statistics", "official_statistics", "official_statistic"} or any(term in subcategory for term in ("demograph", "population", "statistic")):
+        return "official_statistic"
+    if "monetary" in subcategory:
+        return "monetary_policy"
+    if "health" in subcategory:
+        return "public_health"
+    return next(iter(sorted(preferred)), "general")
+
+
+def source_route_payload(payload_v2: AssertionValidationPayloadV2) -> Dict[str, Any]:
+    assertion = payload_v2.assertion
+    locations = sorted(
+        assertion.context.locations,
+        key=lambda item: ({"explicit": 0, "inferred": 1}.get(str(item.origin.value), 2), -item.confidence),
+    )
+    location = locations[0] if locations else None
+    return {
+        "category": assertion.categoryId,
+        "subcategory": assertion.subcategory,
+        "claim_type": claim_type_for_assertion(assertion),
+        "location": {
+            "name": location.name if location else "unknown",
+            "country_code": location.country_code if location else None,
+            "region_code": location.region_code if location else None,
+            "scope": location.scope if location else assertion.context.jurisdiction,
+        },
+        "entities": [{"name": item.name, "type": item.type} for item in assertion.context.entities if item.name != "unknown"],
+        "language": assertion.context.language,
+    }
+
+
+def resolve_local_domains(payload_v2: AssertionValidationPayloadV2) -> tuple[List[str], Dict[str, Any]]:
+    logger.info("[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling source-router before evidence-search")
+    try:
+        response = httpx.post(
+            f"{SOURCE_ROUTER_URL.rstrip('/')}/routes/resolve",
+            json=source_route_payload(payload_v2),
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        route = response.json()
+    except Exception as exc:
+        raise SourceRouterRequestError(str(exc) or exc.__class__.__name__) from exc
+    domains = list(dict.fromkeys(str(source.get("domain") or "").strip().lower() for source in route.get("sources") or [] if source.get("domain")))
+    return domains, route
 
 
 def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if not uses_evidence_search():
         return [], None
     search_policy = current_evidence_search_policy()
+    route_response = None
+    if current_evidence_search_use_preferred_domains() == EvidencePreferredDomainsMode.LOCAL:
+        domains, route_response = resolve_local_domains(payload_v2)
+        if not domains:
+            return [], {"route": route_response, "evidences": [], "search_skipped": "no_eligible_local_sources"}
+        search_policy["include_domains"] = domains
     request_payload = {
         "schema_version": "evidence-search-request-v2",
         "assertion": payload_v2.assertion.model_dump(mode="json"),
@@ -554,6 +612,8 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
         resp.raise_for_status()
         response = resp.json()
         response.setdefault("search_policy", search_policy)
+        if route_response is not None:
+            response["route"] = route_response
         return response.get("evidences", []) or response.get("sources", []) or [], response
     except Exception:
         logger.exception("Evidence search failed")
@@ -567,14 +627,8 @@ class MistralValidator(AIValidator):
         self.temperature = temperature
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        import requests
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = build_prompt_content(texto, contexto, evidences)
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
-        resp = requests.post(self.api_url, headers=headers, json=data)
-        if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return complete("mistral", LLMRequest(prompt=contenido, model=self.model, temperature=self.temperature)).content
 
 class GeminiValidator(AIValidator):
     def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
@@ -585,16 +639,7 @@ class GeminiValidator(AIValidator):
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
         prompt = build_prompt_content(texto, contexto, evidences)
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": self.temperature, "topK": 40, "topP": 0.8},
-        }
-        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
-        resp = httpx.post(f"{self.api_url}/models/{self.model}:generateContent", headers=headers, json=payload)
-        if resp.status_code == 200:
-            result = resp.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return complete("gemini", LLMRequest(prompt=prompt, model=self.model, temperature=self.temperature)).content
 
 class OpenRouterValidator(AIValidator):
     def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
@@ -604,13 +649,9 @@ class OpenRouterValidator(AIValidator):
         self.temperature = temperature
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = build_prompt_content(texto, contexto, evidences)
-        data = {"model": openrouter_model_for_current_type(self.model), "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
-        resp = httpx.post(self.api_url, headers=headers, json=data)
-        if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        model = openrouter_model_for_current_type(self.model)
+        return complete("openrouter", LLMRequest(prompt=contenido, model=model, temperature=self.temperature)).content
 
 class GrokValidator(AIValidator):
     def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
@@ -621,16 +662,8 @@ class GrokValidator(AIValidator):
         self.temperature = temperature
 
     def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         contenido = build_prompt_content(texto, contexto, evidences)
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
-        
-        # Usamos httpx igual que en OpenRouter
-        resp = httpx.post(self.api_url, headers=headers, json=data, timeout=30.0)
-        
-        if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return complete("grok", LLMRequest(prompt=contenido, model=self.model, temperature=self.temperature)).content
     
 def build_ai_validator() -> Optional[AIValidator]:
     if not is_automatic_validator():
@@ -899,7 +932,6 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         status=status,
         use_evidence_search=uses_evidence_search(),
         evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
-        evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
         online_search_enabled=uses_online_search(),
         evidence_search_url=EVIDENCE_SEARCH_URL,
     )
@@ -1173,7 +1205,7 @@ async def update_admin_config(config: AdminConfigUpdate):
     Refresca la configuración IPFS/blockchain cuando cambian los campos públicos del validador.
     """
     global AI_PROVIDER, API_URL, API_KEY, PRIVATE_KEY, ACCOUNT_ADDRESS, VALIDATOR_TYPE, VALIDATOR_SERVICE_URL
-    global EVIDENCE_SEARCH_URL, EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
+    global EVIDENCE_SEARCH_URL
     global ai_validator, VALIDATOR_CATEGORIES
 
 
@@ -1183,7 +1215,6 @@ async def update_admin_config(config: AdminConfigUpdate):
     old_service_url = VALIDATOR_SERVICE_URL
     old_evidence_search_url = EVIDENCE_SEARCH_URL
     old_use_preferred_domains = current_evidence_search_use_preferred_domains()
-    old_preferred_profile_id = current_evidence_search_preferred_profile_id()
     old_categories = list(VALIDATOR_CATEGORIES)
 
     new_provider = config.provider.lower() if config.provider else AI_PROVIDER
@@ -1243,10 +1274,6 @@ async def update_admin_config(config: AdminConfigUpdate):
     if config.evidence_search_use_preferred_domains is not None:
         set_runtime_env("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", config.evidence_search_use_preferred_domains.value)
 
-    if config.evidence_search_preferred_profile_id is not None:
-        EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = config.evidence_search_preferred_profile_id
-        set_runtime_env("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID)
-
     if config.provider is not None:
         AI_PROVIDER = new_provider
         set_runtime_env("AI_PROVIDER", AI_PROVIDER)
@@ -1281,7 +1308,6 @@ async def update_admin_config(config: AdminConfigUpdate):
         VALIDATOR_SERVICE_URL != old_service_url,
         EVIDENCE_SEARCH_URL != old_evidence_search_url,
         current_evidence_search_use_preferred_domains() != old_use_preferred_domains,
-        current_evidence_search_preferred_profile_id() != old_preferred_profile_id,
     ])
     metrics_reset_at = datetime.now(timezone.utc).isoformat() if public_config_changed else None
     blockchain_receipts = {}

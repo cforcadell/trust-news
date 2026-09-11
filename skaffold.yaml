@@ -169,6 +169,10 @@ profiles:
           context: api
           docker: {dockerfile: evidence-search/Dockerfile}
           sync: {infer: ["**/*.py"]}
+        - image: source-router
+          context: api
+          docker: {dockerfile: source-router/Dockerfile}
+          sync: {infer: ["**/*.py"]}
         - image: gateway
           context: api
           docker: {dockerfile: gateway/Dockerfile}
@@ -194,6 +198,7 @@ profiles:
           - k8s/apis/validate-asertions/overlays/local/worker-2
           - k8s/apis/validate-asertions/overlays/local/worker-3
           - k8s/apis/evidence-search/overlays/local
+          - k8s/apis/source-router/overlays/local
           - k8s/apis/news-handler/overlays/local
           - k8s/apis/news-chain/overlays/local
           - k8s/apis/gateway/overlays/local
@@ -207,6 +212,7 @@ profiles:
       - {resourceType: service, resourceName: validate-service-3, namespace: apis, port: 8070, localPort: 8068}
       - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
       - {resourceType: service, resourceName: evidence-search, namespace: apis, port: 8074, localPort: 8074}
+      - {resourceType: service, resourceName: source-router, namespace: apis, port: 8075, localPort: 8075}
       - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
       - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
       - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
@@ -276,6 +282,10 @@ profiles:
           context: api
           docker: {dockerfile: evidence-search/Dockerfile}
           sync: {infer: ["**/*.py"]}
+        - image: source-router
+          context: api
+          docker: {dockerfile: source-router/Dockerfile}
+          sync: {infer: ["**/*.py"]}
         - image: gateway
           context: api
           docker: {dockerfile: gateway/Dockerfile}
@@ -300,6 +310,7 @@ profiles:
           - k8s/apis/validate-asertions/overlays/prod/worker-2
           - k8s/apis/validate-asertions/overlays/prod/worker-3
           - k8s/apis/evidence-search/overlays/prod
+          - k8s/apis/source-router/overlays/prod
           - k8s/apis/news-handler/overlays/prod
           - k8s/apis/news-chain/overlays/prod
           - k8s/apis/gateway/overlays/prod-domain

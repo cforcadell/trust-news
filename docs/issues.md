@@ -33,7 +33,7 @@ cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
 | 012 | P1 | Solucionada y desplegada en Hetzner | 13 |
 | 013 | P1 | Validada localmente y desplegada en Hetzner el 2026-09-06 | 13 |
 | 014 | P1 | Abierta; confirmada en código/sondas locales | 13 |
-| 015 | P1 | Abierto; fallo reproducido con perfil versionado | 13 |
+| 015 | P1 | Solucionada y validada localmente el 2026-09-08; despliegue/E2E real pendiente | 13 |
 | 016 | P1 | Abierto; falsos positivos y diagnóstico incompleto | 13 |
 | 017 | P1 | Abierto; carencia de evaluación factual | 13, ampliar en 14 |
 | 018 | P1 | Solucionada y desplegada en Hetzner | 13 |
@@ -216,13 +216,23 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-015 - Selección local de fuentes sin pertinencia regional acreditada
 
-- **Reproducido:** `test_catalunya_scoring_order` falla: el perfil predeterminado
-  no contiene `idescat.cat`; devuelve primero `workandincome.govt.nz`, `va.gov`
-  y `uwv.nl` para población de Catalunya. No acredita el comportamiento del
-  perfil que esté cargado en MongoDB del despliegue.
-- **Cierre:** revisar catálogo, ponderación geográfica y fallback; corpus de
-  fuentes pertinentes por región/tema. Alinear la fixture con el contrato
-  acordado sin limitarse a eliminar la expectativa que falla.
+- **Estado:** solucionada y validada localmente el 2026-09-08; pendiente de
+  desplegar y ejecutar con proveedores/Mongo reales.
+- **Causa eliminada:** `LOCAL` usaba una allowlist masiva estática sin
+  pertinencia regional acreditada. Evidence Search mezclaba selección de
+  dominios y recuperación, y podía fabricar placeholders sin proveedor.
+- **Implementado:** microservicio interno `source-router`; discovery real por
+  `common/search`, una clasificación batch por `common/llm`, rechazo de
+  dominios inventados, eligibility geográfica estricta, ranking determinista y
+  memoria `source_routes` FRESH/STALE/MISSING. Los validators orquestan
+  `source-router → evidence-search(include_domains)` solo para RAG+LOCAL.
+- **Eliminado:** perfiles/seeds/generadores estáticos y colecciones
+  `evidence_domain_profiles`/`evidence_normalization_configs`. El bootstrap las
+  elimina explícitamente. `NONE` y `EXT_*` conservan su planificación.
+- **Validación:** tests unitarios cubren Catalunya, España, UE, salud global,
+  jurisdicción desconocida, cache de segunda petición, stale fallback,
+  proveedor/LLM fallido, GET sin costes y orden de dependencias. Falta E2E de
+  red con APIs externas, Mongo y ambos recorridos desplegados.
 
 ### ISSUE-016 - Regresión con falsos positivos y diagnóstico incompleto
 
@@ -230,8 +240,8 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
   viewport=390; tests Blockchain antiguos aceptan HTTP 500. Una salida temprana
   evita agregar errores de red/consola: la ejecución interrumpida registra 400
   de autenticación y dos errores de consola, pero el resumen cuenta cero.
-- **Además:** el test de logs usa `capsys` para eventos de logging; falla aunque
-  `search_request` sí se registra. `api/tests/requirements.txt` no reúne las
+- **Además:** el test de logs se corrigió para usar `caplog` y vuelve a comprobar
+  `search_request`. `api/tests/requirements.txt` no reúne las
   dependencias de la suite y la fixture no exige credenciales antes de conectar.
 - **Cierre:** entorno de tests reproducible, `caplog`, fallos HTTP estrictos,
   comprobaciones de contenido/overflow y diagnóstico en `finally`; registrar

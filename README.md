@@ -499,7 +499,8 @@ Additional architecture documents:
 | `api/admin` | Clients, quotas and administrative operations |
 | `api/news-handler` | Main workflow orchestration |
 | `api/generate-asertions` | Atomic assertion extraction |
-| `api/evidence-search` | Evidence retrieval, domain routing and cache |
+| `api/source-router` | Dynamic LOCAL source discovery and routing |
+| `api/evidence-search` | Evidence retrieval, chunking, ranking and cache |
 | `api/validate-asertions` | Validator workers |
 | `api/news-chain` | Blockchain integration layer |
 | `api/ipfs` | IPFS abstraction |
@@ -522,12 +523,10 @@ The `evidence-search` service exposes:
 POST /search/evidence
 ```
 
-Evidence configuration is stored in MongoDB using collections including:
+For `RAG + LOCAL`, validators first call:
 
 ```text
-evidence_domain_profiles
-evidence_normalization_configs
-evidence_search_cache
+source-router → source_routes → selected domains → evidence-search(include_domains)
 ```
 
 Preferred-domain behavior is controlled through:
@@ -541,17 +540,14 @@ Supported modes:
 | Mode | Behavior |
 |---|---|
 | `NONE` | Use the generated or fallback query without preferred domains |
-| `LOCAL` | Resolve preferred domains using local MongoDB profiles |
+| `LOCAL` | Validator resolves dynamic domains through source-router, then passes them to evidence-search |
 | `EXT_OFFICIAL_FIRST` | Ask the provider to prioritize official sources |
 | `EXT_ONLY_OFFICIAL` | Restrict retrieval to official sources where supported |
 
-Preferred-domain profiles are an initial step toward domain-aware validation.
-They should not be confused with a validator owning a private knowledge base:
-today they influence where evidence is retrieved from rather than providing an
-independent domain-specific knowledge system.
-
-The server bootstrap script loads the default evidence profiles and
-normalization metadata:
+`source-router` uses Exa/Tavily discovery, one batch LLM classification,
+deterministic jurisdiction eligibility/ranking and non-destructive Mongo route
+memory. Evidence Search never calls Source Router. The bootstrap removes the
+obsolete static profile collections and creates `source_routes` indexes:
 
 ```bash
 scripts/k8s/init-mongodb-server.sh --dry-run

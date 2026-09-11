@@ -18,12 +18,10 @@ from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
 
 sys.path.append(os.path.dirname(__file__))
-from app.domain_router.profiles_loader import PROFILE_ID, DomainProfileNotFound, load_profile_bundle as load_domain_profile_bundle, normalize_assertion
 from app.chunk_ranker import rank_chunks
 from app.chunker import build_context_windows, chunk_text
 from app.document_fetcher import fetch_main_text
-from app.domain_router.resolver import resolve_domains
-from app.search.providers import search_with_provider
+from common.search import search_with_provider
 
 load_dotenv()
 
@@ -33,13 +31,10 @@ logger = logging.getLogger("evidence-search")
 
 MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
-MONGO_DOMAIN_PROFILE_COLLECTION = os.getenv("EVIDENCE_DOMAIN_CONFIG_COLLECTION", os.getenv("MONGO_EVIDENCE_DOMAIN_PROFILES_COLLECTION", "evidence_domain_profiles"))
-MONGO_NORMALIZATION_CONFIG_COLLECTION = os.getenv("EVIDENCE_NORMALIZATION_CONFIG_COLLECTION", "evidence_normalization_configs")
 MONGO_CACHE_COLLECTION = os.getenv("EVIDENCE_SEARCH_CACHE_COLLECTION", "evidence_search_cache")
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_CACHE_TTL_SECONDS", "86400"))
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "").lower() or None
-API_KEY_PROVIDER = os.getenv("API_KEY_PROVIDER", "")
 EVIDENCE_FETCH_FULL_TEXT = os.getenv("EVIDENCE_FETCH_FULL_TEXT", "false").lower() == "true"
 EVIDENCE_MAX_CONTEXTS_PER_SOURCE = int(os.getenv("EVIDENCE_MAX_CONTEXTS_PER_SOURCE", "2"))
 EVIDENCE_MAX_CONTEXTS_TOTAL = int(os.getenv("EVIDENCE_MAX_CONTEXTS_TOTAL", "8"))
@@ -55,8 +50,6 @@ EVIDENCE_USER_AGENT = os.getenv("EVIDENCE_USER_AGENT", "TrustNewsEvidenceBot/1.0
 app = FastAPI(title="TrustNews Evidence Search")
 mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
-domain_profile_collection = None
-normalization_config_collection = None
 cache_collection = None
 
 
@@ -372,19 +365,6 @@ def evidence_cache_key(assertion: Dict[str, Any], policy: Any, profile_version: 
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
 
-def preferred_profile_id_for_policy(policy: Any) -> str:
-    """Resolve the requested profile id, falling back to the default profile."""
-    # Support both dict policies and Pydantic model instances.
-    if isinstance(policy, dict):
-        raw_profile_id = policy.get("preferred_profile_id")
-    else:
-        raw_profile_id = getattr(policy, "preferred_profile_id", "")
-
-    # Empty strings should behave like an omitted profile id.
-    profile_id = str(raw_profile_id or "").strip()
-    return profile_id or PROFILE_ID
-
-
 def preferred_domains_mode_for_policy(policy: Any) -> EvidencePreferredDomainsMode:
     """Return the configured evidence-search domain preference mode."""
     if isinstance(policy, dict):
@@ -394,18 +374,6 @@ def preferred_domains_mode_for_policy(policy: Any) -> EvidencePreferredDomainsMo
     if isinstance(raw_mode, EvidencePreferredDomainsMode):
         return raw_mode
     return EvidencePreferredDomainsMode(str(raw_mode or "").strip().upper())
-
-
-async def load_profile_bundle(profile_id: str = PROFILE_ID):
-    """Load one complete profile plus its independent normalization configs."""
-    try:
-        return await load_domain_profile_bundle(
-            domain_profile_collection, normalization_config_collection, profile_id=profile_id
-        )
-    except DomainProfileNotFound as exc:
-        raise HTTPException(status_code=404, detail={"code": exc.code, "message": str(exc)}) from exc
-    except (RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=500, detail={"code": "DOMAIN_PROFILE_INVALID", "message": str(exc)}) from exc
 
 
 def empty_domain_resolution() -> Dict[str, Any]:
@@ -594,11 +562,7 @@ def merge_search_results(*result_groups: List[Dict[str, Any]], max_sources: int)
 
 
 async def ensure_indexes():
-    """Create indexes for one-document profiles, normalization configs, and cache."""
-    if domain_profile_collection is not None:
-        await domain_profile_collection.create_index("profile_id", name="uniq_domain_profile_id", unique=True)
-    if normalization_config_collection is not None:
-        await normalization_config_collection.create_index("config_type", name="uniq_normalization_config_type", unique=True)
+    """Create indexes for the evidence response cache."""
     if cache_collection is not None:
         await cache_collection.create_index("cache_key", unique=True)
         await cache_collection.create_index("assertion_hash")
@@ -610,11 +574,9 @@ async def ensure_indexes():
 async def startup_event():
     """Initialize Mongo collections and indexes when the FastAPI app starts."""
     # Create the shared Mongo client and bind the collections used by handlers.
-    global mongo_client, db, domain_profile_collection, normalization_config_collection, cache_collection
+    global mongo_client, db, cache_collection
     mongo_client = AsyncIOMotorClient(MONGO_URI)
     db = mongo_client[MONGO_DBNAME]
-    domain_profile_collection = db[MONGO_DOMAIN_PROFILE_COLLECTION]
-    normalization_config_collection = db[MONGO_NORMALIZATION_CONFIG_COLLECTION]
     cache_collection = db[MONGO_CACHE_COLLECTION]
 
     # Create or update indexes before serving traffic.
@@ -662,15 +624,21 @@ async def search_evidence(req: EvidenceSearchRequestV2):
     if not text:
         raise HTTPException(status_code=400, detail="assertion.text is required")
 
-    # Load routing profiles only when the request policy enables local preferred domains.
+    # LOCAL routing is resolved by the caller before this request.
     preferred_domains_mode = preferred_domains_mode_for_policy(req.search_policy)
     use_local_preferred_domains = preferred_domains_mode == EvidencePreferredDomainsMode.LOCAL
-    preferred_profile_id = preferred_profile_id_for_policy(req.search_policy)
-    if use_local_preferred_domains:
-        profile, normalization_configs, profile_version = await load_profile_bundle(preferred_profile_id)
-        assertion = normalize_assertion(assertion, normalization_configs)
-    else:
-        profile, profile_version = None, f"preferred-domains-{preferred_domains_mode.value.lower()}"
+    include_domains = list(dict.fromkeys(
+        normalize_domain(domain) for domain in getattr(req.search_policy, "include_domains", []) if normalize_domain(domain)
+    ))
+    if use_local_preferred_domains and not include_domains:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "LOCAL_INCLUDE_DOMAINS_REQUIRED", "message": "LOCAL evidence search requires pre-resolved include_domains"},
+        )
+    profile_version = (
+        "caller-domains:" + hashlib.sha256(canonical_json(include_domains).encode("utf-8")).hexdigest()[:16]
+        if use_local_preferred_domains else f"preferred-domains-{preferred_domains_mode.value.lower()}"
+    )
 
     # Build the cache key from the normalized assertion, policy, and profile version.
     cache_key = evidence_cache_key(assertion, req.search_policy, profile_version)
@@ -686,26 +654,29 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             logger.info(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
             return response
 
-    # Resolve contextual preferred domains only for LOCAL mode.
+    # Attach caller-selected LOCAL domains as metadata; no discovery or route memory lives here.
     if use_local_preferred_domains:
-        domain_resolution = resolve_domains(assertion, profile, max_domains=req.search_policy.max_domains)
+        domain_resolution = {
+            "selected_profiles": [],
+            "preferred_domains": [
+                {"domain": domain, "source_type": "unknown", "trust_score": 0.3, "reason": "Selected by caller", "matched_profiles": []}
+                for domain in include_domains[:req.search_policy.max_domains]
+            ],
+            "selected_domains": include_domains[:req.search_policy.max_domains],
+            "fallback_used": False,
+            "reason": "caller_selected_domains",
+        }
     else:
         domain_resolution = empty_domain_resolution()
         domain_resolution["reason"] = f"{preferred_domains_mode.value.lower()}_mode"
     domain_resolution["preferred_domains_mode"] = preferred_domains_mode.value
-    domain_resolution["profile_id"] = profile.profile_id if use_local_preferred_domains else None
     domain_resolution["profile_version"] = profile_version
     effective_search_policy = req.search_policy.model_dump(mode="json") if hasattr(req.search_policy, "model_dump") else dict(vars(req.search_policy))
     if use_local_preferred_domains:
-        selection_policy = profile.selection_policy
         effective_search_policy.update({
-            "mode": "local_scored_domains",
-            "preferred_profile_id": profile.profile_id,
-            "domain_scoring_enabled": True,
-            "max_domains": min(req.search_policy.max_domains, selection_policy.max_domains),
-            "max_results": selection_policy.max_results,
-            "max_queries_per_domain": selection_policy.max_queries_per_domain,
-            "fallback_to_general_search": selection_policy.fallback_to_general_search,
+            "mode": "local_routed_domains",
+            "domain_scoring_enabled": False,
+            "fallback_to_general_search": False,
             "selected_domains": domain_resolution.get("selected_domains", []),
         })
     else:
@@ -713,11 +684,10 @@ async def search_evidence(req: EvidenceSearchRequestV2):
         effective_search_policy["selected_domains"] = []
 
     # Log the routing decision to make evidence selection auditable.
-    logger_prefix = f"[domain-router] assertion_id={assertion.get('assertion_id')}"
+    logger_prefix = f"[evidence-search] assertion_id={assertion.get('assertion_id')}"
     logger.info(
         f"{logger_prefix} preferred_domains_mode={preferred_domains_mode.value} "
-        f"preferred_profile_id={preferred_profile_id if use_local_preferred_domains else None} "
-        f"selected_profiles={domain_resolution.get('selected_profiles')}"
+        f"include_domains={include_domains if use_local_preferred_domains else []}"
     )
 
     # Log the legacy rendered query list for easier debugging in existing logs.
@@ -737,60 +707,45 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             f"mode={search_request.get('mode')}"
         )
 
-    # Execute live provider searches when an API key is configured.
+    # Execute provider searches. Missing credentials are a dependency error, never placeholders.
     raw_results: List[Dict[str, Any]] = []
     successful_searches = 0
     provider_errors: List[Dict[str, str]] = []
     provider_name = SEARCH_PROVIDER
-    if API_KEY_PROVIDER:
-        for search_request in search_requests:
-            query = search_request["query"]
-            include_domains = search_request.get("include_domains")
-            external_source_policy = search_request.get("external_source_policy") or "none"
-            try:
-                # Merge each provider response into the ordered, deduplicated result set.
-                search_results = await search_with_provider(
-                    provider_name,
-                    query,
-                    effective_search_policy["max_results"],
-                    include_domains=include_domains or None,
-                    external_source_policy=external_source_policy,
-                )
-                successful_searches += 1
-                raw_results = merge_search_results(
-                    raw_results,
-                    search_results.get("results", []) or [],
-                    max_sources=effective_search_policy["max_results"],
-                )
-                if len(raw_results) >= effective_search_policy["max_results"]:
-                    break
-            except Exception as e:
-                logger.warning(f"[evidence-search] search provider failed provider='{provider_name}' query='{query}': {e}")
-                provider_errors.append({"provider": provider_name, "query": query, "error": str(e) or e.__class__.__name__})
-
-        # Zero results is valid. Zero successful requests is a dependency failure.
-        # Raise before cache storage so transient provider failures are never cached.
-        if search_requests and successful_searches == 0:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "code": "EVIDENCE_PROVIDER_FAILED",
-                    "message": "All evidence provider requests failed",
-                    "provider": provider_name,
-                    "errors": provider_errors,
-                    "search_policy": effective_search_policy,
-                },
+    for search_request in search_requests:
+        query = search_request["query"]
+        include_domains = search_request.get("include_domains")
+        external_source_policy = search_request.get("external_source_policy") or "none"
+        try:
+            # Merge each provider response into the ordered, deduplicated result set.
+            search_results = await search_with_provider(
+                provider_name,
+                query,
+                effective_search_policy["max_results"],
+                include_domains=include_domains or None,
+                external_source_policy=external_source_policy,
             )
-    else:
-        # Without a provider key, return routed domains as placeholder evidence.
-        for idx, domain_cfg in enumerate(domain_resolution.get("preferred_domains") or [], start=1):
-            raw_results.append({
-                "url": f"https://{domain_cfg['domain']}/",
-                "title": domain_cfg.get("reason") or domain_cfg["domain"],
-                "content": "Domain selected by contextual routing; configure API_KEY_PROVIDER for live snippets.",
-                "score": domain_cfg.get("weight", 0.0),
-                "_routing_placeholder": True,
-            })
+            successful_searches += 1
+            raw_results = merge_search_results(
+                raw_results,
+                search_results.get("results", []) or [],
+                max_sources=effective_search_policy["max_results"],
+            )
+            if len(raw_results) >= effective_search_policy["max_results"]:
+                break
+        except Exception as e:
+            logger.warning(f"[evidence-search] search provider failed provider='{provider_name}' query='{query}': {e}")
+            provider_errors.append({"provider": provider_name, "query": query, "error": str(e) or e.__class__.__name__})
+
+    # Zero results is valid. Zero successful requests is a dependency failure.
+    if search_requests and successful_searches == 0:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "EVIDENCE_PROVIDER_FAILED", "message": "All evidence provider requests failed",
+                "provider": provider_name, "errors": provider_errors, "search_policy": effective_search_policy,
+            },
+        )
 
     # Normalize raw provider results into the public evidence response contract.
     evidences = await build_evidences_with_optional_contexts(

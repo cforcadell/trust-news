@@ -2,12 +2,9 @@ import os
 import json
 import asyncio
 import logging
-import time
 import uuid
-import httpx
 from typing import Any, List, Optional
 
-import aiohttp
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -41,7 +38,8 @@ from common.models.async_models import (
 from common.models.protocol_models import CATEGORY_CATALOG_PROMPT
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
-from common.utils.llm_json import extract_chat_content, parse_model_list
+from common.utils.llm_json import parse_model_list
+from common.llm import LLMConfigurationError, LLMRequest, acomplete
 
 # ============================================================
 # Config / constantes (desde env)
@@ -247,409 +245,54 @@ def parse_assertions_content(content) -> List[Assertion]:
     return parse_model_list(content, Assertion, list_key="assertions", id_field="idAssertion")
 
 # ============================================================
-# Llamada asíncrona a Mistral (aiohttp)
+# Compatibility wrappers delegate to common/llm.
 # ============================================================
-async def call_mistral(text: str) -> List[Assertion]:
-    """Llama a la API de Mistral y valida la respuesta como List[Assertion]."""
-    if not (MISTRAL_API_URL and MISTRAL_API_KEY):
-        raise HTTPException(status_code=500, detail="Mistral no está configurado en variables de entorno.")
-
-    full_prompt = build_assertions_prompt(text)
-    log_event(
-        logger,
-        logging.INFO,
-        "llm_request_started",
-        provider="mistral",
-        model=MISTRAL_MODEL,
-        input_chars=len(text),
-        prompt_chars=len(full_prompt),
-        timeout_seconds=HTTP_TIMEOUT,
-        max_attempts=MAX_RETRIES,
-    )
-    headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": MISTRAL_MODEL,
-        "messages": [{"role": "user", "content": full_prompt}],
-        "temperature": TEMPERATURE,
-        # Solicitar formato estructurado JSON
-        "response_format": {"type": "json_object"}
-    }
-
-    async with aiohttp.ClientSession() as session:
-        for attempt in range(1, MAX_RETRIES + 1):
-            attempt_started = time.monotonic()
-            response_status = None
-            try:
-                async with session.post(MISTRAL_API_URL, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
-                    response_status = resp.status
-                    text_resp = await resp.text()
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "llm_response_received",
-                        provider="mistral",
-                        model=MISTRAL_MODEL,
-                        attempt=attempt,
-                        status=resp.status,
-                        duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
-                        response_chars=len(text_resp),
-                    )
-                    if resp.status != 200:
-                        log_event(
-                            logger,
-                            logging.ERROR,
-                            "llm_response_error",
-                            provider="mistral",
-                            model=MISTRAL_MODEL,
-                            attempt=attempt,
-                            status=resp.status,
-                            response_chars=len(text_resp),
-                        )
-                        if resp.status in [429, 500, 502, 503, 504]:
-                            raise Exception(f"Error temporal Mistral: {resp.status}")
-                        raise HTTPException(status_code=resp.status, detail="Error Mistral")
-                    
-                    data = await resp.json()
-                    
-                    try:
-                        return parse_assertions_content(extract_chat_content(data))
-                    except (ValueError, ValidationError) as e:
-                        log_event(
-                            logger,
-                            logging.ERROR,
-                            "llm_response_invalid",
-                            provider="mistral",
-                            model=MISTRAL_MODEL,
-                            attempt=attempt,
-                            status=resp.status,
-                            error_type=type(e).__name__,
-                            error=exception_message(e),
-                        )
-                        raise ValueError("Mistral devolvió un JSON con esquema incorrecto.")
-
-            except HTTPException:
-                raise
-            except Exception as e:
-                error_detail = exception_message(e)
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "llm_attempt_failed",
-                    provider="mistral",
-                    model=MISTRAL_MODEL,
-                    attempt=attempt,
-                    max_attempts=MAX_RETRIES,
-                    status=response_status,
-                    duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
-                    error_type=type(e).__name__,
-                    error=error_detail,
-                )
-                if attempt == MAX_RETRIES:
-                    log_event(
-                        logger,
-                        logging.ERROR,
-                        "llm_request_failed",
-                        provider="mistral",
-                        model=MISTRAL_MODEL,
-                        attempts=MAX_RETRIES,
-                        error_type=type(e).__name__,
-                        error=error_detail,
-                        exc_info=True,
-                    )
-                    raise HTTPException(status_code=503, detail=error_detail)
-                await asyncio.sleep(RETRY_DELAY)
-    return []
-
-# ============================================================
-# Llamada asíncrona a Gemini (aiohttp)
-# ============================================================
-async def call_gemini(text: str) -> List[Assertion]:
-    """Llama a la API de Gemini, usando JSON Schema para forzar el modelo Assertion."""
-    if not (GEMINI_API_URL and GEMINI_API_KEY):
-        raise HTTPException(status_code=500, detail="Gemini no está configurado en variables de entorno.")
-
-    full_prompt = build_assertions_prompt(text)
-    log_event(
-        logger,
-        logging.INFO,
-        "llm_request_started",
-        provider="gemini",
-        model=GEMINI_MODEL,
-        input_chars=len(text),
-        prompt_chars=len(full_prompt),
-        timeout_seconds=HTTP_TIMEOUT,
-        max_attempts=MAX_RETRIES,
-    )
-
-    api_endpoint = f"{GEMINI_API_URL}/models/{GEMINI_MODEL}:generateContent"
-    headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
-
-    # Usar el esquema JSON de Pydantic
-    response_schema = get_assertions_schema()
-
-    payload = {
-        "contents": [{"parts": [{"text": full_prompt}]}],
-        "generationConfig": {
-            "temperature": TEMPERATURE,
-            "responseMimeType": "application/json"
-            #,"responseSchema": response_schema
-        }
-    }
-
-    async with aiohttp.ClientSession() as session:
-        for attempt in range(1, MAX_RETRIES + 1):
-            attempt_started = time.monotonic()
-            response_status = None
-            try:
-                async with session.post(api_endpoint, headers=headers, json=payload, timeout=HTTP_TIMEOUT) as resp:
-                    response_status = resp.status
-                    text_resp = await resp.text()
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "llm_response_received",
-                        provider="gemini",
-                        model=GEMINI_MODEL,
-                        attempt=attempt,
-                        status=resp.status,
-                        duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
-                        response_chars=len(text_resp),
-                    )
-                    if resp.status != 200:
-                        log_event(
-                            logger,
-                            logging.ERROR,
-                            "llm_response_error",
-                            provider="gemini",
-                            model=GEMINI_MODEL,
-                            attempt=attempt,
-                            status=resp.status,
-                            response_chars=len(text_resp),
-                        )
-                        if resp.status in [429, 500, 502, 503, 504]:
-                            raise Exception(f"Error temporal Gemini: {resp.status}")
-                        raise HTTPException(status_code=resp.status, detail="Error Gemini")
-                    
-                    data = await resp.json()
-                    
-                    try:
-                        json_string = data["candidates"][0]["content"]["parts"][0]["text"]
-                        return parse_assertions_content(json_string)
-                    except (KeyError, IndexError, ValueError, ValidationError) as e:
-                        log_event(
-                            logger,
-                            logging.ERROR,
-                            "llm_response_invalid",
-                            provider="gemini",
-                            model=GEMINI_MODEL,
-                            attempt=attempt,
-                            status=resp.status,
-                            response_chars=len(text_resp),
-                            error_type=type(e).__name__,
-                            error=exception_message(e),
-                        )
-                        raise ValueError("Gemini devolvió un JSON con esquema incorrecto.")
-            
-            except HTTPException:
-                raise
-            except Exception as e:
-                error_detail = exception_message(e)
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "llm_attempt_failed",
-                    provider="gemini",
-                    model=GEMINI_MODEL,
-                    attempt=attempt,
-                    max_attempts=MAX_RETRIES,
-                    status=response_status,
-                    duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
-                    error_type=type(e).__name__,
-                    error=error_detail,
-                )
-                if attempt == MAX_RETRIES:
-                    log_event(
-                        logger,
-                        logging.ERROR,
-                        "llm_request_failed",
-                        provider="gemini",
-                        model=GEMINI_MODEL,
-                        attempts=MAX_RETRIES,
-                        error_type=type(e).__name__,
-                        error=error_detail,
-                        exc_info=True,
-                    )
-                    raise HTTPException(status_code=503, detail=error_detail)
-                await asyncio.sleep(RETRY_DELAY)
-    return []
-
-# ============================================================
-# Llamada asíncrona a OpenRouter (aiohttp) 
-# ============================================================
-async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Assertion]:
-    """
-    Llama a OpenRouter y devuelve la respuesta validada como List[Assertion].
-    Limpia automáticamente bloques de código Markdown (```json ... ```) antes de parsear.
-    """
-    if not (OPENROUTER_API_URL and OPENROUTER_API_KEY):
-        raise HTTPException(
-            status_code=500, 
-            detail="OpenRouter no está configurado en variables de entorno."
-        )
-
-    # Construir prompt
+async def _call_configured_llm(text: str, contexto: Optional[str] = None) -> List[Assertion]:
     full_prompt = build_assertions_prompt(text)
     if contexto:
         full_prompt += f"\nContexto adicional:\n{contexto}"
-    log_event(
-        logger,
-        logging.INFO,
-        "llm_request_started",
-        provider="openrouter",
-        model=OPENROUTER_MODEL,
-        input_chars=len(text),
-        prompt_chars=len(full_prompt),
-        timeout_seconds=HTTP_TIMEOUT,
-        max_attempts=MAX_RETRIES,
-    )
+    model = {
+        "mistral": MISTRAL_MODEL,
+        "gemini": GEMINI_MODEL,
+        "openrouter": OPENROUTER_MODEL,
+    }.get(AI_PROVIDER)
+    if not model:
+        return []
+    try:
+        response = await acomplete(
+            AI_PROVIDER,
+            LLMRequest(
+                prompt=full_prompt,
+                model=model,
+                temperature=TEMPERATURE,
+                json_mode=True,
+            ),
+        )
+        return parse_assertions_content(response.content)
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=exception_message(exc)) from exc
 
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://trust-news",
-        "X-Title": "AIValidator-OpenRouter"
-    }
 
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [{"role": "user", "content": full_prompt}],
-        "temperature": TEMPERATURE
-    }
+async def call_mistral(text: str) -> List[Assertion]:
+    return await _call_configured_llm(text)
 
-    async with aiohttp.ClientSession() as session:
-        for attempt in range(1, MAX_RETRIES + 1):
-            attempt_started = time.monotonic()
-            response_status = None
-            try:
-                async with session.post(
-                    OPENROUTER_API_URL,
-                    headers=headers,
-                    json=payload,
-                    timeout=HTTP_TIMEOUT
-                ) as resp:
-                    response_status = resp.status
-                    text_resp = await resp.text()
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "llm_response_received",
-                        provider="openrouter",
-                        model=OPENROUTER_MODEL,
-                        attempt=attempt,
-                        status=resp.status,
-                        duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
-                        response_chars=len(text_resp),
-                    )
 
-                    if resp.status != 200:
-                        log_event(
-                            logger,
-                            logging.ERROR,
-                            "llm_response_error",
-                            provider="openrouter",
-                            model=OPENROUTER_MODEL,
-                            attempt=attempt,
-                            status=resp.status,
-                            response_chars=len(text_resp),
-                        )
-                        # Si es un error de cuota o temporal, el except Exception lo capturará para reintentar
-                        if resp.status in [429, 500, 502, 503, 504]:
-                             raise Exception(f"Error temporal del servidor: {resp.status}")
-                        # El cuerpo puede incluir contenido del proveedor o del
-                        # modelo. Conservamos únicamente el estado observable.
-                        raise HTTPException(
-                            status_code=resp.status,
-                            detail=f"Error OpenRouter (status {resp.status})",
-                        )
+async def call_gemini(text: str) -> List[Assertion]:
+    return await _call_configured_llm(text)
 
-                    data = await resp.json()
-                    
-                    try:
-                        assertions = parse_assertions_content(extract_chat_content(data))
-                    except (ValueError, ValidationError) as e:
-                        log_event(
-                            logger,
-                            logging.ERROR,
-                            "llm_response_invalid",
-                            provider="openrouter",
-                            model=OPENROUTER_MODEL,
-                            attempt=attempt,
-                            status=resp.status,
-                            error_type=type(e).__name__,
-                            error=exception_message(e),
-                        )
-                        raise ValueError("OpenRouter devolvió un JSON con esquema incorrecto.")
 
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "llm_response_parsed",
-                        provider="openrouter",
-                        model=OPENROUTER_MODEL,
-                        attempt=attempt,
-                        assertions=len(assertions),
-                    )
-                    return assertions
+async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Assertion]:
+    return await _call_configured_llm(text, contexto)
 
-            except HTTPException as he:
-                # No reintentamos si es un error de cliente (4xx) definido explícitamente
-                raise he
-            except Exception as e:
-                error_detail = exception_message(e)
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "llm_attempt_failed",
-                    provider="openrouter",
-                    model=OPENROUTER_MODEL,
-                    attempt=attempt,
-                    max_attempts=MAX_RETRIES,
-                    status=response_status,
-                    duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
-                    error_type=type(e).__name__,
-                    error=error_detail,
-                )
-                if attempt == MAX_RETRIES:
-                    log_event(
-                        logger,
-                        logging.ERROR,
-                        "llm_request_failed",
-                        provider="openrouter",
-                        model=OPENROUTER_MODEL,
-                        attempts=MAX_RETRIES,
-                        error_type=type(e).__name__,
-                        error=error_detail,
-                        exc_info=True,
-                    )
-                    raise HTTPException(status_code=503, detail=f"Servicio no disponible: {error_detail}")
-                
-                await asyncio.sleep(RETRY_DELAY)
-
-    return []
 
 # ============================================================
 # Dispatch a proveedor elegido
 # ============================================================
 # El tipo de retorno ahora es List[Assertion]
 async def extract_assertions_from_text(text: str) -> List[Assertion]:
-    if AI_PROVIDER == "mistral":
-        return await call_mistral(text)
-    elif AI_PROVIDER == "gemini":
-        return await call_gemini(text)
-    elif AI_PROVIDER == "openrouter":
-        return await call_openrouter(text)
-    else:
-        return []
+    return await _call_configured_llm(text)
 
 
 async def publish_assertions_not_generated(

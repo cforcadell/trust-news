@@ -101,20 +101,20 @@ En OpenRouter, cuando `VALIDATOR_TYPE=2`, el modelo se transforma automaticament
 
 **Algoritmo:** recuperacion de evidencias + validacion estricta con LLM.
 
-El worker llama a `evidence-search` siempre que `VALIDATOR_TYPE=3`. Ese servicio recibe la asercion enriquecida, construye una politica de busqueda y devuelve evidencias normalizadas. Despues el worker inyecta esas evidencias en el prompt `RAG_EVIDENCE_VALIDATION_PROMPT`.
+El worker RAG orquesta la estrategia. Con LOCAL llama primero a `source-router`, recibe dominios y después llama a `evidence-search(include_domains)`. Con NONE/EXT llama directamente a Evidence Search. Finalmente inyecta las evidencias en `RAG_EVIDENCE_VALIDATION_PROMPT`.
 
 El prompt RAG exige validar solo con las evidencias proporcionadas. Si no hay evidencias suficientes, el comportamiento esperado es `UNKNOWN` o insuficiencia equivalente.
 
-**Variables clave:** `VALIDATOR_TYPE=3`, `EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `RAG_EVIDENCE_VALIDATION_PROMPT`.
+**Variables clave:** `VALIDATOR_TYPE=3`, `SOURCE_ROUTER_URL`, `EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `RAG_EVIDENCE_VALIDATION_PROMPT`.
 
 **Subcomportamientos RAG:**
 
 | Variante | Configuracion | Comportamiento |
 |---|---|---|
 | RAG general | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE` | Construye queries desde texto, entidades, ubicaciones y contexto temporal, con busqueda general como fallback. |
-| RAG con dominios preferentes | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL` | Usa perfiles Mongo `evidence_domain_profiles` para priorizar dominios por categoria, subcategoria, entidades y ubicaciones. |
-| RAG sin Tavily | `TAVILY_API_KEY` vacio | Devuelve dominios seleccionados como evidencias placeholder; util para desarrollo, no para validacion factual completa. |
-| RAG con Tavily | `TAVILY_API_KEY` configurado | Ejecuta queries reales, fusiona resultados, deduplica URLs y limita resultados por dominio. |
+| RAG LOCAL | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL` | Descubre y clasifica fuentes reales mediante Source Router; restringe Evidence Search a los dominios elegibles. |
+| RAG sin credenciales de búsqueda | `API_KEY_PROVIDER` vacío | Falla explícitamente; no crea placeholders ni dominios estáticos. |
+| RAG con Exa/Tavily | `API_KEY_PROVIDER` configurado | Ejecuta queries reales, fusiona resultados, deduplica URLs y limita resultados. |
 
 **Uso esperado:** validador de mayor confianza operacional porque la decision queda ligada a evidencias explicitamente recuperadas. Su peso es alto (`0.80`).
 

@@ -1,9 +1,9 @@
 # Incidencias de Assermetry
 
-Revisión: **2026-09-07**. Resumen del inventario histórico y de la regresión
-[registrada aquí](testing-v0.0.13.md). La revisión inicial no modificó código.
-Actualización 2026-09-06: 011, 012 y 018 solucionadas y desplegadas en Hetzner.
-Evidencia de código local no implica explotación demostrada en el despliegue.
+Revisión: **2026-09-11**. Inventario acumulativo de hallazgos y criterios de
+cierre de [v0.0.13](version.md). La revisión inicial no modificó código.
+011, 012 y 018 están solucionadas y desplegadas en Hetzner. Evidencia de código
+local no implica comportamiento demostrado en el despliegue.
 
 ## Gestión
 
@@ -39,10 +39,13 @@ cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
 | 018 | P1 | Solucionada y desplegada en Hetzner | 13 |
 | 019 | P1 | Abierto; contadores contradictorios en GUI | 13 |
 | 020 | P2 | Abierto; desbordamiento y mezcla de idiomas | 13 |
+| 021 | P1 | Abierto; autoconfirmación y política de fuentes no aplicada | 13 |
+| 022 | P2 | Abierto; taxonomía libre fragmenta y contamina rutas cacheadas | 13 |
 
 Los P1 de objetivo 13 bloquean su cierre. 009–010 bloquean la experiencia de
-revisión/evidencia de 14. 020 debe corregirse antes de acreditar móvil; cualquier
-aceptación temporal debe limitar explícitamente el alcance de demo.
+revisión/evidencia de 14. 020 debe corregirse antes de acreditar móvil. 022 debe
+cerrarse antes de considerar estable la caché de rutas; cualquier aceptación
+temporal debe limitar explícitamente el alcance de demo.
 
 ## Incidencias previas, revisadas
 
@@ -205,6 +208,9 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
   y de los recorridos Kafka/IPFS/MongoDB/navegador en el entorno objetivo. La
   comprobación de implicación semántica entre afirmación y cita se mantiene como
   alcance de ISSUE-017.
+- **Límite descubierto:** comprobar que una cita pertenece al corpus no acredita
+  independencia ni calidad de la fuente. La autoconfirmación y la elegibilidad
+  documental se separan en ISSUE-021 para no reabrir el alcance ya implementado.
 
 ### ISSUE-014 - Resumen rompe al faltar resultados ponderados
 
@@ -233,6 +239,10 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
   jurisdicción desconocida, cache de segunda petición, stale fallback,
   proveedor/LLM fallido, GET sin costes y orden de dependencias. Falta E2E de
   red con APIs externas, Mongo y ambos recorridos desplegados.
+- **Límite descubierto:** la elegibilidad geográfica no exige fuente primaria y
+  el consumidor reduce las fuentes enrutadas a dominios, perdiendo tipo,
+  autoridad y puntuación. La jerarquía documental se trata en ISSUE-021 y la
+  estabilidad de la firma en ISSUE-022.
 
 ### ISSUE-016 - Regresión con falsos positivos y diagnóstico incompleto
 
@@ -295,3 +305,52 @@ aceptación temporal debe limitar explícitamente el alcance de demo.
 - **Cierre:** sin scroll horizontal de página a 390 px, navegación compacta,
   avisos contenidos y resultado accesible; ES/EN completos y acciones coherentes.
   Validar teclado y foco, no solo tamaño del viewport.
+
+## Hallazgos nuevos — 2026-09-11
+
+### ISSUE-021 - Una fuente recuperada puede autoconfirmar la noticia y eludir la política documental
+
+- **Estado:** abierta. Reproducida en la orden LIGHT
+  `355f6090-cec0-4ed3-a29a-46763fe66cc6`, primera aserción.
+- **Impacto:** los tres validadores RAG emitieron TRUE usando como evidencia la
+  noticia de Libertad Digital que originó el texto. La cita es literal y supera
+  el grounding de ISSUE-013, pero no es corroboración independiente.
+- **Causas:** la URL original se pierde tras importar el texto; Source Router
+  permite medios si cumplen jurisdicción; `EXT_ONLY_OFFICIAL` orienta al
+  proveedor pero no filtra su respuesta; el validator pasa solo dominios a
+  Evidence Search y pierde metadatos; el recuperador rechaza PDF, por lo que el
+  informe primario de IEA localizado no aportó contexto utilizable.
+- **Cierre:** propagar URL/dominio de origen; clasificar fuente primaria,
+  secundaria, copia y relación con el documento sometido; aplicar la política
+  tras recuperar resultados; conservar metadatos del router; extraer PDF con
+  página y error auditable. Una fuente sometida o copia no puede ser la única
+  evidencia decisiva. Para una afirmación atribuible a un estudio se exige el
+  documento primario recuperado o el veredicto efectivo es UNKNOWN.
+- **Regresión:** la orden indicada debe priorizar y citar el informe de IEA. Si
+  este no puede recuperarse, Libertad Digital puede conservarse como contexto o
+  pista, sin producir por sí sola TRUE/FALSE documental.
+- **Relación:** amplía la calidad factual de 017; no invalida el grounding
+  sintáctico de 013 ni la elegibilidad geográfica resuelta por 015.
+
+### ISSUE-022 - Subcategorías y tipos libres generan rutas duplicadas o demasiado amplias
+
+- **Estado:** abierta. Mongo contiene rutas distintas para combinaciones muy
+  próximas y la generación permite `subcategory` libre.
+- **Impacto:** sinónimos, tildes, traducciones o elecciones variables crean
+  nuevas entradas; a la vez, una ruta temática amplia puede reutilizar fuentes
+  descubiertas para un estudio concreto. Aumenta coste y puede degradar la
+  pertinencia sin producir un fallo explícito.
+- **Causas:** la firma solo normaliza espacios y mayúsculas; no hay catálogo ni
+  aliases de subcategorías; `claim_type_for_assertion` puede elegir el primer
+  `preferred_source_type` por orden alfabético; autores y título influyen en el
+  descubrimiento, pero no se separan de la memoria temática.
+- **Cierre:** catálogo versionado de subcategorías por categoría con aliases y
+  `OTHER` revisable; vocabulario cerrado de tipos de afirmación; resolución
+  determinista antes de crear categorías; firma `route-v2` con categoría,
+  subcategoría, tipo y jurisdicción canónicos. Entidades, título y fecha se usan
+  en la búsqueda concreta, no para fragmentar la ruta temática. Las rutas v1 se
+  dejan expirar o migran de forma explícita, sin fusión destructiva automática.
+- **Regresión y métricas:** aliases equivalentes producen la misma clave;
+  conceptos relacionados pero distintos permanecen separados. Registrar tasa
+  de rutas nuevas, reutilización, colisiones y candidatos `OTHER` para revisar y
+  repriorizar la taxonomía.

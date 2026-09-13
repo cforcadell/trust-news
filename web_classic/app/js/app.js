@@ -348,7 +348,7 @@ function renderOrderPollingState(type, session, status = "") {
         date: formatPollingEventDate(latestEvent?.timestamp),
         event: summarizeOrderEvent(latestEvent)
     });
-    const isError = type === "timeout" || type === "connection-error" || type === "terminal-error";
+    const isError = type === "connection-error" || type === "terminal-error";
     const messages = {
         checking: {
             title: t("messages.verificationChecking"),
@@ -383,7 +383,7 @@ function renderOrderPollingState(type, session, status = "") {
                 ${canRetry ? `<button type="button" class="btn-secondary btn-retry-verification">${safeText(t("messages.retryVerification"))}</button>` : ""}
             </div>
         </div>
-        <span class="status-value" data-status="${safeText(status || currentOrderData?.status || "UNKNOWN")}"></span>
+        ${renderGlobalOrderStatus(currentOrderData)}
     `;
 
     container.querySelector(".btn-retry-verification")?.addEventListener("click", () => pollOrder(session.orderId, {
@@ -396,8 +396,9 @@ async function runOrderPollingCycle(session) {
 
     if (Date.now() - session.startedAt >= POLLING_DURATION) {
         stopOrderPolling(session);
+        activateOrderTab("process");
         renderOrderPollingState("timeout", session, currentOrderData?.status);
-        alertMessage(t("messages.verificationTimeoutTitle"), "error", 7000);
+        alertMessage(t("messages.verificationTimeoutTitle"), "info", 7000);
         return;
     }
 
@@ -408,7 +409,7 @@ async function runOrderPollingCycle(session) {
     const result = await loadOrderById(session.orderId, false, {
         signal: controller.signal,
         background: true,
-        preferredTabKey: session.followProcess ? "process" : null,
+        preferredTabKey: session.followProcess && !session.processShown ? "process" : null,
         isCurrent: () => activeOrderPollingSession === session && !session.stopped
     });
     window.clearTimeout(requestTimeoutId);
@@ -417,6 +418,7 @@ async function runOrderPollingCycle(session) {
     if (session.stopped || activeOrderPollingSession !== session) return;
 
     if (result?.ok) {
+        session.processShown = true;
         session.consecutiveErrors = 0;
         const status = String(result.data?.status || "UNKNOWN").toUpperCase();
         if (isTerminalOrderStatus(status)) {
@@ -1078,7 +1080,7 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
                         if (s.disabled) return;
                         document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
                         btn.classList.add("activeTab");
-                        renderTabContent(s.key, s.data, orderAssertions, data, eventsData);
+                        renderCurrentOrderTab(s.key);
                     };
                     if(s.key === defaultTabKey) btn.classList.add("activeTab");
                     tabs.appendChild(btn);
@@ -1100,7 +1102,7 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
             }
         }
 
-        detailsContainer.innerHTML = '<span class="status-value" data-status="' + safeText(data.status || "UNKNOWN") + '"></span>';
+        detailsContainer.innerHTML = renderGlobalOrderStatus(data);
         return { ok: true, data };
     } catch (error) {
         if (!background) {
@@ -1123,6 +1125,27 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
 // =========================================================
 // RENDER TAB CONTENT
 // =========================================================
+function orderValidationPending(order) {
+    return Boolean(order?.status) && !isTerminalOrderStatus(String(order.status).toUpperCase());
+}
+
+function renderGlobalOrderStatus(order) {
+    if (!order?.order_id) return "";
+    const summary = buildVerificationSummary(order, currentOrderEvents);
+    return `<div class="order-global-status" role="status">${renderStatusBadge(order.status)}
+        <span>${safeText(t(orderValidationPending(order) ? "ui.provisionalResult" : "ui.result"))}: ${safeText(summary.statusLabel)}</span>
+        <span>${safeText(t("ui.validationProgressCount", { completed: summary.completedValidations, total: summary.totalValidations }))}</span>
+        <span class="status-value" data-status="${safeText(order.status)}"></span></div>`;
+}
+
+function renderCurrentOrderTab(key) {
+    const order = currentOrderData;
+    const assertions = collectOrderAssertions(order.assertions, order);
+    const values = { summary: order, assertions, evidence: order.validations || {}, process: currentOrderEvents,
+        technical: order, ipfs: order.document || null, events: currentOrderEvents };
+    renderTabContent(key, values[key], assertions, order, currentOrderEvents);
+}
+
 function renderTabContent(tabName, data, assertions=[], orderData=null, events=[]) {
     const container = document.getElementById("tabContent");
     container.innerHTML = "";
@@ -1142,6 +1165,10 @@ function renderTabContent(tabName, data, assertions=[], orderData=null, events=[
             `;
             break;
         case "evidence":
+            if (orderValidationPending(orderData) && !Object.keys(data || {}).length) {
+                container.innerHTML = `<p class="empty-state">${safeText(t("ui.waitingEvidence"))}</p>`;
+                break;
+            }
             renderValidationsTree(container, data, assertions, orderData);
             break;
         case "process":
@@ -1548,6 +1575,8 @@ function buildVerificationSummary(order, events = []) {
 
 function assertionOutcome(orderData, assertionId) {
     const result = getAssertionResult(orderData, assertionId);
+    const waiting = orderValidationPending(orderData);
+    if (waiting && result?.decision_status === "NO_VALID_RESPONSES") return "pending";
     if (result) {
         const verdict = result.verdict || result.winner || "UNKNOWN";
         if (verdict === "TRUE") return "confirmed";
@@ -1557,6 +1586,7 @@ function assertionOutcome(orderData, assertionId) {
 
     const validators = orderData?.validations?.[String(assertionId)] || {};
     const completed = completedValidations(validators);
+    if (waiting && !completed.length) return "pending";
     if (!completed.length && Object.values(validators).some(isValidationError)) return "error";
     const votes = completed.map(item => getValidationLiteral(item?.approval));
     const approved = votes.filter(vote => vote === "True").length;
@@ -1568,6 +1598,7 @@ function assertionOutcome(orderData, assertionId) {
 
 function outcomeMeta(outcome) {
     const values = {
+        pending: { label: t("ui.awaitingValidation"), icon: "…", className: "inconclusive" },
         confirmed: { label: t("ui.confirmed"), icon: "✓", className: "confirmed" },
         contradicted: { label: t("ui.disproved"), icon: "×", className: "contradicted" },
         inconclusive: { label: t("summary.inconclusive"), icon: "?", className: "inconclusive" },
@@ -1697,7 +1728,7 @@ function renderOrderAssertions(container, assertions, orderData) {
             <button type="button" onclick="activateOrderTab('evidence')">${t("ui.viewDetail")}</button>
         </article>`;
     }).join("");
-    container.innerHTML = `<div class="assertions-toolbar"><strong>${assertions.length} ${t("ui.assertions").toLowerCase()}</strong><span>${t("ui.weightedValidatorVote")}</span></div><div class="assertion-card-list">${cards}</div>`;
+    container.innerHTML = `<div class="assertions-toolbar"><strong>${assertions.length} ${t("ui.assertions").toLowerCase()}</strong><span>${t(orderValidationPending(orderData) ? "ui.provisionalResult" : "ui.weightedValidatorVote")}</span></div><div class="assertion-card-list">${cards}</div>`;
 }
 
 function buildOrderProcessRows(orderData, events = []) {
@@ -3581,6 +3612,36 @@ function evidenceValidationResult(info = {}) {
     return info.evidence_validation || info.payload?.evidence_validation || null;
 }
 
+function unverifiedModelOpinion(info = {}) {
+    const result = evidenceValidationResult(info);
+    return result?.basis === "RETRIEVED_EVIDENCE"
+        && result.effective_verdict === "UNKNOWN"
+        && ["TRUE", "FALSE"].includes(result.original_verdict) ? result : null;
+}
+
+function renderModelOpinionAudit(info, opinion) {
+    const response = info.evidence_search_response || info.payload?.evidence_search_response;
+    const provided = opinion.provided_evidence_text;
+    const sources = response?.evidences || [];
+    const issues = (opinion.issues || []).map(issue => {
+        const key = `ui.citationIssues.${issue.code}`;
+        const label = t(key);
+        return `<li>${safeText(label === key ? issue.code : label)}${issue.source_id ? ` (${safeText(issue.source_id)})` : ""}</li>`;
+    }).join("");
+    const claims = opinion.claimed_evidence;
+    return `<details class="validator-evidence-summary model-opinion-audit">
+        <summary>${safeText(t("ui.opinionAudit"))}</summary>
+        <p>${safeText(t("ui.opinionExcluded"))}</p>
+        <h4>${safeText(t("ui.originalModelReason"))}</h4>
+        <p>${safeText(opinion.original_description || t("ui.auditNotRecorded"))}</p>
+        <h4>${safeText(t("ui.citationCheck"))}</h4><ul>${issues}</ul>
+        <h4>${safeText(t("ui.modelCitations"))}</h4>
+        <pre>${safeText(claims == null ? t("ui.auditNotRecorded") : JSON.stringify(claims, null, 2))}</pre>
+        <h4>${safeText(t("ui.providedEvidence"))}</h4>
+        ${provided ? `<pre>${safeText(provided)}</pre>` : `<p>${safeText(t("ui.auditNotRecorded"))}</p><pre>${safeText(JSON.stringify(sources, null, 2))}</pre>`}
+    </details>`;
+}
+
 function renderEvidenceValidationBadge(info = {}) {
     const validation = evidenceValidationResult(info);
     if (!validation) return "";
@@ -3696,7 +3757,11 @@ function renderValidationsTree(container, validations, assertions, orderData = n
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
         const assertionText = resolveAssertionText(assertionId, assertions, orderData, validatorsObj);
 
-        const assertionResult = getAssertionResult(orderData, assertionId);
+        const recordedResult = getAssertionResult(orderData, assertionId);
+        const awaitingResponses = orderValidationPending(orderData)
+            && (!recordedResult || recordedResult.decision_status === "NO_VALID_RESPONSES")
+            && !completedValidations(validatorsObj).length;
+        const assertionResult = awaitingResponses ? null : recordedResult;
         const completed = completedValidations(validatorsObj);
         const literals = completed.map(v => getValidationLiteral(v.approval));
         const approvedCount = literals.filter(v => v === "True").length;
@@ -3714,6 +3779,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
 
         const validatorsHtml = Object.entries(validatorsObj).map(([validator, info]) => {
             const validationError = isValidationError(info);
+            const opinion = validationError ? null : unverifiedModelOpinion(info);
             const lit = validationError ? "ERROR" : getValidationLiteral(info.approval);
             const litClass = validationError ? "validation-error-text" : lit === "True" ? "true-news" : lit === "False" ? "false-news" : "partial-news";
             let desc = validationError ? (info.error_details?.message || info.error || info.text || "Validation failed") : (info.text || t("ui.noDescription"));
@@ -3729,12 +3795,12 @@ function renderValidationsTree(container, validations, assertions, orderData = n
             const typeHint = t(typeId >= 1 && typeId <= 5 ? `ui.validatorTypeHints.${typeId}` : "ui.validatorUnknownHint");
             const typeBadge = `<span class="validator-type-badge" tabindex="0" title="${safeText(typeHint)}" aria-label="${safeText(`${typeLabel}. ${typeHint}`)}">${safeText(typeLabel)}<span aria-hidden="true" class="validator-type-info">ⓘ</span></span>`;
             const preferredDomainsBadge = typeId === 3 ? renderPreferredDomainsBadge(preferredDomainsInfoForValidation(info)) : "";
-            const evidenceHtml = renderEvidenceLinks(info);
+            const evidenceHtml = opinion ? renderModelOpinionAudit(info, opinion) : renderEvidenceLinks(info);
             return `
                 <div class="validator-card${validationError ? " validation-error-card" : ""}${tx ? " has-transaction" : ""}">
                     <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${safeText(info.validator_alias || validator)}</a></div>
-                    <div class="validator-result ${litClass}">${lit}</div>
-                    <div class="validator-desc">${safeText(desc)}</div>
+                    <div class="validator-result ${opinion ? "partial-news" : litClass}">${opinion ? safeText(t("ui.modelOpinion", { verdict: opinion.original_verdict })) : lit}</div>
+                    <div class="validator-desc">${opinion ? `<p class="model-opinion-notice">${safeText(t("ui.unverifiedCitation"))} · ${safeText(t("ui.opinionExcluded"))}</p>` : ""}${safeText(desc)}</div>
                     <div class="validator-meta">
                         ${typeBadge}
                         ${preferredDomainsBadge}
@@ -3751,7 +3817,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
             <details class="validation-node">
                 <summary class="validation-summary">
                     <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult ? ` → ${safeText(assertionResult.verdict || assertionResult.winner || "UNKNOWN")}` : errorCount ? " → ERROR" : ""}</div>
-                    ${assertionResult ? renderScorePills(assertionResult) : `<div class="vote-pills">
+                    ${awaitingResponses ? `<span class="vote-pill vote-unknown">${safeText(t("ui.awaitingValidation"))}</span>` : assertionResult ? renderScorePills(assertionResult) : `<div class="vote-pills">
                         ${renderVotePill(approvedCount, "True", "vote-true")}
                         ${renderVotePill(rejectedCount, "False", "vote-false")}
                         ${renderVotePill(unknownCount, "Unknown", "vote-unknown")}

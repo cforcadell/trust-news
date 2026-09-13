@@ -678,6 +678,10 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
 }
 .validator-card .validator-name { grid-area: name; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; color: #dbeafe; font-weight: 800; }
 .validator-result { grid-area: result; font-weight: 900; white-space: nowrap; }
+.validator-result.partial-news { white-space: normal; overflow-wrap: anywhere; }
+.model-opinion-notice { margin: 0 0 8px; color: var(--accent-yellow); font-weight: 700; }
+.order-global-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 0; color: var(--text-secondary); font-size: .85rem; }
+.model-opinion-audit pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; }
 .validator-desc { grid-area: desc; min-width: 0; color: #e2e8f0; line-height: 1.45; max-height: 120px; overflow: auto; overflow-wrap: anywhere; }
 .validator-desc pre { margin: 0; }
 .validator-meta {

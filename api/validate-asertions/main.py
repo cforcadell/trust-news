@@ -508,9 +508,17 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
     extras["evidence_validation"] = grounding["validation"]
     effective_verdict = Validacion[grounding["effective_verdict"]]
     if effective_verdict == Validacion.UNKNOWN and verdict in {Validacion.TRUE, Validacion.FALSE}:
+        extras["evidence_validation"].update({
+            "original_description": description,
+            "claimed_evidence": claimed_evidence,
+            "provided_evidence_text": format_evidences_for_prompt(evidences),
+        })
         description = (
-            "No se emite un veredicto documental: la respuesta del validador no "
-            "contiene evidencia recuperada y comprobable que apoye la decisión."
+            f"La IA respondió {verdict.name}, pero su cita no ha podido verificarse "
+            "como soporte de la decisión. Este resultado no cuenta como voto "
+            "decisivo en el consenso documental. "
+            f"Se proporcionaron {len(evidences)} fuentes al modelo. "
+            f"Justificación original de la IA: {description}"
         )
         logger.warning(
             "[validate-asertions] unsupported_documentary_verdict=true "

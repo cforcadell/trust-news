@@ -42,6 +42,33 @@ def minimal_payload():
     return SimpleNamespace(assertion=assertion)
 
 
+@pytest.mark.parametrize("original", ["TRUE", "FALSE"])
+def test_unverified_opinion_preserves_audit_without_decisive_vote(validator, monkeypatch, original):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    sources = [{"source_id": "source-1", "url": "https://example.test/report", "contexts": [
+        {"context_id": "context-1", "text": "Texto recuperado exacto."}
+    ]}]
+    claims = [{"source_id": "source-1", "url": "https://example.test/report",
+               "evidence_text": "Cita inventada", "supports": original == "TRUE"}]
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (sources, {"evidences": sources}))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(verificar_asercion=lambda *args: "response"))
+    monkeypatch.setattr(validator, "parse_validator_api_response", lambda text: (
+        validator.Validacion[original], "Razonamiento original", {"evidence_used": claims}))
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmación"))
+    verdict, description, extras, response = validator.validate_payload_v2(payload)
+    assert verdict == validator.Validacion.UNKNOWN
+    assert extras["evidence_used"] == []
+    audit = extras["evidence_validation"]
+    assert audit["original_verdict"] == original
+    assert audit["original_description"] == "Razonamiento original"
+    assert audit["claimed_evidence"] == claims
+    assert audit["provided_evidence_text"] == validator.format_evidences_for_prompt(sources)
+    assert "EVIDENCE_TEXT_NOT_RETRIEVED" in [issue["code"] for issue in audit["issues"]]
+    assert original in description
+    assert response["evidences"] == sources
+
+
 def test_non_rag_calls_neither_dependency(validator, monkeypatch):
     validator.VALIDATOR_TYPE = validator.ValidatorType.LLM_MEMORY_VALIDATION
     monkeypatch.setattr(validator.httpx, "post", lambda *args, **kwargs: pytest.fail("external dependency called"))

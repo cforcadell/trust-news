@@ -103,14 +103,16 @@ mostrado límites que no cubren las correcciones 013 y 015:
 - El informe primario puede localizarse y perder frente a un medio porque el
   recuperador no extrae PDF y el paso `source-router → evidence-search` pierde
   metadatos de autoridad y tipo de fuente (ISSUE-021).
-- La subcategoría libre y el `claim_type` inestable fragmentan rutas equivalentes
-  o permiten reutilizar rutas demasiado amplias (ISSUE-022).
+- La subcategoría libre y el `claim_type` inestable fragmentaban rutas
+  equivalentes; se sustituyen por taxonomía cerrada y una firma `route-v2`
+  (ISSUE-022).
 
 La iteración debe propagar la URL de origen, clasificar procedencia e
 independencia, recuperar documentos primarios en PDF, aplicar la política de
 fuentes después de la búsqueda y conservar los metadatos del router. También
-debe introducir subcategorías y tipos de afirmación canónicos, aliases y claves
-de ruta versionadas, sin borrar la caché histórica.
+introduce temas y tipos de evidencia canónicos y claves de ruta versionadas. Al
+ser una ruptura deliberada, el realineamiento elimina la caché histórica
+incompatible y conserva las nuevas colecciones en ejecuciones posteriores.
 
 ISSUE-017 aporta el corpus y las métricas para comprobar el resultado. La orden
 `355f6090-cec0-4ed3-a29a-46763fe66cc6` queda como caso de regresión: la noticia

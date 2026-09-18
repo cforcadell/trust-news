@@ -178,9 +178,9 @@ Configuracion del worker:
 Flujo:
 
 1. El worker recibe una solicitud de validacion por blockchain event o Kafka light.
-2. Para LOCAL ejecuta `POST /routes/resolve` en source-router; NONE/EXT omiten este paso.
-3. Source Router consulta `source_routes`; en MISS/STALE descubre URLs reales, hace una clasificación LLM batch y aplica eligibility/ranking en código.
-4. El worker ejecuta `POST /search/evidence` con `include_domains` cuando es LOCAL.
+2. Para `LOCAL` ejecuta `POST /routes/resolve` en Source Router; las estrategias `EXT_*` omiten este paso.
+3. Source Router consulta `source_routes_v2` y `domain_profiles_v1`; en MISSING/STALE descubre URLs reales, clasifica en un batch LLM y aplica elegibilidad/ranking en código.
+4. El worker ejecuta `POST /search/evidence`; con `LOCAL` adjunta `preferred_sources[]` completos.
 5. Evidence Search consulta Exa/Tavily y construye evidencia/chunks; no conoce la memoria de rutas.
 6. El worker inyecta las evidencias en el prompt RAG mediante `common/llm`.
 7. El LLM debe responder usando exclusivamente esas evidencias.

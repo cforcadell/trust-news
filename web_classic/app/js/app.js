@@ -592,17 +592,10 @@ function normalizeGeneratedAssertion(assertion, fallbackIndex = 0) {
 }
 
 function generatedAssertionsFromResponse(data) {
-    const payload = data?.payload || data || {};
-    const candidates = [
-        payload.assertions,
-        payload.assertions_document?.assertions,
-        payload.assertionsDocument?.assertions,
-        data?.assertions,
-        data?.assertions_document?.assertions
-    ].filter(Array.isArray);
-
-    const best = candidates.reduce((selected, current) => current.length > selected.length ? current : selected, []);
-    return best.map((assertion, index) => normalizeGeneratedAssertion(assertion, index));
+    const assertions = data?.payload?.assertions_document?.assertions;
+    return Array.isArray(assertions)
+        ? assertions.map((assertion, index) => normalizeGeneratedAssertion(assertion, index))
+        : [];
 }
 
 function encodeAssertionDraft(assertion) {
@@ -678,7 +671,7 @@ async function handleGenerateAssertions() {
     try {
         const assertions = await generateAssertionsFromText(text, controller.signal);
         progress.stop();
-        renderEditableAssertionsTable(container, assertions);
+        renderAssertionsTable(container, assertions);
         renderAssertionsGenerationResult(container, assertions.length);
         alertMessage(
             assertions.length
@@ -715,49 +708,10 @@ function attachAssertionTableEvents(container) {
         });
     });
 
-    // ======================
-    // Añadir fila nueva
-    // ======================
-    const addBtn = container.querySelector("#btn-add-row");
-    if (!addBtn) return;  // seguridad
-
-    addBtn.addEventListener("click", () => {
-
-        const tbody = container.querySelector("tbody");
-
-        // Calcular último ID numérico existente
-        let lastId = 0;
-        tbody.querySelectorAll("tr").forEach(row => {
-            const cell = row.children[0]?.textContent.trim();
-            if (cell && !isNaN(cell)) {
-                lastId = Math.max(lastId, parseInt(cell, 10));
-            }
-        });
-
-        const nextId = lastId + 1;
-
-        // Crear fila nueva
-        const row = document.createElement("tr");
-        row.setAttribute("data-id", nextId);
-
-        row.innerHTML = `
-            <td>${nextId}</td>
-            <td contenteditable="true" class="editable-text"></td>
-            <td>${renderCategorySelect(1)}</td>
-            <td><button class="btn-delete-row">✖</button></td>
-        `;
-
-        tbody.appendChild(row);
-
-        // Añadir evento borrar a la nueva fila
-        row.querySelector(".btn-delete-row").addEventListener("click", () => {
-            row.remove();
-        });
-    });
 }
 
 
-function renderEditableAssertionsTable(container, assertions) {
+function renderAssertionsTable(container, assertions) {
     container.innerHTML = `
         <table class="compact-table">
             <thead>
@@ -774,19 +728,18 @@ function renderEditableAssertionsTable(container, assertions) {
                     return `
                     <tr data-id="${safeText(assertionId)}" data-assertion="${safeText(encodeAssertionDraft(a))}">
                         <td>${safeText(assertionId)}</td>
-                        <td contenteditable="true" class="editable-text">${safeText(extractAssertionText(a))}</td>
-                        <td>${renderCategorySelect(getAssertionCategory(a) || 1)}</td>
+                        <td class="assertion-text">${safeText(extractAssertionText(a))}</td>
+                        <td>${safeText(categoryLabel(getAssertionCategory(a) || 1))}</td>
                         <td><button class="btn-delete-row">✖</button></td>
                     </tr>`;
                 }).join("")}
             </tbody>
         </table>
 
-        <button id="btn-add-row" class="btn btn-tertiary">+</button>
         <button id="btn-publish-with-assertions" class="btn btn-tertiary">${t("ui.publishWithAssertions")}</button>
     `;
 
-    // Conectar los eventos de edición y borrado
+    // Conectar el borrado de aserciones sin alterar sus metadatos normalizados.
     attachAssertionTableEvents(container);
 
     // -----------------------------
@@ -803,19 +756,6 @@ function renderEditableAssertionsTable(container, assertions) {
         });
     }
 }
-
-
-function renderCategorySelect(selected) {
-    return `
-        <select class="category-select">
-            ${CATEGORY_IDS
-                .map(id => `
-                    <option value="${id}" ${selected == id ? "selected" : ""}>${categoryLabel(id)}</option>`
-                ).join("")}
-        </select>
-    `;
-}
-
 
 
 // =========================================================
@@ -861,15 +801,14 @@ async function publishWithAssertions() {
     rows.forEach(row => {
         const originalAssertion = decodeAssertionDraft(row.dataset.assertion);
         const idAssertion = row.dataset.id || originalAssertion.idAssertion || originalAssertion.assertion_id || crypto.randomUUID();
-        const textCell = row.querySelector(".editable-text");
-        const categorySelect = row.querySelector(".category-select");
+        const textCell = row.querySelector(".assertion-text");
 
-        if (textCell && categorySelect) {
+        if (textCell) {
             const assertion = {
                 ...originalAssertion,
                 idAssertion: String(idAssertion),
                 text: textCell.innerText.trim(),
-                categoryId: parseInt(categorySelect.value)
+                categoryId: Number(originalAssertion.categoryId)
             };
             if (assertion.assertion_id == null && /^\d+$/.test(String(idAssertion))) {
                 assertion.assertion_id = Number(idAssertion);
@@ -1328,6 +1267,16 @@ function getAssertionId(assertion, fallbackIndex) {
     return String(assertion.idAssertion ?? assertion.id ?? assertion.assertion_id ?? fallbackIndex);
 }
 
+function assertionDeduplicationKey(assertion, fallbackIndex) {
+    const explicitId = assertion?.idAssertion ?? assertion?.id ?? assertion?.assertion_id;
+    if (explicitId !== null && explicitId !== undefined && String(explicitId).trim()) {
+        return `id:${String(explicitId).trim()}`;
+    }
+
+    const normalizedText = extractAssertionText(assertion).replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    return normalizedText ? `text:${normalizedText}` : `position:${fallbackIndex}`;
+}
+
 function collectOrderAssertions(assertions = [], orderData = null) {
     const sources = [
         assertions,
@@ -1343,7 +1292,10 @@ function collectOrderAssertions(assertions = [], orderData = null) {
         if (!Array.isArray(source)) return;
         source.forEach((assertion, index) => {
             if (!assertion || typeof assertion !== "object") return;
-            const key = `${getAssertionId(assertion, index)}:${assertion.assertion_index ?? ""}:${extractAssertionText(assertion)}`;
+            // `order.assertions` is a UI projection while `document.assertions`
+            // is the canonical protocol document. They may differ only in
+            // assertion_index, so that field must not create a second card.
+            const key = assertionDeduplicationKey(assertion, index);
             if (seen.has(key)) return;
             seen.add(key);
             collected.push(assertion);
@@ -3455,59 +3407,38 @@ function renderScorePills(result) {
     `;
 }
 
-function preferredDomainsStatusFromPolicy(usePreferredDomains) {
-    const mode = normalizePreferredDomainsMode(usePreferredDomains);
-    if (!mode) return null;
+function evidenceStrategyStatus(value) {
+    const strategy = normalizeEvidenceStrategy(value);
+    if (!strategy) return null;
     return {
-        enabled: mode !== "NONE",
-        label: t(`ui.sourcePolicies.${mode}.label`),
-        title: t(`ui.sourcePolicies.${mode}.hint`),
-        className: mode === "NONE" ? "preferred-domains-off" : "preferred-domains-on",
+        enabled: true,
+        label: t(`ui.sourcePolicies.${strategy}.label`),
+        title: t(`ui.sourcePolicies.${strategy}.hint`),
+        className: "preferred-domains-on",
     };
 }
 
-function normalizePreferredDomainsMode(value) {
+function normalizeEvidenceStrategy(value) {
     if (typeof value !== "string") return null;
-    const mode = value.trim().toUpperCase();
-    return ["NONE", "LOCAL", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"].includes(mode) ? mode : null;
+    const strategy = value.trim().toUpperCase();
+    return ["LOCAL", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"].includes(strategy) ? strategy : null;
 }
 
-function preferredDomainsStatusFromEvidenceResponse(response) {
+function evidenceStrategyFromResponse(response) {
     if (!response || typeof response !== "object") return null;
-
-    const explicitPolicy = normalizePreferredDomainsMode(response.search_policy?.use_preferred_domains);
-    const fromPolicy = preferredDomainsStatusFromPolicy(explicitPolicy);
-    if (fromPolicy) return fromPolicy;
-
-    const resolution = response.domain_resolution || {};
-    const fromResolutionMode = preferredDomainsStatusFromPolicy(normalizePreferredDomainsMode(resolution.preferred_domains_mode));
-    if (fromResolutionMode) return fromResolutionMode;
-
-    const preferredDomains = Array.isArray(resolution.preferred_domains) ? resolution.preferred_domains : [];
-    const queries = Array.isArray(response.queries_executed) ? response.queries_executed : [];
-    const hasSiteQueries = queries.some(query => String(query || "").trim().startsWith("site:"));
-
-    if (preferredDomains.length || hasSiteQueries) {
-        return {
-            enabled: true,
-            label: t("ui.sourcePolicies.LOCAL.label"),
-            title: t("ui.sourcePolicies.LOCAL.hint"),
-            className: "preferred-domains-on"
-        };
-    }
-
-    return null;
+    return evidenceStrategyStatus(response.search_policy?.strategy)
+        || evidenceStrategyStatus(response.domain_resolution?.strategy);
 }
 
-function preferredDomainsInfoForValidation(info = {}) {
+function evidenceStrategyInfoForValidation(info = {}) {
     const config = info.validator_config?.config || info.config || info.validator_config || {};
-    const explicitPolicy = normalizePreferredDomainsMode(
-        info.search_policy?.use_preferred_domains
-        ?? info.payload?.search_policy?.use_preferred_domains
-        ?? config.evidence_search_use_preferred_domains
+    const explicitStrategy = normalizeEvidenceStrategy(
+        info.search_policy?.strategy
+        ?? info.payload?.search_policy?.strategy
+        ?? config.evidence_search_strategy
     );
-    return preferredDomainsStatusFromPolicy(explicitPolicy)
-        || preferredDomainsStatusFromEvidenceResponse(info.evidence_search_response || info.payload?.evidence_search_response)
+    return evidenceStrategyStatus(explicitStrategy)
+        || evidenceStrategyFromResponse(info.evidence_search_response || info.payload?.evidence_search_response)
         || { enabled: null, label: t("ui.noRecord"), title: t("ui.sourcePolicyUnknown"), className: "preferred-domains-unknown" };
 }
 
@@ -3794,7 +3725,7 @@ function renderValidationsTree(container, validations, assertions, orderData = n
             const typeLabel = typeId >= 1 && typeId <= 5 ? validatorTypeLabel(type) : t("ui.validatorUnknown");
             const typeHint = t(typeId >= 1 && typeId <= 5 ? `ui.validatorTypeHints.${typeId}` : "ui.validatorUnknownHint");
             const typeBadge = `<span class="validator-type-badge" tabindex="0" title="${safeText(typeHint)}" aria-label="${safeText(`${typeLabel}. ${typeHint}`)}">${safeText(typeLabel)}<span aria-hidden="true" class="validator-type-info">ⓘ</span></span>`;
-            const preferredDomainsBadge = typeId === 3 ? renderPreferredDomainsBadge(preferredDomainsInfoForValidation(info)) : "";
+            const preferredDomainsBadge = typeId === 3 ? renderPreferredDomainsBadge(evidenceStrategyInfoForValidation(info)) : "";
             const evidenceHtml = opinion ? renderModelOpinionAudit(info, opinion) : renderEvidenceLinks(info);
             return `
                 <div class="validator-card${validationError ? " validation-error-card" : ""}${tx ? " has-transaction" : ""}">

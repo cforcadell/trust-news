@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, Dict, List, Literal, Optional
@@ -7,6 +8,19 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from common.category_catalog import CATEGORY_CATALOG_PROMPT, CATEGORY_IDS, validate_category_id
+from common.search.normalization import normalize_domain
+from common.routing_taxonomy import (
+    EVIDENCE_KIND_PROMPT,
+    TAXONOMY_VERSION,
+    TOPIC_PROMPT,
+    EntityRole,
+    EntityType,
+    EvidenceKind,
+    JurisdictionScope,
+    TemporalType,
+    TopicCode,
+    validate_topic_category,
+)
 
 
 ASSERTIONS_DOCUMENT_SCHEMA_VERSION = "assertions-document-v2"
@@ -31,18 +45,6 @@ class Origin(str, Enum):
     UNKNOWN = "unknown"
 
 
-JURISDICTIONS = {
-    "local",
-    "regional",
-    "national",
-    "european",
-    "international",
-    "corporate",
-    "sports",
-    "unknown",
-}
-
-
 CategoryId = Annotated[
     StrictInt,
     Field(json_schema_extra={"enum": sorted(CATEGORY_IDS)}),
@@ -62,76 +64,94 @@ def clamp_confidence(value: Any, default: float = 0.0) -> float:
     return max(0.0, min(1.0, parsed))
 
 
+class JurisdictionContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: JurisdictionScope
+    country_code: Optional[str] = Field(default=None, pattern=r"^[A-Z]{2}$")
+    region_code: Optional[str] = Field(default=None, pattern=r"^[A-Z]{2}-[A-Z0-9]{1,3}$")
+    jurisdiction_code: Optional[str] = Field(default=None, pattern=r"^[A-Z][A-Z0-9._-]{1,31}$")
+    applicable_country_codes: List[str] = Field(default_factory=list)
+
+    @field_validator("country_code", "region_code", "jurisdiction_code", mode="before")
+    @classmethod
+    def upper_codes(cls, value: Any) -> Any:
+        return str(value).strip().upper() if value else None
+
+    @field_validator("applicable_country_codes", mode="before")
+    @classmethod
+    def normalize_applicable_countries(cls, values: Any) -> List[str]:
+        normalized = list(dict.fromkeys(str(value).strip().upper() for value in (values or []) if str(value).strip()))
+        if any(not re.fullmatch(r"[A-Z]{2}", value) for value in normalized):
+            raise ValueError("applicable_country_codes must contain ISO 3166-1 alpha-2 codes")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_codes_for_scope(self):
+        if self.scope in {JurisdictionScope.GLOBAL, JurisdictionScope.UNKNOWN}:
+            if self.country_code or self.region_code or self.jurisdiction_code or self.applicable_country_codes:
+                raise ValueError(f"{self.scope.value} jurisdiction cannot contain codes")
+        elif self.scope == JurisdictionScope.SUPRANATIONAL:
+            if not self.jurisdiction_code or self.country_code or self.region_code:
+                raise ValueError("SUPRANATIONAL jurisdiction requires only jurisdiction_code")
+        elif self.scope == JurisdictionScope.COUNTRY:
+            if not self.country_code or self.region_code or self.jurisdiction_code or self.applicable_country_codes:
+                raise ValueError("COUNTRY jurisdiction requires country_code and no region_code")
+        elif self.scope == JurisdictionScope.REGION:
+            if not self.country_code or not self.region_code or self.jurisdiction_code or self.applicable_country_codes:
+                raise ValueError("REGION jurisdiction requires country_code and region_code")
+        elif self.scope == JurisdictionScope.LOCAL:
+            if not self.country_code or not self.region_code or not self.jurisdiction_code or self.applicable_country_codes:
+                raise ValueError("LOCAL jurisdiction requires country_code, region_code and jurisdiction_code")
+        return self
+
+    def routing_key(self) -> str:
+        return ":".join(filter(None, (self.scope.value, self.jurisdiction_code, self.country_code, self.region_code)))
+
+
 class LocationContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = "unknown"
-    scope: str = "unknown"
-    type: str = "unknown"
+    scope: JurisdictionScope = JurisdictionScope.UNKNOWN
     country_code: Optional[str] = None
     region_code: Optional[str] = None
-    province: Optional[str] = None
-    city: Optional[str] = None
     origin: Origin = Origin.UNKNOWN
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
+    @field_validator("country_code", "region_code", mode="before")
+    @classmethod
+    def upper_location_codes(cls, value: Any) -> Any:
+        return str(value).strip().upper() if value else None
+
 
 class EntityContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = "unknown"
-    type: str = "unknown"
-    role: str = "unknown"
+    type: EntityType = EntityType.UNKNOWN
+    role: EntityRole = EntityRole.UNKNOWN
     origin: Origin = Origin.UNKNOWN
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class TemporalContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     value: str = "unknown"
-    type: str = "unknown"
+    type: TemporalType = TemporalType.UNKNOWN
     origin: Origin = Origin.UNKNOWN
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class AssertionContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     locations: List[LocationContext] = Field(default_factory=list)
     entities: List[EntityContext] = Field(default_factory=list)
     temporal_context: List[TemporalContext] = Field(default_factory=list)
     language: str = "unknown"
-    jurisdiction: str = "unknown"
-
-    @model_validator(mode="before")
-    @classmethod
-    def accept_legacy_context_lists(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-
-        normalized = dict(data)
-
-        def normalize_items(field: str, value_key: str) -> None:
-            items = normalized.get(field)
-            if items is None:
-                return
-            if not isinstance(items, list):
-                items = [items]
-            coerced = []
-            for item in items:
-                if isinstance(item, dict):
-                    coerced.append(item)
-                elif item is not None:
-                    coerced.append({
-                        value_key: str(item),
-                        "origin": Origin.EXPLICIT,
-                        "confidence": 0.5,
-                    })
-            normalized[field] = coerced
-
-        normalize_items("locations", "name")
-        normalize_items("entities", "name")
-        normalize_items("temporal_context", "value")
-        return normalized
-
-    @field_validator("jurisdiction")
-    @classmethod
-    def normalize_jurisdiction(cls, value: str) -> str:
-        normalized = (value or "unknown").strip().lower()
-        return normalized if normalized in JURISDICTIONS else "unknown"
+    jurisdiction: JurisdictionContext
 
     @field_validator("language")
     @classmethod
@@ -141,18 +161,10 @@ class AssertionContext(BaseModel):
 
 
 class SearchHints(BaseModel):
-    preferred_source_types: List[str] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
     search_keywords: List[str] = Field(default_factory=list)
     suggested_queries: List[str] = Field(default_factory=list)
-
-    @field_validator("preferred_source_types")
-    @classmethod
-    def normalize_source_types(cls, values: List[str]) -> List[str]:
-        normalized = []
-        for value in values or []:
-            item = str(value or "unknown").strip().lower()
-            normalized.append(item)
-        return list(dict.fromkeys(normalized))
 
 
 class ContextConfidence(BaseModel):
@@ -168,10 +180,17 @@ class EnrichedAssertion(BaseModel):
     assertion_index: int = Field(ge=0)
     text: str
     categoryId: CategoryId
-    subcategory: str = "unknown"
-    context: AssertionContext = Field(default_factory=AssertionContext)
+    topic_code: TopicCode
+    evidence_kind: EvidenceKind
+    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    context: AssertionContext
     search_hints: SearchHints = Field(default_factory=SearchHints)
     context_confidence: ContextConfidence = Field(default_factory=ContextConfidence)
+
+    @model_validator(mode="after")
+    def validate_topic_for_category(self):
+        validate_topic_category(self.topic_code, self.categoryId)
+        return self
 
     def to_chain_assertion(self) -> Dict[str, Any]:
         return {
@@ -196,6 +215,12 @@ class ProtocolPost(BaseModel):
     published_at: Optional[str] = None
     submitted_at: str = Field(default_factory=utc_now_iso)
 
+    @field_validator("source_domain", mode="before")
+    @classmethod
+    def normalize_source_domain(cls, value: Any) -> Optional[str]:
+        normalized = normalize_domain(value)
+        return normalized or None
+
 
 class GeneratorInfo(BaseModel):
     service: str = "generate-asertions"
@@ -218,12 +243,18 @@ class AssertionsDocumentV2(BaseModel):
     def reject_legacy_or_operational_fields(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        version = data.get("schema_version", ASSERTIONS_DOCUMENT_SCHEMA_VERSION)
-        if version != ASSERTIONS_DOCUMENT_SCHEMA_VERSION:
+        if data.get("schema_version") != ASSERTIONS_DOCUMENT_SCHEMA_VERSION:
             raise ValueError("Invalid assertions document schema_version: expected assertions-document-v2")
         if "order_id" in data:
             raise ValueError("order_id is operational and must not be part of assertions-document-v2")
         return data
+
+    @model_validator(mode="after")
+    def validate_assertion_order(self):
+        for index, assertion in enumerate(self.assertions):
+            if assertion.assertion_index != index or str(assertion.assertion_id) != str(index + 1):
+                raise ValueError("assertions must use contiguous assertion_id and assertion_index values")
+        return self
 
     def to_chain_assertions(self) -> List[Dict[str, Any]]:
         return [assertion.to_chain_assertion() for assertion in self.assertions]
@@ -239,6 +270,19 @@ class SourceDocument(BaseModel):
     schema_version: Literal["assertions-document-v2"] = ASSERTIONS_DOCUMENT_SCHEMA_VERSION
 
 
+class OriginDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: Optional[str] = None
+    domain: Optional[str] = None
+
+    @field_validator("domain", mode="before")
+    @classmethod
+    def normalize_origin_domain(cls, value: Any) -> Optional[str]:
+        normalized = normalize_domain(value)
+        return normalized or None
+
+
 class AssertionValidationPayloadV2(BaseModel):
     schema_version: Literal["assertion-validation-payload-v2"] = ASSERTION_VALIDATION_PAYLOAD_SCHEMA_VERSION
     mode: ValidationMode
@@ -246,13 +290,14 @@ class AssertionValidationPayloadV2(BaseModel):
     correlation: Correlation = Field(default_factory=Correlation)
     assertion: EnrichedAssertion
     source_document: SourceDocument
+    origin_document: OriginDocument
 
     @model_validator(mode="before")
     @classmethod
     def reject_legacy_payload(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        if data.get("schema_version", ASSERTION_VALIDATION_PAYLOAD_SCHEMA_VERSION) != ASSERTION_VALIDATION_PAYLOAD_SCHEMA_VERSION:
+        if data.get("schema_version") != ASSERTION_VALIDATION_PAYLOAD_SCHEMA_VERSION:
             raise ValueError("Invalid validation payload schema_version: expected assertion-validation-payload-v2")
         return data
 
@@ -283,13 +328,25 @@ def build_assertions_document_v2(
     model: Optional[str] = None,
     post_id: Optional[int | str] = None,
     network: Optional[Dict[str, Any]] = None,
+    source_url: Optional[str] = None,
+    source_domain: Optional[str] = None,
 ) -> AssertionsDocumentV2:
     parsed_mode = parse_validation_mode(mode)
-    enriched = [a if isinstance(a, EnrichedAssertion) else EnrichedAssertion(**assertion_input_for_protocol(a)) for a in assertions]
+    enriched = []
+    for index, assertion in enumerate(assertions):
+        parsed = assertion if isinstance(assertion, EnrichedAssertion) else EnrichedAssertion(**assertion_input_for_protocol(assertion))
+        enriched.append(parsed.model_copy(update={"assertion_id": index + 1, "assertion_index": index}))
     return AssertionsDocumentV2(
+        schema_version=ASSERTIONS_DOCUMENT_SCHEMA_VERSION,
         mode=parsed_mode,
         network=NetworkRef(**network) if network else None,
-        post=ProtocolPost(post_id=post_id, original_text=text, language=_first_language(enriched)),
+        post=ProtocolPost(
+            post_id=post_id,
+            original_text=text,
+            source_url=source_url,
+            source_domain=source_domain,
+            language=_first_language(enriched),
+        ),
         generator=GeneratorInfo(provider=provider, model=model),
         assertions=enriched,
     )
@@ -303,16 +360,20 @@ def build_assertion_validation_payload_v2(
     post_id: Optional[int | str] = None,
     cid: Optional[str] = None,
     order_id: Optional[str] = None,
+    origin_url: Optional[str] = None,
+    origin_domain: Optional[str] = None,
 ) -> AssertionValidationPayloadV2:
     parsed_mode = parse_validation_mode(mode)
     parsed_storage = storage if isinstance(storage, SourceDocumentStorage) else SourceDocumentStorage(str(storage).lower())
     parsed_assertion = assertion if isinstance(assertion, EnrichedAssertion) else EnrichedAssertion(**assertion_input_for_protocol(assertion))
     return AssertionValidationPayloadV2(
+        schema_version=ASSERTION_VALIDATION_PAYLOAD_SCHEMA_VERSION,
         mode=parsed_mode,
         post_id=post_id,
         correlation=Correlation(order_id=order_id),
         assertion=parsed_assertion,
         source_document=SourceDocument(storage=parsed_storage, cid=cid),
+        origin_document=OriginDocument(url=origin_url, domain=origin_domain),
     )
 
 

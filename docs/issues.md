@@ -222,27 +222,26 @@ temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-015 - Selección local de fuentes sin pertinencia regional acreditada
 
-- **Estado:** solucionada y validada localmente el 2026-09-08; pendiente de
-  desplegar y ejecutar con proveedores/Mongo reales.
+- **Estado:** solucionada y validada localmente; MongoDB se realineó en
+  `kind-trust-news`. Pendiente de desplegar y ejecutar con proveedores externos.
 - **Causa eliminada:** `LOCAL` usaba una allowlist masiva estática sin
   pertinencia regional acreditada. Evidence Search mezclaba selección de
   dominios y recuperación, y podía fabricar placeholders sin proveedor.
 - **Implementado:** microservicio interno `source-router`; discovery real por
   `common/search`, una clasificación batch por `common/llm`, rechazo de
   dominios inventados, eligibility geográfica estricta, ranking determinista y
-  memoria `source_routes` FRESH/STALE/MISSING. Los validators orquestan
-  `source-router → evidence-search(include_domains)` solo para RAG+LOCAL.
+  memoria `source_routes_v2` FRESH/STALE/MISSING. Los validators orquestan
+  `source-router → evidence-search(preferred_sources)` solo para RAG+LOCAL.
 - **Eliminado:** perfiles/seeds/generadores estáticos y colecciones
   `evidence_domain_profiles`/`evidence_normalization_configs`. El bootstrap las
-  elimina explícitamente. `NONE` y `EXT_*` conservan su planificación.
-- **Validación:** tests unitarios cubren Catalunya, España, UE, salud global,
-  jurisdicción desconocida, cache de segunda petición, stale fallback,
-  proveedor/LLM fallido, GET sin costes y orden de dependencias. Falta E2E de
-  red con APIs externas, Mongo y ambos recorridos desplegados.
-- **Límite descubierto:** la elegibilidad geográfica no exige fuente primaria y
-  el consumidor reduce las fuentes enrutadas a dominios, perdiendo tipo,
-  autoridad y puntuación. La jerarquía documental se trata en ISSUE-021 y la
-  estabilidad de la firma en ISSUE-022.
+  elimina explícitamente. Las estrategias RAG externas se mantienen como
+  `EXT_OFFICIAL_FIRST` y `EXT_ONLY_OFFICIAL`; `NONE` se elimina.
+- **Validación:** tests unitarios cubren rutas regionales, nacionales y UE,
+  firma normalizada, caché FRESH, stale fallback, rechazo de dominios inventados
+  y orden `router -> evidence-search`. El script se aplicó y verificó dos veces
+  sobre MongoDB local. Falta E2E con APIs externas y recorridos desplegados.
+- **Límite restante:** la extracción PDF y la clasificación documental fina se
+  tratan en ISSUE-021; la estabilidad de la firma queda resuelta en ISSUE-022.
 
 ### ISSUE-016 - Regresión con falsos positivos y diagnóstico incompleto
 
@@ -310,12 +309,12 @@ temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-021 - Una fuente recuperada puede autoconfirmar la noticia y eludir la política documental
 
-- **Estado:** abierta. Reproducida en la orden LIGHT
+- **Estado:** parcialmente solucionada. Reproducida en la orden LIGHT
   `355f6090-cec0-4ed3-a29a-46763fe66cc6`, primera aserción.
 - **Impacto:** los tres validadores RAG emitieron TRUE usando como evidencia la
   noticia de Libertad Digital que originó el texto. La cita es literal y supera
   el grounding de ISSUE-013, pero no es corroboración independiente.
-- **Causas:** la URL original se pierde tras importar el texto; Source Router
+- **Causas originales:** la URL original se pierde tras importar el texto; Source Router
   permite medios si cumplen jurisdicción; `EXT_ONLY_OFFICIAL` orienta al
   proveedor pero no filtra su respuesta; el validator pasa solo dominios a
   Evidence Search y pierde metadatos; el recuperador rechaza PDF, por lo que el
@@ -326,6 +325,11 @@ temporal debe limitar explícitamente el alcance de demo.
   página y error auditable. Una fuente sometida o copia no puede ser la única
   evidencia decisiva. Para una afirmación atribuible a un estudio se exige el
   documento primario recuperado o el veredicto efectivo es UNKNOWN.
+- **Implementado:** URL/dominio de origen viajan en los contratos `v2`; Evidence
+  Search conserva tipo, autoridad, puntuación, versión de perfil y relación con
+  el origen; `EXT_ONLY_OFFICIAL` filtra después de recuperar; el grounding
+  rechaza `relationship_to_origin=ORIGINAL`. Sigue pendiente la extracción PDF
+  y una clasificación documental más fina que `UNKNOWN`.
 - **Regresión:** la orden indicada debe priorizar y citar el informe de IEA. Si
   este no puede recuperarse, Libertad Digital puede conservarse como contexto o
   pista, sin producir por sí sola TRUE/FALSE documental.
@@ -334,8 +338,10 @@ temporal debe limitar explícitamente el alcance de demo.
 
 ### ISSUE-022 - Subcategorías y tipos libres generan rutas duplicadas o demasiado amplias
 
-- **Estado:** abierta. Mongo contiene rutas distintas para combinaciones muy
-  próximas y la generación permite `subcategory` libre.
+- **Estado:** solucionada en código y realineada en el clúster local
+  `kind-trust-news`; pendiente de despliegue en producción.
+  Mongo contenía rutas distintas para combinaciones próximas y la generación
+  permitía `subcategory` libre.
 - **Impacto:** sinónimos, tildes, traducciones o elecciones variables crean
   nuevas entradas; a la vez, una ruta temática amplia puede reutilizar fuentes
   descubiertas para un estudio concreto. Aumenta coste y puede degradar la
@@ -344,12 +350,16 @@ temporal debe limitar explícitamente el alcance de demo.
   aliases de subcategorías; `claim_type_for_assertion` puede elegir el primer
   `preferred_source_type` por orden alfabético; autores y título influyen en el
   descubrimiento, pero no se separan de la memoria temática.
-- **Cierre:** catálogo versionado de subcategorías por categoría con aliases y
-  `OTHER` revisable; vocabulario cerrado de tipos de afirmación; resolución
-  determinista antes de crear categorías; firma `route-v2` con categoría,
-  subcategoría, tipo y jurisdicción canónicos. Entidades, título y fecha se usan
-  en la búsqueda concreta, no para fragmentar la ruta temática. Las rutas v1 se
-  dejan expirar o migran de forma explícita, sin fusión destructiva automática.
+- **Implementado:** se elimina `subcategory` y se sustituyen los valores libres
+  por `topic_code`, `evidence_kind`, `source_type`, `authority_level` y
+  jurisdicción de `routing-taxonomy-v1`. Pydantic y el JSON Schema rechazan
+  valores inventados y combinaciones tema/categoría incompatibles. La firma es
+  `route-v2|taxonomy|topic|evidence|jurisdiction`; texto, entidad y fecha quedan
+  fuera de la caché temática y se usan en la búsqueda documental concreta.
+- **Realineamiento:** colecciones nuevas `source_routes_v2`,
+  `domain_profiles_v1` y `evidence_search_cache_v2`. El script idempotente
+  `scripts/k8s/realign-source-routing-mongodb.sh` elimina datos obsoletos,
+  asegura índices y registra la versión; CI ejecuta `--apply` y `--check`.
 - **Regresión y métricas:** aliases equivalentes producen la misma clave;
   conceptos relacionados pero distintos permanecen separados. Registrar tasa
   de rutas nuevas, reutilización, colisiones y candidatos `OTHER` para revisar y

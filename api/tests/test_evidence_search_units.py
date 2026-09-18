@@ -1,431 +1,218 @@
 import importlib.util
-import logging
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
-EVIDENCE_SEARCH_ROOT = Path(__file__).resolve().parents[1] / "evidence-search"
-if str(EVIDENCE_SEARCH_ROOT) not in sys.path:
-    sys.path.insert(0, str(EVIDENCE_SEARCH_ROOT))
+from common.models.evidence_models import EvidenceSearchPolicy, EvidenceSearchRequestV2, EvidenceSearchResponseV2
 
-from app.search import providers as search_providers
 
-MODULE_PATH = EVIDENCE_SEARCH_ROOT / "main.py"
+ROOT = Path(__file__).resolve().parents[1] / "evidence-search"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+MODULE_PATH = ROOT / "main.py"
 spec = importlib.util.spec_from_file_location("evidence_search_main", MODULE_PATH)
 evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 
 
-def enriched_assertion():
+def assertion():
     return {
         "assertion_id": 1,
+        "assertion_index": 0,
         "text": "El paro en Barcelona bajo en 2024.",
+        "categoryId": 1,
+        "topic_code": "EMPLOYMENT",
+        "evidence_kind": "STATISTICAL_DATA",
+        "taxonomy_version": "routing-taxonomy-v1",
         "context": {
-            "locations": [{"name": "Barcelona"}],
-            "entities": [{"name": "INE"}],
-            "temporal_context": [{"value": "2024"}],
+            "locations": [{"name": "Barcelona", "scope": "REGION", "country_code": "ES", "region_code": "ES-CT", "origin": "explicit", "confidence": 1}],
+            "entities": [{"name": "INE", "type": "GOVERNMENT_BODY", "role": "AUTHORITY", "origin": "inferred", "confidence": 0.8}],
+            "temporal_context": [{"value": "2024", "type": "YEAR", "origin": "explicit", "confidence": 1}],
+            "language": "es",
+            "jurisdiction": {"scope": "REGION", "country_code": "ES", "region_code": "ES-CT"},
         },
         "search_hints": {"search_keywords": ["estadistica oficial"], "suggested_queries": []},
+        "context_confidence": {"location": 1, "entities": 0.8, "temporal": 1},
     }
 
 
-def test_excerpt_prefers_raw_content_and_is_limited():
-    raw = " palabra " * 300
-    excerpt = evidence.useful_excerpt({"raw_content": raw, "content": "fallback"})
-    assert len(excerpt) <= 900
-    assert "palabra" in excerpt
-
-
-def test_source_classification_for_v2_fallbacks():
-    assert evidence.source_type_for_domain("www.who.int") == "official"
-    assert evidence.source_type_for_domain("reuters.com") == "news_agency"
-    assert evidence.source_type_for_domain("example.com") == "media"
-
-
-def test_build_queries_v2_uses_preferred_domains_and_general_fallback():
-    policy = SimpleNamespace(max_queries_per_domain=2, fallback_to_general_search=True)
-    domain_resolution = {
-        "preferred_domains": [
-            {"domain": "ine.es"},
-            {"domain": "sepe.es"},
-        ]
+def preferred_source():
+    return {
+        "domain": "ine.es",
+        "source_type": "STATISTICAL_OFFICE",
+        "authority_level": "NATIONAL_PRIMARY",
+        "jurisdictions": [{"scope": "COUNTRY", "country_code": "ES"}],
+        "topic_codes": ["EMPLOYMENT"],
+        "evidence_kinds": ["STATISTICAL_DATA"],
+        "languages": ["es"],
+        "route_score": 0.9,
+        "rank": 1,
+        "reason": "official statistics",
+        "profile_version": "source-router-v2",
     }
 
-    queries = evidence.build_queries_v2(enriched_assertion(), domain_resolution, policy)
 
-    assert queries[0].startswith("(site:ine.es OR site:sepe.es)")
-    assert "site:ine.es" in queries[0]
-    assert "site:sepe.es" in queries[0]
-    assert "El paro en Barcelona" in queries[0]
-    assert queries[-1].startswith("El paro")
-
-
-def test_build_queries_v2_skips_site_queries_when_preferred_domains_disabled():
-    policy = SimpleNamespace(max_queries_per_domain=2, fallback_to_general_search=True)
-    domain_resolution = evidence.empty_domain_resolution()
-
-    queries = evidence.build_queries_v2(enriched_assertion(), domain_resolution, policy)
-
-    assert queries
-    assert all(not query.startswith("site:") for query in queries)
-    assert queries[0].startswith("El paro")
-
-
-def test_base_queries_enrich_suggested_queries_with_missing_context_terms():
-    assertion = {
-        "assertion_id": 1,
-        "text": "A measurable public claim.",
-        "context": {
-            "temporal_context": [{"value": "2024", "origin": "inferred"}],
-            "entities": [{"name": "International Agency", "origin": "inferred"}],
-            "locations": [{"name": "Sample Country", "origin": "inferred"}],
+def request(strategy="EXT_OFFICIAL_FIRST", preferred_sources=None):
+    return EvidenceSearchRequestV2(
+        schema_version="evidence-search-request-v2",
+        assertion=assertion(),
+        origin_document={"url": "https://publisher.test/story", "domain": "publisher.test"},
+        search_policy={
+            "strategy": strategy,
+            "max_domains": 3,
+            "max_results": 3,
+            "max_queries": 2,
+            "preferred_sources": preferred_sources or [],
         },
-        "search_hints": {
-            "search_keywords": ["official report"],
-            "suggested_queries": ["measurable public claim"],
-        },
-    }
-
-    queries = evidence.base_queries_for_assertion(assertion)
-
-    assert queries == ["measurable public claim 2024 International Agency Sample Country official report"]
-
-
-def test_context_terms_prioritize_explicit_before_inferred():
-    assertion = {
-        "assertion_id": 1,
-        "text": "A claim with mixed context.",
-        "context": {
-            "temporal_context": [
-                {"value": "2023", "origin": "inferred"},
-                {"value": "2022", "origin": "explicit"},
-            ],
-            "entities": [
-                {"name": "Inferred Entity", "origin": "inferred"},
-                {"name": "Explicit Entity", "origin": "explicit"},
-            ],
-            "locations": [],
-        },
-        "search_hints": {"suggested_queries": ["claim"]},
-    }
-
-    query = evidence.base_queries_for_assertion(assertion)[0]
-
-    assert query.index("2022") < query.index("2023")
-    assert query.index("Explicit Entity") < query.index("Inferred Entity")
-
-
-def test_base_queries_do_not_duplicate_context_already_in_suggested_query():
-    assertion = {
-        "assertion_id": 1,
-        "text": "A dated claim.",
-        "context": {
-            "temporal_context": [{"value": "2024", "origin": "explicit"}],
-            "entities": [{"name": "Known Entity", "origin": "inferred"}],
-            "locations": [],
-        },
-        "search_hints": {"suggested_queries": ["Known Entity dated claim 2024"]},
-    }
-
-    query = evidence.base_queries_for_assertion(assertion)[0]
-
-    assert query == "Known Entity dated claim 2024"
-
-
-def test_evidence_from_source_v2_preserves_domain_resolution_metadata():
-    domain_resolution = {
-        "preferred_domains": [
-            {
-                "domain": "ine.es",
-                "source_type": "statistics",
-                "trust_score": 0.95,
-                "reason": "entity",
-                "matched_profiles": ["entity_INE"],
-            }
-        ]
-    }
-
-    result = evidence.evidence_from_source_v2(
-        {"url": "https://ine.es/demo", "title": "INE", "content": "Evidence text"},
-        1,
-        domain_resolution,
     )
 
-    assert result["domain"] == "ine.es"
-    assert result["source_id"] == "source-1"
-    assert result["snippet"] == "Evidence text"
-    assert result["source_type"] == "statistics"
-    assert result["trust_score"] == 0.95
-    assert result["why_selected"] == "entity"
-    assert result["matched_profiles"] == ["entity_INE"]
+
+def test_query_context_orders_explicit_before_inferred():
+    query = evidence.base_queries_for_assertion(assertion())[0]
+    assert query.index("2024") < query.index("INE")
+    assert "estadistica oficial" in query
 
 
-def test_evidence_from_source_v2_marks_routing_placeholder_as_non_evidentiary():
-    result = evidence.evidence_from_source_v2(
-        {
-            "url": "https://example.test/",
-            "title": "Routing preview",
-            "content": "No live provider configured",
-            "_routing_placeholder": True,
-        },
-        1,
-        {"preferred_domains": []},
+def test_strategy_plans_are_explicit_and_have_no_local_fallback():
+    local_policy = EvidenceSearchPolicy(
+        strategy="LOCAL", max_queries=2, preferred_sources=[preferred_source()]
     )
+    local_resolution = {"preferred_sources": [preferred_source()]}
+    local = evidence.build_search_requests(assertion(), local_resolution, local_policy)
+    assert [item["mode"] for item in local] == ["local_routed"]
+    assert local[0]["include_domains"] == ["ine.es"]
 
-    assert result["is_placeholder"] is True
-    assert result["evidence_status"] == "ROUTING_PLACEHOLDER"
+    official_first = evidence.build_search_requests(
+        assertion(), evidence.empty_domain_resolution(), EvidenceSearchPolicy(strategy="EXT_OFFICIAL_FIRST")
+    )
+    assert [item["mode"] for item in official_first] == ["external_official_first", "general_fallback"]
 
-
-def test_exa_result_normalization_uses_highlights_and_preserves_text():
-    result = search_providers.normalize_exa_result({
-        "url": "https://idescat.cat/demo",
-        "title": "Idescat demo",
-        "highlights": ["  Population reached 8 million.  ", " Official estimate. "],
-        "text": "Longer page text with the full statistical context.",
-        "summary": "Short summary",
-        "score": 0.9,
-    })
-
-    assert result["url"] == "https://idescat.cat/demo"
-    assert result["title"] == "Idescat demo"
-    assert result["content"] == "Population reached 8 million. Official estimate."
-    assert result["raw_content"] == "Longer page text with the full statistical context."
-    assert result["summary"] == "Short summary"
+    only_official = evidence.build_search_requests(
+        assertion(), evidence.empty_domain_resolution(), EvidenceSearchPolicy(strategy="EXT_ONLY_OFFICIAL")
+    )
+    assert [item["mode"] for item in only_official] == ["external_only_official"]
 
 
-def test_tavily_result_normalization_uses_content_and_preserves_raw_content():
-    result = search_providers.normalize_tavily_result({
-        "url": "https://tavily.example/demo",
-        "title": "Tavily demo",
-        "content": "  Search snippet from Tavily.  ",
-        "raw_content": "  Longer extracted Tavily page text.  ",
-        "score": 0.8,
-    })
-
-    assert result["content"] == "Search snippet from Tavily."
-    assert result["raw_content"] == "Longer extracted Tavily page text."
+def test_policy_rejects_none_and_ambiguous_source_ownership():
+    with pytest.raises(ValidationError):
+        EvidenceSearchPolicy(strategy="NONE")
+    with pytest.raises(ValidationError):
+        EvidenceSearchPolicy(strategy="LOCAL")
+    with pytest.raises(ValidationError):
+        EvidenceSearchPolicy(strategy="EXT_OFFICIAL_FIRST", preferred_sources=[preferred_source()])
 
 
-def test_evidence_cache_key_normalizes_text_and_uses_profile_version():
-    policy = SimpleNamespace(max_domains=8, max_results=5, max_queries_per_domain=2, fallback_to_general_search=True)
-    assertion_a = {**enriched_assertion(), "text": "  El   Paro en Barcelona bajo en 2024. "}
-    assertion_b = {**enriched_assertion(), "text": "el paro en barcelona bajo en 2024."}
+def test_evidence_preserves_router_metadata_and_origin_relationship():
+    resolution = {"preferred_sources": [preferred_source()]}
+    result = evidence.evidence_from_source_v2(
+        {"url": "https://ine.es/demo", "title": "INE", "content": "Evidence text"}, 1, resolution,
+        {"domain": "publisher.test"},
+    )
+    assert result["source_type"] == "STATISTICAL_OFFICE"
+    assert result["authority_level"] == "NATIONAL_PRIMARY"
+    assert result["route_score"] == 0.9
+    assert result["relationship_to_origin"] == "INDEPENDENT"
 
-    key_a = evidence.evidence_cache_key(assertion_a, policy, "v1")
-    key_b = evidence.evidence_cache_key(assertion_b, policy, "v1")
-    key_c = evidence.evidence_cache_key(assertion_b, policy, "v2")
+    original = evidence.evidence_from_source_v2(
+        {"url": "https://publisher.test/story", "content": "Original"}, 2, {},
+        {"url": "https://publisher.test/story", "domain": "publisher.test"},
+    )
+    assert original["relationship_to_origin"] == "ORIGINAL"
 
+
+def test_cache_key_normalizes_text_and_partitions_origin_policy_and_profile(monkeypatch):
+    policy = EvidenceSearchPolicy(strategy="EXT_OFFICIAL_FIRST")
+    assertion_a = {**assertion(), "text": "  El   PARO bajo. "}
+    assertion_b = {**assertion(), "text": "el paro bajo."}
+    origin = {"domain": "publisher.test", "url": None}
+    key_a = evidence.evidence_cache_key(assertion_a, origin, policy, "external-ext_official_first")
+    key_b = evidence.evidence_cache_key(assertion_b, origin, policy, "external-ext_official_first")
+    other_origin = evidence.evidence_cache_key(assertion_b, {"domain": "other.test"}, policy, "external-ext_official_first")
     assert key_a == key_b
-    assert key_a != key_c
-    assert len(key_a) == 64
-
-
-def test_evidence_cache_key_changes_with_search_provider(monkeypatch):
-    policy = SimpleNamespace(max_domains=8, max_results=5, max_queries_per_domain=2, fallback_to_general_search=True)
+    assert key_a != other_origin
+    normalized_url_a = evidence.evidence_cache_key(
+        assertion_b, {"url": "https://publisher.test/story", "domain": "publisher.test"},
+        policy, "external-ext_official_first",
+    )
+    normalized_url_b = evidence.evidence_cache_key(
+        assertion_b, {"url": "HTTPS://WWW.Publisher.Test/story/", "domain": "www.publisher.test"},
+        policy, "external-ext_official_first",
+    )
+    assert normalized_url_a == normalized_url_b
 
     monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
-    exa_key = evidence.evidence_cache_key(enriched_assertion(), policy, "v1")
-
+    exa = evidence.evidence_cache_key(assertion(), origin, policy, "v1")
     monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "tavily")
-    tavily_key = evidence.evidence_cache_key(enriched_assertion(), policy, "v1")
-
-    assert exa_key != tavily_key
+    assert exa != evidence.evidence_cache_key(assertion(), origin, policy, "v1")
 
 
-def test_build_search_requests_groups_same_query_by_domain():
-    policy = SimpleNamespace(max_queries_per_domain=2, fallback_to_general_search=True)
-    domain_resolution = {
-        "preferred_domains": [
-            {"domain": "ine.es"},
-            {"domain": "sepe.es"},
-        ]
-    }
-
-    requests = evidence.build_search_requests(enriched_assertion(), domain_resolution, policy)
-
-    assert len(requests) == 2
-    assert requests[0]["mode"] == "preferred_domains"
-    assert set(requests[0]["include_domains"]) == {"ine.es", "sepe.es"}
-    assert requests[0]["query"].startswith("El paro en Barcelona bajo en 2024.")
-    assert requests[1]["mode"] == "general_fallback"
-    assert requests[1]["include_domains"] is None
-    assert requests[1]["query"] == requests[0]["query"]
+def test_request_contract_requires_origin():
+    payload = request().model_dump(mode="json")
+    del payload["origin_document"]
+    with pytest.raises(ValidationError):
+        EvidenceSearchRequestV2(**payload)
 
 
 @pytest.mark.asyncio
-async def test_search_evidence_logs_final_search_calls(monkeypatch, caplog):
-    original_provider = evidence.SEARCH_PROVIDER
-    evidence.SEARCH_PROVIDER = "exa"
-
+async def test_search_endpoint_passes_strategy_to_provider(monkeypatch):
     calls = []
 
-    async def fake_search_with_provider(provider_name, query, max_sources, include_domains=None, external_source_policy="none"):
-        calls.append({"provider": provider_name, "query": query, "include_domains": include_domains, "external_source_policy": external_source_policy})
+    async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
+        calls.append((include_domains, external_source_policy))
         return {"results": []}
 
-    monkeypatch.setattr(evidence, "search_with_provider", fake_search_with_provider)
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
     monkeypatch.setattr(evidence, "cache_collection", None)
-
-    req = SimpleNamespace(
-        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
-        search_policy=SimpleNamespace(
-            use_preferred_domains="LOCAL",
-            max_domains=3,
-            max_results=3,
-            max_queries_per_domain=2,
-            # The validator's default policy requests a fallback, but LOCAL must
-            # never broaden a route selected by source-router.
-            fallback_to_general_search=True,
-            include_domains=["ine.es", "sepe.es"],
-            model_dump=lambda mode=None: {
-                "use_preferred_domains": "LOCAL", "max_domains": 3, "max_results": 3,
-                "max_queries_per_domain": 2, "fallback_to_general_search": True,
-                "include_domains": ["ine.es", "sepe.es"],
-            },
-        ),
-    )
-
-    try:
-        with caplog.at_level(logging.INFO, logger="evidence-search"):
-            response = await evidence.search_evidence(req)
-    finally:
-        evidence.SEARCH_PROVIDER = original_provider
-
-    assert len([call for call in calls if "provider" in call]) == 1
-    assert calls[0]["include_domains"] == ["ine.es", "sepe.es"]
-    assert response["search_policy"]["fallback_to_general_search"] is False
-    assert any("search_request" in record.getMessage() for record in caplog.records)
+    response = await evidence.search_evidence(request("EXT_OFFICIAL_FIRST"))
+    EvidenceSearchResponseV2(**response)
+    assert calls == [(None, "official_first"), (None, "none")]
+    assert response["search_policy"]["strategy"] == "EXT_OFFICIAL_FIRST"
+    assert response["domain_resolution"]["selected_domains"] == []
 
 
 @pytest.mark.asyncio
-async def test_search_provider_registry_can_switch_to_exa(monkeypatch):
-    import common.search.factory as search_factory
-    calls = []
+async def test_only_official_filters_provider_results_that_violate_policy(monkeypatch):
+    async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
+        return {
+            "results": [
+                {"url": "https://example.com/article", "title": "Media result"},
+                {"url": "https://ec.europa.eu/eurostat/data", "title": "Eurostat"},
+            ]
+        }
 
-    class FakeExaProvider(search_providers.SearchProvider):
-        name = "exa"
-
-        async def search(self, request):
-            calls.append((request.query, request.max_results, request.include_domains, request.external_source_policy))
-            return []
-
-    monkeypatch.setitem(search_factory._providers, "exa", FakeExaProvider())
-
-    result = await search_providers.search_with_provider("exa", "foo", 5, include_domains=["one.es"])
-
-    assert result == {"results": []}
-    assert calls == [("foo", 5, ["one.es"], "none")]
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    response = await evidence.search_evidence(request("EXT_ONLY_OFFICIAL"))
+    assert [item["domain"] for item in response["evidences"]] == ["ec.europa.eu"]
+    assert response["evidences"][0]["source_type"] == "INTERGOVERNMENTAL_ORGANIZATION"
 
 
-def test_merge_search_results_keeps_same_domain_results_and_dedupes_urls():
-    results_a = [
-        {"url": "https://ine.es/doc1", "title": "Doc1", "content": "Text1"},
-        {"url": "https://ine.es/doc2", "title": "Doc2", "content": "Text2"},
-    ]
-    results_b = [
-        {"url": "https://sepe.es/doc", "title": "Doc3", "content": "Text3"},
-        {"url": "https://ine.es/doc1", "title": "Doc1 duplicate", "content": "Duplicate"},
-        {"url": "https://ine.es/doc3", "title": "Doc4", "content": "Text4"},
-    ]
-
-    merged = evidence.merge_search_results(results_a, results_b, max_sources=10)
-
-    assert len(merged) == 4
-    assert sum(1 for item in merged if "ine.es" in item["url"]) == 3
-    assert sum(1 for item in merged if "sepe.es" in item["url"]) == 1
+def test_source_type_heuristics_use_normalized_exact_domain_boundaries():
+    assert evidence.source_type_for_domain("www.ine.es") == "STATISTICAL_OFFICE"
+    assert evidence.source_type_for_domain("ec.europa.eu") == "INTERGOVERNMENTAL_ORGANIZATION"
+    assert evidence.source_type_for_domain("datos.gob.es") == "GOVERNMENT_AGENCY"
+    assert evidence.source_type_for_domain("notreuters.com") == "MEDIA"
 
 
 @pytest.mark.asyncio
-async def test_search_evidence_raises_when_all_provider_requests_fail(monkeypatch):
-    original_provider = evidence.SEARCH_PROVIDER
-    evidence.SEARCH_PROVIDER = "exa"
-
-    async def failing_search(*args, **kwargs):
+async def test_search_endpoint_raises_when_every_provider_call_fails(monkeypatch):
+    async def fail(*args, **kwargs):
         raise RuntimeError("provider unavailable")
 
-    monkeypatch.setattr(evidence, "search_with_provider", failing_search)
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
+    monkeypatch.setattr(evidence, "search_with_provider", fail)
     monkeypatch.setattr(evidence, "cache_collection", None)
-    req = SimpleNamespace(
-        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
-        search_policy=SimpleNamespace(
-            use_preferred_domains="NONE",
-            max_domains=3,
-            max_results=3,
-            max_queries_per_domain=2,
-            fallback_to_general_search=True,
-            include_domains=[],
-        ),
-    )
-
-    try:
-        with pytest.raises(evidence.HTTPException) as exc_info:
-            await evidence.search_evidence(req)
-    finally:
-        evidence.SEARCH_PROVIDER = original_provider
-
+    with pytest.raises(evidence.HTTPException) as exc_info:
+        await evidence.search_evidence(request("EXT_ONLY_OFFICIAL"))
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail["code"] == "EVIDENCE_PROVIDER_FAILED"
 
 
-@pytest.mark.asyncio
-async def test_local_requires_domains_selected_by_caller():
-    req = SimpleNamespace(
-        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
-        search_policy=SimpleNamespace(use_preferred_domains="LOCAL", include_domains=[]),
-    )
-    with pytest.raises(evidence.HTTPException) as exc_info:
-        await evidence.search_evidence(req)
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["code"] == "LOCAL_INCLUDE_DOMAINS_REQUIRED"
-
-
-def test_evidence_search_has_no_source_router_client():
+def test_evidence_search_does_not_call_source_router():
     source = Path(evidence.__file__).read_text()
     assert "SOURCE_ROUTER_URL" not in source
     assert "/routes/resolve" not in source
-
-@pytest.mark.parametrize(
-    "mode,expected_request_modes",
-    [
-        ("NONE", ["general_fallback"]),
-        ("EXT_OFFICIAL_FIRST", ["external_official_first", "general_fallback"]),
-        ("EXT_ONLY_OFFICIAL", ["external_only_official"]),
-    ],
-)
-def test_non_local_modes_preserve_external_planning_without_local_domains(mode, expected_request_modes):
-    policy = {
-        "use_preferred_domains": mode,
-        "max_queries_per_domain": 2,
-        "fallback_to_general_search": True,
-    }
-    requests = evidence.build_search_requests(enriched_assertion(), evidence.empty_domain_resolution(), policy)
-    assert [request["mode"] for request in requests] == expected_request_modes
-    assert all(request["include_domains"] is None for request in requests)
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["NONE", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])
-async def test_non_local_modes_do_not_load_mongo_profiles(monkeypatch, mode):
-    async def fake_search(*args, **kwargs):
-        return {"results": []}
-
-    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
-    monkeypatch.setattr(evidence, "cache_collection", None)
-    req = SimpleNamespace(
-        assertion=SimpleNamespace(model_dump=lambda mode=None: enriched_assertion()),
-        search_policy=SimpleNamespace(
-            use_preferred_domains=mode, max_domains=3,
-            max_results=3, max_queries_per_domain=2, fallback_to_general_search=True,
-            mode="official_first",
-            include_domains=[],
-            model_dump=lambda **_kwargs: {
-                "use_preferred_domains": mode, "max_domains": 3, "max_results": 3,
-                "max_queries_per_domain": 2, "fallback_to_general_search": True,
-                "mode": "official_first", "include_domains": [],
-            },
-        ),
-    )
-    response = await evidence.search_evidence(req)
-    assert response["search_policy"]["domain_scoring_enabled"] is False
-    assert response["search_policy"]["selected_domains"] == []

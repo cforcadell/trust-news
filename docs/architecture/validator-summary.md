@@ -40,7 +40,8 @@ Cada pod `validate-asertions` cumple cuatro responsabilidades:
 | `api/common/models/protocol_models.py` | Define `assertions-document-v2` y `assertion-validation-payload-v2`, usados tanto en LIGHT como en BLOCKCHAIN. |
 | `api/common/utils/validator_registry.py` | Filtra validadores activos, automaticos y compatibles con una categoria. |
 | `api/common/utils/scoring.py` | Calcula pesos por validador y resultado ponderado por asercion. |
-| `api/evidence-search/main.py` | Servicio RAG: resuelve dominios, construye queries, consulta Tavily si esta configurado, cachea y devuelve evidencias normalizadas. |
+| `api/source-router` | Descubre, clasifica y cachea perfiles de dominio y rutas solo para la estrategia RAG `LOCAL`. |
+| `api/evidence-search/main.py` | Ejecuta el plan RAG, recupera documentos con Exa/Tavily, cachea y devuelve evidencias normalizadas. |
 | `api/news-handler/main.py` | Orquesta ordenes, genera solicitudes LIGHT, consume respuestas y calcula resultados ponderados. |
 | `api/news-chain/main.py` | Escucha eventos on-chain, recupera documentos IPFS y reenvia solicitudes/resultados al backend via Kafka. |
 
@@ -52,7 +53,7 @@ Los tipos se definen en `ValidatorType`:
 |---:|---|---|---:|---|
 | 1 | `LLM_MEMORY_VALIDATION` | Si | 0.25 | Valida con conocimiento interno del modelo y razonamiento. |
 | 2 | `LLM_SEARCH_VALIDATION` | Si | 0.50 | Valida con LLM y busqueda online cuando el proveedor/modelo lo soporta. |
-| 3 | `RAG_EVIDENCE_VALIDATION` | Si | 0.80 | Valida con LLM, pero usando evidencias recuperadas por `evidence-search`. |
+| 3 | `RAG_EVIDENCE_VALIDATION` | Si | 1.00 | Valida con LLM, pero usando evidencias recuperadas por `evidence-search`. |
 | 4 | `DETERMINISTIC_VALIDATION` | No | 1.00 | Reservado para validadores no LLM con reglas deterministas. En el worker actual no ejecuta listeners automaticos. |
 | 5 | `HUMAN` | No | 0.10 | Representa validacion humana/manual. En el worker actual solo se registra/configura, no valida automaticamente. |
 
@@ -89,7 +90,7 @@ El worker usa el prompt `LLM_MEMORY_VALIDATION_PROMPT`. El modelo razona sobre l
 
 **Algoritmo:** inferencia con LLM y capacidad online del proveedor.
 
-El worker usa `LLM_SEARCH_VALIDATION_PROMPT` y delega la capacidad de búsqueda al proveedor/modelo. No llama al microservicio `evidence-search` y, por tanto, no exige fuentes ni presenta los enlaces opcionales del proveedor como evidencia comprobada.
+El worker usa `LLM_SEARCH_VALIDATION_PROMPT` y delega la capacidad de búsqueda al proveedor/modelo. No llama al microservicio `evidence-search` y, por tanto, no exige fuentes ni presenta los enlaces opcionales del proveedor como evidencia comprobada. La implementación actual exige OpenRouter; otros proveedores se rechazan hasta disponer de una integración explícita de sus herramientas web.
 
 En OpenRouter, cuando `VALIDATOR_TYPE=2`, el modelo se transforma automaticamente con sufijo `:online`. Por ejemplo, `openai/gpt-5-mini` pasa a `openai/gpt-5-mini:online`.
 
@@ -101,22 +102,29 @@ En OpenRouter, cuando `VALIDATOR_TYPE=2`, el modelo se transforma automaticament
 
 **Algoritmo:** recuperacion de evidencias + validacion estricta con LLM.
 
-El worker RAG orquesta la estrategia. Con LOCAL llama primero a `source-router`, recibe dominios y después llama a `evidence-search(include_domains)`. Con NONE/EXT llama directamente a Evidence Search. Finalmente inyecta las evidencias en `RAG_EVIDENCE_VALIDATION_PROMPT`.
+El worker RAG orquesta una estrategia obligatoria. Con `LOCAL` llama primero a
+`source-router`, recibe `preferred_sources[]` con metadatos normalizados y los
+envía a Evidence Search. Con `EXT_OFFICIAL_FIRST` o `EXT_ONLY_OFFICIAL` llama
+directamente a Evidence Search sin dominios locales. Finalmente inyecta las
+evidencias recuperadas en `RAG_EVIDENCE_VALIDATION_PROMPT`.
 
 El prompt RAG exige validar solo con las evidencias proporcionadas. Si no hay evidencias suficientes, el comportamiento esperado es `UNKNOWN` o insuficiencia equivalente.
 
-**Variables clave:** `VALIDATOR_TYPE=3`, `SOURCE_ROUTER_URL`, `EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `RAG_EVIDENCE_VALIDATION_PROMPT`.
+**Variables clave:** `VALIDATOR_TYPE=3`, `SOURCE_ROUTER_URL`,
+`EVIDENCE_SEARCH_URL`, `EVIDENCE_SEARCH_STRATEGY` y
+`RAG_EVIDENCE_VALIDATION_PROMPT`.
 
 **Subcomportamientos RAG:**
 
 | Variante | Configuracion | Comportamiento |
 |---|---|---|
-| RAG general | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE` | Construye queries desde texto, entidades, ubicaciones y contexto temporal, con busqueda general como fallback. |
-| RAG LOCAL | `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL` | Descubre y clasifica fuentes reales mediante Source Router; restringe Evidence Search a los dominios elegibles. |
+| RAG LOCAL | `EVIDENCE_SEARCH_STRATEGY=LOCAL` | Source Router descubre y clasifica dominios; Evidence Search queda restringido a los dominios elegibles. |
+| RAG oficial preferente | `EVIDENCE_SEARCH_STRATEGY=EXT_OFFICIAL_FIRST` | El proveedor prioriza fuentes oficiales y después permite una búsqueda general. |
+| RAG solo oficial | `EVIDENCE_SEARCH_STRATEGY=EXT_ONLY_OFFICIAL` | El proveedor busca fuentes oficiales y Evidence Search descarta resultados no oficiales. |
 | RAG sin credenciales de búsqueda | `API_KEY_PROVIDER` vacío | Falla explícitamente; no crea placeholders ni dominios estáticos. |
 | RAG con Exa/Tavily | `API_KEY_PROVIDER` configurado | Ejecuta queries reales, fusiona resultados, deduplica URLs y limita resultados. |
 
-**Uso esperado:** validador de mayor confianza operacional porque la decision queda ligada a evidencias explicitamente recuperadas. Su peso es alto (`0.80`).
+**Uso esperado:** validador de mayor confianza operacional porque la decision queda ligada a evidencias explicitamente recuperadas. Su peso es alto (`1.00`).
 
 ### 4. Deterministico (`DETERMINISTIC_VALIDATION`)
 
@@ -150,7 +158,7 @@ LIGHT no publica el documento en IPFS ni registra la validacion en blockchain. G
 
 ### Modo BLOCKCHAIN
 
-El documento de aserciones se sube a IPFS y se registra on-chain. Cuando el contrato emite `ValidationRequested`, el worker automatico correspondiente recupera el documento desde IPFS, reconstruye `AssertionsDocumentV2` si hace falta, localiza la asercion por `assertion_index`, construye `assertion-validation-payload-v2`, ejecuta el algoritmo, sube el documento de validacion a IPFS y registra el resultado con `addValidation`.
+El documento de aserciones se sube a IPFS y se registra on-chain. Cuando el contrato emite `ValidationRequested`, el worker automatico correspondiente recupera y valida el `AssertionsDocumentV2` desde IPFS, localiza la asercion por `assertion_index`, construye `assertion-validation-payload-v2`, ejecuta el algoritmo, sube el documento de validacion a IPFS y registra el resultado con `addValidation`. Cualquier forma anterior del documento se rechaza.
 
 `news-chain` tambien escucha eventos del contrato y reenvia trazas/resultados hacia Kafka para mantener sincronizado el backend.
 
@@ -168,15 +176,15 @@ La clasificacion real de cada worker se decide por variables de entorno:
 | `API_URL` | Endpoint del proveedor. |
 | `TEMPERATURE` | Temperatura del LLM. |
 | `EVIDENCE_SEARCH_URL` | URL interna del microservicio de evidencias. |
-| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS` | Estrategia de dominios: `NONE`, `LOCAL`, `EXT_OFFICIAL_FIRST` o `EXT_ONLY_OFFICIAL`. |
+| `EVIDENCE_SEARCH_STRATEGY` | Estrategia RAG obligatoria: `LOCAL`, `EXT_OFFICIAL_FIRST` o `EXT_ONLY_OFFICIAL`. No se define para otros tipos. |
 
 En Kubernetes, `k8s/apis/validate-asertions/base/configmap-common.yaml` define defaults y prompts. Los overlays locales especializan cada worker. En la configuracion local actual:
 
 | Worker | Tipo | Provider/modelo | Comportamiento |
 |---|---:|---|---|
-| `worker-1` | 1 | OpenRouter + `mistralai/mistral-small-24b-instruct-2501` | LLM de memoria, sin evidence-search ni online. |
-| `worker-2` | 3 | Groq-compatible + `llama-3.1-8b-instant` | RAG con `evidence-search`, sin dominios preferentes. |
-| `worker-3` | 3 | OpenRouter + `openai/gpt-5-mini` | RAG con `evidence-search` y dominios preferentes. |
+| `worker-1` | 3 | OpenRouter + `meta-llama/llama-3.1-8b-instruct` | RAG `EXT_ONLY_OFFICIAL`. |
+| `worker-2` | 3 | OpenRouter + `qwen/qwen3-30b-a3b-instruct-2507` | RAG `EXT_OFFICIAL_FIRST`. |
+| `worker-3` | 3 | OpenRouter + `mistralai/mistral-small-24b-instruct-2501` | RAG `LOCAL`. |
 
 ## Scoring y resultado ponderado
 
@@ -193,7 +201,7 @@ Los pesos por tipo son:
 |---|---:|
 | `LLM_MEMORY_VALIDATION` | 0.25 |
 | `LLM_SEARCH_VALIDATION` | 0.50 |
-| `RAG_EVIDENCE_VALIDATION` | 0.80 |
+| `RAG_EVIDENCE_VALIDATION` | 1.00 |
 | `DETERMINISTIC_VALIDATION` | 1.00 |
 | `HUMAN` | 0.10 |
 

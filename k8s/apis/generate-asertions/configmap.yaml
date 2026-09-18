@@ -16,6 +16,8 @@ data:
   TEMPERATURE: "0.1"
   MAX_ASSERTIONS: "7"
   HTTP_TIMEOUT: "60"
+  LLM_MAX_RETRIES: "3"
+  LLM_RETRY_DELAY: "1"
 
   KAFKA_BOOTSTRAP: "kafka.infra.svc.cluster.local:9092"
   KAFKA_INPUT_TOPIC: "fake_news_requests_generate"
@@ -43,7 +45,8 @@ data:
     - Usa `origin="explicit"` si el dato aparece en la aserción, `origin="inferred"` si se deduce del texto completo y `origin="unknown"` si no puede determinarse. `confidence` debe estar entre 0 y 1.
     - No inventes contexto: usa listas vacías y `"unknown"` cuando falte información.
     - Genera `search_keywords` y `suggested_queries` autónomas con los lugares, entidades y fechas necesarios para localizar evidencias precisas.
-    - `categoryId` debe ser un entero de la lista canónica indicada después; no devuelvas `category`. `subcategory` es una etiqueta libre.
+    - `categoryId` debe ser un entero de la lista canónica indicada después; no devuelvas `category`.
+    - `topic_code`, `evidence_kind`, `context.jurisdiction`, tipos de entidad y tipos temporales deben usar exactamente los valores del JSON Schema. No inventes etiquetas.
 
     SALIDA OBLIGATORIA
     Devuelve exclusivamente un objeto JSON válido con la clave `assertions`, sin markdown, comentarios ni texto adicional. No añadas campos fuera de este esquema. Los identificadores empiezan en 1, son correlativos y `assertion_index` empieza en 0. Si no hay aserciones válidas, devuelve {"assertions":[]}.
@@ -56,16 +59,17 @@ data:
           "idAssertion": "1",
           "text": "Aserción factual, autocontenida y verificable.",
           "categoryId": 1,
-          "subcategory": "EMPLOYMENT",
+          "topic_code": "EMPLOYMENT",
+          "evidence_kind": "STATISTICAL_DATA",
+          "taxonomy_version": "routing-taxonomy-v1",
           "context": {
-            "locations": [{"name":"España","type":"country","country_code":"ES","region_code":null,"province":null,"city":null,"origin":"explicit","confidence":0.9}],
-            "entities": [{"name":"Institución mencionada","type":"organization","role":"subject","origin":"explicit","confidence":0.9}],
-            "temporal_context": [{"value":"2026","type":"year","origin":"explicit","confidence":0.9}],
+            "locations": [{"name":"España","scope":"COUNTRY","country_code":"ES","region_code":null,"origin":"explicit","confidence":0.9}],
+            "entities": [{"name":"Institución mencionada","type":"ORGANIZATION","role":"SUBJECT","origin":"explicit","confidence":0.9}],
+            "temporal_context": [{"value":"2026","type":"YEAR","origin":"explicit","confidence":0.9}],
             "language": "es",
-            "jurisdiction": "national"
+            "jurisdiction": {"scope":"COUNTRY","country_code":"ES","region_code":null,"jurisdiction_code":null}
           },
           "search_hints": {
-            "preferred_source_types": ["official", "statistics"],
             "search_keywords": ["hecho verificable", "España", "2026"],
             "suggested_queries": ["hecho verificable España 2026 fuente oficial"]
           },

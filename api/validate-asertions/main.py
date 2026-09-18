@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking, send_and_wait, receipt_succeeded, require_successful_receipt
 from common.utils.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple,cid_to_multihash_tuple
 from common.models.veredicto import Veredicto, Validacion
-from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidencePreferredDomainsMode, local_preferred_domains_supported
+from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidenceSearchStrategy, evidence_search_strategy_supported
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     AssertionValidationPayloadV2,
@@ -193,10 +193,8 @@ class AdminConfigResponse(BaseModel):
     api_url: Optional[str] = None
     service_url: Optional[str] = None
     validator_type: int
-    use_evidence_search: bool
-    online_search_enabled: bool
     evidence_search_url: str
-    evidence_search_use_preferred_domains: EvidencePreferredDomainsMode
+    evidence_search_strategy: Optional[EvidenceSearchStrategy]
     private_key: Optional[str] = None
     account_address: str
     api_key: Optional[str] = None
@@ -211,7 +209,7 @@ class AdminConfigUpdate(BaseModel):
     service_url: Optional[str] = None
     validator_type: Optional[int] = None
     evidence_search_url: Optional[str] = None
-    evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
+    evidence_search_strategy: Optional[EvidenceSearchStrategy] = None
     private_key: Optional[str] = None
     account_address: Optional[str] = None
     api_key: Optional[str] = None
@@ -226,7 +224,11 @@ class AIValidator(ABC):
 
 
 class SourceRouterRequestError(RuntimeError):
-    pass
+    def __init__(self, cause: Exception):
+        self.response = getattr(cause, "response", None)
+        self.status_code = getattr(cause, "status_code", None) or getattr(self.response, "status_code", None)
+        self.detail = getattr(cause, "detail", None)
+        super().__init__(str(cause) or cause.__class__.__name__)
 
 
 def is_automatic_validator() -> bool:
@@ -249,22 +251,34 @@ def selected_validation_prompt() -> str:
     return LLM_MEMORY_VALIDATION_PROMPT
 
 
-def current_evidence_search_use_preferred_domains() -> EvidencePreferredDomainsMode:
-    raw = str(os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", EvidencePreferredDomainsMode.NONE.value) or "").strip().upper()
+def current_evidence_search_strategy() -> Optional[EvidenceSearchStrategy]:
+    if not uses_evidence_search():
+        return None
+    raw = str(os.getenv("EVIDENCE_SEARCH_STRATEGY", "") or "").strip().upper()
+    if not raw:
+        raise RuntimeError("EVIDENCE_SEARCH_STRATEGY is required for RAG_EVIDENCE_VALIDATION")
     try:
-        return EvidencePreferredDomainsMode(raw)
+        return EvidenceSearchStrategy(raw)
     except ValueError as exc:
-        allowed = ", ".join(mode.value for mode in EvidencePreferredDomainsMode)
-        raise RuntimeError(f"EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS invalido: {raw}. Valores permitidos: {allowed}") from exc
+        allowed = ", ".join(strategy.value for strategy in EvidenceSearchStrategy)
+        raise RuntimeError(f"EVIDENCE_SEARCH_STRATEGY invalido: {raw}. Valores permitidos: {allowed}") from exc
 
 
-def ensure_local_mode_supported(validator_type: ValidatorType, mode: EvidencePreferredDomainsMode) -> None:
-    if not local_preferred_domains_supported(validator_type, mode):
+def ensure_evidence_strategy_supported(validator_type: ValidatorType, strategy: Optional[EvidenceSearchStrategy]) -> None:
+    if validator_type == ValidatorType.RAG_EVIDENCE_VALIDATION and not evidence_search_strategy_supported(validator_type, strategy):
         raise HTTPException(
             status_code=400,
             detail={
-                "code": "LOCAL_PREFERRED_DOMAINS_UNSUPPORTED_VALIDATOR_TYPE",
-                "message": "LOCAL preferred domains are only supported for RAG_EVIDENCE_VALIDATION validators.",
+                "code": "RAG_EVIDENCE_STRATEGY_REQUIRED",
+                "message": "RAG_EVIDENCE_VALIDATION requires an evidence search strategy.",
+            },
+        )
+    if validator_type != ValidatorType.RAG_EVIDENCE_VALIDATION and strategy is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "EVIDENCE_STRATEGY_UNSUPPORTED_VALIDATOR_TYPE",
+                "message": "Evidence search strategies are only valid for RAG_EVIDENCE_VALIDATION validators.",
             },
         )
 
@@ -318,10 +332,8 @@ def normalize_admin_config_response() -> AdminConfigResponse:
         api_url=API_URL,
         service_url=VALIDATOR_SERVICE_URL or None,
         validator_type=int(VALIDATOR_TYPE),
-        use_evidence_search=uses_evidence_search(),
-        online_search_enabled=uses_online_search(),
         evidence_search_url=EVIDENCE_SEARCH_URL,
-        evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
+        evidence_search_strategy=current_evidence_search_strategy(),
         private_key=mask_secret(PRIVATE_KEY),
         account_address=ACCOUNT_ADDRESS,
         api_key=mask_secret(API_KEY),
@@ -354,7 +366,6 @@ def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> st
         ]
 
         contexts = source.get("contexts") or []
-        chunks = source.get("chunks") or []
         if contexts:
             for context_idx, context in enumerate(contexts, start=1):
                 source_lines.extend([
@@ -365,22 +376,12 @@ def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> st
                     f"included_chunk_ids: {context.get('included_chunk_ids', [])}",
                     f"text: {context.get('text', '')}",
                 ])
-        elif chunks:
-            for chunk_idx, chunk in enumerate(chunks, start=1):
-                source_lines.extend([
-                    f"CONTEXTO {chunk_idx}",
-                    f"context_id: {chunk.get('context_id') or chunk.get('chunk_id', '')}",
-                    f"origin: {chunk.get('origin', 'chunk')}",
-                    f"score: {chunk.get('score', '')}",
-                    f"included_chunk_ids: {chunk.get('included_chunk_ids') or [chunk.get('chunk_id')] if chunk.get('chunk_id') else []}",
-                    f"text: {chunk.get('text', '')}",
-                ])
         else:
             snippet = source.get("snippet") or source.get("excerpt") or source.get("content") or ""
             source_lines.extend([
                 "CONTEXTO 1",
                 "context_id: ",
-                "origin: legacy_snippet",
+                "origin: search_snippet",
                 "score: ",
                 "included_chunk_ids: []",
                 f"text: {snippet}",
@@ -536,54 +537,29 @@ def openrouter_model_for_current_type(model: str) -> str:
 
 
 def current_evidence_search_policy() -> Dict[str, Any]:
-    preferred_domains_mode = current_evidence_search_use_preferred_domains()
-    ensure_local_mode_supported(VALIDATOR_TYPE, preferred_domains_mode)
+    strategy = current_evidence_search_strategy()
+    ensure_evidence_strategy_supported(VALIDATOR_TYPE, strategy)
     policy = {
-        "mode": "official_first",
-        "use_preferred_domains": preferred_domains_mode.value,
+        "strategy": strategy.value,
         "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
         "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
-        "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
-        "fallback_to_general_search": True,
+        "max_queries": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES", "2")),
+        "preferred_sources": [],
     }
     return policy
 
 
-def claim_type_for_assertion(assertion) -> str:
-    preferred = {str(item).strip().lower() for item in assertion.search_hints.preferred_source_types}
-    subcategory = str(assertion.subcategory or "").lower()
-    if preferred & {"statistics", "official_statistics", "official_statistic"} or any(term in subcategory for term in ("demograph", "population", "statistic")):
-        return "official_statistic"
-    if "monetary" in subcategory:
-        return "monetary_policy"
-    if "health" in subcategory:
-        return "public_health"
-    return next(iter(sorted(preferred)), "general")
-
-
 def source_route_payload(payload_v2: AssertionValidationPayloadV2) -> Dict[str, Any]:
     assertion = payload_v2.assertion
-    locations = sorted(
-        assertion.context.locations,
-        key=lambda item: ({"explicit": 0, "inferred": 1}.get(str(item.origin.value), 2), -item.confidence),
-    )
-    location = locations[0] if locations else None
     return {
-        "category": assertion.categoryId,
-        "subcategory": assertion.subcategory,
-        "claim_type": claim_type_for_assertion(assertion),
-        "location": {
-            "name": location.name if location else "unknown",
-            "country_code": location.country_code if location else None,
-            "region_code": location.region_code if location else None,
-            "scope": location.scope if location else assertion.context.jurisdiction,
-        },
-        "entities": [{"name": item.name, "type": item.type} for item in assertion.context.entities if item.name != "unknown"],
+        "topic_code": assertion.topic_code.value,
+        "evidence_kind": assertion.evidence_kind.value,
+        "jurisdiction": assertion.context.jurisdiction.model_dump(mode="json"),
         "language": assertion.context.language,
     }
 
 
-def resolve_local_domains(payload_v2: AssertionValidationPayloadV2) -> tuple[List[str], Dict[str, Any]]:
+def resolve_local_sources(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     logger.info("[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling source-router before evidence-search")
     try:
         response = httpx.post(
@@ -594,9 +570,8 @@ def resolve_local_domains(payload_v2: AssertionValidationPayloadV2) -> tuple[Lis
         response.raise_for_status()
         route = response.json()
     except Exception as exc:
-        raise SourceRouterRequestError(str(exc) or exc.__class__.__name__) from exc
-    domains = list(dict.fromkeys(str(source.get("domain") or "").strip().lower() for source in route.get("sources") or [] if source.get("domain")))
-    return domains, route
+        raise SourceRouterRequestError(exc) from exc
+    return route.get("sources") or [], route
 
 
 def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -604,14 +579,15 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
         return [], None
     search_policy = current_evidence_search_policy()
     route_response = None
-    if current_evidence_search_use_preferred_domains() == EvidencePreferredDomainsMode.LOCAL:
-        domains, route_response = resolve_local_domains(payload_v2)
-        if not domains:
+    if current_evidence_search_strategy() == EvidenceSearchStrategy.LOCAL:
+        sources, route_response = resolve_local_sources(payload_v2)
+        if not sources:
             return [], {"route": route_response, "evidences": [], "search_skipped": "no_eligible_local_sources"}
-        search_policy["include_domains"] = domains
+        search_policy["preferred_sources"] = sources
     request_payload = {
         "schema_version": "evidence-search-request-v2",
         "assertion": payload_v2.assertion.model_dump(mode="json"),
+        "origin_document": payload_v2.origin_document.model_dump(mode="json"),
         "search_policy": search_policy,
     }
     try:
@@ -622,7 +598,7 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
         response.setdefault("search_policy", search_policy)
         if route_response is not None:
             response["route"] = route_response
-        return response.get("evidences", []) or response.get("sources", []) or [], response
+        return response.get("evidences", []) or [], response
     except Exception:
         logger.exception("Evidence search failed")
         raise
@@ -679,6 +655,8 @@ def build_ai_validator() -> Optional[AIValidator]:
         return None
     if AI_PROVIDER == "none":
         raise RuntimeError("AI_PROVIDER must be different from 'none' for LLM validator types")
+    if uses_online_search() and AI_PROVIDER != "openrouter":
+        raise RuntimeError("LLM_SEARCH_VALIDATION currently requires AI_PROVIDER=openrouter")
     if AI_PROVIDER == "mistral":
         return MistralValidator(API_URL, API_KEY, os.getenv("MODEL", "mistral-tiny"), TEMPERATURE)
     elif AI_PROVIDER == "gemini":
@@ -938,9 +916,7 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         updated_date=updated_date or VALIDATOR_UPDATED_DATE,
         end_date=end_date,
         status=status,
-        use_evidence_search=uses_evidence_search(),
-        evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
-        online_search_enabled=uses_online_search(),
+        evidence_search_strategy=current_evidence_search_strategy(),
         evidence_search_url=EVIDENCE_SEARCH_URL,
     )
 
@@ -1222,7 +1198,7 @@ async def update_admin_config(config: AdminConfigUpdate):
     old_validator_type = VALIDATOR_TYPE
     old_service_url = VALIDATOR_SERVICE_URL
     old_evidence_search_url = EVIDENCE_SEARCH_URL
-    old_use_preferred_domains = current_evidence_search_use_preferred_domains()
+    old_evidence_search_strategy = current_evidence_search_strategy()
     old_categories = list(VALIDATOR_CATEGORIES)
 
     new_provider = config.provider.lower() if config.provider else AI_PROVIDER
@@ -1232,16 +1208,23 @@ async def update_admin_config(config: AdminConfigUpdate):
     new_service_url = config.service_url if config.service_url is not None else VALIDATOR_SERVICE_URL
     new_api_key = API_KEY if config.api_key is None or is_masked_secret(config.api_key) else config.api_key
 
-    new_preferred_domains_mode = (
-        config.evidence_search_use_preferred_domains
-        if config.evidence_search_use_preferred_domains is not None
-        else current_evidence_search_use_preferred_domains()
+    new_evidence_search_strategy = (
+        config.evidence_search_strategy
+        if config.evidence_search_strategy is not None
+        else old_evidence_search_strategy
     )
-    ensure_local_mode_supported(new_validator_type, new_preferred_domains_mode)
+    if new_validator_type != ValidatorType.RAG_EVIDENCE_VALIDATION and config.evidence_search_strategy is None:
+        new_evidence_search_strategy = None
+    ensure_evidence_strategy_supported(new_validator_type, new_evidence_search_strategy)
 
     allowed_providers = {"mistral", "gemini", "openrouter", "grok"}
     if new_validator_type in AUTOMATIC_VALIDATOR_TYPES and new_provider not in allowed_providers:
         raise HTTPException(status_code=400, detail=f"Provider desconocido: {new_provider}")
+    if new_validator_type == ValidatorType.LLM_SEARCH_VALIDATION and new_provider != "openrouter":
+        raise HTTPException(
+            status_code=400,
+            detail="LLM_SEARCH_VALIDATION currently requires provider=openrouter",
+        )
 
     ai_client_changed = any([
         new_provider != old_provider,
@@ -1279,8 +1262,10 @@ async def update_admin_config(config: AdminConfigUpdate):
         EVIDENCE_SEARCH_URL = config.evidence_search_url
         set_runtime_env("EVIDENCE_SEARCH_URL", EVIDENCE_SEARCH_URL)
 
-    if config.evidence_search_use_preferred_domains is not None:
-        set_runtime_env("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", config.evidence_search_use_preferred_domains.value)
+    if new_evidence_search_strategy is not None:
+        set_runtime_env("EVIDENCE_SEARCH_STRATEGY", new_evidence_search_strategy.value)
+    else:
+        os.environ.pop("EVIDENCE_SEARCH_STRATEGY", None)
 
     if config.provider is not None:
         AI_PROVIDER = new_provider
@@ -1315,7 +1300,7 @@ async def update_admin_config(config: AdminConfigUpdate):
         VALIDATOR_TYPE != old_validator_type,
         VALIDATOR_SERVICE_URL != old_service_url,
         EVIDENCE_SEARCH_URL != old_evidence_search_url,
-        current_evidence_search_use_preferred_domains() != old_use_preferred_domains,
+        current_evidence_search_strategy() != old_evidence_search_strategy,
     ])
     metrics_reset_at = datetime.now(timezone.utc).isoformat() if public_config_changed else None
     blockchain_receipts = {}
@@ -1434,23 +1419,7 @@ class BlockchainEventAgent:
             post_json = json.loads(resp.text)
             logger.info("🧩 JSON parseado correctamente desde IPFS")
             
-            if isinstance(post_json, dict) and post_json.get("schema_version") == "assertions-document-v2":
-                content_obj = post_json
-            elif isinstance(post_json, dict) and "assertions" in post_json and "text" in post_json:
-                content_obj = post_json
-            else:
-                content_obj = json.loads(post_json.get("content", "{}"))
-
-            if isinstance(content_obj, dict) and "assertions" in content_obj and "post" not in content_obj:
-                logger.info(f"[validate-asertions] detected minimal document shape from IPFS cid={cid}, reconstructing AssertionsDocumentV2")
-                assertions_document = build_assertions_document_v2(
-                    text=content_obj.get("text", ""),
-                    assertions=content_obj.get("assertions", []),
-                    mode=ValidationMode.BLOCKCHAIN,
-                    provider="news-handler",
-                )
-            else:
-                assertions_document = AssertionsDocumentV2(**content_obj)
+            assertions_document = AssertionsDocumentV2(**post_json)
             logger.info(f"[validate-asertions] loaded assertions-document-v2 from IPFS cid={cid}")
 
             assertion = next((item for item in assertions_document.assertions if int(item.assertion_index) == int(assertion_index)), None)
@@ -1465,6 +1434,8 @@ class BlockchainEventAgent:
                 post_id=post_id,
                 cid=cid,
                 order_id=None,
+                origin_url=assertions_document.post.source_url,
+                origin_domain=assertions_document.post.source_domain,
             )
 
         try:

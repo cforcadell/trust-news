@@ -43,11 +43,6 @@ def sanitize_evidence_item(value: Any) -> Any:
 
 EvidenceItem = Annotated[Dict[str, Any], BeforeValidator(sanitize_evidence_item)]
 
-_ROUTING_PLACEHOLDER_TEXT = (
-    "domain selected by contextual routing; configure api_key_provider for live snippets."
-)
-
-
 def _canonical_http_url(value: Any) -> str | None:
     """Return a comparison-safe HTTP(S) URL without its fragment."""
     if not is_http_url(value):
@@ -68,15 +63,6 @@ def _canonical_http_url(value: Any) -> str | None:
 def _normalized_evidence_text(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     return re.sub(r"\s+", " ", text).strip().casefold()
-
-
-def _is_placeholder_evidence(source: Dict[str, Any]) -> bool:
-    if source.get("is_placeholder") or source.get("evidence_status") == "ROUTING_PLACEHOLDER":
-        return True
-    # Cached responses created before evidence_status was added must remain
-    # non-evidentiary as well.
-    candidate = source.get("snippet") or source.get("content") or ""
-    return _normalized_evidence_text(candidate) == _ROUTING_PLACEHOLDER_TEXT
 
 
 def _source_texts(source: Dict[str, Any], reference: Dict[str, Any]) -> Iterable[str]:
@@ -144,8 +130,8 @@ def evaluate_evidence_grounding(
         if source is None:
             issues.append({"index": index, "code": "SOURCE_NOT_RETRIEVED", "source_id": source_id or None})
             continue
-        if _is_placeholder_evidence(source):
-            issues.append({"index": index, "code": "SOURCE_IS_PLACEHOLDER", "source_id": source_id})
+        if source.get("relationship_to_origin") == "ORIGINAL":
+            issues.append({"index": index, "code": "SOURCE_IS_ORIGINAL_DOCUMENT", "source_id": source_id})
             continue
 
         reference_url = _canonical_http_url(reference.get("url"))

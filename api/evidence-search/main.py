@@ -11,9 +11,10 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient
-from common.models.async_models import EvidencePreferredDomainsMode
-from common.models.evidence_models import EvidenceSearchRequestV2
-from common.utils.domain_utils import normalize_domain
+from common.models.async_models import EvidenceSearchStrategy
+from common.models.evidence_models import EvidenceSearchRequestV2, EvidenceSearchResponseV2
+from common.routing_taxonomy import SourceType
+from common.search.normalization import normalize_domain, normalize_url
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
 
@@ -31,7 +32,7 @@ logger = logging.getLogger("evidence-search")
 
 MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
-MONGO_CACHE_COLLECTION = os.getenv("EVIDENCE_SEARCH_CACHE_COLLECTION", "evidence_search_cache")
+MONGO_CACHE_COLLECTION = os.getenv("EVIDENCE_SEARCH_CACHE_COLLECTION", "evidence_search_cache_v2")
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_CACHE_TTL_SECONDS", "86400"))
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "").lower() or None
@@ -45,6 +46,19 @@ EVIDENCE_CONTEXT_WINDOW_AFTER = int(os.getenv("EVIDENCE_CONTEXT_WINDOW_AFTER", "
 EVIDENCE_HTTP_TIMEOUT = float(os.getenv("EVIDENCE_HTTP_TIMEOUT", "10"))
 EVIDENCE_MIN_CONTEXT_CHARS = int(os.getenv("EVIDENCE_MIN_CONTEXT_CHARS", "120"))
 EVIDENCE_USER_AGENT = os.getenv("EVIDENCE_USER_AGENT", "TrustNewsEvidenceBot/1.0")
+
+OFFICIAL_SOURCE_TYPES = {
+    SourceType.STATISTICAL_OFFICE,
+    SourceType.CENTRAL_BANK,
+    SourceType.GOVERNMENT_AGENCY,
+    SourceType.OFFICIAL_GAZETTE,
+    SourceType.LEGISLATURE,
+    SourceType.COURT,
+    SourceType.REGULATOR,
+    SourceType.ELECTORAL_AUTHORITY,
+    SourceType.PUBLIC_HEALTH_AUTHORITY,
+    SourceType.INTERGOVERNMENTAL_ORGANIZATION,
+}
 
 
 app = FastAPI(title="TrustNews Evidence Search")
@@ -146,12 +160,12 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
     """Create the structured search plan shared by query logging and execution."""
     # Limit query fan-out according to the active evidence-search policy.
     base_queries = base_queries_for_assertion(assertion)
-    query_limit = max(1, int(_policy_value(policy, "max_queries_per_domain", 1) or 1))
+    query_limit = max(1, int(_policy_value(policy, "max_queries", 1) or 1))
     base_queries = base_queries[:query_limit]
 
     # Group preferred domains by query so providers can receive include-domain filters.
     grouped: Dict[str, List[str]] = {}
-    for domain_cfg in domain_resolution.get("preferred_domains") or []:
+    for domain_cfg in domain_resolution.get("preferred_sources") or []:
         domain = str(domain_cfg.get("domain") or "").strip()
         if not domain:
             continue
@@ -160,29 +174,29 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
             if domain not in grouped[query]:
                 grouped[query].append(domain)
 
-    preferred_domains_mode = preferred_domains_mode_for_policy(policy)
+    strategy = strategy_for_policy(policy)
 
     # Build the preferred-domain requests first, preserving the router priority.
     requests = []
-    for query in base_queries:
-        domains = grouped.get(query, [])
-        if domains:
+    if strategy == EvidenceSearchStrategy.LOCAL:
+        for query in base_queries:
+            domains = grouped.get(query, [])
             requests.append({
                 "query": query,
                 "include_domains": domains,
-                "mode": "preferred_domains",
+                "mode": "local_routed",
                 "external_source_policy": "none",
             })
 
-    if preferred_domains_mode in {EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST, EvidencePreferredDomainsMode.EXT_ONLY_OFFICIAL}:
+    if strategy in {EvidenceSearchStrategy.EXT_OFFICIAL_FIRST, EvidenceSearchStrategy.EXT_ONLY_OFFICIAL}:
         external_source_policy = (
             "official_first"
-            if preferred_domains_mode == EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST
+            if strategy == EvidenceSearchStrategy.EXT_OFFICIAL_FIRST
             else "only_official"
         )
         request_mode = (
             "external_official_first"
-            if preferred_domains_mode == EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST
+            if strategy == EvidenceSearchStrategy.EXT_OFFICIAL_FIRST
             else "external_only_official"
         )
         for query in base_queries:
@@ -193,11 +207,7 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
                 "external_source_policy": external_source_policy,
             })
 
-    # Optionally add general fallback searches to avoid returning no evidence when routing is sparse.
-    general_fallback = _policy_value(policy, "fallback_to_general_search", False)
-    if preferred_domains_mode == EvidencePreferredDomainsMode.LOCAL:
-        general_fallback = bool(domain_resolution.get("fallback_used"))
-    if preferred_domains_mode != EvidencePreferredDomainsMode.EXT_ONLY_OFFICIAL and general_fallback:
+    if strategy == EvidenceSearchStrategy.EXT_OFFICIAL_FIRST:
         for query in base_queries:
             requests.append({
                 "query": query,
@@ -212,14 +222,14 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
 
 def build_queries_v2(assertion: Dict[str, Any], domain_resolution: Dict[str, Any], policy) -> List[str]:
     """Render the structured search plan as human-readable query strings."""
-    # Reuse the canonical request plan so legacy query logs mirror execution.
+    # Reuse the canonical request plan so operator-facing logs mirror execution.
     plan = _search_request_plan(assertion, domain_resolution, policy)
     queries: List[str] = []
 
     # Preferred-domain requests are displayed as site: queries for easy operator inspection.
     for request in plan["requests"]:
         query = request["query"]
-        if request["mode"] == "preferred_domains":
+        if request["mode"] == "local_routed":
             domains = [str(domain).strip() for domain in request.get("include_domains") or [] if str(domain).strip()]
             if domains:
                 if len(domains) == 1:
@@ -232,7 +242,7 @@ def build_queries_v2(assertion: Dict[str, Any], domain_resolution: Dict[str, Any
         else:
             queries.append(query)
 
-    # Keep the return value as a plain list because older tests and logs expect it.
+    # Keep the operator-facing representation separate from provider requests.
     return queries
 
 
@@ -242,16 +252,30 @@ def build_search_requests(assertion: Dict[str, Any], domain_resolution: Dict[str
     return _search_request_plan(assertion, domain_resolution, policy)["requests"]
 
 
-def evidence_from_source_v2(source: Dict[str, Any], rank: int, domain_resolution: Dict[str, Any]) -> Dict[str, Any]:
+def evidence_from_source_v2(
+    source: Dict[str, Any],
+    rank: int,
+    domain_resolution: Dict[str, Any],
+    origin_document: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Normalize a raw provider result into the evidence-search response schema."""
     # Extract and normalize the domain so it can be matched against router metadata.
     url = source.get("url") or ""
     domain = normalize_domain(urlparse(url).netloc)
-    matched = next((d for d in domain_resolution.get("preferred_domains", []) if d.get("domain") == domain), {})
+    matched = next((d for d in domain_resolution.get("preferred_sources", []) if d.get("domain") == domain), {})
 
     # Use router source metadata when available, otherwise fall back to domain heuristics.
     source_type = matched.get("source_type") or source_type_for_domain(domain)
-    trust_score = float(matched.get("trust_score", 0.3) or 0.3)
+    route_score = float(matched.get("route_score", 0.3) or 0.3)
+    origin_document = origin_document or {}
+    origin_url = normalize_url(origin_document.get("url") or "")
+    origin_domain = normalize_domain(origin_document.get("domain") or origin_url)
+    if origin_url and normalize_url(url) == origin_url:
+        relationship_to_origin = "ORIGINAL"
+    elif origin_domain and domain == origin_domain:
+        relationship_to_origin = "UNKNOWN"
+    else:
+        relationship_to_origin = "INDEPENDENT"
 
     # Preserve useful provider text and add stable ids for downstream validator prompts.
     evidence = {
@@ -262,14 +286,14 @@ def evidence_from_source_v2(source: Dict[str, Any], rank: int, domain_resolution
         "source_type": source_type,
         "snippet": source.get("content") or source.get("snippet") or useful_excerpt(source),
         "rank": rank,
-        "trust_score": trust_score,
+        "authority_level": matched.get("authority_level", "UNKNOWN"),
+        "route_score": route_score,
         "retrieved_at": iso(utc_now()),
         "why_selected": matched.get("reason") or "Matched contextual search policy",
-        "matched_profiles": matched.get("matched_profiles", []),
+        "profile_version": matched.get("profile_version"),
+        "document_type": "UNKNOWN",
+        "relationship_to_origin": relationship_to_origin,
     }
-    if source.get("_routing_placeholder"):
-        evidence["is_placeholder"] = True
-        evidence["evidence_status"] = "ROUTING_PLACEHOLDER"
     return evidence
 
 
@@ -277,17 +301,34 @@ def source_type_for_domain(domain: str) -> str:
     """Infer a broad source type when no profile metadata matched the domain."""
     # Normalize before marker checks so provider URL variations do not change classification.
     d = normalize_domain(domain)
-    official_markers = (".gov", ".gob", ".int", "who.int", "un.org", "europa.eu", "ec.europa.eu", "eurostat.ec.europa.eu", "gencat.cat", "idescat.cat", "ine.es")
+    statistical_domains = ("ine.es", "idescat.cat")
+    intergovernmental_domains = ("europa.eu", "who.int", "un.org", "oecd.org", "worldbank.org", "imf.org")
+    government_domains = ("gencat.cat",)
     agencies = ("reuters.com", "apnews.com", "afp.com", "efe.com", "bloomberg.com")
 
+    def belongs_to(domains: tuple[str, ...]) -> bool:
+        return any(d == item or d.endswith(f".{item}") for item in domains)
+
     # Apply a simple taxonomy used as a fallback trust signal.
-    if any(marker in d for marker in official_markers):
-        return "official"
-    if any(marker in d for marker in agencies):
-        return "news_agency"
+    official_suffix = re.search(r"\.(?:gov|gob|gouv|go)(?:\.[a-z]{2})?$", d)
+    if belongs_to(statistical_domains):
+        return SourceType.STATISTICAL_OFFICE.value
+    if belongs_to(intergovernmental_domains):
+        return SourceType.INTERGOVERNMENTAL_ORGANIZATION.value
+    if official_suffix or belongs_to(government_domains):
+        return SourceType.GOVERNMENT_AGENCY.value
+    if belongs_to(agencies):
+        return SourceType.NEWS_AGENCY.value
     if d:
-        return "media"
-    return "unknown"
+        return SourceType.MEDIA.value
+    return SourceType.UNKNOWN.value
+
+
+def is_official_source_type(value: str) -> bool:
+    try:
+        return SourceType(value) in OFFICIAL_SOURCE_TYPES
+    except ValueError:
+        return False
 
 
 def utc_now() -> datetime:
@@ -317,6 +358,12 @@ def normalized_assertion_for_cache(assertion: Dict[str, Any]) -> Dict[str, Any]:
     if "text" in normalized:
         normalized["text"] = re.sub(r"\s+", " ", str(normalized.get("text") or "").strip()).lower()
     return normalized
+
+
+def normalized_origin_for_cache(origin_document: Dict[str, Any]) -> Dict[str, Any]:
+    url = normalize_url(origin_document.get("url") or "") or None
+    domain = normalize_domain(origin_document.get("domain") or url or "") or None
+    return {"url": url, "domain": domain}
 
 
 def policy_for_cache(policy: Any) -> Dict[str, Any]:
@@ -350,12 +397,18 @@ def search_backend_for_cache() -> Dict[str, Any]:
     }
 
 
-def evidence_cache_key(assertion: Dict[str, Any], policy: Any, profile_version: str) -> str:
+def evidence_cache_key(
+    assertion: Dict[str, Any],
+    origin_document: Dict[str, Any],
+    policy: Any,
+    profile_version: str,
+) -> str:
     """Build the cache key for an assertion, policy, profile version, and search backend."""
     # Include every input that can change the evidence search result.
     payload = {
         "schema_version": "evidence-search-request-v2",
         "assertion": normalized_assertion_for_cache(assertion),
+        "origin_document": normalized_origin_for_cache(origin_document),
         "search_policy": policy_for_cache(policy),
         "profile_version": profile_version,
         "search_backend": search_backend_for_cache(),
@@ -365,25 +418,21 @@ def evidence_cache_key(assertion: Dict[str, Any], policy: Any, profile_version: 
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
 
-def preferred_domains_mode_for_policy(policy: Any) -> EvidencePreferredDomainsMode:
-    """Return the configured evidence-search domain preference mode."""
-    if isinstance(policy, dict):
-        raw_mode = policy.get("use_preferred_domains", EvidencePreferredDomainsMode.NONE)
-    else:
-        raw_mode = getattr(policy, "use_preferred_domains", EvidencePreferredDomainsMode.NONE)
-    if isinstance(raw_mode, EvidencePreferredDomainsMode):
-        return raw_mode
-    return EvidencePreferredDomainsMode(str(raw_mode or "").strip().upper())
+def strategy_for_policy(policy: Any) -> EvidenceSearchStrategy:
+    """Return the required evidence-search strategy."""
+    raw_strategy = _policy_value(policy, "strategy")
+    if isinstance(raw_strategy, EvidenceSearchStrategy):
+        return raw_strategy
+    return EvidenceSearchStrategy(str(raw_strategy or "").strip().upper())
 
 
 def empty_domain_resolution() -> Dict[str, Any]:
-    """Return the domain-resolution shape used when preferred routing is disabled."""
-    # Preserve the response contract even when no domain router is involved.
+    """Return the domain-resolution shape used by external strategies."""
     return {
         "selected_profiles": [],
-        "preferred_domains": [],
-        "fallback_used": True,
-        "reason": "preferred_domains_disabled",
+        "preferred_sources": [],
+        "selected_domains": [],
+        "reason": "external_strategy",
     }
 
 
@@ -400,7 +449,7 @@ def useful_excerpt(result: Dict[str, Any]) -> str:
 
 
 def snippet_context_for_evidence(evidence: Dict[str, Any], score: Optional[float] = None) -> Optional[Dict[str, Any]]:
-    """Build a traceable context from the provider snippet for compatibility/fallback."""
+    """Build a traceable context from the provider snippet when full text is unavailable."""
     snippet = re.sub(r"\s+", " ", evidence.get("snippet") or "").strip()
     if not snippet:
         return None
@@ -446,6 +495,7 @@ async def build_evidences_with_optional_contexts(
     raw_results: List[Dict[str, Any]],
     domain_resolution: Dict[str, Any],
     max_results: int,
+    origin_document: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Normalize search results and optionally enrich them with selected document contexts."""
     evidences: List[Dict[str, Any]] = []
@@ -455,7 +505,7 @@ async def build_evidences_with_optional_contexts(
         logger.info(f"[evidence-search] full_text_enrichment_start=true assertion_id={assertion.get('assertion_id')}")
 
     for idx, source in enumerate(raw_results[:max_results], start=1):
-        evidence = evidence_from_source_v2(source, idx, domain_resolution)
+        evidence = evidence_from_source_v2(source, idx, domain_resolution, origin_document)
         source_id = evidence["source_id"]
 
         if not EVIDENCE_FETCH_FULL_TEXT:
@@ -564,10 +614,10 @@ def merge_search_results(*result_groups: List[Dict[str, Any]], max_sources: int)
 async def ensure_indexes():
     """Create indexes for the evidence response cache."""
     if cache_collection is not None:
-        await cache_collection.create_index("cache_key", unique=True)
-        await cache_collection.create_index("assertion_hash")
-        await cache_collection.create_index("created_at")
-        await cache_collection.create_index("expires_at", expireAfterSeconds=0)
+        await cache_collection.create_index("cache_key", name="cache_key_1", unique=True)
+        await cache_collection.create_index("assertion_hash", name="assertion_hash_1")
+        await cache_collection.create_index("created_at", name="created_at_1")
+        await cache_collection.create_index("expires_at", name="expires_at_ttl", expireAfterSeconds=0)
 
 
 @app.on_event("startup")
@@ -615,7 +665,7 @@ async def clear_cache():
     }
 
 
-@app.post("/search/evidence")
+@app.post("/search/evidence", response_model=EvidenceSearchResponseV2)
 async def search_evidence(req: EvidenceSearchRequestV2):
     """Search for evidence supporting a validated assertion payload."""
     # Validate the minimum assertion text required to build any useful query.
@@ -624,24 +674,25 @@ async def search_evidence(req: EvidenceSearchRequestV2):
     if not text:
         raise HTTPException(status_code=400, detail="assertion.text is required")
 
-    # LOCAL routing is resolved by the caller before this request.
-    preferred_domains_mode = preferred_domains_mode_for_policy(req.search_policy)
-    use_local_preferred_domains = preferred_domains_mode == EvidencePreferredDomainsMode.LOCAL
-    include_domains = list(dict.fromkeys(
-        normalize_domain(domain) for domain in getattr(req.search_policy, "include_domains", []) if normalize_domain(domain)
+    strategy = strategy_for_policy(req.search_policy)
+    use_local_routing = strategy == EvidenceSearchStrategy.LOCAL
+    preferred_sources = [source.model_dump(mode="json") for source in req.search_policy.preferred_sources]
+    selected_domains = list(dict.fromkeys(
+        normalize_domain(source.get("domain")) for source in preferred_sources if normalize_domain(source.get("domain"))
     ))
-    if use_local_preferred_domains and not include_domains:
+    if use_local_routing and not selected_domains:
         raise HTTPException(
             status_code=400,
-            detail={"code": "LOCAL_INCLUDE_DOMAINS_REQUIRED", "message": "LOCAL evidence search requires pre-resolved include_domains"},
+            detail={"code": "LOCAL_PREFERRED_SOURCES_REQUIRED", "message": "LOCAL evidence search requires sources resolved by Source Router"},
         )
     profile_version = (
-        "caller-domains:" + hashlib.sha256(canonical_json(include_domains).encode("utf-8")).hexdigest()[:16]
-        if use_local_preferred_domains else f"preferred-domains-{preferred_domains_mode.value.lower()}"
+        "routed-sources:" + hashlib.sha256(canonical_json(preferred_sources).encode("utf-8")).hexdigest()[:16]
+        if use_local_routing else f"external-{strategy.value.lower()}"
     )
+    origin_document = req.origin_document.model_dump(mode="json")
 
     # Build the cache key from the normalized assertion, policy, and profile version.
-    cache_key = evidence_cache_key(assertion, req.search_policy, profile_version)
+    cache_key = evidence_cache_key(assertion, origin_document, req.search_policy, profile_version)
     now = utc_now()
 
     # Return a fresh cached response when one exists and has not expired.
@@ -655,42 +706,28 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             return response
 
     # Attach caller-selected LOCAL domains as metadata; no discovery or route memory lives here.
-    if use_local_preferred_domains:
+    if use_local_routing:
         domain_resolution = {
             "selected_profiles": [],
-            "preferred_domains": [
-                {"domain": domain, "source_type": "unknown", "trust_score": 0.3, "reason": "Selected by caller", "matched_profiles": []}
-                for domain in include_domains[:req.search_policy.max_domains]
-            ],
-            "selected_domains": include_domains[:req.search_policy.max_domains],
-            "fallback_used": False,
-            "reason": "caller_selected_domains",
+            "preferred_sources": preferred_sources[:req.search_policy.max_domains],
+            "selected_domains": selected_domains[:req.search_policy.max_domains],
+            "reason": "source_router",
         }
     else:
         domain_resolution = empty_domain_resolution()
-        domain_resolution["reason"] = f"{preferred_domains_mode.value.lower()}_mode"
-    domain_resolution["preferred_domains_mode"] = preferred_domains_mode.value
+        domain_resolution["reason"] = strategy.value.lower()
+    domain_resolution["strategy"] = strategy.value
     domain_resolution["profile_version"] = profile_version
     effective_search_policy = req.search_policy.model_dump(mode="json") if hasattr(req.search_policy, "model_dump") else dict(vars(req.search_policy))
-    if use_local_preferred_domains:
-        effective_search_policy.update({
-            "mode": "local_routed_domains",
-            "domain_scoring_enabled": False,
-            "fallback_to_general_search": False,
-            "selected_domains": domain_resolution.get("selected_domains", []),
-        })
-    else:
-        effective_search_policy["domain_scoring_enabled"] = False
-        effective_search_policy["selected_domains"] = []
 
     # Log the routing decision to make evidence selection auditable.
     logger_prefix = f"[evidence-search] assertion_id={assertion.get('assertion_id')}"
     logger.info(
-        f"{logger_prefix} preferred_domains_mode={preferred_domains_mode.value} "
-        f"include_domains={include_domains if use_local_preferred_domains else []}"
+        f"{logger_prefix} strategy={strategy.value} "
+        f"selected_domains={selected_domains if use_local_routing else []}"
     )
 
-    # Log the legacy rendered query list for easier debugging in existing logs.
+    # Log the rendered query list for operator debugging.
     queries = build_queries_v2(assertion, domain_resolution, effective_search_policy)
     for query in queries:
         logger.info(f"[evidence-search] query='{query}'")
@@ -747,12 +784,21 @@ async def search_evidence(req: EvidenceSearchRequestV2):
             },
         )
 
+    if strategy == EvidenceSearchStrategy.EXT_ONLY_OFFICIAL:
+        raw_results = [
+            item for item in raw_results
+            if is_official_source_type(
+                source_type_for_domain(normalize_domain(urlparse(item.get("url") or "").netloc))
+            )
+        ]
+
     # Normalize raw provider results into the public evidence response contract.
     evidences = await build_evidences_with_optional_contexts(
         assertion,
         raw_results,
         domain_resolution,
         max_results=effective_search_policy["max_results"],
+        origin_document=origin_document,
     )
     response = {
         "schema_version": "evidence-search-response-v2",
@@ -775,13 +821,13 @@ async def search_evidence(req: EvidenceSearchRequestV2):
                     "cache_key": cache_key,
                     "assertion_hash": assertion_hash,
                     "profile_version": profile_version,
-                    "search_strategy": effective_search_policy["mode"],
-                    "preferred_domains_mode": preferred_domains_mode.value,
+                    "search_strategy": strategy.value,
                     "search_backend": search_backend_for_cache(),
                     "created_at": now,
                     "expires_at": now + timedelta(seconds=EVIDENCE_SEARCH_CACHE_TTL_SECONDS),
                     "request": {
                         "assertion": assertion,
+                        "origin_document": origin_document,
                         "search_policy": effective_search_policy,
                     },
                     "response": response,

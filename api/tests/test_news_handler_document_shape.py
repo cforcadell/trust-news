@@ -18,20 +18,40 @@ def load_news_handler_module():
     return module
 
 
-def test_minimal_document_for_order_shape():
-    module = load_news_handler_module()
-    document = module.minimal_document_for_order(
-        text="Este es un texto de prueba",
-        assertions=[{"idAssertion": "a1", "text": "Prueba", "categoryId": 1}],
-    )
-
-    assert document == {
-        "text": "Este es un texto de prueba",
-        "assertions": [{"idAssertion": "a1", "text": "Prueba", "categoryId": 1}],
+def assertion_payload():
+    return {
+        "idAssertion": "1",
+        "text": "El paro descendio en Espana.",
+        "categoryId": 1,
+        "topic_code": "EMPLOYMENT",
+        "evidence_kind": "STATISTICAL_DATA",
+        "context": {
+            "locations": [], "entities": [], "temporal_context": [], "language": "es",
+            "jurisdiction": {"scope": "COUNTRY", "country_code": "ES"},
+        },
     }
 
 
-def test_start_light_flow_updates_order_with_minimal_document(monkeypatch):
+def test_generated_payload_requires_the_canonical_document():
+    module = load_news_handler_module()
+    document = module.build_assertions_document_v2(
+        text="Este es un texto de prueba", assertions=[assertion_payload()],
+        mode=module.ValidationMode.LIGHT, provider="test",
+    )
+    response = module.AssertionsGeneratedResponse(
+        action="assertions_generated", order_id="order-1",
+        payload={"assertions_document": document},
+    )
+    assert response.payload.assertions_document.schema_version == "assertions-document-v2"
+
+    with pytest.raises(Exception):
+        module.AssertionsGeneratedResponse(
+            action="assertions_generated", order_id="order-1",
+            payload={"text": "legacy", "assertions": []},
+        )
+
+
+def test_start_light_flow_stores_the_full_protocol_document(monkeypatch):
     module = load_news_handler_module()
     calls = {}
 
@@ -56,7 +76,7 @@ def test_start_light_flow_updates_order_with_minimal_document(monkeypatch):
 
     assertions_document = module.build_assertions_document_v2(
         text="Texto de prueba",
-        assertions=[{"idAssertion": "1", "text": "Aserción de prueba", "categoryId": 1}],
+        assertions=[assertion_payload()],
         mode=module.ValidationMode.LIGHT,
         provider="test",
     )
@@ -74,16 +94,14 @@ def test_start_light_flow_updates_order_with_minimal_document(monkeypatch):
     assert order_update["cid"] is None
     assert order_update["tx_hash"] is None
 
-    assert order_update["document"]["text"] == "Texto de prueba"
+    assert order_update["document"]["schema_version"] == "assertions-document-v2"
+    assert order_update["document"]["post"]["original_text"] == "Texto de prueba"
     assert len(order_update["document"]["assertions"]) == 1
     assertion_item = order_update["document"]["assertions"][0]
-    assert assertion_item["idAssertion"] == "1"
-    assert assertion_item["text"] == "Aserción de prueba"
+    assert assertion_item["assertion_id"] == 1
+    assert assertion_item["text"] == "El paro descendio en Espana."
     assert assertion_item["categoryId"] == 1
-    assert "assertion_id" not in assertion_item
-    assert "assertion_index" not in assertion_item
-
-    assert "assertions_document" not in order_update
+    assert assertion_item["topic_code"] == "EMPLOYMENT"
 
 
 def test_legacy_validation_weight_fallback_is_marked(monkeypatch):

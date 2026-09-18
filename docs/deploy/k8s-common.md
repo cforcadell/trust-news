@@ -180,25 +180,28 @@ categorias no coinciden con `smart-contracts/config/categories.json`.
 
 ## 6. MongoDB bootstrap
 
-Despues de levantar MongoDB, ejecutar siempre el bootstrap idempotente:
+Despues de levantar MongoDB, ejecutar el bootstrap y comprobar el esquema:
 
 ```bash
-scripts/k8s/init-mongodb-server.sh --dry-run
 scripts/k8s/init-mongodb-server.sh
+scripts/k8s/realign-source-routing-mongodb.sh --check
 ```
 
 Este paso:
 
 - crea o actualiza el usuario de aplicacion;
-- crea indices de `news`, `clients_quotas`, `events`, `validations`, `source_routes` y `evidence_search_cache`;
-- elimina las colecciones estáticas obsoletas `evidence_domain_profiles` y `evidence_normalization_configs`;
-- limpia por defecto `evidence_search_cache`.
+- crea índices de `news`, `clients_quotas`, `events` y `validations`;
+- realinea `source_routes_v2`, `domain_profiles_v1` y `evidence_search_cache_v2` cuando cambia el marcador de esquema;
+- elimina las colecciones incompatibles anteriores y conserva las cachés nuevas en ejecuciones repetidas.
+
+En CI, `apis-frontend-prod` ejecuta `--apply` y `--check` inmediatamente antes
+del rollout de APIs. Para `infra-prod`, el bootstrap los ejecuta después de que
+el StatefulSet de MongoDB esté listo.
 
 Verificacion:
 
 ```bash
-kubectl exec -it mongodb-0 -n infra -- sh -c \
-  'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$MONGO_APP_DATABASE" --quiet --eval "printjson({routes: db.source_routes.countDocuments({}), cache: db.evidence_search_cache.countDocuments({})})"'
+scripts/k8s/realign-source-routing-mongodb.sh --check
 ```
 
 ---
@@ -326,10 +329,11 @@ el registro anterior y actualizar sus límites mediante
 
 ## 8. Source Router y Evidence Search
 
-`source-router` mantiene rutas dinámicas en `source_routes`. En MISS/STALE usa
-el proveedor de búsqueda y el LLM configurados; en FRESH solo consulta Mongo.
+`source-router` mantiene rutas dinámicas en `source_routes_v2` y propiedades
+estables en `domain_profiles_v1`. En MISS/STALE usa el proveedor de búsqueda y
+el LLM configurados; en FRESH solo consulta Mongo.
 Crear fuera del repositorio `search-secret`, `source-router-llm-secret` y
-`mongodb-app-secret`. Evidence Search recibe `include_domains` para LOCAL y
+`mongodb-app-secret`. Evidence Search recibe `preferred_sources` para `LOCAL` y
 solo recupera/rankea evidencia. No existen seeds ni allowlists.
 
 ```bash
@@ -383,8 +387,9 @@ Colecciones principales:
 | `events` | `news-handler` | Eventos del flujo por `order_id`. |
 | `validations` | `news-handler` | Validaciones por orden/asercion/validador. |
 | `clients_quotas` | `admin` | Clientes y cuotas disponibles/consumidas. |
-| `source_routes` | `source-router` | Memoria dinámica FRESH/STALE de rutas y fuentes clasificadas. |
-| `evidence_search_cache` | `evidence-search` | Cache v2 de busquedas de evidencias. |
+| `source_routes_v2` | `source-router` | Referencias dinámicas FRESH/STALE de rutas normalizadas. |
+| `domain_profiles_v1` | `source-router` | Perfil estable y normalizado de cada dominio clasificado. |
+| `evidence_search_cache_v2` | `evidence-search` | Respuestas cacheadas por asercion, origen, politica y backend. |
 
 ---
 

@@ -41,7 +41,7 @@ function createContext(language = 'es') {
         }
     `, context);
     vm.runInContext(functionBlock('formatMaxTwoDecimals', 'parseEventTimestamp'), context);
-    vm.runInContext(functionBlock('formatWeightPercent', 'preferredDomainsStatusFromPolicy'), context);
+    vm.runInContext(functionBlock('formatWeightPercent', 'evidenceStrategyStatus'), context);
     return context;
 }
 

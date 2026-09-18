@@ -230,10 +230,9 @@
                 "5": "Una persona revisa la afirmación y emite su valoración."
             },
             sourcePolicies: {
-                NONE: { label: "Búsqueda abierta", hint: "Busca en internet sin priorizar un catálogo de dominios." },
-                LOCAL: { label: "Dominios Preseleccionados antes de buscar evidencias", hint: "Busca en internet usando dominios seleccionados del catálogo propio. Puede ampliar la búsqueda según la configuración." },
+                LOCAL: { label: "Dominios preseleccionados", hint: "Busca evidencias exclusivamente en los dominios elegibles seleccionados por el router local." },
                 EXT_OFFICIAL_FIRST: { label: "Prioriza fuentes oficiales al buscador de evidencias", hint: "Pide al buscador que priorice organismos y autoridades oficiales. Puede consultar otras fuentes." },
-                EXT_ONLY_OFFICIAL: { label: "Restringe fuentes oficiales al buscador de evidencias", hint: "Pide al buscador que limite los resultados a fuentes oficiales, si lo permite. No amplía la búsqueda a otras fuentes." }
+                EXT_ONLY_OFFICIAL: { label: "Solo fuentes oficiales", hint: "Pide al buscador que limite los resultados a fuentes oficiales y descarta resultados no oficiales." }
             },
             validatorTypes: { "1": "IA sin búsqueda", "2": "IA con búsqueda web", "3": "Verificación con fuentes", "4": "Verificación por reglas", "5": "Revisión humana" },
             searchingPrevious: "Buscando verificaciones previas...", resultsFound: "Se encontraron {count} resultados.", searchError: "Error de conexión o datos inválidos al buscar.", resultsLoadError: "Error al cargar los resultados.",
@@ -543,10 +542,9 @@
                 "5": "A person reviews the claim and provides an assessment."
             },
             sourcePolicies: {
-                NONE: { label: "Open web search", hint: "Searches the web without prioritizing a domain catalog." },
-                LOCAL: { label: "Selected presources", hint: "Searches the web using domains selected from the internal catalog. May broaden the search depending on configuration." },
+                LOCAL: { label: "Preselected domains", hint: "Searches for evidence only in eligible domains selected by the local router." },
                 EXT_OFFICIAL_FIRST: { label: "Official sources first", hint: "Asks the search provider to prioritize official institutions and authorities. May consult other sources." },
-                EXT_ONLY_OFFICIAL: { label: "Official sources only", hint: "Asks the search provider to restrict results to official sources where supported. Does not broaden the search to other sources." }
+                EXT_ONLY_OFFICIAL: { label: "Official sources only", hint: "Asks the search provider to restrict results to official sources and discards non-official results." }
             },
             validatorTypes: { "1": "AI without search", "2": "AI with web search", "3": "Source-based verification", "4": "Rule-based verification", "5": "Human review" },
             searchingPrevious: "Searching previous verifications...", resultsFound: "{count} results found.", searchError: "Connection error or invalid search data.", resultsLoadError: "Error loading results.",

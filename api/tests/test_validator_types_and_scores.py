@@ -46,11 +46,11 @@ def test_weighted_score_formula_preserves_raw_weight():
     assert max(scores, key=scores.get) == "FALSE"
 
 
-def test_local_preferred_domains_only_supports_rag_validator():
-    from common.models.async_models import EvidencePreferredDomainsMode, local_preferred_domains_supported
+def test_evidence_search_strategies_only_apply_to_rag():
+    from common.models.async_models import EvidenceSearchStrategy, evidence_search_strategy_supported
 
-    assert local_preferred_domains_supported(ValidatorType.RAG_EVIDENCE_VALIDATION, EvidencePreferredDomainsMode.LOCAL)
-    assert not local_preferred_domains_supported(ValidatorType.LLM_MEMORY_VALIDATION, EvidencePreferredDomainsMode.LOCAL)
-    assert not local_preferred_domains_supported(ValidatorType.DETERMINISTIC_VALIDATION, EvidencePreferredDomainsMode.LOCAL)
-    assert local_preferred_domains_supported(ValidatorType.LLM_MEMORY_VALIDATION, EvidencePreferredDomainsMode.NONE)
-    assert local_preferred_domains_supported(ValidatorType.LLM_SEARCH_VALIDATION, EvidencePreferredDomainsMode.EXT_OFFICIAL_FIRST)
+    for strategy in EvidenceSearchStrategy:
+        assert evidence_search_strategy_supported(ValidatorType.RAG_EVIDENCE_VALIDATION, strategy)
+        assert not evidence_search_strategy_supported(ValidatorType.LLM_MEMORY_VALIDATION, strategy)
+        assert not evidence_search_strategy_supported(ValidatorType.LLM_SEARCH_VALIDATION, strategy)
+    assert not evidence_search_strategy_supported(ValidatorType.RAG_EVIDENCE_VALIDATION, "NONE")

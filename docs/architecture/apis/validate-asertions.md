@@ -11,17 +11,17 @@
 - `POST /registrar_validador`: sube la configuración del validador a IPFS, registra el validador en el contrato y publica evento de configuración.
 - `POST /desregistrar_validador`: marca configuración como baja, actualiza blockchain, desregistra el validador y publica evento.
 - `GET /admin/config`: devuelve proveedor, modelo, categorías y configuración runtime del validador. `private_key` y `api_key` se devuelven ofuscados como `********`.
-- `PUT /admin/config`: actualiza proveedor/modelo/categorías y permite cambiar `api_url`, `validator_type`, `evidence_search_url`, `evidence_search_use_preferred_domains`, `private_key`, `account_address` y `api_key`. Si se envía `private_key` o `api_key` como solo asteriscos, se conserva el valor actual. Refresca configuración IPFS y actualiza blockchain cuando cambia el hash público de configuración.
+- `PUT /admin/config`: actualiza proveedor/modelo/categorías y permite cambiar `api_url`, `validator_type`, `evidence_search_url`, `evidence_search_strategy`, `private_key`, `account_address` y `api_key`. Si se envía `private_key` o `api_key` como solo asteriscos, se conserva el valor actual. Refresca configuración IPFS y actualiza blockchain cuando cambia el hash público de configuración.
 
 ## Evidencia de decisión
 
 Solo los validadores RAG producen evidencia documental comprobable por Assermetry.
 
 La orquestación de dependencias es explícita: MEMORY y SEARCH llaman solo a
-`common/llm`; RAG con `NONE` o `EXT_*` llama directamente a Evidence Search;
-RAG con `LOCAL` llama primero a Source Router, pasa los dominios devueltos como
-`include_domains` a Evidence Search y finalmente valida con `common/llm`. LIGHT
-y BLOCKCHAIN reutilizan la misma función.
+`common/llm`; SEARCH activa la búsqueda propia del proveedor. RAG con una
+estrategia `EXT_*` llama directamente a Evidence Search; RAG con `LOCAL` llama
+primero a Source Router y pasa `preferred_sources` con todos sus metadatos a
+Evidence Search. LIGHT y BLOCKCHAIN reutilizan la misma función.
 
 - `VALIDATOR_TYPE=2` (`LLM_SEARCH_VALIDATION`) delega la búsqueda al proveedor. Puede devolver `TRUE`, `FALSE` o `UNKNOWN` sin fuentes. Los enlaces opcionales se publican en `sources_declared` y se etiquetan como `PROVIDER_SEARCH_UNVERIFIED`; no se convierten en `evidence_used` porque el servidor no dispone del corpus consultado para comprobarlos.
 - `VALIDATOR_TYPE=3` (`RAG_EVIDENCE_VALIDATION`) rellena `evidence_used` usando exclusivamente las evidencias proporcionadas por `evidence-search`. Cada entrada debe incluir `source_id`, `url`, `evidence_text`, `supports`, `reason` y, cuando exista, `context_id` o `chunk_id`.
@@ -82,7 +82,8 @@ Durante la carga del módulo configura Web3, contrato, proveedor LLM, prompts, c
 - `VALIDATOR_TYPE=3`: activa integración RAG/evidence-search.
 - `EVIDENCE_SEARCH_URL`: URL del servicio evidence-search.
 - `SOURCE_ROUTER_URL`: URL interna usada exclusivamente en `RAG + LOCAL`.
-- `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`, `EVIDENCE_SEARCH_MAX_DOMAINS`, `EVIDENCE_SEARCH_MAX_SOURCES`, `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN`: política de búsqueda de evidencias.
+- `EVIDENCE_SEARCH_STRATEGY`: estrategia obligatoria para tipo 3: `LOCAL`, `EXT_OFFICIAL_FIRST` o `EXT_ONLY_OFFICIAL`.
+- `EVIDENCE_SEARCH_MAX_DOMAINS`, `EVIDENCE_SEARCH_MAX_SOURCES`, `EVIDENCE_SEARCH_MAX_QUERIES`: límites de búsqueda de evidencias.
 - `TEMPERATURE`: temperatura del modelo.
 - `KAFKA_BROKER` o `KAFKA_BOOTSTRAP`: bootstrap Kafka.
 - `KAFKA_USERNAME`, `KAFKA_PASSWORD`, `KAFKA_SECURITY_PROTOCOL`, `KAFKA_MECHANISM`: seguridad Kafka.

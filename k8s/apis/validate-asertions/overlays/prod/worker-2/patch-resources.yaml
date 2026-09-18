@@ -25,7 +25,7 @@ spec:
           value: "3"
         - name: EVIDENCE_SEARCH_URL
           value: "http://evidence-search.apis.svc.cluster.local:8074"
-        - name: EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+        - name: EVIDENCE_SEARCH_STRATEGY
           value: "EXT_OFFICIAL_FIRST"
         resources:
             requests:

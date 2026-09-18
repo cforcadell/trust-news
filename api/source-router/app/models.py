@@ -3,39 +3,39 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-class RouteLocation(BaseModel):
-    name: str = "unknown"
-    country_code: str | None = None
-    region_code: str | None = None
-    scope: str = "unknown"
-
-    @field_validator("country_code", "region_code")
-    @classmethod
-    def upper_codes(cls, value: str | None) -> str | None:
-        return str(value).strip().upper() if value else None
-
-
-class RouteEntity(BaseModel):
-    name: str
-    type: str = "unknown"
+from common.models.protocol_models import JurisdictionContext
+from common.search.normalization import normalize_domain
+from common.routing_taxonomy import (
+    TAXONOMY_VERSION,
+    AuthorityLevel,
+    EvidenceKind,
+    MatchLevel,
+    SourceType,
+    TopicCode,
+)
 
 
 class ResolveRouteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    category: str | int = "unknown"
-    subcategory: str = "unknown"
-    claim_type: str = "general"
-    location: RouteLocation = Field(default_factory=RouteLocation)
-    entities: list[RouteEntity] = Field(default_factory=list)
+    topic_code: TopicCode
+    evidence_kind: EvidenceKind
+    jurisdiction: JurisdictionContext
     language: str = "unknown"
+
+    @field_validator("language")
+    @classmethod
+    def normalize_language(cls, value: str) -> str:
+        normalized = str(value or "unknown").strip().lower()
+        return normalized[:8] or "unknown"
 
 
 class RouteSignature(BaseModel):
-    claim_type: str
-    subcategory: str
-    country_code: str = "GLOBAL"
-    region_code: str = "*"
+    model_config = ConfigDict(extra="forbid")
+    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    topic_code: TopicCode
+    evidence_kind: EvidenceKind
+    jurisdiction: JurisdictionContext
+    jurisdiction_key: str
 
 
 class CandidateSource(BaseModel):
@@ -46,60 +46,125 @@ class CandidateSource(BaseModel):
     provider_score: float | None = None
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
-
-class JurisdictionClassification(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    scope: str = "unknown"
-    country_code: str | None = None
-    region_code: str | None = None
-    applicable_country_codes: list[str] = Field(default_factory=list)
-
-    @field_validator("country_code", "region_code")
+    @field_validator("domain", mode="before")
     @classmethod
-    def upper_codes(cls, value: str | None) -> str | None:
-        return str(value).strip().upper() if value else None
-
-    @field_validator("applicable_country_codes")
-    @classmethod
-    def upper_applicable_codes(cls, values: list[str]) -> list[str]:
-        return list(dict.fromkeys(str(value).strip().upper() for value in values if str(value).strip()))
+    def normalize_candidate_domain(cls, value: str) -> str:
+        domain = normalize_domain(value)
+        if not domain:
+            raise ValueError("candidate domain is required")
+        return domain
 
 
 class SourceClassification(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     domain: str
-    source_type: str = "unknown"
-    authority_level: str = "unknown"
-    jurisdiction: JurisdictionClassification = Field(default_factory=JurisdictionClassification)
-    claim_type_match: Literal["exact", "partial", "none", "unknown"] = "unknown"
-    subcategory_match: Literal["exact", "partial", "none", "unknown"] = "unknown"
-    entity_match: Literal["exact", "partial", "none", "unknown"] = "unknown"
-    language_match: Literal["exact", "partial", "none", "unknown"] = "unknown"
+    source_type: SourceType = SourceType.UNKNOWN
+    authority_level: AuthorityLevel = AuthorityLevel.UNKNOWN
+    jurisdictions: list[JurisdictionContext] = Field(default_factory=list)
+    topic_codes: list[TopicCode] = Field(default_factory=list)
+    evidence_kinds: list[EvidenceKind] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    topic_match: MatchLevel = MatchLevel.UNKNOWN
+    evidence_kind_match: MatchLevel = MatchLevel.UNKNOWN
     semantic_relevance: float = Field(default=0, ge=0, le=1)
     classification_confidence: float = Field(default=0, ge=0, le=1)
     reason: str = ""
     provider_score: float | None = None
 
+    @field_validator("domain", mode="before")
+    @classmethod
+    def normalize_classified_domain(cls, value: str) -> str:
+        domain = normalize_domain(value)
+        if not domain:
+            raise ValueError("classified domain is required")
+        return domain
+
+    @field_validator("authority_level", mode="before")
+    @classmethod
+    def normalize_authority_level(cls, value: Any) -> Any:
+        if isinstance(value, AuthorityLevel):
+            return value
+        normalized = str(value or "").strip().upper()
+        aliases = {
+            "LOCAL": AuthorityLevel.LOCAL_PRIMARY,
+            "REGIONAL": AuthorityLevel.REGIONAL_PRIMARY,
+            "NATIONAL": AuthorityLevel.NATIONAL_PRIMARY,
+            "SUPRANATIONAL": AuthorityLevel.SUPRANATIONAL_PRIMARY,
+            "INTERNATIONAL": AuthorityLevel.INTERNATIONAL_PRIMARY,
+            "GLOBAL": AuthorityLevel.GLOBAL_PRIMARY,
+            "SECONDARY": AuthorityLevel.SECONDARY_AUTHORITATIVE,
+        }
+        return aliases.get(normalized, normalized)
+
+    @field_validator("languages")
+    @classmethod
+    def normalize_languages(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(value).strip().lower()[:8] for value in values if str(value).strip()))
+
 
 class ClassificationBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     classifications: list[SourceClassification]
 
 
-class RoutedSource(SourceClassification):
-    rank: int
-    routing_score: float = Field(ge=0, le=1)
+class DomainProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain: str
+    source_type: SourceType
+    authority_level: AuthorityLevel
+    jurisdictions: list[JurisdictionContext]
+    topic_codes: list[TopicCode]
+    evidence_kinds: list[EvidenceKind]
+    languages: list[str]
+    classification_confidence: float = Field(ge=0, le=1)
+    reason: str
+    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    profile_version: str
+    classification_model: str
+    created_at: datetime
+    updated_at: datetime
+    last_verified_at: datetime
+
+    @field_validator("domain", mode="before")
+    @classmethod
+    def normalize_profile_domain(cls, value: str) -> str:
+        domain = normalize_domain(value)
+        if not domain:
+            raise ValueError("profile domain is required")
+        return domain
+
+
+class RouteCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain: str
+    topic_match: MatchLevel
+    evidence_kind_match: MatchLevel
+    semantic_relevance: float = Field(ge=0, le=1)
+    provider_score: float | None = None
+    reason: str
+    base_score: float = Field(ge=0, le=1)
+
+
+class RoutedSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain: str
+    source_type: SourceType
+    authority_level: AuthorityLevel
+    jurisdictions: list[JurisdictionContext]
+    topic_codes: list[TopicCode]
+    evidence_kinds: list[EvidenceKind]
+    languages: list[str]
+    route_score: float = Field(ge=0, le=1)
+    rank: int = Field(ge=1)
+    reason: str
+    profile_version: str
 
 
 class RouteDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     route_key: str
     route_signature: RouteSignature
-    category: str | int = "unknown"
-    entities: list[str] = Field(default_factory=list)
-    sources: list[RoutedSource] = Field(default_factory=list)
+    candidates: list[RouteCandidate] = Field(default_factory=list)
     router_version: str
     discovery_provider: str
     classification_model: str
@@ -114,7 +179,10 @@ class ResolveRouteResponse(BaseModel):
     route_state: Literal["FRESH", "MISSING", "STALE"]
     sources: list[RoutedSource] = Field(default_factory=list)
     router_version: str
+    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
     stale_route_used: bool = False
+    degraded: bool = False
+    diagnostic_code: Literal["CLASSIFICATION_FAILED"] | None = None
 
 
 class StoredRouteResponse(RouteDocument):

@@ -106,33 +106,18 @@ def test_wrong_context_or_chunk_cannot_be_used(retrieved_evidence):
         assert result["evidence_used"] == []
 
 
-def test_placeholder_source_cannot_support_a_documentary_verdict(retrieved_evidence):
-    retrieved_evidence[0]["is_placeholder"] = True
-    retrieved_evidence[0]["evidence_status"] = "ROUTING_PLACEHOLDER"
+def test_original_document_cannot_be_decisive_evidence(retrieved_evidence):
+    retrieved_evidence[0]["relationship_to_origin"] = "ORIGINAL"
 
     result = evaluate_evidence_grounding(
         "TRUE", [used_reference()], retrieved_evidence, require_grounding=True
     )
 
     assert result["effective_verdict"] == "UNKNOWN"
-    assert result["validation"]["issues"][0]["code"] == "SOURCE_IS_PLACEHOLDER"
-
-
-def test_legacy_unmarked_routing_placeholder_cannot_support_a_verdict(retrieved_evidence):
-    retrieved_evidence[0].pop("contexts")
-    retrieved_evidence[0]["snippet"] = (
-        "Domain selected by contextual routing; configure API_KEY_PROVIDER for live snippets."
-    )
-
-    result = evaluate_evidence_grounding(
-        "TRUE",
-        [used_reference(evidence_text="Domain selected by contextual routing")],
-        retrieved_evidence,
-        require_grounding=True,
-    )
-
-    assert result["effective_verdict"] == "UNKNOWN"
-    assert result["validation"]["issues"][0]["code"] == "SOURCE_IS_PLACEHOLDER"
+    assert result["evidence_used"] == []
+    assert "SOURCE_IS_ORIGINAL_DOCUMENT" in {
+        issue["code"] for issue in result["validation"]["issues"]
+    }
 
 
 def test_unknown_remains_an_abstention_and_invalid_citations_are_removed(retrieved_evidence):

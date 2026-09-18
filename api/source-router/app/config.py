@@ -9,6 +9,7 @@ class Settings:
     mongo_uri: str
     mongo_dbname: str
     collection: str
+    profiles_collection: str
     search_provider: str
     discovery_max_results: int
     llm_provider: str
@@ -23,7 +24,8 @@ def get_settings() -> Settings:
     return Settings(
         mongo_uri=build_mongo_uri_from_env(),
         mongo_dbname=os.getenv("MONGO_DBNAME", "newsdb"),
-        collection=os.getenv("SOURCE_ROUTES_COLLECTION", "source_routes"),
+        collection=os.getenv("SOURCE_ROUTES_COLLECTION", "source_routes_v2"),
+        profiles_collection=os.getenv("SOURCE_DOMAIN_PROFILES_COLLECTION", "domain_profiles_v1"),
         search_provider=os.getenv("SEARCH_PROVIDER", "exa").lower(),
         discovery_max_results=int(os.getenv("SOURCE_ROUTER_DISCOVERY_MAX_RESULTS", "12")),
         llm_provider=os.getenv("LLM_PROVIDER", os.getenv("AI_PROVIDER", "openrouter")).lower(),
@@ -31,5 +33,5 @@ def get_settings() -> Settings:
         llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0")),
         refresh_seconds=int(os.getenv("SOURCE_ROUTE_REFRESH_SECONDS", "2592000")),
         max_sources=int(os.getenv("SOURCE_ROUTER_MAX_SOURCES", "8")),
-        router_version=os.getenv("SOURCE_ROUTER_VERSION", "source-router-hybrid-v1"),
+        router_version=os.getenv("SOURCE_ROUTER_VERSION", "source-router-v2"),
     )

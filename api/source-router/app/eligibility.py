@@ -1,31 +1,45 @@
+from common.routing_taxonomy import AuthorityLevel, EVIDENCE_SOURCE_TYPES, JurisdictionScope, MatchLevel
+
 from .models import RouteSignature, SourceClassification
 
 
-def is_eligible(signature: RouteSignature, source: SourceClassification) -> bool:
-    jurisdiction = source.jurisdiction
-    scope = jurisdiction.scope.lower()
-    authority = source.authority_level.lower()
+def jurisdiction_is_eligible(signature: RouteSignature, source: SourceClassification) -> bool:
+    target = signature.jurisdiction
+    for jurisdiction in source.jurisdictions:
+        if jurisdiction.scope == JurisdictionScope.GLOBAL:
+            return True
+        if jurisdiction.scope == JurisdictionScope.SUPRANATIONAL:
+            if target.scope == JurisdictionScope.SUPRANATIONAL:
+                if jurisdiction.jurisdiction_code == target.jurisdiction_code:
+                    return True
+            elif target.country_code in jurisdiction.applicable_country_codes:
+                return True
+            continue
+        if target.scope == JurisdictionScope.GLOBAL:
+            continue
+        if target.scope == JurisdictionScope.UNKNOWN:
+            continue
+        if target.scope == JurisdictionScope.SUPRANATIONAL:
+            continue
+        if jurisdiction.country_code != target.country_code:
+            continue
+        if jurisdiction.scope == JurisdictionScope.COUNTRY:
+            return True
+        if target.scope == JurisdictionScope.COUNTRY:
+            continue
+        if jurisdiction.region_code == target.region_code:
+            return True
+    return False
 
-    if signature.country_code == "GLOBAL":
-        return scope in {"global", "international", "supranational"} or authority in {"global_primary", "international_primary"}
-    if scope in {"global", "international"}:
-        return True
-    if scope in {"supranational", "european"}:
-        return (
-            jurisdiction.country_code == signature.country_code
-            or signature.country_code in jurisdiction.applicable_country_codes
-        )
-    if jurisdiction.country_code and jurisdiction.country_code != signature.country_code:
+
+def is_eligible(signature: RouteSignature, source: SourceClassification) -> bool:
+    if source.topic_match == MatchLevel.NONE or source.evidence_kind_match == MatchLevel.NONE:
         return False
-    if jurisdiction.region_code:
-        if signature.region_code == "*":
-            return jurisdiction.country_code == signature.country_code
-        return jurisdiction.region_code == signature.region_code
-    if scope in {"national", "country"} or authority == "national_primary":
-        return jurisdiction.country_code == signature.country_code
-    if scope in {"regional", "local"} or authority in {"regional_primary", "local_primary"}:
-        return signature.region_code != "*" and jurisdiction.region_code == signature.region_code
-    return bool(jurisdiction.country_code == signature.country_code and source.classification_confidence >= 0.5)
+    if source.source_type not in EVIDENCE_SOURCE_TYPES[signature.evidence_kind]:
+        return False
+    if not jurisdiction_is_eligible(signature, source):
+        return False
+    return source.authority_level not in {AuthorityLevel.UNKNOWN, AuthorityLevel.OTHER}
 
 
 def eligible_sources(signature: RouteSignature, sources: list[SourceClassification]) -> list[SourceClassification]:

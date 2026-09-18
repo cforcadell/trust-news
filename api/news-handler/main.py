@@ -157,33 +157,12 @@ validator_type_weights = default_validator_type_weights()
 
 
 
-def assertion_to_enriched(assertion: Any, index: int = 0) -> EnrichedAssertion:
-    raw = assertion.model_dump() if hasattr(assertion, "model_dump") else dict(assertion or {})
-    assertion_id = raw.pop("idAssertion")
-    raw["assertion_id"] = assertion_id
-    raw["assertion_index"] = int(assertion_id) - 1
-    return EnrichedAssertion(**raw)
-
-
 def assertion_dump_for_news(assertion: EnrichedAssertion) -> dict:
     item = assertion.model_dump(mode="json")
     item["idAssertion"] = str(assertion.assertion_id)
     item.pop("assertion_id", None)
     item.pop("assertion_index", None)
     return item
-
-
-def assertions_document_from_generation(parsed_payload: Any, text: str, mode: ValidationMode) -> AssertionsDocumentV2:
-    generated_doc = getattr(parsed_payload, "assertions_document", None)
-    if generated_doc:
-        return generated_doc if isinstance(generated_doc, AssertionsDocumentV2) else AssertionsDocumentV2(**generated_doc)
-    assertions = getattr(parsed_payload, "assertions", []) or []
-    return build_assertions_document_v2(
-        text=text,
-        assertions=[assertion_to_enriched(a, i) for i, a in enumerate(assertions)],
-        mode=mode,
-        provider=getattr(parsed_payload, "publisher", "generate-asertions"),
-    )
 
 
 def assert_no_order_id_in_protocol_document(document: AssertionsDocumentV2) -> None:
@@ -199,21 +178,6 @@ def protocol_assertions_for_mongo(document: AssertionsDocumentV2) -> list:
 def chain_assertions_for_contract(document: AssertionsDocumentV2) -> list:
     return [a.to_chain_assertion() for a in document.assertions]
 
-
-def minimal_document_for_order(text: str, assertions: list) -> dict:
-    return {
-        "text": text,
-        "assertions": assertions,
-    }
-
-
-def build_assertions_document_from_order(order_doc: dict) -> AssertionsDocumentV2:
-    return build_assertions_document_v2(
-        text=order_doc.get("text", ""),
-        assertions=order_doc.get("assertions", []) or [],
-        mode=normalize_validation_mode(order_doc.get("validation_mode", ValidationMode.BLOCKCHAIN)),
-        provider="news-handler",
-    )
 
 # =========================================================
 # Helpers DB & Kafka security
@@ -512,11 +476,6 @@ def calculate_order_assertion_results(order: dict) -> dict:
     )
 
 
-def light_document_for_order(order_id: str, assertions_document: AssertionsDocumentV2) -> dict:
-    assertions_list = protocol_assertions_for_mongo(assertions_document)
-    return minimal_document_for_order(assertions_document.post.original_text, assertions_list)
-
-
 def validator_healthcheck_url(validator: dict) -> Optional[str]:
     config = validator.get("config") or {}
     explicit_health_url = (
@@ -593,7 +552,8 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
             "validatorAddresses": validator_ids,
             "text": assertion_text,
             "categoryId": category_id,
-            "subcategory": assertion.subcategory,
+            "topic_code": assertion.topic_code.value,
+            "evidence_kind": assertion.evidence_kind.value,
             "reputation": {str(v.get("validator")): float(v.get("reputation", 1.0) or 1.0) for v in validators},
         })
         validation_requests[assertion_id] = validator_ids
@@ -612,6 +572,8 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
                 post_id=None,
                 cid=None,
                 order_id=order_id,
+                origin_url=assertions_document.post.source_url,
+                origin_domain=assertions_document.post.source_domain,
             )
             msg = LightValidationRequest(
                 order_id=order_id,
@@ -654,7 +616,7 @@ async def start_light_flow(order_id: str, text: str, assertions_document: Assert
     logger.info(f"[LIGHT] Starting lightweight validation flow | order_id={order_id}")
     logger.info(f"[LIGHT] Skipping IPFS and blockchain publication | order_id={order_id}")
     assertions_list = protocol_assertions_for_mongo(assertions_document)
-    document = minimal_document_for_order(text, assertions_list)
+    document = assertions_document.model_dump(mode="json")
     await update_order(order_id, {
         "$set": {
             "validation_mode": ValidationMode.LIGHT.value,
@@ -878,8 +840,11 @@ async def process_kafka_message(data: dict):
             if not doc:
                 return
 
-            validation_mode = normalize_validation_mode(doc.get("validation_mode", getattr(parsed.payload, "validation_mode", ValidationMode.BLOCKCHAIN)))
-            assertions_document = assertions_document_from_generation(parsed.payload, doc.get("text", ""), validation_mode)
+            assertions_document = parsed.payload.assertions_document
+            validation_mode = assertions_document.mode
+            expected_mode = normalize_validation_mode(doc.get("validation_mode", ValidationMode.BLOCKCHAIN))
+            if validation_mode != expected_mode:
+                raise ValueError("Generated document mode does not match the order validation mode")
             assertions_list = protocol_assertions_for_mongo(assertions_document)
             chain_assertions = chain_assertions_for_contract(assertions_document)
             num_assertions = len(assertions_list)
@@ -919,7 +884,7 @@ async def process_kafka_message(data: dict):
                     return
 
             assert_no_order_id_in_protocol_document(assertions_document)
-            document = minimal_document_for_order(doc.get("text", ""), assertions_list)
+            document = assertions_document.model_dump(mode="json")
             await update_order(order_id, {
                 "$set": {
                     "assertions": assertions_list,
@@ -932,7 +897,7 @@ async def process_kafka_message(data: dict):
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             })
-            logger.info(f"[news-handler] mode=BLOCKCHAIN uploading minimal document to IPFS")
+            logger.info(f"[news-handler] mode=BLOCKCHAIN uploading assertions-document-v2 to IPFS")
             logger.info(f"[news-handler] verified IPFS document does not contain order_id")
 
             # Enviar upload_ipfs request usando UploadIpfsRequest
@@ -1000,7 +965,7 @@ async def process_kafka_message(data: dict):
             logger.info(f"[{order_id}] ✅ IPFS subido con CID={cid}")
             logger.info(f"[news-handler] mode=BLOCKCHAIN ipfs_cid={cid}")
 
-            chain_assertions = chain_assertions_for_contract(build_assertions_document_from_order(doc))
+            chain_assertions = chain_assertions_for_contract(AssertionsDocumentV2(**doc["document"]))
             await handle_blockchain_request(order_id, doc.get("text", ""), cid, chain_assertions)
             await update_order(order_id, {"$set": {"status": "BLOCKCHAIN_PENDING"}})
             logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain enviada (emulada o real según configuración).")
@@ -1817,6 +1782,8 @@ async def publish_new(req: PublishRequest, client_id: str):
         "client_id": client_id, # 🔑 Guardar el client_id para luego
         "status": "CREATED",
         "validation_mode": normalize_validation_mode(req.validation_mode).value,
+        "source_url": req.source_url,
+        "source_domain": req.source_domain,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await save_order_doc(order_doc)
@@ -1828,7 +1795,12 @@ async def publish_new(req: PublishRequest, client_id: str):
         msg = GenerateAssertionsRequest(
             action="generate_assertions",
             order_id=order_id,
-            payload={"text": req.text, "validation_mode": validation_mode}
+            payload={
+                "text": req.text,
+                "validation_mode": validation_mode,
+                "source_url": req.source_url,
+                "source_domain": req.source_domain,
+            }
         )
         await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
@@ -1882,16 +1854,14 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
             assertions=[a.to_enriched() if hasattr(a, "to_enriched") else a for a in req.assertions],
             mode=validation_mode,
             provider="news-handler",
+            source_url=req.source_url,
+            source_domain=req.source_domain,
         )
         msg = AssertionsGeneratedResponse(
             action="assertions_generated",
             order_id=order_id,
             payload={
-                "text": req.text,
-                "publisher": "news-handler",
-                "assertions": req.assertions,
                 "assertions_document": assertions_document,
-                "validation_mode": validation_mode
             }
         )
 

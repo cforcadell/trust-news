@@ -47,7 +47,6 @@ from common.models.protocol_models import (
     AssertionsDocumentV2,
     SourceDocumentStorage,
     ValidationMode,
-    build_assertions_document_v2,
     build_assertion_validation_payload_v2,
 )
 
@@ -642,23 +641,7 @@ async def blockchain_event_listener():
 
                                 post_json = json.loads(ipfs_content)
                                 logger.info("🧩 JSON parseado correctamente desde IPFS")
-                                if isinstance(post_json, dict) and post_json.get("schema_version") == "assertions-document-v2":
-                                    content_obj = post_json
-                                elif isinstance(post_json, dict) and "assertions" in post_json and "text" in post_json:
-                                    content_obj = post_json
-                                else:
-                                    content_obj = json.loads(post_json.get("content", "{}"))
-
-                                if isinstance(content_obj, dict) and "assertions" in content_obj and "post" not in content_obj:
-                                    logger.info(f"[news-chain] detected minimal document shape from IPFS cid={cid_post}, reconstructing AssertionsDocumentV2")
-                                    assertions_document = build_assertions_document_v2(
-                                        text=content_obj.get("text", ""),
-                                        assertions=content_obj.get("assertions", []),
-                                        mode=ValidationMode.BLOCKCHAIN,
-                                        provider="news-handler",
-                                    )
-                                else:
-                                    assertions_document = AssertionsDocumentV2(**content_obj)
+                                assertions_document = AssertionsDocumentV2(**post_json)
                                 logger.info(f"[news-chain] loaded assertions-document-v2 from IPFS cid={cid_post}")
 
                                 assertion = next((item for item in assertions_document.assertions if int(item.assertion_index) == int(assertion_index - 1)), None)
@@ -673,6 +656,8 @@ async def blockchain_event_listener():
                                     post_id=post_id,
                                     cid=cid_post,
                                     order_id=None,
+                                    origin_url=assertions_document.post.source_url,
+                                    origin_domain=assertions_document.post.source_domain,
                                 )
                                 logger.info(f"[news-chain] built assertion-validation-payload-v2 assertion_id={assertion.assertion_id}")
 

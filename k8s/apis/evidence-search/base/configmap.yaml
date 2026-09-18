@@ -5,7 +5,7 @@ metadata:
   namespace: apis
 data:
   MONGO_DBNAME: "newsdb"
-  EVIDENCE_SEARCH_CACHE_COLLECTION: "evidence_search_cache"
+  EVIDENCE_SEARCH_CACHE_COLLECTION: "evidence_search_cache_v2"
   EVIDENCE_SEARCH_CACHE_TTL_SECONDS: "86400"
   SEARCH_PROVIDER: "exa" #tavily || exa
   #SEARCH_API_URL: "https://api.tavily.com/search"

@@ -1,37 +1,47 @@
 # Source Router
 
-Servicio interno que decide dónde buscar para `RAG_EVIDENCE_VALIDATION + LOCAL`.
-Descubre URLs reales mediante `common/search`, clasifica todos los candidatos
-en una única llamada a `common/llm`, aplica eligibility geográfica y ranking
-deterministas, y recuerda el resultado en Mongo `source_routes`.
+Servicio interno usado exclusivamente por `RAG_EVIDENCE_VALIDATION + LOCAL`.
+Descubre dominios reales, clasifica candidatos con enums cerrados, aplica elegibilidad
+geográfica y ranking determinista, y separa dos memorias en MongoDB:
+
+- `domain_profiles_v1`: propiedades estables del dominio (`source_type`,
+  `authority_level`, jurisdicciones, temas, tipos de evidencia e idiomas).
+- `source_routes_v2`: rutas reutilizables formadas por `topic_code`,
+  `evidence_kind` y jurisdicción canónica; solo contienen referencias y puntuaciones
+  propias de esa ruta.
 
 ```text
-RouteSignature → Mongo → FRESH: sources
-                      └→ MISSING/STALE: SearchProvider → batch LLM
-                                         → eligibility → ranking → Mongo
+RouteSignature -> source_routes_v2 -> FRESH -> unir DomainProfile -> ranking
+                                  `-> MISSING/STALE -> SearchProvider -> LLM batch
+                                                     -> eligibility -> upsert
 ```
 
 ## API
 
-`POST /routes/resolve` acepta `category`, `subcategory`, `claim_type`,
-`location`, `entities` y `language`. Devuelve `route_key`, `route_state`,
-fuentes y `stale_route_used`. Una ruta FRESH no incurre en llamadas externas.
+`POST /routes/resolve` acepta `topic_code`, `evidence_kind`, `jurisdiction` y
+`language`. Todos salvo el idioma son vocabularios cerrados de
+`routing-taxonomy-v1`. Devuelve `route_key`, `route_state`, `router_version` y
+`sources[]` con dominio, tipo, autoridad, jurisdicciones, puntuación y versión
+del perfil. Una ruta `FRESH` no realiza llamadas externas.
 
-`GET /routes` admite `route_key`, `claim_type`, `category`, `subcategory`,
-`country_code`, `region_code`, `entity` y `limit`. `GET /routes/{route_key}`
-recupera una ruta exacta. Ambos GET son Mongo-only y devuelven estado FRESH o
-STALE; nunca ejecutan discovery o LLM.
+La clave es:
 
-La firma predeterminada es
-`claim_type|SUBCATEGORY|COUNTRY_CODE|REGION_CODE`, sin texto ni año. El
-classifier no puede añadir dominios y no decide eligibility, selección, rank ni
-veracidad. Una jurisdicción nacional ajena se descarta aunque tenga relevancia
-semántica máxima.
+```text
+route-v2|routing-taxonomy-v1|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY
+```
 
-No hay TTL destructivo. Un refresh fallido reutiliza la ruta STALE existente;
-un MISS fallido no fabrica dominios ni usa allowlists.
+Texto, entidades y fechas no fragmentan esta memoria temática. Esos datos aparecen
+después en la consulta concreta de Evidence Search.
 
-El pod escucha en 8075 y usa `source-router-config`, `source-router-enc` y
-`mongodb-app-secret`. `source-router-enc` contiene las credenciales del LLM y
-del proveedor de búsqueda propias de este servicio. No depende de Kafka,
-Blockchain ni IPFS.
+`GET /routes` admite filtros `route_key`, `topic_code`, `evidence_kind`,
+`jurisdiction_key` y `limit`. `GET /routes/{route_key}` recupera una ruta exacta.
+Ambos endpoints son Mongo-only y nunca ejecutan discovery o LLM.
+
+El clasificador no puede añadir dominios ni decidir veracidad. Un candidato con
+tema o evidencia `NONE`, autoridad desconocida/no admitida o jurisdicción
+incompatible se descarta. Un refresh fallido puede reutilizar una ruta `STALE`;
+un `MISSING` fallido no fabrica dominios.
+
+Variables de persistencia: `SOURCE_ROUTES_COLLECTION=source_routes_v2`,
+`SOURCE_DOMAIN_PROFILES_COLLECTION=domain_profiles_v1` y
+`SOURCE_ROUTER_VERSION=source-router-v2`.

@@ -36,6 +36,16 @@ from common.models.async_models import (
     build_assertions_document_v2,
 )
 from common.models.protocol_models import CATEGORY_CATALOG_PROMPT
+from common.routing_taxonomy import (
+    EVIDENCE_KIND_PROMPT,
+    TAXONOMY_VERSION,
+    TOPIC_CATEGORY_PROMPT,
+    TOPIC_PROMPT,
+    EntityRole,
+    EntityType,
+    JurisdictionScope,
+    TemporalType,
+)
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
 from common.utils.llm_json import parse_model_list
@@ -89,6 +99,11 @@ def build_assertions_prompt(text: str) -> str:
         f"{CATEGORY_CATALOG_PROMPT}\n\n"
         "El campo categoryId DEBE ser uno de esos enteros. "
         "No devuelvas un campo category, no traduzcas ni inventes categorías.\n\n"
+        f"TOPIC_CODE CANÓNICO ({TAXONOMY_VERSION}):\n{TOPIC_PROMPT}\n\n"
+        f"CATEGORYID PERMITIDOS PARA CADA TOPIC_CODE:\n{TOPIC_CATEGORY_PROMPT}\n\n"
+        f"EVIDENCE_KIND CANÓNICO:\n{EVIDENCE_KIND_PROMPT}\n\n"
+        "topic_code y evidence_kind DEBEN ser valores exactos de estas listas. "
+        "Usa UNKNOWN si el texto no permite decidir y OTHER solo para un tema identificable fuera del catálogo.\n\n"
         "CONTEXTO DE VALIDACIÓN OBLIGATORIO:\n"
         "- Para cada aserción, rellena context.locations, context.entities y context.temporal_context con el contexto necesario para verificarla.\n"
         "- Marca origin=\"explicit\" cuando el dato aparece en el texto literal de la aserción.\n"
@@ -97,6 +112,14 @@ def build_assertions_prompt(text: str) -> str:
         "- No inventes contexto externo al texto proporcionado; usa unknown/listas vacías si no hay base textual suficiente.\n"
         "- search_hints.search_keywords y search_hints.suggested_queries deben incorporar el contexto temporal, entidades y lugares relevantes para que un buscador externo pueda encontrar evidencias precisas.\n"
         "- Las queries sugeridas deben ser autónomas: deben poder buscarse sin leer el resto de la noticia.\n\n"
+        "VALORES CANÓNICOS DEL CONTEXTO:\n"
+        f"- EntityType: {', '.join(item.value for item in EntityType)}\n"
+        f"- EntityRole: {', '.join(item.value for item in EntityRole)}\n"
+        f"- JurisdictionScope: {', '.join(item.value for item in JurisdictionScope)}\n"
+        f"- TemporalType: {', '.join(item.value for item in TemporalType)}\n"
+        "- region_code debe usar el código ISO 3166-2 completo (por ejemplo, ES-CT para Catalunya).\n"
+        "- Si jurisdiction contiene region_code, su scope debe ser REGION; COUNTRY no puede contener region_code.\n"
+        "- No uses valores fuera de estas listas ni códigos territoriales abreviados no canónicos.\n\n"
         f"Texto a analizar:\n{text}\n\n"
         f"IMPRESCINDIBLE: Devuelve como máximo {MAX_ASSERTIONS} aserciones.\n"
     )
@@ -235,22 +258,40 @@ def normalize_admin_config_response() -> AdminConfigResponse:
 # Helpers Pydantic JSON Schema
 # ============================================================
 
+
+class AssertionBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assertions: List[Assertion]
+
+
 def get_assertions_schema() -> dict:
-    """Genera el JSON Schema para List[Assertion] enriquecidas que los LLM deben seguir."""
-    assertion_schema = Assertion.model_json_schema(by_alias=True)
-    return {"type": "array", "items": assertion_schema}
+    """Genera el JSON Schema cerrado que los LLM deben seguir."""
+    return AssertionBatch.model_json_schema(by_alias=True)
 
 
 def parse_assertions_content(content) -> List[Assertion]:
     return parse_model_list(content, Assertion, list_key="assertions", id_field="idAssertion")
 
-# ============================================================
-# Compatibility wrappers delegate to common/llm.
-# ============================================================
-async def _call_configured_llm(text: str, contexto: Optional[str] = None) -> List[Assertion]:
-    full_prompt = build_assertions_prompt(text)
-    if contexto:
-        full_prompt += f"\nContexto adicional:\n{contexto}"
+
+def build_assertions_llm_request(text: str, model: str) -> LLMRequest:
+    """Build a provider-compatible request while keeping local validation strict."""
+    request = {
+        "prompt": build_assertions_prompt(text),
+        "model": model,
+        "temperature": TEMPERATURE,
+        "response_model": AssertionBatch,
+    }
+    if AI_PROVIDER == "openrouter":
+        # Gemini 2.5 Flash Lite via OpenRouter currently returns empty objects
+        # for both the full and minimal strict json_schema contracts. Prompted
+        # JSON remains populated and is still validated by response_model.
+        request["json_mode"] = True
+    else:
+        request["response_schema"] = get_assertions_schema()
+    return LLMRequest(**request)
+
+
+async def _call_configured_llm(text: str) -> List[Assertion]:
     model = {
         "mistral": MISTRAL_MODEL,
         "gemini": GEMINI_MODEL,
@@ -261,30 +302,13 @@ async def _call_configured_llm(text: str, contexto: Optional[str] = None) -> Lis
     try:
         response = await acomplete(
             AI_PROVIDER,
-            LLMRequest(
-                prompt=full_prompt,
-                model=model,
-                temperature=TEMPERATURE,
-                json_mode=True,
-            ),
+            build_assertions_llm_request(text, model),
         )
         return parse_assertions_content(response.content)
     except LLMConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=exception_message(exc)) from exc
-
-
-async def call_mistral(text: str) -> List[Assertion]:
-    return await _call_configured_llm(text)
-
-
-async def call_gemini(text: str) -> List[Assertion]:
-    return await _call_configured_llm(text)
-
-
-async def call_openrouter(text: str, contexto: Optional[str] = None) -> List[Assertion]:
-    return await _call_configured_llm(text, contexto)
 
 
 # ============================================================
@@ -319,7 +343,13 @@ async def publish_assertions_not_generated(
 
 
 
-def build_generated_document(text: str, assertions: List[Assertion], validation_mode) :
+def build_generated_document(
+    text: str,
+    assertions: List[Assertion],
+    validation_mode,
+    source_url: Optional[str] = None,
+    source_domain: Optional[str] = None,
+):
     return build_assertions_document_v2(
         text=text,
         assertions=[a.to_enriched() if hasattr(a, "to_enriched") else a for a in assertions],
@@ -330,6 +360,8 @@ def build_generated_document(text: str, assertions: List[Assertion], validation_
             "gemini": GEMINI_MODEL,
             "openrouter": OPENROUTER_MODEL,
         }.get(AI_PROVIDER),
+        source_url=source_url,
+        source_domain=source_domain,
     )
 
 # ============================================================
@@ -385,7 +417,13 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
 
     # Construir respuesta tipada (AssertionsGeneratedResponse)
     try:
-        assertions_document = build_generated_document(req.payload.text, assertion_objs, req.payload.validation_mode)
+        assertions_document = build_generated_document(
+            req.payload.text,
+            assertion_objs,
+            req.payload.validation_mode,
+            req.payload.source_url,
+            req.payload.source_domain,
+        )
         log_event(
             logger,
             logging.INFO,
@@ -401,20 +439,17 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
         for assertion in assertions_document.assertions:
             logger.debug(
                 "[generate-asertions] assertion_id=%s categoryId=%s "
-                "subcategory=%s location=%s entities=%s temporal=%s",
+                "topic_code=%s evidence_kind=%s jurisdiction=%s entities=%s temporal=%s",
                 assertion.assertion_id,
                 assertion.categoryId,
-                assertion.subcategory,
-                [loc.country_code or loc.name for loc in assertion.context.locations],
+                assertion.topic_code.value,
+                assertion.evidence_kind.value,
+                assertion.context.jurisdiction.routing_key(),
                 [ent.name for ent in assertion.context.entities],
                 [item.value for item in assertion.context.temporal_context],
             )
         payload = AssertionGeneratedPayload(
-            text=req.payload.text,
-            assertions=assertion_objs,
             assertions_document=assertions_document,
-            publisher=AI_PROVIDER,
-            validation_mode=req.payload.validation_mode
         )
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=req.order_id, payload=payload)
     except ValidationError as e:
@@ -629,7 +664,7 @@ async def extraer_texto(
 
     try:
         assertions_document = build_generated_document(text, assertion_objs, "BLOCKCHAIN")
-        payload = AssertionGeneratedPayload(text=text, assertions=assertion_objs, assertions_document=assertions_document, publisher=AI_PROVIDER)
+        payload = AssertionGeneratedPayload(assertions_document=assertions_document)
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=order_id, payload=payload)
         return response
     except ValidationError as e:

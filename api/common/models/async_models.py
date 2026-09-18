@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Literal, Optional
 from enum import Enum, IntEnum
 from common.models.veredicto import Validacion
 from common.models.protocol_models import (
@@ -14,6 +14,7 @@ from common.models.protocol_models import (
     build_assertions_document_v2,
     build_assertion_validation_payload_v2,
 )
+from common.routing_taxonomy import TAXONOMY_VERSION, EvidenceKind, TopicCode
 from common.utils.evidence import EvidenceItem
 
 
@@ -43,8 +44,10 @@ class Assertion(BaseModel):
     categoryId: CategoryId
     assertion_id: Optional[int | str] = None
     assertion_index: Optional[int] = None
-    subcategory: str = "unknown"
-    context: AssertionContext = Field(default_factory=AssertionContext)
+    topic_code: TopicCode
+    evidence_kind: EvidenceKind
+    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    context: AssertionContext
     search_hints: SearchHints = Field(default_factory=SearchHints)
     context_confidence: ContextConfidence = Field(default_factory=ContextConfidence)
 
@@ -65,7 +68,9 @@ class Assertion(BaseModel):
             assertion_index=self.assertion_index or 0,
             text=self.text,
             categoryId=self.categoryId,
-            subcategory=self.subcategory,
+            topic_code=self.topic_code,
+            evidence_kind=self.evidence_kind,
+            taxonomy_version=self.taxonomy_version,
             context=self.context,
             search_hints=self.search_hints,
             context_confidence=self.context_confidence,
@@ -148,20 +153,19 @@ class ValidatorType(IntEnum):
     HUMAN = 5
 
 
-class EvidencePreferredDomainsMode(str, Enum):
-    NONE = "NONE"
+class EvidenceSearchStrategy(str, Enum):
     LOCAL = "LOCAL"
     EXT_OFFICIAL_FIRST = "EXT_OFFICIAL_FIRST"
     EXT_ONLY_OFFICIAL = "EXT_ONLY_OFFICIAL"
 
 
-def local_preferred_domains_supported(validator_type: ValidatorType | int, mode: EvidencePreferredDomainsMode | str) -> bool:
+def evidence_search_strategy_supported(validator_type: ValidatorType | int, strategy: EvidenceSearchStrategy | str | None) -> bool:
     try:
         parsed_type = validator_type if isinstance(validator_type, ValidatorType) else ValidatorType(int(validator_type))
-        parsed_mode = mode if isinstance(mode, EvidencePreferredDomainsMode) else EvidencePreferredDomainsMode(str(mode).upper())
+        parsed_strategy = strategy if isinstance(strategy, EvidenceSearchStrategy) else EvidenceSearchStrategy(str(strategy).upper())
     except (TypeError, ValueError):
         return False
-    return parsed_mode != EvidencePreferredDomainsMode.LOCAL or parsed_type == ValidatorType.RAG_EVIDENCE_VALIDATION
+    return parsed_type == ValidatorType.RAG_EVIDENCE_VALIDATION and parsed_strategy is not None
 
 
 
@@ -231,10 +235,8 @@ class ValidatorConfig(BaseModel):
     updated_date: str
     end_date: Optional[str] = None
     status: ValidatorStatus = ValidatorStatus.Registered
-    use_evidence_search: Optional[bool] = None
-    online_search_enabled: Optional[bool] = None
     evidence_search_url: Optional[str] = None
-    evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
+    evidence_search_strategy: Optional[EvidenceSearchStrategy] = None
 
 
 class ValidatorConfigOnChain(BaseModel):
@@ -277,11 +279,15 @@ class TextoEntrada(BaseModel):
 class PublishRequest(BaseModel):
     text: str
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    source_url: Optional[str] = None
+    source_domain: Optional[str] = None
 
 
 class GenerateAssertionsPayload(BaseModel):
     text: str
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    source_url: Optional[str] = None
+    source_domain: Optional[str] = None
 
 
 class GenerateAssertionsRequest(BaseModel):
@@ -291,11 +297,9 @@ class GenerateAssertionsRequest(BaseModel):
 
 
 class AssertionGeneratedPayload(BaseModel):
-    text: str
-    assertions: List[Assertion]
-    publisher: str
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
-    assertions_document: Optional[AssertionsDocumentV2] = None
+    model_config = ConfigDict(extra="forbid")
+
+    assertions_document: AssertionsDocumentV2
 
 
 class AssertionsGeneratedResponse(BaseModel):
@@ -328,6 +332,8 @@ class PublishWithAssertionsRequest(BaseModel):
     text: str
     assertions: List[PreGeneratedAssertion]
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    source_url: Optional[str] = None
+    source_domain: Optional[str] = None
 
 # ============================================================
 # 🔹 UPLOAD IPFS

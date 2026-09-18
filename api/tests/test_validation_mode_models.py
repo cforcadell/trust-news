@@ -31,9 +31,18 @@ def test_publish_request_rejects_invalid_mode():
 def test_publish_with_assertions_defaults_to_blockchain():
     req = PublishWithAssertionsRequest(
         text="news",
-        assertions=[{"idAssertion": "1", "text": "claim", "categoryId": 1}],
+        assertions=[{
+            "idAssertion": "1", "text": "claim", "categoryId": 1,
+            "topic_code": "EMPLOYMENT", "evidence_kind": "STATISTICAL_DATA",
+            "taxonomy_version": "routing-taxonomy-v1",
+            "context": {
+                "locations": [], "entities": [], "temporal_context": [], "language": "en",
+                "jurisdiction": {"scope": "UNKNOWN"},
+            },
+        }],
     )
     assert req.validation_mode == ValidationMode.BLOCKCHAIN
+    assert req.assertions[0].taxonomy_version == "routing-taxonomy-v1"
 
 
 def test_light_kafka_contracts_include_correlation_fields():

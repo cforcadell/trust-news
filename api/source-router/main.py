@@ -20,7 +20,11 @@ app.include_router(router)
 @app.on_event("startup")
 async def startup() -> None:
     client = AsyncIOMotorClient(settings.mongo_uri, tz_aware=True)
-    repository = SourceRouteRepository(client[settings.mongo_dbname][settings.collection])
+    database = client[settings.mongo_dbname]
+    repository = SourceRouteRepository(
+        database[settings.collection],
+        database[settings.profiles_collection],
+    )
     await repository.ensure_indexes()
     app.state.mongo_client = client
     app.state.source_router_service = SourceRouterService(repository, settings)

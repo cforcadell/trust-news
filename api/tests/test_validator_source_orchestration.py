@@ -6,12 +6,7 @@ import pytest
 
 
 @pytest.fixture(scope="module")
-def validator(monkeypatch_module):
-    return monkeypatch_module
-
-
-@pytest.fixture(scope="module")
-def monkeypatch_module():
+def validator():
     import os
 
     root = Path(__file__).resolve().parents[2]
@@ -19,8 +14,10 @@ def monkeypatch_module():
         "ACCOUNT_ADDRESS": "0x0000000000000000000000000000000000000001",
         "CONTRACT_ADDRESS": "0x0000000000000000000000000000000000000002",
         "CONTRACT_ABI_PATH": str(root / "smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json"),
-        "RPC_URL": "http://127.0.0.1:1", "PRIVATE_KEY": "0x" + "1" * 64,
-        "VALIDATOR_TYPE": "4", "AI_PROVIDER": "none",
+        "RPC_URL": "http://127.0.0.1:1",
+        "PRIVATE_KEY": "0x" + "1" * 64,
+        "VALIDATOR_TYPE": "4",
+        "AI_PROVIDER": "none",
     })
     path = root / "api/validate-asertions/main.py"
     spec = importlib.util.spec_from_file_location("source_orchestration_validator", path)
@@ -31,15 +28,28 @@ def monkeypatch_module():
 
 def minimal_payload():
     assertion = SimpleNamespace(
-        categoryId=4, subcategory="DEMOGRAPHICS",
-        search_hints=SimpleNamespace(preferred_source_types=["statistics"]),
+        categoryId=10,
+        topic_code=SimpleNamespace(value="DEMOGRAPHY"),
+        evidence_kind=SimpleNamespace(value="STATISTICAL_DATA"),
         context=SimpleNamespace(
-            locations=[SimpleNamespace(name="Catalunya", country_code="ES", region_code="ES-CT", scope="regional", origin=SimpleNamespace(value="explicit"), confidence=1)],
-            entities=[], language="ca", jurisdiction="regional",
+            entities=[],
+            language="ca",
+            jurisdiction=SimpleNamespace(model_dump=lambda mode=None: {
+                "scope": "REGION", "country_code": "ES", "region_code": "ES-CT",
+            }),
         ),
-        model_dump=lambda mode=None: {"assertion_id": "1", "assertion_index": 0, "text": "Population", "categoryId": 4, "subcategory": "DEMOGRAPHICS", "context": {}, "search_hints": {}, "context_confidence": {}},
+        model_dump=lambda mode=None: {
+            "assertion_id": "1", "assertion_index": 0, "text": "Population", "categoryId": 10,
+            "topic_code": "DEMOGRAPHY", "evidence_kind": "STATISTICAL_DATA",
+            "taxonomy_version": "routing-taxonomy-v1",
+            "context": {"locations": [], "entities": [], "temporal_context": [], "language": "ca", "jurisdiction": {"scope": "REGION", "country_code": "ES", "region_code": "ES-CT"}},
+            "search_hints": {}, "context_confidence": {},
+        },
     )
-    return SimpleNamespace(assertion=assertion)
+    origin = SimpleNamespace(model_dump=lambda mode=None: {
+        "url": "https://publisher.test/story", "domain": "publisher.test",
+    })
+    return SimpleNamespace(assertion=assertion, origin_document=origin)
 
 
 @pytest.mark.parametrize("original", ["TRUE", "FALSE"])
@@ -48,36 +58,51 @@ def test_unverified_opinion_preserves_audit_without_decisive_vote(validator, mon
     sources = [{"source_id": "source-1", "url": "https://example.test/report", "contexts": [
         {"context_id": "context-1", "text": "Texto recuperado exacto."}
     ]}]
-    claims = [{"source_id": "source-1", "url": "https://example.test/report",
-               "evidence_text": "Cita inventada", "supports": original == "TRUE"}]
+    claims = [{"source_id": "source-1", "url": "https://example.test/report", "evidence_text": "Cita inventada", "supports": original == "TRUE"}]
     monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (sources, {"evidences": sources}))
     monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
     monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(verificar_asercion=lambda *args: "response"))
     monkeypatch.setattr(validator, "parse_validator_api_response", lambda text: (
         validator.Validacion[original], "Razonamiento original", {"evidence_used": claims}))
-    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmación"))
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmacion"))
     verdict, description, extras, response = validator.validate_payload_v2(payload)
     assert verdict == validator.Validacion.UNKNOWN
     assert extras["evidence_used"] == []
-    audit = extras["evidence_validation"]
-    assert audit["original_verdict"] == original
-    assert audit["original_description"] == "Razonamiento original"
-    assert audit["claimed_evidence"] == claims
-    assert audit["provided_evidence_text"] == validator.format_evidences_for_prompt(sources)
-    assert "EVIDENCE_TEXT_NOT_RETRIEVED" in [issue["code"] for issue in audit["issues"]]
+    assert "EVIDENCE_TEXT_NOT_RETRIEVED" in [issue["code"] for issue in extras["evidence_validation"]["issues"]]
     assert original in description
     assert response["evidences"] == sources
 
 
-def test_non_rag_calls_neither_dependency(validator, monkeypatch):
-    validator.VALIDATOR_TYPE = validator.ValidatorType.LLM_MEMORY_VALIDATION
+@pytest.mark.parametrize("validator_type", [1, 2, 4])
+def test_non_rag_calls_neither_dependency(validator, monkeypatch, validator_type):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType(validator_type))
     monkeypatch.setattr(validator.httpx, "post", lambda *args, **kwargs: pytest.fail("external dependency called"))
     assert validator.fetch_evidences_for_payload(minimal_payload()) == ([], None)
 
 
+def test_direct_llm_search_requires_an_implemented_online_provider(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.LLM_SEARCH_VALIDATION)
+    monkeypatch.setattr(validator, "AI_PROVIDER", "gemini")
+    with pytest.raises(RuntimeError, match="requires AI_PROVIDER=openrouter"):
+        validator.build_ai_validator()
+
+    monkeypatch.setattr(validator, "AI_PROVIDER", "openrouter")
+    assert validator.openrouter_model_for_current_type("openai/gpt-5-mini") == "openai/gpt-5-mini:online"
+    assert validator.openrouter_model_for_current_type("openai/gpt-5-mini:online") == "openai/gpt-5-mini:online"
+
+
+def routed_source():
+    return {
+        "domain": "idescat.cat", "source_type": "STATISTICAL_OFFICE", "authority_level": "REGIONAL_PRIMARY",
+        "jurisdictions": [{"scope": "REGION", "country_code": "ES", "region_code": "ES-CT"}],
+        "topic_codes": ["DEMOGRAPHY"], "evidence_kinds": ["STATISTICAL_DATA"], "languages": ["ca"],
+        "route_score": 0.95, "rank": 1, "reason": "official", "profile_version": "source-router-v2",
+    }
+
+
 def test_rag_local_calls_router_then_evidence(validator, monkeypatch):
-    validator.VALIDATOR_TYPE = validator.ValidatorType.RAG_EVIDENCE_VALIDATION
-    monkeypatch.setenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", "LOCAL")
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
     calls = []
 
     class Response:
@@ -88,58 +113,42 @@ def test_rag_local_calls_router_then_evidence(validator, monkeypatch):
     def post(url, json, timeout):
         calls.append((url, json))
         if "source-router" in url:
-            return Response({"route_key": "k", "route_state": "MISSING", "router_version": "v1", "sources": [{"domain": "idescat.cat"}]})
-        assert json["search_policy"]["include_domains"] == ["idescat.cat"]
-        assert json["search_policy"]["use_preferred_domains"] == "LOCAL"
-        # evidence-search receives the ordinary policy, then constrains it to
-        # routed domains before planning provider calls.
-        assert json["search_policy"]["fallback_to_general_search"] is True
+            return Response({"route_key": "k", "route_state": "MISSING", "router_version": "v2", "sources": [routed_source()]})
+        assert json["search_policy"]["strategy"] == "LOCAL"
+        assert json["search_policy"]["preferred_sources"][0]["domain"] == "idescat.cat"
+        assert json["origin_document"]["domain"] == "publisher.test"
         return Response({"evidences": [{"url": "https://idescat.cat/data"}]})
 
     monkeypatch.setattr(validator.httpx, "post", post)
-    evidences, response = validator.fetch_evidences_for_payload(minimal_payload())
-    assert ["source-router" in calls[0][0], "evidence-search" in calls[1][0]] == [True, True]
-    assert evidences[0]["url"].startswith("https://idescat.cat")
-    assert response["route"]["route_key"] == "k"
+    evidences, _ = validator.fetch_evidences_for_payload(minimal_payload())
+    assert len(calls) == 2
+    assert "source-router" in calls[0][0] and "evidence-search" in calls[1][0]
+    assert evidences == [{"url": "https://idescat.cat/data"}]
 
 
-def test_rag_prompt_includes_auditable_source_context(validator):
-    validator.VALIDATOR_TYPE = validator.ValidatorType.RAG_EVIDENCE_VALIDATION
+def test_source_router_http_status_is_preserved_as_retryable(validator, monkeypatch):
+    request = validator.httpx.Request("POST", "http://source-router/routes/resolve")
+    response = validator.httpx.Response(500, request=request, json={"detail": "classification failed"})
 
-    prompt = validator.build_prompt_content(
-        "Catalunya supera los ocho millones de habitantes.",
-        "Noticia publicada en 2025.",
-        [{
-            "source_id": "source-1",
-            "title": "Població. Idescat",
-            "url": "https://www.idescat.cat/poblacio",
-            "domain": "idescat.cat",
-            "source_type": "official_statistics",
-            "trust_score": 0.95,
-            "why_selected": "regional primary source",
-            "contexts": [{
-                "context_id": "ctx-1",
-                "origin": "raw_content",
-                "score": 0.91,
-                "included_chunk_ids": ["chunk-1"],
-                "text": "La població de Catalunya és de 8.124.000 habitants.",
-            }],
-        }],
-    )
+    def post(*args, **kwargs):
+        raise validator.httpx.HTTPStatusError("server error", request=request, response=response)
 
-    assert "Evidencias proporcionadas:" in prompt
-    assert "source_id: source-1" in prompt
-    assert "url: https://www.idescat.cat/poblacio" in prompt
-    assert "context_id: ctx-1" in prompt
-    assert "included_chunk_ids: ['chunk-1']" in prompt
-    assert "La població de Catalunya és de 8.124.000 habitants." in prompt
-    assert "Aserción a validar:\nCatalunya supera los ocho millones de habitantes." in prompt
+    monkeypatch.setattr(validator.httpx, "post", post)
+    with pytest.raises(validator.SourceRouterRequestError) as captured:
+        validator.resolve_local_sources(minimal_payload())
+
+    failure = validator.ValidationExecutionFailure("SOURCE_ROUTER", captured.value, [], None)
+    details = validator.validation_error_details(failure)
+    assert details.code == "SOURCE_ROUTER_HTTP_500"
+    assert details.status_code == 500
+    assert details.retryable is True
+    assert details.message == "classification failed"
 
 
-@pytest.mark.parametrize("mode", ["NONE", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])
-def test_rag_external_modes_skip_router(validator, monkeypatch, mode):
-    validator.VALIDATOR_TYPE = validator.ValidatorType.RAG_EVIDENCE_VALIDATION
-    monkeypatch.setenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", mode)
+@pytest.mark.parametrize("strategy", ["EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])
+def test_rag_external_strategy_skips_router(validator, monkeypatch, strategy):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", strategy)
     calls = []
 
     class Response:
@@ -147,9 +156,11 @@ def test_rag_external_modes_skip_router(validator, monkeypatch, mode):
         def json(self): return {"evidences": []}
 
     def post(url, json, timeout):
-        calls.append(url)
+        calls.append((url, json))
         return Response()
 
     monkeypatch.setattr(validator.httpx, "post", post)
     validator.fetch_evidences_for_payload(minimal_payload())
-    assert len(calls) == 1 and "evidence-search" in calls[0]
+    assert len(calls) == 1 and "evidence-search" in calls[0][0]
+    assert calls[0][1]["search_policy"]["strategy"] == strategy
+    assert calls[0][1]["search_policy"]["preferred_sources"] == []

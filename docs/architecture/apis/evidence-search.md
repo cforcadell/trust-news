@@ -1,36 +1,37 @@
 # Evidence Search
 
-`api/evidence-search` recupera evidencia concreta. No descubre autoridades, no
-clasifica fuentes y no consulta `source-router`.
+`api/evidence-search` recupera documentos concretos para validadores RAG. No
+descubre autoridades, no clasifica dominios y no consulta `source-router`.
 
-## API
+## Contrato v2
 
-- `GET /health`: liveness.
-- `POST /search/evidence`: recibe una assertion y `search_policy`, ejecuta
-  Exa/Tavily mediante `common/search`, normaliza resultados, obtiene texto,
-  construye chunks/contextos, rankea y cachea.
-- `DELETE /admin/cache`: vacía exclusivamente `evidence_search_cache`.
+`POST /search/evidence` recibe:
 
-En modo `LOCAL`, `search_policy.include_domains` es obligatorio y ya viene
-resuelto por el validator:
+- `assertion`: aserción completa de `assertions-document-v2`.
+- `origin_document`: URL/dominio de la noticia, o ambos a `null` si se desconocen.
+- `search_policy`: una estrategia RAG, límites y `preferred_sources`.
 
-```json
-{
-  "use_preferred_domains": "LOCAL",
-  "include_domains": ["idescat.cat", "ine.es"]
-}
-```
+Solo existen tres estrategias:
 
-La búsqueda queda restringida a esos dominios y no hace fallback general. En
-`NONE`, `EXT_OFFICIAL_FIRST` y `EXT_ONLY_OFFICIAL` se conserva la planificación
-anterior; los modos `EXT_*` delegan la preferencia oficial al proveedor.
+| Estrategia | Dominios | Plan |
+|---|---|---|
+| `LOCAL` | `preferred_sources` obligatorio, producido por Source Router | Búsqueda restringida, sin ampliación general |
+| `EXT_OFFICIAL_FIRST` | No acepta `preferred_sources` | Petición oficial preferente y después búsqueda general |
+| `EXT_ONLY_OFFICIAL` | No acepta `preferred_sources` | Petición solo oficial y filtro determinista posterior por `source_type` |
 
-Mongo solo guarda la caché de evidencia con TTL. No existen perfiles estáticos
-ni seeds. La migración operativa ejecutada por
-`scripts/k8s/init-mongodb-server.sh` elimina las antiguas colecciones
-`evidence_domain_profiles` y `evidence_normalization_configs`.
+`NONE` no existe. La búsqueda web autónoma ya está representada por
+`LLM_SEARCH_VALIDATION` y no atraviesa este servicio.
 
-Variables principales: `MONGO_*`, `EVIDENCE_SEARCH_CACHE_COLLECTION`,
-`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`, `SEARCH_PROVIDER`, `SEARCH_API_URL`,
-`API_KEY_PROVIDER`, `SEARCH_TIMEOUT`, `SEARCH_MAX_RETRIES` y las opciones
-`EVIDENCE_*` de descarga/chunking.
+La respuesta contiene el plan ejecutado como objetos estructurados, la resolución
+de dominios y evidencias normalizadas. Cada evidencia conserva `source_type`,
+`authority_level`, `route_score`, `profile_version` y
+`relationship_to_origin`. El documento original puede aparecer como contexto,
+pero el grounding no lo admite como evidencia decisiva independiente.
+
+MongoDB solo guarda `evidence_search_cache_v2` con TTL. La clave incluye la
+aserción normalizada, el origen, la estrategia completa, los perfiles enrutados
+y la configuración del backend de búsqueda. Cambiar cualquiera de ellos separa
+la entrada de caché.
+
+`DELETE /admin/cache` vacía exclusivamente esa caché. Las colecciones antiguas se
+eliminan mediante `scripts/k8s/realign-source-routing-mongodb.sh`.

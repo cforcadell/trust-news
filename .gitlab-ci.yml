@@ -98,29 +98,6 @@ build:
 # ---------------------------------------------------------
 # PREFLIGHT
 # ---------------------------------------------------------
-check_mongodb_bootstrap:
-  stage: preflight
-  image: alpine:3.19
-  tags:
-    - hetzner-runner
-  extends: .kube_access
-
-  rules:
-    - if: '$PROFILE == "apis-frontend-prod"'
-
-  script:
-    - echo "Comprobando bootstrap de MongoDB antes de desplegar APIs"
-    - kubectl wait -n infra --for=condition=Ready pod/mongodb-0 --timeout=180s
-    - |
-      kubectl exec mongodb-0 -n infra -- sh -c 'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "${MONGO_APP_DATABASE:-newsdb}" --quiet --eval "
-        const p = db.evidence_domain_profiles.findOne({profile_id: \"default\"});
-        const profiles = db.evidence_domain_profiles.countDocuments({profile_id: \"default\"});
-        const normalization = db.evidence_normalization_configs.countDocuments({});
-        const domains = p && p.domains ? p.domains.length : 0;
-        printjson({profiles, normalization, domains});
-        quit(profiles === 1 && normalization >= 3 && domains >= 500 ? 0 : 1);
-      "'
-
 check_phase6_origin_tls:
   stage: preflight
   image: alpine:3.19
@@ -176,8 +153,6 @@ deploy:
   needs:
     - job: build
       optional: true
-    - job: check_mongodb_bootstrap
-      optional: true
     - job: check_phase6_origin_tls
       optional: true
 
@@ -197,13 +172,19 @@ deploy:
     - helm version --short
 
   script:
-    - echo "Deploy con Skaffold $SKAFFOLD_VERSION"
     - |
       test -f build.json || {
         echo "ERROR: falta build.json para el perfil $PROFILE"
         exit 1
       }
-      skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
+    - |
+      if [ "$PROFILE" = "apis-frontend-prod" ]; then
+        echo "Realineando Source Router y Evidence Search antes del rollout"
+        scripts/k8s/realign-source-routing-mongodb.sh --apply
+        scripts/k8s/realign-source-routing-mongodb.sh --check
+      fi
+    - echo "Deploy con Skaffold $SKAFFOLD_VERSION"
+    - skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
 
     - echo "Verificando rollout"
     - |
@@ -324,7 +305,7 @@ deploy:
       esac
 
 # ---------------------------------------------------------
-# BOOTSTRAP MONGODB
+# BOOTSTRAP / REALIGN MONGODB
 # ---------------------------------------------------------
 bootstrap_mongodb:
   stage: bootstrap
@@ -338,8 +319,6 @@ bootstrap_mongodb:
   rules:
     - if: '$PROFILE == "infra-prod"'
       when: on_success
-    - when: manual
-      allow_failure: true
 
   before_script:
     - !reference [.kube_access, before_script]
@@ -348,21 +327,8 @@ bootstrap_mongodb:
   script:
     - echo "Esperando MongoDB"
     - kubectl rollout status statefulset/mongodb -n infra --timeout=180s
-    - scripts/k8s/init-mongodb-server.sh --dry-run
-    - |
-      if kubectl exec mongodb-0 -n infra -- sh -c 'mongo -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "${MONGO_APP_DATABASE:-newsdb}" --quiet --eval "
-        const p = db.evidence_domain_profiles.findOne({profile_id: \"default\"});
-        const profiles = db.evidence_domain_profiles.countDocuments({profile_id: \"default\"});
-        const normalization = db.evidence_normalization_configs.countDocuments({});
-        const domains = p && p.domains ? p.domains.length : 0;
-        printjson({profiles, normalization, domains});
-        quit(profiles === 1 && normalization >= 3 && domains >= 500 ? 0 : 42);
-      "'; then
-        echo "MongoDB ya esta inicializado"
-      else
-        echo "MongoDB incompleto o vacio; ejecutando bootstrap"
-        scripts/k8s/init-mongodb-server.sh
-      fi
+    - scripts/k8s/init-mongodb-server.sh
+    - scripts/k8s/realign-source-routing-mongodb.sh --check
 
 # ---------------------------------------------------------
 # ROLLBACK automático si falla

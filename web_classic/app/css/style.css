@@ -847,8 +847,7 @@ pre, .event-payload-pre {
 }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; }
 .pagination button { background: rgba(148,163,184,.11); color: #dbeafe; border: 1px solid var(--border-color); }
-.category-select { min-width: 160px; }
-.editable-text { background: rgba(148,163,184,.05); border-radius: 8px; }
+.assertion-text { background: rgba(148,163,184,.05); border-radius: 8px; }
 
 /* Toast */
 .status-toast {

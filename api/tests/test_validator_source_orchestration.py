@@ -100,7 +100,8 @@ def routed_source():
     }
 
 
-def test_rag_local_calls_router_then_evidence(validator, monkeypatch):
+@pytest.mark.parametrize("diagnostic", [None, "CLASSIFICATION_PARTIAL", "PROFILE_FALLBACK"])
+def test_rag_local_calls_router_then_evidence(validator, monkeypatch, diagnostic):
     monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
     monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
     calls = []
@@ -113,17 +114,21 @@ def test_rag_local_calls_router_then_evidence(validator, monkeypatch):
     def post(url, json, timeout):
         calls.append((url, json))
         if "source-router" in url:
-            return Response({"route_key": "k", "route_state": "MISSING", "router_version": "v2", "sources": [routed_source()]})
+            return Response({"route_key": "k", "route_state": "MISSING", "router_version": "v2", "sources": [routed_source()],
+                             "degraded": diagnostic is not None, "diagnostic_code": diagnostic,
+                             "diagnostics": {"failed_domains": ["bad.example"] if diagnostic else []}})
         assert json["search_policy"]["strategy"] == "LOCAL"
         assert json["search_policy"]["preferred_sources"][0]["domain"] == "idescat.cat"
         assert json["origin_document"]["domain"] == "publisher.test"
         return Response({"evidences": [{"url": "https://idescat.cat/data"}]})
 
     monkeypatch.setattr(validator.httpx, "post", post)
-    evidences, _ = validator.fetch_evidences_for_payload(minimal_payload())
+    evidences, response = validator.fetch_evidences_for_payload(minimal_payload())
     assert len(calls) == 2
     assert "source-router" in calls[0][0] and "evidence-search" in calls[1][0]
     assert evidences == [{"url": "https://idescat.cat/data"}]
+    assert response["route"]["diagnostic_code"] == diagnostic
+    assert response["route"]["diagnostics"]["failed_domains"] == (["bad.example"] if diagnostic else [])
 
 
 def test_source_router_http_status_is_preserved_as_retryable(validator, monkeypatch):

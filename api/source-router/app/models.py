@@ -160,6 +160,20 @@ class RoutedSource(BaseModel):
     profile_version: str
 
 
+RouteDiagnosticCode = Literal[
+    "CLASSIFICATION_FAILED", "CLASSIFICATION_PARTIAL", "PROFILE_FALLBACK",
+    "NO_DISCOVERY_CANDIDATES", "NO_ELIGIBLE_SOURCES",
+]
+
+
+class RouteDiagnostics(BaseModel):
+    discovered_domains: list[str] = Field(default_factory=list)
+    classified_domains: list[str] = Field(default_factory=list)
+    rejected_domains: list[str] = Field(default_factory=list)
+    failed_domains: list[str] = Field(default_factory=list)
+    fallback_domains: list[str] = Field(default_factory=list)
+
+
 class RouteDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
     route_key: str
@@ -172,6 +186,9 @@ class RouteDocument(BaseModel):
     updated_at: datetime
     last_refreshed_at: datetime
     refresh_after: datetime
+    degraded: bool = False
+    diagnostic_code: RouteDiagnosticCode | None = None
+    diagnostics: RouteDiagnostics = Field(default_factory=RouteDiagnostics)
 
 
 class ResolveRouteResponse(BaseModel):
@@ -182,7 +199,8 @@ class ResolveRouteResponse(BaseModel):
     taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
     stale_route_used: bool = False
     degraded: bool = False
-    diagnostic_code: Literal["CLASSIFICATION_FAILED"] | None = None
+    diagnostic_code: RouteDiagnosticCode | None = None
+    diagnostics: RouteDiagnostics = Field(default_factory=RouteDiagnostics)
 
 
 class StoredRouteResponse(RouteDocument):

@@ -1,4 +1,5 @@
 import importlib
+import json
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -156,6 +157,61 @@ def test_classifier_rejects_ambiguous_authority_value():
         classified(authority="CONTINENTAL")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_failure", [False, True])
+async def test_classifier_preserves_valid_domain_when_other_jurisdiction_fails(monkeypatch, retry_failure):
+    valid = classified().model_dump(mode="json")
+    invalid = classified("bad.example").model_dump(mode="json")
+    invalid["jurisdictions"] = [{"scope": "SUPRANATIONAL", "country_code": "ES"}]
+    calls = []
+
+    async def complete(provider, llm_request):
+        calls.append(llm_request)
+        if len(calls) == 2:
+            if retry_failure:
+                raise LLMResponseError("invalid JSON on retry")
+            return SimpleNamespace(content=json.dumps({"classifications": [invalid]}))
+        return SimpleNamespace(content=json.dumps({"classifications": [valid, invalid]}))
+
+    monkeypatch.setattr(classifier, "acomplete", complete)
+    result = await classifier.classify_candidates(
+        signatures.build_route_signature(request()), request(),
+        [models.CandidateSource(domain=d, url=f"https://{d}/") for d in ("idescat.cat", "bad.example")], settings(),
+    )
+    assert [item.domain for item in result] == ["idescat.cat"]
+    assert result.failed_domains == ["bad.example"]
+    assert len(calls) == 2
+    assert "Return corrected classifications only for: bad.example" in calls[1].prompt
+
+
+def test_jurisdiction_repairs_only_redundant_codes_without_broadening_coverage():
+    raw = classified("ine.es", {"scope": "COUNTRY", "country_code": "ES"}).model_dump(mode="json")
+    raw["jurisdictions"][0].update(jurisdiction_code="ES", applicable_country_codes=["ES"])
+    repaired = classifier.normalize_classification(raw)
+    assert models.SourceClassification.model_validate(repaired).jurisdictions[0].routing_key() == "COUNTRY:ES"
+    assert raw["jurisdictions"][0]["jurisdiction_code"] == "ES"  # no input mutation
+    raw["jurisdictions"][0]["region_code"] = "ES-CT"
+    with pytest.raises(ValueError):
+        models.SourceClassification.model_validate(classifier.normalize_classification(raw))
+
+
+@pytest.mark.asyncio
+async def test_classifier_retries_missing_candidate_without_losing_first_result(monkeypatch):
+    sources = [classified(), classified("ine.es", {"scope": "COUNTRY", "country_code": "ES"})]
+    responses = iter(sources)
+
+    async def complete(*args):
+        return SimpleNamespace(content=json.dumps({"classifications": [next(responses).model_dump(mode="json")]}))
+
+    monkeypatch.setattr(classifier, "acomplete", complete)
+    result = await classifier.classify_candidates(
+        signatures.build_route_signature(request()), request(),
+        [models.CandidateSource(domain=item.domain, url=f"https://{item.domain}/") for item in sources], settings(),
+    )
+    assert {item.domain for item in result} == {"idescat.cat", "ine.es"}
+    assert result.failed_domains == []
+
+
 def test_eligibility_requires_route_matches_authority_and_jurisdiction():
     signature = signatures.build_route_signature(request())
     assert eligibility.is_eligible(signature, classified())
@@ -298,6 +354,80 @@ async def test_missing_route_degrades_when_classification_fails(monkeypatch):
     assert result.sources == []
     assert result.degraded is True
     assert result.diagnostic_code == "CLASSIFICATION_FAILED"
+    assert repo.saved_routes == []
+
+
+@pytest.mark.asyncio
+async def test_classification_failure_uses_only_recent_compatible_discovered_profiles(monkeypatch):
+    sources = [classified(), classified("old.example"), classified("wrong-country.example", {"scope": "COUNTRY", "country_code": "NZ"}),
+               classified("wrong-topic.example"), classified("wrong-kind.example"), classified("media.example"), classified("undiscovered.example")]
+    profiles = {item.domain: profile(item) for item in sources}
+    profiles["old.example"].last_verified_at -= timedelta(days=40)
+    profiles["wrong-topic.example"].topic_codes = []
+    profiles["wrong-kind.example"].evidence_kinds = []
+    profiles["media.example"].source_type = models.SourceType.MEDIA
+    repo = MemoryRepository(profiles=profiles)
+    original = profiles["idescat.cat"].model_dump()
+    router = service_module.SourceRouterService(repo, settings())
+
+    async def search(*args):
+        return {"results": [{"url": f"https://{item.domain}/"} for item in sources[:-1]]}
+
+    async def fail(*args):
+        raise LLMResponseError("invalid jurisdiction")
+
+    monkeypatch.setattr(service_module, "search_with_provider", search)
+    monkeypatch.setattr(service_module, "classify_candidates", fail)
+    result = await router.resolve(request())
+    assert [item.domain for item in result.sources] == ["idescat.cat"]
+    assert result.degraded and result.diagnostic_code == "PROFILE_FALLBACK"
+    assert result.diagnostics.fallback_domains == ["idescat.cat"]
+    assert repo.profiles["idescat.cat"].model_dump() == original
+    assert repo.route.refresh_after - repo.route.updated_at == timedelta(seconds=300)
+    cached = await router.resolve(request())
+    assert cached.route_state == "FRESH"
+    assert cached.degraded and cached.diagnostic_code == "PROFILE_FALLBACK"
+
+
+@pytest.mark.asyncio
+async def test_partial_classification_preserves_rejection_diagnostics_and_short_cache(monkeypatch):
+    repo = MemoryRepository()
+    router = service_module.SourceRouterService(repo, settings())
+    wrong = classified("wrong.example", {"scope": "COUNTRY", "country_code": "NZ"})
+
+    async def search(*args):
+        return {"results": [{"url": f"https://{d}/"} for d in ("idescat.cat", "bad.example", "wrong.example")]}
+
+    async def classify(*args):
+        return classifier.ClassificationResults([classified(), wrong], {"bad.example"})
+
+    monkeypatch.setattr(service_module, "search_with_provider", search)
+    monkeypatch.setattr(service_module, "classify_candidates", classify)
+    result = await router.resolve(request())
+    assert [item.domain for item in result.sources] == ["idescat.cat"]
+    assert result.diagnostic_code == "CLASSIFICATION_PARTIAL"
+    assert result.diagnostics.rejected_domains == ["wrong.example"]
+    assert result.diagnostics.failed_domains == ["bad.example"]
+    assert repo.route.refresh_after - repo.route.updated_at == timedelta(seconds=300)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_candidates", [False, True])
+async def test_no_eligible_sources_are_diagnosed_and_not_cached(monkeypatch, with_candidates):
+    repo = MemoryRepository()
+    router = service_module.SourceRouterService(repo, settings())
+
+    async def search(*args):
+        return {"results": [{"url": "https://wrong.example/"}] if with_candidates else []}
+
+    async def classify(*args):
+        return [classified("wrong.example", {"scope": "COUNTRY", "country_code": "NZ"})] if with_candidates else []
+
+    monkeypatch.setattr(service_module, "search_with_provider", search)
+    monkeypatch.setattr(service_module, "classify_candidates", classify)
+    result = await router.resolve(request())
+    assert result.sources == []
+    assert result.diagnostic_code == ("NO_ELIGIBLE_SOURCES" if with_candidates else "NO_DISCOVERY_CANDIDATES")
     assert repo.saved_routes == []
 
 

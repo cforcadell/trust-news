@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -196,6 +197,50 @@ def test_source_type_heuristics_use_normalized_exact_domain_boundaries():
     assert evidence.source_type_for_domain("ec.europa.eu") == "INTERGOVERNMENTAL_ORGANIZATION"
     assert evidence.source_type_for_domain("datos.gob.es") == "GOVERNMENT_AGENCY"
     assert evidence.source_type_for_domain("notreuters.com") == "MEDIA"
+
+
+@pytest.mark.asyncio
+async def test_failed_document_fetch_never_exposes_provider_snippet_as_citable(monkeypatch):
+    async def failed_fetch(*args, **kwargs):
+        return SimpleNamespace(status="failed", error="http_403", text="", document_length_chars=0)
+
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "fetch_main_text", failed_fetch)
+    results = await evidence.build_evidences_with_optional_contexts(
+        assertion(),
+        [{"url": "https://ine.es/report", "title": "INE", "content": "Snippet del proveedor"}],
+        {"preferred_sources": [preferred_source()]},
+        max_results=1,
+    )
+
+    assert results[0]["snippet"] == "Snippet del proveedor"
+    assert results[0]["contexts"] == []
+    assert results[0]["citation_status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_fetched_document_context_is_citable_and_hashed(monkeypatch):
+    document = " ".join([
+        "En 2024 el instituto publicó la estadística oficial de empleo en Barcelona."
+    ] * 8)
+
+    async def successful_fetch(*args, **kwargs):
+        return SimpleNamespace(status="ok", error=None, text=document, document_length_chars=len(document))
+
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "fetch_main_text", successful_fetch)
+    results = await evidence.build_evidences_with_optional_contexts(
+        assertion(),
+        [{"url": "https://ine.es/report", "title": "INE", "content": "Snippet"}],
+        {"preferred_sources": [preferred_source()]},
+        max_results=1,
+    )
+
+    context = results[0]["contexts"][0]
+    assert results[0]["citation_status"] == "available"
+    assert context["citation_eligible"] is True
+    assert context["origin"] == "fetched_document"
+    assert len(context["text_sha256"]) == 64
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,8 @@ def retrieved_evidence():
                     "selected_chunk_id": "source-1-chunk-2",
                     "included_chunk_ids": ["source-1-chunk-1", "source-1-chunk-2"],
                     "text": "La población registrada en 2025 fue de ocho millones de personas.",
+                    "text_sha256": "canonical-hash",
+                    "citation_eligible": True,
                 }
             ],
         }
@@ -23,11 +25,25 @@ def retrieved_evidence():
 
 def used_reference(**overrides):
     reference = {
+        "context_id": "source-1-context-1",
+        "supports": True,
+        "reason": "El contexto contiene la cifra.",
+    }
+    reference.update(overrides)
+    return reference
+
+
+def canonical_reference(**overrides):
+    reference = {
         "source_id": "source-1",
         "context_id": "source-1-context-1",
-        "url": "https://example.test/report",
-        "evidence_text": "ocho millones de personas",
+        "chunk_id": "source-1-chunk-2",
+        "url": "https://example.test/report/",
+        "title": None,
         "supports": True,
+        "evidence_text": "La población registrada en 2025 fue de ocho millones de personas.",
+        "evidence_text_sha256": "canonical-hash",
+        "reason": "El contexto contiene la cifra.",
     }
     reference.update(overrides)
     return reference
@@ -39,7 +55,7 @@ def test_true_verdict_keeps_only_evidence_present_in_retrieved_context(retrieved
     )
 
     assert result["effective_verdict"] == "TRUE"
-    assert result["evidence_used"] == [used_reference()]
+    assert result["evidence_used"] == [canonical_reference()]
     assert result["validation"]["status"] == "VERIFIED"
     assert result["validation"]["verified_count"] == 1
 
@@ -47,11 +63,9 @@ def test_true_verdict_keeps_only_evidence_present_in_retrieved_context(retrieved
 @pytest.mark.parametrize(
     ("reference", "code"),
     [
-        (used_reference(source_id="source-invented"), "SOURCE_NOT_RETRIEVED"),
-        (used_reference(url="https://attacker.test/report"), "URL_NOT_RETRIEVED"),
-        (used_reference(evidence_text="dato que no aparece"), "EVIDENCE_TEXT_NOT_RETRIEVED"),
-        (used_reference(evidence_text=""), "EVIDENCE_TEXT_REQUIRED"),
-        (used_reference(url="javascript:alert(1)"), "URL_REQUIRED"),
+        (used_reference(context_id="source-1-context-invented"), "CONTEXT_NOT_RETRIEVED"),
+        ({"supports": True}, "CONTEXT_ID_REQUIRED"),
+        (used_reference(supports="true"), "SUPPORTS_REQUIRED"),
     ],
 )
 def test_invented_or_incomplete_evidence_is_rejected_and_verdict_abstains(
@@ -95,15 +109,38 @@ def test_false_verdict_requires_a_verified_contradicting_reference(retrieved_evi
 
 
 def test_wrong_context_or_chunk_cannot_be_used(retrieved_evidence):
-    for reference in (
-        used_reference(context_id="source-1-context-invented"),
-        used_reference(chunk_id="source-1-chunk-invented"),
-    ):
-        result = evaluate_evidence_grounding(
-            "TRUE", [reference], retrieved_evidence, require_grounding=True
-        )
-        assert result["effective_verdict"] == "UNKNOWN"
-        assert result["evidence_used"] == []
+    result = evaluate_evidence_grounding(
+        "TRUE", [used_reference(context_id="source-1-context-invented")], retrieved_evidence,
+        require_grounding=True,
+    )
+    assert result["effective_verdict"] == "UNKNOWN"
+    assert result["evidence_used"] == []
+
+
+def test_context_without_server_citation_flag_cannot_be_used(retrieved_evidence):
+    retrieved_evidence[0]["contexts"][0]["citation_eligible"] = False
+    result = evaluate_evidence_grounding(
+        "TRUE", [used_reference()], retrieved_evidence, require_grounding=True
+    )
+
+    assert result["effective_verdict"] == "UNKNOWN"
+    assert result["evidence_used"] == []
+    assert "CONTEXT_NOT_CITABLE" in {
+        issue["code"] for issue in result["validation"]["issues"]
+    }
+
+
+def test_model_cannot_override_canonical_url_or_text(retrieved_evidence):
+    claimed = used_reference(
+        source_id="source-invented",
+        url="https://attacker.test/report",
+        evidence_text="Texto inventado",
+        title="Título inventado",
+    )
+    result = evaluate_evidence_grounding("TRUE", [claimed], retrieved_evidence, require_grounding=True)
+
+    assert result["effective_verdict"] == "TRUE"
+    assert result["evidence_used"] == [canonical_reference()]
 
 
 def test_original_document_cannot_be_decisive_evidence(retrieved_evidence):
@@ -123,7 +160,7 @@ def test_original_document_cannot_be_decisive_evidence(retrieved_evidence):
 def test_unknown_remains_an_abstention_and_invalid_citations_are_removed(retrieved_evidence):
     result = evaluate_evidence_grounding(
         "UNKNOWN",
-        [used_reference(source_id="source-invented")],
+        [used_reference(context_id="source-invented-context-1")],
         retrieved_evidence,
         require_grounding=True,
     )
@@ -172,12 +209,12 @@ def test_provider_search_keeps_verdict_without_claiming_documentary_verification
 def test_valid_reference_survives_alongside_rejected_invented_reference(retrieved_evidence):
     result = evaluate_evidence_grounding(
         "TRUE",
-        [used_reference(), used_reference(source_id="source-invented")],
+        [used_reference(), used_reference(context_id="source-invented-context-1")],
         retrieved_evidence,
         require_grounding=True,
     )
 
     assert result["effective_verdict"] == "TRUE"
-    assert result["evidence_used"] == [used_reference()]
+    assert result["evidence_used"] == [canonical_reference()]
     assert result["validation"]["status"] == "PARTIALLY_VERIFIED"
     assert result["validation"]["rejected_count"] == 1

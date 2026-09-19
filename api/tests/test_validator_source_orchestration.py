@@ -56,9 +56,9 @@ def minimal_payload():
 def test_unverified_opinion_preserves_audit_without_decisive_vote(validator, monkeypatch, original):
     monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
     sources = [{"source_id": "source-1", "url": "https://example.test/report", "contexts": [
-        {"context_id": "context-1", "text": "Texto recuperado exacto."}
+        {"context_id": "context-1", "text": "Texto recuperado exacto.", "citation_eligible": True}
     ]}]
-    claims = [{"source_id": "source-1", "url": "https://example.test/report", "evidence_text": "Cita inventada", "supports": original == "TRUE"}]
+    claims = [{"context_id": "context-invented", "supports": original == "TRUE"}]
     monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (sources, {"evidences": sources}))
     monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
     monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(verificar_asercion=lambda *args: "response"))
@@ -68,7 +68,7 @@ def test_unverified_opinion_preserves_audit_without_decisive_vote(validator, mon
     verdict, description, extras, response = validator.validate_payload_v2(payload)
     assert verdict == validator.Validacion.UNKNOWN
     assert extras["evidence_used"] == []
-    assert "EVIDENCE_TEXT_NOT_RETRIEVED" in [issue["code"] for issue in extras["evidence_validation"]["issues"]]
+    assert "CONTEXT_NOT_RETRIEVED" in [issue["code"] for issue in extras["evidence_validation"]["issues"]]
     assert original in description
     assert response["evidences"] == sources
 

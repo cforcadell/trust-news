@@ -1,7 +1,5 @@
-import re
-import unicodedata
-from typing import Any, Dict, Iterable
-from urllib.parse import urlparse, urlunparse
+from typing import Any, Dict
+from urllib.parse import urlparse
 
 from pydantic import BeforeValidator, HttpUrl, TypeAdapter, ValidationError
 from typing_extensions import Annotated
@@ -43,53 +41,56 @@ def sanitize_evidence_item(value: Any) -> Any:
 
 EvidenceItem = Annotated[Dict[str, Any], BeforeValidator(sanitize_evidence_item)]
 
-def _canonical_http_url(value: Any) -> str | None:
-    """Return a comparison-safe HTTP(S) URL without its fragment."""
-    if not is_http_url(value):
-        return None
-    parsed = urlparse(str(value).strip())
-    host = (parsed.hostname or "").lower()
-    port = parsed.port
-    default_port = (parsed.scheme.lower() == "http" and port == 80) or (
-        parsed.scheme.lower() == "https" and port == 443
-    )
-    netloc = host if port is None or default_port else f"{host}:{port}"
-    path = parsed.path or "/"
-    if path != "/":
-        path = path.rstrip("/")
-    return urlunparse((parsed.scheme.lower(), netloc, path, "", parsed.query, ""))
-
-
-def _normalized_evidence_text(value: Any) -> str:
-    text = unicodedata.normalize("NFKC", str(value or ""))
-    return re.sub(r"\s+", " ", text).strip().casefold()
-
-
-def _source_texts(source: Dict[str, Any], reference: Dict[str, Any]) -> Iterable[str]:
-    contexts = source.get("contexts") or source.get("chunks") or []
-    context_id = str(reference.get("context_id") or "").strip()
-    chunk_id = str(reference.get("chunk_id") or "").strip()
-
-    for context in contexts:
-        if not isinstance(context, dict):
+def _citation_contexts(
+    retrieved_evidence: Any,
+) -> tuple[Dict[str, tuple[Dict[str, Any], Dict[str, Any]]], set[str], set[str]]:
+    """Index server-created citation contexts and report ambiguous identifiers."""
+    indexed: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {}
+    ambiguous: set[str] = set()
+    uncitable: set[str] = set()
+    for source in retrieved_evidence if isinstance(retrieved_evidence, list) else []:
+        if not isinstance(source, dict):
             continue
-        if context_id and str(context.get("context_id") or "") != context_id:
-            continue
-        if chunk_id:
-            possible_chunk_ids = {
-                str(context.get("chunk_id") or ""),
-                str(context.get("selected_chunk_id") or ""),
-                *(str(value) for value in context.get("included_chunk_ids") or []),
-            }
-            if chunk_id not in possible_chunk_ids:
+        for context in source.get("contexts") or []:
+            if not isinstance(context, dict):
                 continue
-        yield str(context.get("text") or "")
+            context_id = str(context.get("context_id") or "").strip()
+            if not context_id:
+                continue
+            if context.get("citation_eligible") is not True or not str(context.get("text") or "").strip():
+                uncitable.add(context_id)
+                continue
+            if context_id in indexed:
+                ambiguous.add(context_id)
+                indexed.pop(context_id, None)
+                continue
+            if context_id not in ambiguous:
+                indexed[context_id] = (source, context)
+    return indexed, ambiguous, uncitable
 
-    # Legacy/provider responses may only expose a bounded search snippet.
-    if not context_id and not chunk_id:
-        for key in ("snippet", "excerpt", "content"):
-            if source.get(key):
-                yield str(source[key])
+
+def _canonical_evidence_reference(
+    source: Dict[str, Any],
+    context: Dict[str, Any],
+    claimed: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build public evidence exclusively from server-retrieved canonical data."""
+    reference = {
+        "source_id": source.get("source_id"),
+        "context_id": context.get("context_id"),
+        "url": source.get("url"),
+        "title": source.get("title"),
+        "supports": claimed.get("supports"),
+        "evidence_text": context.get("text"),
+        "reason": str(claimed.get("reason") or "").strip(),
+    }
+    selected_chunk_id = context.get("selected_chunk_id")
+    if selected_chunk_id:
+        reference["chunk_id"] = selected_chunk_id
+    text_sha256 = context.get("text_sha256")
+    if text_sha256:
+        reference["evidence_text_sha256"] = text_sha256
+    return sanitize_evidence_item(reference)
 
 
 def evaluate_evidence_grounding(
@@ -112,11 +113,7 @@ def evaluate_evidence_grounding(
 
     claimed = evidence_used if isinstance(evidence_used, list) else []
     retrieved = retrieved_evidence if isinstance(retrieved_evidence, list) else []
-    retrieved_by_id = {
-        str(item.get("source_id")): item
-        for item in retrieved
-        if isinstance(item, dict) and item.get("source_id")
-    }
+    citation_contexts, ambiguous_contexts, uncitable_contexts = _citation_contexts(retrieved)
     verified: list[Dict[str, Any]] = []
     issues: list[Dict[str, Any]] = []
 
@@ -124,35 +121,37 @@ def evaluate_evidence_grounding(
         if not isinstance(raw_reference, dict):
             issues.append({"index": index, "code": "INVALID_EVIDENCE_ITEM"})
             continue
-        reference = sanitize_evidence_item(raw_reference)
-        source_id = str(reference.get("source_id") or "").strip()
-        source = retrieved_by_id.get(source_id)
-        if source is None:
-            issues.append({"index": index, "code": "SOURCE_NOT_RETRIEVED", "source_id": source_id or None})
+        context_id = str(raw_reference.get("context_id") or "").strip()
+        if not context_id:
+            issues.append({"index": index, "code": "CONTEXT_ID_REQUIRED"})
             continue
+        if context_id in ambiguous_contexts:
+            issues.append({"index": index, "code": "CONTEXT_ID_AMBIGUOUS", "context_id": context_id})
+            continue
+        if context_id in uncitable_contexts:
+            issues.append({"index": index, "code": "CONTEXT_NOT_CITABLE", "context_id": context_id})
+            continue
+        resolved = citation_contexts.get(context_id)
+        if resolved is None:
+            issues.append({"index": index, "code": "CONTEXT_NOT_RETRIEVED", "context_id": context_id})
+            continue
+        source, context = resolved
+        source_id = str(source.get("source_id") or "").strip()
         if source.get("relationship_to_origin") == "ORIGINAL":
-            issues.append({"index": index, "code": "SOURCE_IS_ORIGINAL_DOCUMENT", "source_id": source_id})
+            issues.append({
+                "index": index,
+                "code": "SOURCE_IS_ORIGINAL_DOCUMENT",
+                "source_id": source_id,
+                "context_id": context_id,
+            })
             continue
-
-        reference_url = _canonical_http_url(reference.get("url"))
-        source_url = _canonical_http_url(source.get("url"))
-        if reference_url is None:
-            issues.append({"index": index, "code": "URL_REQUIRED", "source_id": source_id})
+        if not is_http_url(source.get("url")):
+            issues.append({"index": index, "code": "RETRIEVED_SOURCE_URL_INVALID", "source_id": source_id})
             continue
-        if source_url is None or reference_url != source_url:
-            issues.append({"index": index, "code": "URL_NOT_RETRIEVED", "source_id": source_id})
+        if not isinstance(raw_reference.get("supports"), bool):
+            issues.append({"index": index, "code": "SUPPORTS_REQUIRED", "context_id": context_id})
             continue
-
-        quote = reference.get("evidence_text") or reference.get("quote")
-        normalized_quote = _normalized_evidence_text(quote)
-        if not normalized_quote:
-            issues.append({"index": index, "code": "EVIDENCE_TEXT_REQUIRED", "source_id": source_id})
-            continue
-        candidate_texts = [_normalized_evidence_text(text) for text in _source_texts(source, reference)]
-        if not any(normalized_quote in text for text in candidate_texts if text):
-            issues.append({"index": index, "code": "EVIDENCE_TEXT_NOT_RETRIEVED", "source_id": source_id})
-            continue
-        verified.append(reference)
+        verified.append(_canonical_evidence_reference(source, context, raw_reference))
 
     expected_support = True if original_verdict == "TRUE" else False
     supports_verdict = any(item.get("supports") is expected_support for item in verified)

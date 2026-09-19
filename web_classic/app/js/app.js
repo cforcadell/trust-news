@@ -934,6 +934,7 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
     const tabs = document.getElementById("orderTabs");
     const detailsContainer = document.getElementById("fixedDetailsContainer");
     const tabContent = document.getElementById("tabContent");
+    const orderSection = document.getElementById("order");
     const background = Boolean(options.background);
     const ownedController = options.signal ? null : new AbortController();
     const requestSignal = options.signal || ownedController.signal;
@@ -944,7 +945,13 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
 
     if (cleanup && !background) stopOrderPolling();
 
-    if (cleanup) tabs.innerHTML = '';
+    if (cleanup) {
+        tabs.innerHTML = '';
+        if (orderSection) {
+            delete orderSection.dataset.renderedOrderId;
+            delete orderSection.dataset.renderedOrderStatus;
+        }
+    }
 
     if (cleanup) {
         detailsContainer.innerHTML = `<div class="p-4 text-center text-gray-400">${safeText(t("messages.loadingOrder", { orderId }))}</div>`;
@@ -1042,6 +1049,10 @@ async function loadOrderById(orderId, cleanup = true, options = {}) {
         }
 
         detailsContainer.innerHTML = renderGlobalOrderStatus(data);
+        if (orderSection) {
+            orderSection.dataset.renderedOrderId = String(data.order_id || orderId);
+            orderSection.dataset.renderedOrderStatus = String(data.status || "UNKNOWN").toUpperCase();
+        }
         return { ok: true, data };
     } catch (error) {
         if (!background) {

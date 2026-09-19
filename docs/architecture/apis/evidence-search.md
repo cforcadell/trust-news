@@ -28,10 +28,22 @@ de dominios y evidencias normalizadas. Cada evidencia conserva `source_type`,
 `relationship_to_origin`. El documento original puede aparecer como contexto,
 pero el grounding no lo admite como evidencia decisiva independiente.
 
+Una fuente sólo es citable cuando Evidence Search descarga el documento,
+extrae su texto y genera contextos con `context_id`, `text_sha256`,
+`origin=fetched_document` y `citation_eligible=true`. Si la descarga falla o la
+extracción de texto está deshabilitada, se conservan URL, título y snippet para
+diagnóstico, pero `contexts` queda vacío y `citation_status=unavailable`. Un
+snippet del proveedor no constituye evidencia documental citable.
+
+El validador selecciona únicamente `context_id`; no controla la URL ni el texto
+persistidos. Validate Asertions reconstruye `evidence_used` desde el contexto
+canónico y rechaza identificadores ausentes o ambiguos.
+
 MongoDB solo guarda `evidence_search_cache_v2` con TTL. La clave incluye la
 aserción normalizada, el origen, la estrategia completa, los perfiles enrutados
-y la configuración del backend de búsqueda. Cambiar cualquiera de ellos separa
-la entrada de caché.
+y la configuración del backend de búsqueda, incluida la versión del contrato de
+citas. Cambiar cualquiera de ellos separa la entrada de caché. La nueva versión
+no reutiliza respuestas antiguas, por lo que no requiere eliminar la colección.
 
 `DELETE /admin/cache` vacía exclusivamente esa caché. Las colecciones antiguas se
 eliminan mediante `scripts/k8s/realign-source-routing-mongodb.sh`.

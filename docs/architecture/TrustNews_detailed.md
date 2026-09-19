@@ -682,15 +682,20 @@ When full-text enrichment is enabled, evidence may also include selected context
         "source-1-chunk-4"
       ],
       "text": "Selected context window used by the validator.",
+      "text_sha256": "...",
       "score": 0.91,
-      "origin": "full_text",
+      "origin": "fetched_document",
+      "citation_eligible": true,
       "char_length": 850
     }
   ]
 }
 ```
 
-If full-text retrieval is disabled or fails, the service falls back to the provider snippet.
+If full-text retrieval is disabled or fails, the service retains provider
+metadata for diagnostics but exposes no citable context. The validator selects
+only server-issued `context_id` values; URL and evidence text are reconstructed
+from the canonical context after the model responds.
 
 ---
 

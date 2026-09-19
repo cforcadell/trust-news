@@ -422,7 +422,7 @@ async function run() {
         .join(" ");
       const redactedMessage = redactText(message);
       consoleDiagnostics.push({ type, message: redactedMessage });
-      report.browserConsole.diagnosticEntries.push({ type, message: summarizeText(redactedMessage) });
+      report.browserConsole.diagnosticEntries.push({ type, message: redactedMessage });
     }
   });
   cdp.on("Network.responseReceived", params => {
@@ -609,6 +609,28 @@ async function run() {
     actual: order?.validation_mode || null,
   });
 
+  let terminalViewRendered = false;
+  if (reachedTerminal) {
+    try {
+      terminalViewRendered = await waitFor(`(() => {
+        const section = document.querySelector('#order');
+        const renderedId = section?.dataset.renderedOrderId || '';
+        const renderedStatus = String(section?.dataset.renderedOrderStatus || '').toUpperCase();
+        const tabs = document.querySelectorAll('#orderTabs [data-tab-key]');
+        return renderedId === ${JSON.stringify(submission.orderId)}
+          && (renderedStatus === ${JSON.stringify(finalStatus)} || renderedStatus.startsWith('VALIDATED'))
+          && tabs.length > 0;
+      })()`, 30000, 250);
+    } catch (_) {
+      terminalViewRendered = false;
+    }
+  }
+  addCheck("terminal-order-view-rendered", terminalViewRendered, {
+    expected: "terminal order and tabs rendered",
+    orderId: submission.orderId,
+    status: finalStatus,
+  });
+
   const tabs = await evaluate(`Array.from(document.querySelectorAll('#orderTabs [data-tab-key]')).map(element => ({
     key: element.dataset.tabKey,
     text: element.innerText.trim(),
@@ -714,7 +736,7 @@ async function run() {
   ));
   report.browserConsole.unexpectedErrors = unexpectedConsoleErrors.map(entry => ({
     type: entry.type,
-    message: summarizeText(entry.message),
+    message: entry.message,
   }));
   addCheck("unexpected-console-errors", unexpectedConsoleErrors.length === 0, {
     actual: unexpectedConsoleErrors.length,

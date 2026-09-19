@@ -394,6 +394,7 @@ def search_backend_for_cache() -> Dict[str, Any]:
         "evidence_chunk_overlap_chars": EVIDENCE_CHUNK_OVERLAP_CHARS,
         "evidence_context_window_before": EVIDENCE_CONTEXT_WINDOW_BEFORE,
         "evidence_context_window_after": EVIDENCE_CONTEXT_WINDOW_AFTER,
+        "citation_contract": "retrieved-context-id-v1",
     }
 
 
@@ -448,30 +449,26 @@ def useful_excerpt(result: Dict[str, Any]) -> str:
     return text[:900]
 
 
-def snippet_context_for_evidence(evidence: Dict[str, Any], score: Optional[float] = None) -> Optional[Dict[str, Any]]:
-    """Build a traceable context from the provider snippet when full text is unavailable."""
-    snippet = re.sub(r"\s+", " ", evidence.get("snippet") or "").strip()
-    if not snippet:
-        return None
-    return {
-        "context_id": f"{evidence.get('source_id')}-context-1",
-        "selected_chunk_id": None,
-        "included_chunk_ids": [],
-        "text": snippet,
-        "score": score,
-        "origin": "search_snippet",
-        "char_length": len(snippet),
-    }
-
-
-def attach_snippet_fallback(evidence: Dict[str, Any], fetch_status: str) -> Dict[str, Any]:
-    """Attach snippet context metadata without replacing the normalized evidence fields."""
-    context = snippet_context_for_evidence(evidence)
-    evidence["contexts"] = [context] if context else []
+def mark_evidence_uncitable(evidence: Dict[str, Any], fetch_status: str) -> Dict[str, Any]:
+    """Keep provider metadata but expose no citable context without fetched text."""
+    evidence["contexts"] = []
     evidence["fetch_status"] = fetch_status
-    if fetch_status != "not_requested":
-        logger.info(f"[evidence-search] fallback_to_snippet=true source_id={evidence.get('source_id')} fetch_status={fetch_status}")
+    evidence["citation_status"] = "unavailable"
+    logger.info(
+        f"[evidence-search] citation_context_unavailable=true "
+        f"source_id={evidence.get('source_id')} fetch_status={fetch_status}"
+    )
     return evidence
+
+
+def make_contexts_citable(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Mark contexts derived from fetched documents and bind them to their text hash."""
+    for context in contexts:
+        text = str(context.get("text") or "")
+        context["origin"] = "fetched_document"
+        context["citation_eligible"] = True
+        context["text_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return contexts
 
 
 def chunks_metadata(ranked_chunks: List[Dict[str, Any]], selected_contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -509,14 +506,12 @@ async def build_evidences_with_optional_contexts(
         source_id = evidence["source_id"]
 
         if not EVIDENCE_FETCH_FULL_TEXT:
-            attach_snippet_fallback(evidence, "not_requested")
-            if evidence.get("contexts"):
-                total_contexts += 1
+            mark_evidence_uncitable(evidence, "full_text_disabled")
             evidences.append(evidence)
             continue
 
         if total_contexts >= EVIDENCE_MAX_CONTEXTS_TOTAL:
-            attach_snippet_fallback(evidence, "not_requested")
+            mark_evidence_uncitable(evidence, "context_limit_reached")
             evidences.append(evidence)
             continue
 
@@ -527,10 +522,8 @@ async def build_evidences_with_optional_contexts(
         logger.info(f"[evidence-search] fetch_status source_id={source_id} status={fetch_result.status} error={fetch_result.error}")
 
         if fetch_result.status != "ok":
-            attach_snippet_fallback(evidence, fetch_result.status)
-            evidence["contexts_total"] = len(evidence.get("contexts") or [])
-            if evidence.get("contexts"):
-                total_contexts += 1
+            mark_evidence_uncitable(evidence, fetch_result.status)
+            evidence["contexts_total"] = 0
             evidences.append(evidence)
             continue
 
@@ -556,14 +549,13 @@ async def build_evidences_with_optional_contexts(
         logger.info(f"[evidence-search] contexts_selected source_id={source_id} value={len(contexts)}")
 
         if not chunks or not contexts:
-            attach_snippet_fallback(evidence, "no_ranked_chunks")
-            evidence["contexts_total"] = len(evidence.get("contexts") or [])
-            if evidence.get("contexts"):
-                total_contexts += 1
+            mark_evidence_uncitable(evidence, "no_ranked_chunks")
+            evidence["contexts_total"] = 0
             evidences.append(evidence)
             continue
 
-        evidence["contexts"] = contexts
+        evidence["contexts"] = make_contexts_citable(contexts)
+        evidence["citation_status"] = "available"
         evidence["chunks_metadata"] = chunks_metadata(ranked, contexts)
         total_contexts += len(contexts)
         evidences.append(evidence)

@@ -119,12 +119,11 @@ No inventes fuentes, datos ni citas.
 Si los contextos/evidencias no contienen soporte directo ni contradicción directa para la aserción, responde UNKNOWN.
 Explica porque has tomado su decision de forma breve y objetiva usando URLs y fragmentos concretos.
 No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las evidencias" ni referencias genéricas en descripcion, reason ni evidence_text.
-Si devuelves TRUE o FALSE, evidence_used debe contener al menos una evidencia con url y evidence_text.
-En descripcion menciona la URL, dominio o título concreto usado, no su índice interno.
-evidence_text debe ser un fragmento literal breve presente en las evidencias proporcionadas.
+Si devuelves TRUE o FALSE, evidence_used debe contener al menos una referencia a un context_id proporcionado.
+En descripcion menciona el dominio o título concreto usado, no su índice interno.
 supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
-Usa context_id o chunk_id cuando esté disponible para identificar el trozo exacto.
-No inventes citas ni resumas como si fuera una cita literal.
+Sólo puedes seleccionar context_id incluidos literalmente en el prompt. No devuelvas URL, source_id,
+chunk_id ni evidence_text: el servidor reconstruye esos campos desde el contexto recuperado.
 Si ninguna evidencia contiene un fragmento directo que apoye o contradiga la aserción, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
@@ -133,13 +132,8 @@ Devuelve exclusivamente JSON válido:
   "confidence": "HIGH | MEDIUM | LOW",
   "evidence_used": [
     {
-      "source_id": "string",
       "context_id": "string",
-      "chunk_id": "string",
-      "url": "string",
-      "title": "string",
       "supports": true,
-      "evidence_text": "Fragmento literal breve usado para decidir",
       "reason": "string"
     }
   ]
@@ -365,29 +359,21 @@ def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> st
             f"why_selected: {source.get('why_selected', '')}",
         ]
 
-        contexts = source.get("contexts") or []
-        if contexts:
-            for context_idx, context in enumerate(contexts, start=1):
-                source_lines.extend([
-                    f"CONTEXTO {context_idx}",
-                    f"context_id: {context.get('context_id', '')}",
-                    f"origin: {context.get('origin', '')}",
-                    f"score: {context.get('score', '')}",
-                    f"included_chunk_ids: {context.get('included_chunk_ids', [])}",
-                    f"text: {context.get('text', '')}",
-                ])
-        else:
-            snippet = source.get("snippet") or source.get("excerpt") or source.get("content") or ""
+        contexts = [
+            context for context in source.get("contexts") or []
+            if isinstance(context, dict) and context.get("citation_eligible") is True
+        ]
+        if not contexts:
+            continue
+        for context_idx, context in enumerate(contexts, start=1):
             source_lines.extend([
-                "CONTEXTO 1",
-                "context_id: ",
-                "origin: search_snippet",
-                "score: ",
-                "included_chunk_ids: []",
-                f"text: {snippet}",
+                f"CONTEXTO CITABLE {context_idx}",
+                f"context_id: {context.get('context_id', '')}",
+                f"text_sha256: {context.get('text_sha256', '')}",
+                f"text: {context.get('text', '')}",
             ])
         blocks.append("\n".join(source_lines))
-    return "\n\n".join(blocks)
+    return "\n\n".join(blocks) if blocks else "No hay contextos documentales citables disponibles."
 
 
 def build_prompt_content(texto: Any, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:

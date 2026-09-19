@@ -60,3 +60,31 @@ test('polling selects Process once, preserves navigation, and returns there at t
     await context.runOrderPollingCycle(session);
     assert.deepEqual(activated, ['process']);
 });
+
+test('terminal polling awaits a clean final render before activating Summary', async () => {
+    const calls = [];
+    const activated = [];
+    const session = { startedAt: Date.now(), followProcess: true, consecutiveErrors: 0, stopped: false };
+    const context = contextFor(['runOrderPollingCycle'], {
+        Date, AbortController, POLLING_DURATION: 300000, POLLING_INTERVAL: 3000,
+        POLLING_REQUEST_TIMEOUT_MS: 15000, activeOrderPollingSession: session,
+        currentOrderData: { status: 'VALIDATION_PENDING' },
+        window: { setTimeout: () => 1, clearTimeout: () => {} },
+        renderOrderPollingState: () => {}, isTerminalOrderStatus: status => status === 'VALIDATED',
+        loadOrderById: async (id, cleanup, opts) => {
+            calls.push({ cleanup, preferredTabKey: opts.preferredTabKey });
+            return { ok: true, data: { status: 'VALIDATED' } };
+        },
+        stopOrderPolling: () => { session.stopped = true; },
+        activateOrderTab: key => activated.push(key), alertMessage: () => {}, t: key => key,
+        console: { log: () => {} }
+    });
+
+    await context.runOrderPollingCycle(session);
+
+    assert.deepEqual(calls, [
+        { cleanup: false, preferredTabKey: 'process' },
+        { cleanup: true, preferredTabKey: 'summary' }
+    ]);
+    assert.deepEqual(activated, ['summary']);
+});

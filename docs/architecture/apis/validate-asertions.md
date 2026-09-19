@@ -24,8 +24,8 @@ primero a Source Router y pasa `preferred_sources` con todos sus metadatos a
 Evidence Search. LIGHT y BLOCKCHAIN reutilizan la misma función.
 
 - `VALIDATOR_TYPE=2` (`LLM_SEARCH_VALIDATION`) delega la búsqueda al proveedor. Puede devolver `TRUE`, `FALSE` o `UNKNOWN` sin fuentes. Los enlaces opcionales se publican en `sources_declared` y se etiquetan como `PROVIDER_SEARCH_UNVERIFIED`; no se convierten en `evidence_used` porque el servidor no dispone del corpus consultado para comprobarlos.
-- `VALIDATOR_TYPE=3` (`RAG_EVIDENCE_VALIDATION`) rellena `evidence_used` usando exclusivamente las evidencias proporcionadas por `evidence-search`. Cada entrada debe incluir `source_id`, `url`, `evidence_text`, `supports`, `reason` y, cuando exista, `context_id` o `chunk_id`.
-- `evidence_text` debe ser el fragmento breve o dato concreto que justifica el veredicto. En RAG debe estar presente literalmente en los contextos aportados al prompt.
+- `VALIDATOR_TYPE=3` (`RAG_EVIDENCE_VALIDATION`) permite al modelo seleccionar exclusivamente `context_id` citables proporcionados por `evidence-search`. El modelo sólo devuelve `context_id`, `supports` y `reason`.
+- El servidor resuelve el identificador y construye `evidence_used` con `source_id`, URL, título, `chunk_id`, texto canónico y hash. Los valores libres de URL, título o cita enviados por el modelo se ignoran.
 - `supports` indica si la evidencia apoya la aserción: `true` si la confirma, `false` si la contradice. No significa “apoya el veredicto”.
 - `descripcion`, `reason` y `evidence_text` no deben referirse a fuentes genéricas como “fuente 1”, “CONTEXTO 1” o “las evidencias”; deben mencionar enlaces, dominios o títulos concretos y el fragmento usado.
 - El validador online devuelve `UNKNOWN` cuando el proveedor no dispone de información suficiente; la ausencia de fuentes declaradas no invalida por sí sola su voto no documental.
@@ -40,16 +40,27 @@ Ejemplo RAG:
   "confidence": "HIGH | MEDIUM | LOW",
   "evidence_used": [
     {
-      "source_id": "source-1",
       "context_id": "source-1-context-1",
-      "chunk_id": "source-1-chunk-3",
-      "url": "https://example.org/source",
-      "title": "Título de la fuente",
       "supports": true,
-      "evidence_text": "Fragmento literal breve usado para decidir",
       "reason": "Por qué el fragmento confirma o contradice la aserción"
     }
   ]
+}
+```
+
+Después de validar la referencia, el servidor persiste una entrada canónica como:
+
+```json
+{
+  "source_id": "source-1",
+  "context_id": "source-1-context-1",
+  "chunk_id": "source-1-chunk-3",
+  "url": "https://example.org/source",
+  "title": "Título de la fuente",
+  "supports": true,
+  "evidence_text": "Contexto recuperado por el servidor",
+  "evidence_text_sha256": "...",
+  "reason": "Por qué el contexto confirma la aserción"
 }
 ```
 

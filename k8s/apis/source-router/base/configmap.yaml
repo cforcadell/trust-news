@@ -14,6 +14,7 @@ data:
   SEARCH_PROVIDER: "exa"
   SEARCH_API_URL: "https://api.exa.ai/search"
   SEARCH_TIMEOUT: "30"
+  SEARCH_PROVIDER_MAX_RESULTS: "50"
   SEARCH_MAX_RETRIES: "2"
   LLM_PROVIDER: "openrouter"
   LLM_MODEL: "google/gemini-2.5-flash-lite"

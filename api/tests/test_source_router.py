@@ -94,7 +94,24 @@ def test_route_key_contains_only_normalized_stable_dimensions():
 def test_discovery_query_uses_topic_evidence_and_jurisdiction():
     req = request()
     assert query_builder.build_discovery_queries(signatures.build_route_signature(req), req) == [
-        "official statistics data authority demography ES-CT ES"
+        "official statistics data authority demography Catalunya Catalu\u00f1a Spain Espanya"
+    ]
+
+
+def test_discovery_query_localizes_country_name_without_changing_route_key():
+    req = request(
+        topic_code="HEALTH_PUBLIC_HEALTH",
+        evidence_kind="GOVERNMENT_RECORD",
+        jurisdiction={"scope": "COUNTRY", "country_code": "SE"},
+        language="sv",
+    )
+    signature = signatures.build_route_signature(req)
+
+    assert signatures.route_key(signature) == (
+        "route-v2|routing-taxonomy-v1|HEALTH_PUBLIC_HEALTH|GOVERNMENT_RECORD|COUNTRY:SE"
+    )
+    assert query_builder.build_discovery_queries(signature, req) == [
+        "official government record health public health Sweden Sverige"
     ]
 
 

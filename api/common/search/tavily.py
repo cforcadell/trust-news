@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from .errors import SearchConfigurationError, SearchProviderError
+from .limits import effective_max_results
 from .models import SearchRequest, SearchResult
 from .normalization import normalize_url
 from .provider import SearchProvider
@@ -55,7 +56,7 @@ class TavilySearchProvider(SearchProvider):
             "search_depth": os.getenv("SEARCH_DEPTH", "advanced"),
             "include_answer": os.getenv("SEARCH_INCLUDE_ANSWER", "false").lower() == "true",
             "include_raw_content": raw_content_value,
-            "max_results": min(request.max_results, int(os.getenv("SEARCH_MAX_RESULTS", "5"))),
+            "max_results": effective_max_results(request.max_results),
         }
         if request.include_domains:
             payload["include_domains"] = request.include_domains

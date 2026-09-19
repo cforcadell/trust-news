@@ -383,7 +383,7 @@ def search_backend_for_cache() -> Dict[str, Any]:
     # Provider and content extraction flags must partition cache entries when operators switch backends.
     return {
         "provider": SEARCH_PROVIDER or os.getenv("SEARCH_PROVIDER", "tavily"),
-        "search_max_results": os.getenv("SEARCH_MAX_RESULTS", "5"),
+        "search_provider_max_results": os.getenv("SEARCH_PROVIDER_MAX_RESULTS", "50"),
         "search_include_raw_content": os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true"),
         "exa_include_highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true"),
         "exa_include_text": os.getenv("EXA_INCLUDE_TEXT", "true"),

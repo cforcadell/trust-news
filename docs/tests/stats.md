@@ -1,40 +1,41 @@
-### NewsStats
+# Recogida de métricas históricas
 
+`api/stats` contiene herramientas manuales para capturar órdenes y calcular
+estadísticas. No es una suite de tests, no tiene aserciones de aceptación y no
+forma parte de la regresión descrita en [tests.md](tests.md).
 
-## 1️⃣ Setup the environment
+## Estado actual
 
-```bash
-cd api/stats
-(python3 -m venv venv )
-source venv/bin/activate
-(install required packages)
-```
-## 2️⃣ Execute Same validation ans extract json data  
+Los scripts conservan el contrato histórico de News Handler:
 
-This module generates json data for further analysis. We will only get data files if the news goes to VALIDATES status.
+- URL fija `http://127.0.0.1:8072`;
+- llamadas a `/publishNew`, `/orders/{order_id}` y
+  `/news/{order_id}/events` sin autenticación ni `client_id`;
+- finalización exclusivamente en estado `VALIDATED`;
+- timestamps con formato `%m/%d/%Y %H:%M:%S` y eventos
+  `request_validation`/`validation_completed`.
 
-```bash
-python collector.py \
-  --text "Text to validate" \
-  --num_runs 2 \
-  --timeout 200 
+El API actual exige identidad y ámbito de cliente, y sus contratos de eventos y
+fechas han evolucionado. Por ello `collector.py` y `refetch_orders.py` no deben
+usarse contra el despliegue actual sin adaptarlos primero. Los JSON presentes en
+`api/stats/output` y `api/stats/saved_tests` son muestras históricas, no
+resultados reproducibles de la versión actual.
 
-```
-## 2️⃣ BIS  Generate json data from existing orders
+## Componentes conservados
 
-We can get the same output using preexisting orders by setting order_id in output/orders.csv directly and executing this module.
+| Script | Función histórica | Entrada/salida |
+| --- | --- | --- |
+| `collector.py` | Publicar el mismo texto varias veces y esperar `VALIDATED` | Escribe `output/orders.csv` y un directorio JSON por orden |
+| `refetch_orders.py` | Volver a descargar órdenes ya enumeradas | Lee `output/orders.csv` y reemplaza `order.json`/`events.json` |
+| `stats_report.py` | Calcular agregados de aserciones, votos y tiempos | Lee los JSON capturados e imprime tablas con `tabulate` |
 
+Antes de reactivar estas herramientas debe añadirse autenticación, propagación
+del `client_id`, selección explícita de LIGHT/BLOCKCHAIN, estados terminales
+actuales, parsing ISO-8601 y soporte para los eventos vigentes. Después deberán
+trabajar sobre un directorio de ejecución nuevo, sin sobrescribir las muestras
+históricas.
 
-```bash
-python refetch_orders.py
-
-```
-
-## 3️⃣ Generate Stat News
-
-Once we get json data file we can excute stat module. We need the output/orders.csv and related directories properly informed with news data.
-
-```bash
-python stats_report.py
-
-```
+Hasta que se realice esa adaptación, las métricas válidas para regresión son los
+artefactos fechados producidos por `web_classic/test/run-regression.js`; estos
+registran escenario, duración, comprobaciones, órdenes creadas y errores sin
+confundirse con un test de calidad factual.

@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from .errors import SearchConfigurationError, SearchProviderError
+from .limits import effective_max_results
 from .models import SearchRequest, SearchResult
 from .normalization import normalize_url
 from .provider import SearchProvider
@@ -37,7 +38,7 @@ class ExaSearchProvider(SearchProvider):
             raise SearchConfigurationError("API_KEY_PROVIDER is not configured")
         payload: dict[str, Any] = {
             "query": _official_query(request.query, request.external_source_policy),
-            "numResults": min(request.max_results, int(os.getenv("SEARCH_MAX_RESULTS", "5"))),
+            "numResults": effective_max_results(request.max_results),
             "contents": {
                 "highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true").lower() == "true",
                 "text": os.getenv("EXA_INCLUDE_TEXT", "true").lower() == "true",

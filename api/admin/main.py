@@ -6,11 +6,11 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiokafka import AIOKafkaConsumer
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from typing import Optional, List, Dict, Any
 
 # =========================================================
@@ -65,6 +65,43 @@ class OpenRouterRecommendationsResponse(BaseModel):
 class ValidatorTypeWeightsUpdate(BaseModel):
     weights: Dict[str, float]
 
+
+class LLMRuntimeUpdate(BaseModel):
+    """The only mutable LLM fields exposed through the administrative API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+
+    @field_validator("provider")
+    @classmethod
+    def non_empty_provider(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip().lower()
+        if not value:
+            raise ValueError("provider no puede estar vacío")
+        return value
+
+    @field_validator("model")
+    @classmethod
+    def non_empty_model(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("model no puede estar vacío")
+        return value
+
+    @field_validator("temperature")
+    @classmethod
+    def valid_temperature(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise ValueError("temperature debe ser un número finito mayor o igual que cero")
+        return value
+
 # =========================================================
 # Configuración
 # =========================================================
@@ -85,6 +122,9 @@ OPENROUTER_CHAT_COMPLETIONS_URL = os.getenv(
 )
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL")
 OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "TrustNews Admin")
+GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
+SOURCE_ROUTER_URL = os.getenv("SOURCE_ROUTER_URL", "http://source-router.apis.svc.cluster.local:8075")
+NEWS_HANDLER_URL = os.getenv("NEWS_HANDLER_URL", "http://news-handler.apis.svc.cluster.local:8072")
 
 # =========================================================
 # App & Globales
@@ -407,6 +447,308 @@ async def consume_responses_for_quotas():
 # =========================================================
 # Endpoints REST
 # =========================================================
+
+# LLM runtime configuration -------------------------------------------------
+#
+# Admin owns desired/actual state in Mongo.  The services keep the effective
+# configuration in memory and expose their already-existing internal
+# /admin/config endpoint.  No credential can cross either HTTP boundary.
+LLM_COMPONENT_TARGETS = {
+    "generate-asertions": GENERATE_ASSERTIONS_URL,
+    "source-router": SOURCE_ROUTER_URL,
+}
+
+
+def llm_config_id(component: str) -> str:
+    return f"llm:{component}"
+
+
+def validator_config_id(validator_id: str) -> str:
+    return f"llm:validator:{validator_id.lower()}"
+
+
+def normalized_llm_config(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep only non-sensitive, portable LLM settings from a service reply."""
+    source = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    result = {
+        "provider": str(source.get("provider") or "").strip().lower(),
+        "model": str(source.get("model") or "").strip(),
+        "temperature": source.get("temperature"),
+        "config_version": int(source.get("config_version") or 0),
+    }
+    if result["temperature"] is not None:
+        try:
+            result["temperature"] = float(result["temperature"])
+        except (TypeError, ValueError):
+            result["temperature"] = None
+    return result
+
+
+async def service_config(url: str) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{url.rstrip('/')}/admin/config")
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Servicio de configuración no disponible: {exc.__class__.__name__}") from exc
+    return normalized_llm_config(data)
+
+
+async def apply_service_config(url: str, desired: dict[str, Any]) -> dict[str, Any]:
+    safe_payload = {
+        key: desired[key]
+        for key in ("provider", "model", "temperature", "config_version")
+        if key in desired and desired[key] is not None
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.put(f"{url.rstrip('/')}/admin/config", json=safe_payload)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"No se pudo aplicar la configuración: {exc.__class__.__name__}") from exc
+    return normalized_llm_config(data)
+
+
+def config_matches(desired: dict[str, Any], actual: dict[str, Any]) -> bool:
+    return all(
+        desired.get(key) == actual.get(key)
+        for key in ("provider", "model", "temperature", "config_version")
+    )
+
+
+async def config_document_or_effective(config_id: str, effective: dict[str, Any], component: str) -> dict[str, Any]:
+    document = await config_collection.find_one({"_id": config_id})
+    if not document:
+        return {
+            "component": component,
+            "desired": effective,
+            "actual": effective,
+            "config_version": 0,
+            "status": "APPLIED",
+            "updated_at": None,
+            "updated_by": None,
+        }
+    return {
+        "component": component,
+        "desired": document.get("desired") or effective,
+        "actual": document.get("actual") or effective,
+        "config_version": int(document.get("config_version") or 0),
+        "status": document.get("status") or "ERROR",
+        "updated_at": document.get("updated_at"),
+        "updated_by": document.get("updated_by"),
+        "last_error": document.get("last_error"),
+    }
+
+
+def semantic_validator_type(value: Any) -> dict[str, Any]:
+    try:
+        parsed = ValidatorType(int(value))
+    except (TypeError, ValueError):
+        parsed = ValidatorType.LLM_MEMORY_VALIDATION
+    return {"id": int(parsed), "name": parsed.name}
+
+
+def validator_is_active(config: dict[str, Any]) -> bool:
+    return config.get("status") in (None, 1, "1", "Registered", "registered", "ACTIVE", "active")
+
+
+async def discover_validators() -> list[dict[str, Any]]:
+    """Discover validators from the existing blockchain/IPFS-backed cache.
+
+    The browser never provides a pod URL.  The service URL is read from the
+    registered validator configuration and is subsequently checked server-side.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(f"{NEWS_HANDLER_URL.rstrip('/')}/validators/cache", params={"recover_ipfs": "true"})
+        response.raise_for_status()
+        rows = response.json().get("validators") or []
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"No se pudieron descubrir validators: {exc.__class__.__name__}") from exc
+
+    validators = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        validator_id = str(row.get("validator") or "").strip()
+        config = row.get("config") or {}
+        if not validator_id or not isinstance(config, dict):
+            continue
+        service_url = str(row.get("service_url") or row.get("validator_service_url") or config.get("service_url") or "").strip()
+        item = {
+            "validator_id": validator_id,
+            "service_url": service_url,
+            "validator_type": semantic_validator_type(row.get("validator_type") or config.get("type")),
+            "evidence_search_strategy": config.get("evidence_search_strategy"),
+            "categories": row.get("categories") or [],
+            "status": "ACTIVE" if validator_is_active(config) else "INACTIVE",
+            "provider": config.get("provider"),
+            "model": config.get("model"),
+        }
+        if service_url and item["status"] == "ACTIVE":
+            try:
+                actual = await service_config(service_url)
+                item.update(actual)
+                document = await config_collection.find_one({"_id": validator_config_id(validator_id)})
+                item["config_version"] = int((document or {}).get("config_version") or actual.get("config_version") or 0)
+            except HTTPException:
+                item["status"] = "ERROR"
+                item["config_version"] = 0
+        else:
+            item["status"] = "ERROR" if item["status"] == "ACTIVE" else item["status"]
+            item["config_version"] = 0
+        validators.append(item)
+    return validators
+
+
+async def require_discovered_validator(validator_id: str) -> dict[str, Any]:
+    normalized = validator_id.lower()
+    for validator in await discover_validators():
+        if validator["validator_id"].lower() == normalized:
+            if validator["status"] != "ACTIVE" or not validator.get("service_url"):
+                raise HTTPException(status_code=503, detail="Validator existe pero no está accesible")
+            return validator
+    raise HTTPException(status_code=404, detail="Validator no encontrado")
+
+
+async def persist_and_apply_llm_config(
+    *,
+    config_id: str,
+    component: str,
+    target_url: str,
+    payload: LLMRuntimeUpdate,
+    updated_by: str,
+    validator_type: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    current = await service_config(target_url)
+    old_document = await config_collection.find_one({"_id": config_id}) or {}
+    desired = {**current, **payload.model_dump(exclude_none=True)}
+    desired["config_version"] = int(old_document.get("config_version") or 0) + 1
+    now = datetime.now(timezone.utc)
+    audit = {
+        "component": component,
+        "validator_type": validator_type,
+        "previous": {key: current.get(key) for key in ("provider", "model", "temperature", "config_version")},
+        "next": {key: desired.get(key) for key in ("provider", "model", "temperature", "config_version")},
+        "config_version": desired["config_version"],
+        "updated_by": updated_by,
+        "updated_at": now,
+        "result": "PENDING",
+    }
+    await config_collection.update_one(
+        {"_id": config_id},
+        {"$set": {"component": component, "desired": desired, "config_version": desired["config_version"], "status": "PENDING", "updated_at": now,
+                  "updated_by": updated_by, "last_audit": audit},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    try:
+        actual = await apply_service_config(target_url, desired)
+        if not config_matches(desired, actual):
+            raise RuntimeError("desired_actual_mismatch")
+    except Exception as exc:
+        error = exc.detail if isinstance(exc, HTTPException) else exc.__class__.__name__
+        audit["result"] = "ERROR"
+        await config_collection.update_one(
+            {"_id": config_id},
+            {"$set": {"status": "ERROR", "last_error": str(error), "updated_at": datetime.now(timezone.utc),
+                      "last_audit": audit}},
+        )
+        logger.warning("LLM runtime configuration failed component=%s version=%s error=%s", component, desired["config_version"], error)
+        raise HTTPException(status_code=503, detail=f"Configuración persistida pero no aplicada: {error}") from exc
+
+    audit["result"] = "APPLIED"
+    now = datetime.now(timezone.utc)
+    await config_collection.update_one(
+        {"_id": config_id},
+        {"$set": {"actual": actual, "status": "APPLIED", "updated_at": now, "updated_by": updated_by,
+                  "last_error": None, "last_audit": audit}},
+    )
+    logger.info("LLM runtime configuration applied component=%s version=%s provider=%s model=%s updated_by=%s",
+                component, desired["config_version"], desired["provider"], desired["model"], updated_by)
+    return await config_document_or_effective(config_id, actual, component)
+
+
+@app.get("/internal/llm/overrides/{config_id:path}")
+async def get_internal_llm_override(config_id: str):
+    """Cluster-internal startup lookup; intentionally contains no credentials."""
+    document = await config_collection.find_one({"_id": config_id})
+    if not document or not isinstance(document.get("desired"), dict):
+        raise HTTPException(status_code=404, detail="No runtime override")
+    desired = normalized_llm_config(document["desired"])
+    desired["config_version"] = int(document.get("config_version") or desired.get("config_version") or 0)
+    return {"desired": desired, "status": document.get("status")}
+
+
+@app.get("/llm/components")
+async def list_llm_components():
+    return {"components": [await get_llm_component(component) for component in LLM_COMPONENT_TARGETS]}
+
+
+@app.get("/llm/components/{component}")
+async def get_llm_component(component: str):
+    target = LLM_COMPONENT_TARGETS.get(component)
+    if not target:
+        raise HTTPException(status_code=404, detail="Componente LLM desconocido")
+    actual = await service_config(target)
+    return await config_document_or_effective(llm_config_id(component), actual, component)
+
+
+@app.put("/llm/components/{component}")
+async def update_llm_component(component: str, payload: LLMRuntimeUpdate, request: Request):
+    target = LLM_COMPONENT_TARGETS.get(component)
+    if not target:
+        raise HTTPException(status_code=404, detail="Componente LLM desconocido")
+    if not payload.model_dump(exclude_none=True):
+        raise HTTPException(status_code=400, detail="Indica al menos un campo LLM a actualizar")
+    updated_by = request.headers.get("x-assermetry-admin-user", "gateway-admin")
+    return await persist_and_apply_llm_config(
+        config_id=llm_config_id(component), component=component, target_url=target,
+        payload=payload, updated_by=updated_by,
+    )
+
+
+@app.get("/llm/validators")
+async def list_llm_validators(
+    type: Optional[str] = Query(None),
+    strategy: Optional[str] = Query(None),
+):
+    validators = await discover_validators()
+    if type:
+        type_upper = type.upper()
+        validators = [item for item in validators if item["validator_type"]["name"] == type_upper]
+    if strategy:
+        strategy_upper = strategy.upper()
+        validators = [item for item in validators if str(item.get("evidence_search_strategy") or "").upper() == strategy_upper]
+    return {"validators": validators}
+
+
+@app.get("/llm/validators/{validator_id}")
+async def get_llm_validator(validator_id: str):
+    validator = await require_discovered_validator(validator_id)
+    actual = await service_config(validator["service_url"])
+    view = await config_document_or_effective(validator_config_id(validator["validator_id"]), actual, f"validator:{validator['validator_id']}")
+    return {**view, **{key: value for key, value in validator.items() if key != "service_url"}}
+
+
+@app.put("/llm/validators/{validator_id}")
+async def update_llm_validator(validator_id: str, payload: LLMRuntimeUpdate, request: Request):
+    validator = await require_discovered_validator(validator_id)
+    if not payload.model_dump(exclude_none=True):
+        raise HTTPException(status_code=400, detail="Indica al menos un campo LLM a actualizar")
+    updated_by = request.headers.get("x-assermetry-admin-user", "gateway-admin")
+    result = await persist_and_apply_llm_config(
+        config_id=validator_config_id(validator["validator_id"]), component=f"validator:{validator['validator_id']}",
+        target_url=validator["service_url"], payload=payload, updated_by=updated_by,
+        validator_type=validator["validator_type"],
+    )
+    return {**result, "validator_id": validator["validator_id"], "validator_type": validator["validator_type"],
+            "evidence_search_strategy": validator["evidence_search_strategy"], "categories": validator["categories"],
+            "status": "APPLIED"}
+
+
 @app.get("/ai/openrouter/recommendations", response_model=OpenRouterRecommendationsResponse)
 async def get_openrouter_model_recommendations(
     limit: int = Query(8, ge=1, le=30, description="Número de modelos recomendados a devolver"),

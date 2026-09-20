@@ -1,4 +1,8 @@
 import logging
+import math
+import os
+from copy import copy
+from dataclasses import is_dataclass, replace
 from datetime import timedelta
 
 from common.llm import LLMProviderError, LLMResponseError
@@ -31,6 +35,70 @@ class SourceRouterService:
     def __init__(self, repository: SourceRouteRepository, settings: Settings):
         self.repository = repository
         self.settings = settings
+        self.llm_provider = settings.llm_provider
+        self.llm_model = settings.llm_model
+        self.llm_temperature = settings.llm_temperature
+        self.llm_config_version = 0
+
+    def llm_runtime_config(self) -> dict:
+        return {
+            "provider": self.llm_provider,
+            "model": self.llm_model,
+            "temperature": self.llm_temperature,
+            "config_version": self.llm_config_version,
+            "credentials_configured": {
+                "openrouter": bool(os.environ.get("OPENROUTER_API_KEY") or os.environ.get("API_KEY")),
+                "gemini": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")),
+                "mistral": bool(os.environ.get("MISTRAL_API_KEY") or os.environ.get("API_KEY")),
+                "grok": bool(os.environ.get("GROK_API_KEY") or os.environ.get("API_KEY")),
+            },
+        }
+
+    def update_llm_runtime_config(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        config_version: int | None = None,
+    ) -> dict:
+        allowed = {"openrouter", "gemini", "mistral", "grok"}
+        if provider is not None:
+            normalized = provider.strip().lower()
+            if normalized not in allowed:
+                raise ValueError("provider no soportado")
+            self.llm_provider = normalized
+        if model is not None:
+            normalized_model = model.strip()
+            if not normalized_model:
+                raise ValueError("model no puede estar vacío")
+            self.llm_model = normalized_model
+        if temperature is not None:
+            if not math.isfinite(temperature) or temperature < 0:
+                raise ValueError("temperature debe ser un número finito mayor o igual que cero")
+            self.llm_temperature = float(temperature)
+        if config_version is not None:
+            if int(config_version) <= 0:
+                raise ValueError("config_version debe ser positivo")
+            self.llm_config_version = int(config_version)
+        return self.llm_runtime_config()
+
+    def classifier_settings(self) -> Settings:
+        if is_dataclass(self.settings):
+            return replace(
+                self.settings,
+                llm_provider=self.llm_provider,
+                llm_model=self.llm_model,
+                llm_temperature=self.llm_temperature,
+            )
+        # Test and embedding callers historically supplied a lightweight
+        # settings object rather than Settings. Keep the effective config
+        # isolated from that shared object as well.
+        effective = copy(self.settings)
+        effective.llm_provider = self.llm_provider
+        effective.llm_model = self.llm_model
+        effective.llm_temperature = self.llm_temperature
+        return effective
 
     async def _discover(self, request: ResolveRouteRequest) -> list[CandidateSource]:
         signature = build_route_signature(request)
@@ -106,7 +174,8 @@ class SourceRouterService:
                 classification_confidence=item.classification_confidence,
                 reason=item.reason,
                 profile_version=self.settings.router_version,
-                classification_model=self.settings.llm_model,
+                classification_model=self.llm_model,
+                classification_config_version=self.llm_config_version,
                 created_at=previous.created_at if previous else now,
                 updated_at=now,
                 last_verified_at=now,
@@ -131,7 +200,7 @@ class SourceRouterService:
             candidates = await self._discover(request)
             diagnostics = RouteDiagnostics(discovered_domains=[item.domain for item in candidates])
             try:
-                classified = await classify_candidates(signature, request, candidates, self.settings)
+                classified = await classify_candidates(signature, request, candidates, self.classifier_settings())
                 diagnostics.failed_domains = list(getattr(classified, "failed_domains", []))
             except (LLMProviderError, LLMResponseError):
                 logger.warning("Classification failed route_key=%s; checking prior profiles", key, exc_info=True)
@@ -181,7 +250,8 @@ class SourceRouterService:
                 candidates=list(current.values()),
                 router_version=self.settings.router_version,
                 discovery_provider=self.settings.search_provider,
-                classification_model=self.settings.llm_model,
+                classification_model=self.llm_model,
+                classification_config_version=self.llm_config_version,
                 created_at=previous.created_at if previous else now,
                 updated_at=now,
                 last_refreshed_at=now,

@@ -121,6 +121,7 @@ class DomainProfile(BaseModel):
     taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
     profile_version: str
     classification_model: str
+    classification_config_version: int = 0
     created_at: datetime
     updated_at: datetime
     last_verified_at: datetime
@@ -182,6 +183,7 @@ class RouteDocument(BaseModel):
     router_version: str
     discovery_provider: str
     classification_model: str
+    classification_config_version: int = 0
     created_at: datetime
     updated_at: datetime
     last_refreshed_at: datetime

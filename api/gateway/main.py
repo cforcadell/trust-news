@@ -3,7 +3,7 @@ import logging
 from typing import Any, List
 from urllib.parse import urlencode, quote
 import aiohttp
-from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, status
+from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, Query, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
@@ -73,6 +73,7 @@ NEWS_HANDLER_URL = os.getenv("NEWS_HANDLER_URL", "http://news-handler.apis.svc.c
 NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain.apis.svc.cluster.local:8073")
 IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.local:8060")
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
+ADMIN_URL = os.getenv("ADMIN_URL", "http://admin-service.apis.svc.cluster.local:8400")
 
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "TrustNews")
 KEYCLOAK_ISSUER_URL = os.getenv(
@@ -197,10 +198,86 @@ def is_admin_user(payload: dict) -> bool:
     roles = realm_access.get("roles", [])
     return "trust-admin" in roles
 
+
+async def require_admin_user(auth_payload: dict = Depends(get_current_user)) -> dict:
+    """Require a verified JWT with the realm role for every LLM admin route."""
+    if not is_admin_user(auth_payload):
+        raise HTTPException(status_code=403, detail="Se requiere el rol trust-admin")
+    return auth_payload
+
+
+async def proxy_admin_request(request: Request, target_url: str, auth_payload: dict):
+    """Forward only safe transport headers and a Gateway-derived audit identity."""
+    body = await request.body()
+    headers = {"Content-Type": request.headers.get("content-type", "application/json")}
+    request_id = request.headers.get("x-request-id")
+    if request_id:
+        headers["X-Request-ID"] = request_id
+    headers["X-Assermetry-Admin-User"] = str(
+        auth_payload.get("preferred_username") or auth_payload.get("sub") or "gateway-admin"
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.request(request.method, target_url, headers=headers, data=body) as response:
+                content = await response.read()
+                try:
+                    return JSONResponse(content=await response.json(), status_code=response.status)
+                except Exception:
+                    return JSONResponse(content=content.decode(), status_code=response.status)
+    except Exception as exc:
+        logger.error("Error connecting to Admin LLM API: %s", exc.__class__.__name__)
+        raise HTTPException(status_code=502, detail="Error de comunicación interna") from exc
+
 # ============================================================
 # Router Principal
 # ============================================================
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+admin_llm_router = APIRouter(
+    prefix="/admin/llm",
+    tags=["LLM Administration"],
+    dependencies=[Depends(require_admin_user)],
+)
+
+
+def admin_target(path: str, query: str = "") -> str:
+    suffix = f"?{query}" if query else ""
+    return f"{ADMIN_URL.rstrip('/')}/llm/{path}{suffix}"
+
+
+@admin_llm_router.get("/components")
+async def list_llm_components(request: Request, auth_payload: dict = Depends(require_admin_user)):
+    return await proxy_admin_request(request, admin_target("components"), auth_payload)
+
+
+@admin_llm_router.get("/models/openrouter")
+async def list_openrouter_models(request: Request, auth_payload: dict = Depends(require_admin_user)):
+    query = request.url.query
+    target = f"{ADMIN_URL.rstrip('/')}/ai/openrouter/recommendations"
+    if query:
+        target = f"{target}?{query}"
+    return await proxy_admin_request(request, target, auth_payload)
+
+
+@admin_llm_router.api_route("/components/{component}", methods=["GET", "PUT"])
+async def llm_component(component: str, request: Request, auth_payload: dict = Depends(require_admin_user)):
+    return await proxy_admin_request(request, admin_target(f"components/{quote(component, safe='')}"), auth_payload)
+
+
+@admin_llm_router.get("/validators")
+async def list_llm_validators(
+    request: Request,
+    type: str | None = Query(None),
+    strategy: str | None = Query(None),
+    auth_payload: dict = Depends(require_admin_user),
+):
+    query = urlencode({key: value for key, value in {"type": type, "strategy": strategy}.items() if value is not None})
+    return await proxy_admin_request(request, admin_target("validators", query), auth_payload)
+
+
+@admin_llm_router.api_route("/validators/{validator_id}", methods=["GET", "PUT"])
+async def llm_validator(validator_id: str, request: Request, auth_payload: dict = Depends(require_admin_user)):
+    return await proxy_admin_request(request, admin_target(f"validators/{quote(validator_id, safe='')}"), auth_payload)
 
 @router.get("/auth/is-admin", tags=["Auth"])
 async def check_admin_status(auth_payload: dict = Depends(get_current_user)):
@@ -401,6 +478,7 @@ async def proxy_get_news_events(order_id: str, request: Request, auth_payload: d
     return await proxy_request(request, target_url)
 
 app.include_router(router)
+app.include_router(admin_llm_router)
 
 if __name__ == "__main__":
     import uvicorn

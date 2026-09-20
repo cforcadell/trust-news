@@ -4,6 +4,7 @@ import uuid
 import logging
 import asyncio
 import time
+import math
 
 from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ from common.utils.ipfs_client import (
     unwrap_ipfs_content,
 )
 from common.utils.llm_json import strip_json_markdown
+from common.utils.llm_runtime import fetch_llm_runtime_override
 from common.llm import LLMRequest, complete
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.evidence import evaluate_evidence_grounding
@@ -159,6 +161,7 @@ AUTOMATIC_VALIDATOR_TYPES = {
 VALIDATOR_ACTIVE_DATE = os.getenv("VALIDATOR_ACTIVE_DATE", datetime.now(timezone.utc).isoformat())
 VALIDATOR_UPDATED_DATE = os.getenv("VALIDATOR_UPDATED_DATE", VALIDATOR_ACTIVE_DATE)
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
+LLM_CONFIG_VERSION = int(os.getenv("LLM_CONFIG_VERSION", "0"))
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP))
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
@@ -185,32 +188,26 @@ except Exception:
 
 
 class AdminConfigResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: str
     model: str
+    temperature: float
+    config_version: int
     categories: List[CategoryId]
-    api_url: Optional[str] = None
-    service_url: Optional[str] = None
     validator_type: int
-    evidence_search_url: str
+    validator_type_name: str
     evidence_search_strategy: Optional[EvidenceSearchStrategy]
-    private_key: Optional[str] = None
     account_address: str
-    api_key: Optional[str] = None
+    credentials_configured: dict[str, bool]
 
 class AdminConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Optional[str] = None
     model: Optional[str] = None
-    categories: Optional[List[CategoryId]] = None
-    api_url: Optional[str] = None
-    service_url: Optional[str] = None
-    validator_type: Optional[int] = None
-    evidence_search_url: Optional[str] = None
-    evidence_search_strategy: Optional[EvidenceSearchStrategy] = None
-    private_key: Optional[str] = None
-    account_address: Optional[str] = None
-    api_key: Optional[str] = None
+    temperature: Optional[float] = None
+    config_version: Optional[int] = None
 
 # =========================================================
 # AI Validators
@@ -281,16 +278,6 @@ def ensure_evidence_strategy_supported(validator_type: ValidatorType, strategy: 
         )
 
 
-def mask_secret(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return value
-    return "*" * 8
-
-
-def is_masked_secret(value: Optional[str]) -> bool:
-    return bool(value) and set(str(value)) == {"*"}
-
-
 def set_runtime_env(name: str, value: Any) -> None:
     if value is None:
         return
@@ -326,15 +313,16 @@ def normalize_admin_config_response() -> AdminConfigResponse:
     return AdminConfigResponse(
         provider=AI_PROVIDER,
         model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+        temperature=TEMPERATURE,
+        config_version=LLM_CONFIG_VERSION,
         categories=VALIDATOR_CATEGORIES,
-        api_url=API_URL,
-        service_url=VALIDATOR_SERVICE_URL or None,
         validator_type=int(VALIDATOR_TYPE),
-        evidence_search_url=EVIDENCE_SEARCH_URL,
+        validator_type_name=VALIDATOR_TYPE.name,
         evidence_search_strategy=current_evidence_search_strategy(),
-        private_key=mask_secret(PRIVATE_KEY),
         account_address=ACCOUNT_ADDRESS,
-        api_key=mask_secret(API_KEY),
+        credentials_configured={
+            AI_PROVIDER: bool(os.getenv(f"{AI_PROVIDER.upper()}_API_KEY") or API_KEY),
+        },
     )
 
 
@@ -800,6 +788,9 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "assertion_index": payload.assertion_index,
             "idAssertion": payload.idAssertion,
             "validator_id": ACCOUNT_ADDRESS,
+            "llm_provider": AI_PROVIDER,
+            "llm_model": ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+            "llm_config_version": LLM_CONFIG_VERSION,
             "categoryId": payload.categoryId,
             "verdict": verdict,
             "description": description,
@@ -901,6 +892,7 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         type=VALIDATOR_TYPE,
         provider=AI_PROVIDER,
         model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+        config_version=LLM_CONFIG_VERSION,
         service_url=VALIDATOR_SERVICE_URL or None,
         active_date=VALIDATOR_ACTIVE_DATE,
         updated_date=updated_date or VALIDATOR_UPDATED_DATE,
@@ -1178,120 +1170,47 @@ async def update_admin_config(config: AdminConfigUpdate):
     Modifica la configuración runtime del validador.
     Refresca la configuración IPFS/blockchain cuando cambian los campos públicos del validador.
     """
-    global AI_PROVIDER, API_URL, API_KEY, PRIVATE_KEY, ACCOUNT_ADDRESS, VALIDATOR_TYPE, VALIDATOR_SERVICE_URL
-    global EVIDENCE_SEARCH_URL
-    global ai_validator, VALIDATOR_CATEGORIES
-
+    global AI_PROVIDER, TEMPERATURE, LLM_CONFIG_VERSION, ai_validator
 
     old_provider = AI_PROVIDER
     old_model = ai_validator.model if ai_validator else os.getenv("MODEL", "none")
-    old_validator_type = VALIDATOR_TYPE
-    old_service_url = VALIDATOR_SERVICE_URL
-    old_evidence_search_url = EVIDENCE_SEARCH_URL
-    old_evidence_search_strategy = current_evidence_search_strategy()
-    old_categories = list(VALIDATOR_CATEGORIES)
-
-    new_provider = config.provider.lower() if config.provider else AI_PROVIDER
-    new_model = config.model if config.model else old_model
-    new_validator_type = normalize_validator_type(config.validator_type) if config.validator_type is not None else VALIDATOR_TYPE
-    new_api_url = config.api_url if config.api_url is not None else API_URL
-    new_service_url = config.service_url if config.service_url is not None else VALIDATOR_SERVICE_URL
-    new_api_key = API_KEY if config.api_key is None or is_masked_secret(config.api_key) else config.api_key
-
-    new_evidence_search_strategy = (
-        config.evidence_search_strategy
-        if config.evidence_search_strategy is not None
-        else old_evidence_search_strategy
-    )
-    if new_validator_type != ValidatorType.RAG_EVIDENCE_VALIDATION and config.evidence_search_strategy is None:
-        new_evidence_search_strategy = None
-    ensure_evidence_strategy_supported(new_validator_type, new_evidence_search_strategy)
-
+    new_provider = config.provider.lower().strip() if config.provider else AI_PROVIDER
+    new_model = config.model.strip() if config.model else old_model
     allowed_providers = {"mistral", "gemini", "openrouter", "grok"}
-    if new_validator_type in AUTOMATIC_VALIDATOR_TYPES and new_provider not in allowed_providers:
+    if new_provider not in allowed_providers:
         raise HTTPException(status_code=400, detail=f"Provider desconocido: {new_provider}")
-    if new_validator_type == ValidatorType.LLM_SEARCH_VALIDATION and new_provider != "openrouter":
-        raise HTTPException(
-            status_code=400,
-            detail="LLM_SEARCH_VALIDATION currently requires provider=openrouter",
-        )
+    if not new_model:
+        raise HTTPException(status_code=400, detail="MODEL no puede estar vacío")
+    if VALIDATOR_TYPE == ValidatorType.LLM_SEARCH_VALIDATION and new_provider != "openrouter":
+        raise HTTPException(status_code=400, detail="LLM_SEARCH_VALIDATION currently requires provider=openrouter")
 
-    ai_client_changed = any([
-        new_provider != old_provider,
-        new_model != old_model,
-        new_validator_type != old_validator_type,
-        new_api_url != API_URL,
-        new_api_key != API_KEY,
-    ])
-
-    if config.account_address is not None:
-        ACCOUNT_ADDRESS = normalize_account_address(config.account_address)
-        set_runtime_env("ACCOUNT_ADDRESS", ACCOUNT_ADDRESS)
-
-    if config.private_key is not None and not is_masked_secret(config.private_key):
-        PRIVATE_KEY = config.private_key
-        set_runtime_env("PRIVATE_KEY", PRIVATE_KEY)
-
-    if config.api_url is not None:
-        API_URL = new_api_url
-        set_runtime_env("API_URL", API_URL or "")
-
-    if config.service_url is not None:
-        VALIDATOR_SERVICE_URL = new_service_url
-        set_runtime_env("VALIDATOR_SERVICE_URL", VALIDATOR_SERVICE_URL or "")
-
-    if config.api_key is not None and not is_masked_secret(config.api_key):
-        API_KEY = new_api_key
-        set_runtime_env("API_KEY", API_KEY or "")
-
-    if config.validator_type is not None:
-        VALIDATOR_TYPE = new_validator_type
-        set_runtime_env("VALIDATOR_TYPE", int(VALIDATOR_TYPE))
-
-    if config.evidence_search_url is not None:
-        EVIDENCE_SEARCH_URL = config.evidence_search_url
-        set_runtime_env("EVIDENCE_SEARCH_URL", EVIDENCE_SEARCH_URL)
-
-    if new_evidence_search_strategy is not None:
-        set_runtime_env("EVIDENCE_SEARCH_STRATEGY", new_evidence_search_strategy.value)
-    else:
-        os.environ.pop("EVIDENCE_SEARCH_STRATEGY", None)
-
+    ai_client_changed = new_provider != old_provider or new_model != old_model
     if config.provider is not None:
         AI_PROVIDER = new_provider
         set_runtime_env("AI_PROVIDER", AI_PROVIDER)
-
     if config.model is not None:
         set_runtime_env("MODEL", new_model)
-
-    if config.categories is not None:
-        VALIDATOR_CATEGORIES = [int(category) for category in config.categories]
-        set_runtime_env("VALIDATOR_CATEGORIES", json.dumps(VALIDATOR_CATEGORIES))
+    if config.temperature is not None:
+        if not math.isfinite(config.temperature) or config.temperature < 0:
+            raise HTTPException(status_code=400, detail="TEMPERATURE debe ser finita y no negativa")
+        TEMPERATURE = float(config.temperature)
+        set_runtime_env("TEMPERATURE", TEMPERATURE)
+    if config.config_version is not None:
+        if int(config.config_version) <= 0:
+            raise HTTPException(status_code=400, detail="LLM_CONFIG_VERSION debe ser positivo")
+        LLM_CONFIG_VERSION = int(config.config_version)
+        set_runtime_env("LLM_CONFIG_VERSION", LLM_CONFIG_VERSION)
 
     try:
         if ai_client_changed:
             ai_validator = build_ai_validator()
-            logger.info(
-                f"🔄 AI Validator actualizado en memoria: "
-                f"type={VALIDATOR_TYPE.name} provider={AI_PROVIDER.upper()} model={new_model}"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
+            logger.info("AI validator hot-updated type=%s provider=%s model=%s version=%s",
+                        VALIDATOR_TYPE.name, AI_PROVIDER, new_model, LLM_CONFIG_VERSION)
+    except Exception as exc:
         logger.exception("Error al instanciar el nuevo AI Validator")
-        raise HTTPException(status_code=500, detail=f"Error al cambiar la configuración de IA: {e}")
+        raise HTTPException(status_code=500, detail="Error al cambiar la configuración de IA") from exc
 
-    reload_blockchain_client()
-
-    public_config_changed = any([
-        new_provider != old_provider,
-        new_model != old_model,
-        VALIDATOR_CATEGORIES != old_categories,
-        VALIDATOR_TYPE != old_validator_type,
-        VALIDATOR_SERVICE_URL != old_service_url,
-        EVIDENCE_SEARCH_URL != old_evidence_search_url,
-        current_evidence_search_strategy() != old_evidence_search_strategy,
-    ])
+    public_config_changed = new_provider != old_provider or new_model != old_model
     metrics_reset_at = datetime.now(timezone.utc).isoformat() if public_config_changed else None
     blockchain_receipts = {}
 
@@ -1346,6 +1265,9 @@ async def publish_blockchain_validation_error(
         payload={
             "postId": str(post_id),
             "idValidator": ACCOUNT_ADDRESS,
+            "llm_provider": AI_PROVIDER,
+            "llm_model": ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+            "llm_config_version": LLM_CONFIG_VERSION,
             "idAssertion": str(assertion_id),
             "approval": None,
             "text": error_details.message,
@@ -1452,6 +1374,17 @@ class BlockchainEventAgent:
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
+    override = await fetch_llm_runtime_override(
+        os.getenv("ADMIN_URL", "http://admin-service.apis.svc.cluster.local:8400"),
+        f"llm:validator:{ACCOUNT_ADDRESS.lower()}",
+        logger,
+    )
+    if override:
+        try:
+            await update_admin_config(AdminConfigUpdate(**override))
+            logger.info("Applied persisted LLM runtime override validator=%s", ACCOUNT_ADDRESS)
+        except Exception as exc:
+            logger.warning("Invalid persisted LLM override; using deployment defaults: %s", exc.__class__.__name__)
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
     if is_automatic_validator():
         agent = BlockchainEventAgent(w3, contract, ACCOUNT_ADDRESS, ipfs_api_url)

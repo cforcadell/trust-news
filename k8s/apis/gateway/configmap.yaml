@@ -9,6 +9,7 @@ data:
   NEWS_CHAIN_URL: "http://news-chain.apis.svc.cluster.local:8073"
   IPFS_API_URL: "http://ipfs-fastapi.apis.svc.cluster.local:8060"
   GENERATE_ASSERTIONS_URL: "http://generate-asertions.apis.svc.cluster.local:8071"
+  ADMIN_URL: "http://admin-service.apis.svc.cluster.local:8400"
   
   # Configuración de Keycloak
   KEYCLOAK_REALM: "TrustNews"

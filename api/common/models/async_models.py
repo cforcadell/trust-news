@@ -230,6 +230,7 @@ class ValidatorConfig(BaseModel):
     type: ValidatorType = ValidatorType.LLM_MEMORY_VALIDATION
     provider: str
     model: str
+    config_version: int = 0
     service_url: Optional[str] = None
     active_date: str
     updated_date: str
@@ -457,6 +458,9 @@ class ValidationCompletedPayload(BaseModel):
     text: str
     tx_hash: Optional[str] = None
     validator_alias: str = ""
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_config_version: Optional[int] = None
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
     sources: Optional[List[EvidenceItem]] = None
     sources_declared: Optional[List[EvidenceItem]] = None
@@ -517,6 +521,9 @@ class LightValidationResponsePayload(BaseModel):
     assertion_index: int
     idAssertion: str
     validator_id: str
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_config_version: Optional[int] = None
     categoryId: CategoryId
     verdict: Optional[Validacion] = None
     description: str

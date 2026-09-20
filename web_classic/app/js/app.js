@@ -253,6 +253,10 @@ function showSection(sectionId, reset = true, updateHistory = true) {
             listOrders();
         }
 
+        if (sectionId === "llm-config" && IS_ADMIN) {
+            refreshLLMAdminView();
+        }
+
         if (sectionId === "validators" && reset) {
             listValidatorsCache();
         }
@@ -2983,10 +2987,273 @@ async function checkAdminStatus() {
             // Si es admin, mostramos el checkbox en la vista de órdenes
             if (IS_ADMIN) {
                 document.getElementById('admin-view-container').style.display = 'flex';
+                document.getElementById('llm-admin-nav').style.display = 'block';
             }
         }
     } catch (error) {
         console.error("Error comprobando el rol de administrador:", error);
+    }
+}
+
+function llmConfigValue(config, key) {
+    return config && config[key] !== undefined && config[key] !== null ? config[key] : "";
+}
+
+let ACTIVE_LLM_ADMIN_TAB = "configuration";
+let SELECTED_LLM_VALIDATOR_ID = "";
+
+function llmTypeSummary(validator) {
+    const type = validator?.validator_type || {};
+    const strategy = validator?.evidence_search_strategy ? ` — ${validator.evidence_search_strategy}` : "";
+    return `${type.name || "UNKNOWN"}${strategy}`;
+}
+
+function llmStatusBadge(status) {
+    const value = String(status || "UNKNOWN").toUpperCase();
+    const statusClass = value === "APPLIED" || value === "ACTIVE"
+        ? "success"
+        : value === "PENDING" ? "warning" : value === "ERROR" || value === "INACTIVE" ? "error" : "neutral";
+    return `<span class="llm-status ${statusClass}"><i></i>${safeText(value)}</span>`;
+}
+
+function llmProviderOptions(selected) {
+    const current = String(selected || "").toLowerCase();
+    const providers = ["openrouter", "gemini", "mistral", "grok"];
+    if (current && !providers.includes(current)) providers.unshift(current);
+    return providers.map(provider => `<option value="${safeText(provider)}" ${provider === current ? "selected" : ""}>${safeText(provider.charAt(0).toUpperCase() + provider.slice(1))}</option>`).join("");
+}
+
+function llmCategoryLabel(category) {
+    if (category === null || category === undefined) return "";
+    if (typeof category !== "object") return String(category);
+    const id = category.id ?? category.categoryId ?? category.category_id ?? category.value;
+    const name = category.name ?? category.label ?? category.description;
+    if (id !== undefined && name) return `${id} · ${name}`;
+    if (id !== undefined) return String(id);
+    if (name) return String(name);
+    return JSON.stringify(category);
+}
+
+function renderLLMCategories(categories) {
+    const values = (Array.isArray(categories) ? categories : []).map(llmCategoryLabel).filter(Boolean);
+    if (!values.length) return `<span class="llm-empty-value">Sin categorías declaradas</span>`;
+    return `<div class="llm-category-list">${values.map(value => `<span>${safeText(value)}</span>`).join("")}</div>`;
+}
+
+function llmComponentTitle(component) {
+    return component === "generate-asertions" ? "Generate Assertions" : component === "source-router" ? "Source Router" : component;
+}
+
+function renderLLMComponent(component) {
+    const actual = component.actual || {};
+    const id = safeText(component.component || "");
+    const title = llmComponentTitle(component.component || "");
+    const initials = title.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
+    const description = component.component === "source-router"
+        ? "Clasificación de dominios y autoridad de fuentes"
+        : "Extracción estructurada de afirmaciones verificables";
+    return `<article class="llm-config-card">
+        <header class="llm-card-head">
+            <div class="llm-service-mark">${safeText(initials)}</div>
+            <div><h3>${safeText(title)}</h3><p>${safeText(description)}</p></div>
+            ${llmStatusBadge(component.status)}
+        </header>
+        <div class="llm-form-grid">
+            <label><span>Proveedor</span><select id="llm-provider-${id}">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
+            <label class="llm-field-wide"><span>Modelo</span><input list="llm-model-catalog" id="llm-model-${id}" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
+            <label><span>Temperatura</span><input id="llm-temperature-${id}" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
+        </div>
+        <footer class="llm-card-actions"><span>Versión efectiva <strong>${safeText(component.config_version ?? 0)}</strong></span><button class="btn-primary" onclick="applyLLMComponent('${id}', this)">Aplicar cambios</button></footer>
+    </article>`;
+}
+
+function renderLLMValidatorDetail(detail) {
+    const actual = detail.actual || {};
+    const validatorId = String(detail.validator_id || "");
+    const escapedId = validatorId.replace(/'/g, "\\'");
+    const validatorType = detail.validator_type?.name || "UNKNOWN";
+    const strategy = detail.evidence_search_strategy || "No aplica";
+    return `<article class="llm-validator-detail">
+        <header class="llm-card-head">
+            <div class="llm-service-mark validator">V</div>
+            <div><h3>Validator seleccionado</h3><p class="llm-address">${safeText(validatorId)}</p></div>
+            ${llmStatusBadge(detail.status)}
+        </header>
+        <div class="llm-validator-layout">
+            <div class="llm-readonly-panel">
+                <dl class="llm-meta-grid">
+                    <div><dt>Tipo</dt><dd>${safeText(validatorType)}</dd></div>
+                    <div><dt>Estrategia</dt><dd>${safeText(strategy)}</dd></div>
+                    <div><dt>Versión</dt><dd>${safeText(detail.config_version ?? 0)}</dd></div>
+                    <div class="llm-meta-wide"><dt>Categorías</dt><dd>${renderLLMCategories(detail.categories)}</dd></div>
+                </dl>
+            </div>
+            <div class="llm-edit-panel">
+                <h4>Configuración efectiva</h4>
+                <div class="llm-form-grid">
+                    <label><span>Proveedor</span><select id="llm-validator-provider">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
+                    <label class="llm-field-wide"><span>Modelo</span><input list="llm-model-catalog" id="llm-validator-model" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
+                    <label><span>Temperatura</span><input id="llm-validator-temperature" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
+                </div>
+                <div class="llm-card-actions"><span>El tipo y la estrategia son de solo lectura.</span><button class="btn-primary" onclick="applyLLMValidator('${escapedId}', this)">Aplicar cambios</button></div>
+            </div>
+        </div>
+    </article>`;
+}
+
+async function loadLLMValidatorDetail(validatorId) {
+    const detail = document.getElementById("llmValidatorDetail");
+    if (!validatorId || !detail) return;
+    SELECTED_LLM_VALIDATOR_ID = validatorId;
+    detail.innerHTML = `<p class="empty-state">Cargando configuración efectiva…</p>`;
+    try {
+        const response = await fetchWithAuth(`${API}/admin/llm/validators/${encodeURIComponent(validatorId)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        detail.innerHTML = renderLLMValidatorDetail(await response.json());
+    } catch (error) {
+        detail.innerHTML = `<p class="empty-state">No se pudo cargar el validator seleccionado.</p>`;
+    }
+}
+
+async function loadLLMConfiguration() {
+    if (!IS_ADMIN) return;
+    const container = document.getElementById("llmConfigContainer");
+    if (!container) return;
+    container.innerHTML = `<p class="empty-state">Cargando configuración LLM…</p>`;
+    try {
+        const [componentsResponse, validatorsResponse, modelsResponse] = await Promise.all([
+            fetchWithAuth(`${API}/admin/llm/components`),
+            fetchWithAuth(`${API}/admin/llm/validators`),
+            fetchWithAuth(`${API}/admin/llm/models/openrouter?limit=20`).catch(() => null),
+        ]);
+        if (!componentsResponse.ok || !validatorsResponse.ok) throw new Error("configuration unavailable");
+        const components = (await componentsResponse.json()).components || [];
+        const validators = (await validatorsResponse.json()).validators || [];
+        const recommendations = modelsResponse?.ok ? (await modelsResponse.json()).recommendations || [] : [];
+        const options = validators.map(v => `<option value="${safeText(v.validator_id)}">${safeText(v.validator_id)} — ${safeText(llmTypeSummary(v))}</option>`).join("");
+        const models = recommendations.map(item => `<option value="${safeText(item.model || "")}"></option>`).join("");
+        container.innerHTML = `<datalist id="llm-model-catalog">${models}</datalist>
+            <div class="llm-config-section">
+                <div class="llm-section-heading"><div><span>Componentes</span><h3>Servicios de plataforma</h3></div><p>${components.length} servicios configurables</p></div>
+                <div class="llm-component-grid">${components.map(renderLLMComponent).join("")}</div>
+            </div>
+            <div class="llm-config-section llm-validator-section">
+                <div class="llm-section-heading"><div><span>Validators</span><h3>Configuración por identidad</h3></div><p>${validators.length} disponibles</p></div>
+                <div class="llm-selector-control">
+                    <label for="llm-validator-selector">Selecciona un validator registrado</label>
+                    <select id="llm-validator-selector"><option value="">Selecciona una identidad para consultar su configuración…</option>${options}</select>
+                    <small>La identidad, el tipo y el destino interno se resuelven desde el registro de validators.</small>
+                </div>
+                <div id="llmValidatorDetail" class="llm-validator-detail-host"><div class="llm-selection-placeholder"><span>◇</span><strong>Selecciona un validator</strong><p>Se cargará su configuración efectiva antes de permitir cambios.</p></div></div>
+            </div>`;
+        const selector = document.getElementById("llm-validator-selector");
+        selector?.addEventListener("change", event => loadLLMValidatorDetail(event.target.value));
+        if (SELECTED_LLM_VALIDATOR_ID && validators.some(item => item.validator_id === SELECTED_LLM_VALIDATOR_ID)) {
+            selector.value = SELECTED_LLM_VALIDATOR_ID;
+            await loadLLMValidatorDetail(SELECTED_LLM_VALIDATOR_ID);
+        }
+    } catch (error) {
+        container.innerHTML = `<p class="empty-state">No se pudo cargar la configuración LLM administrativa.</p>`;
+    }
+}
+
+function formatLLMNumber(value, decimals = 2) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString("es-ES", {maximumFractionDigits: decimals}) : "—";
+}
+
+function formatLLMCurrency(value, decimals = 4) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString("es-ES", {style: "currency", currency: "USD", maximumFractionDigits: decimals}) : "—";
+}
+
+function renderLLMRecommendations(payload) {
+    const rows = (payload.recommendations || []).map(item => `<tr>
+        <td><span class="llm-rank">${safeText(item.rank)}</span></td>
+        <td><strong class="llm-model-name">${safeText(item.name || item.model)}</strong><code>${safeText(item.model)}</code></td>
+        <td><strong>${formatLLMNumber(item.quality_score, 1)}</strong><small>Calidad</small></td>
+        <td><strong>${formatLLMNumber(item.value_score, 1)}</strong><small>Valor</small></td>
+        <td>${formatLLMNumber(item.context_length, 0)}</td>
+        <td><span>${formatLLMCurrency(item.price?.prompt_per_million_usd)}</span><small>Entrada / 1M</small><span>${formatLLMCurrency(item.price?.completion_per_million_usd)}</span><small>Salida / 1M</small></td>
+        <td><strong>${formatLLMCurrency(item.estimated_validation_cost_usd, 6)}</strong><small>por validación estimada</small></td>
+        <td class="llm-reason">${safeText(item.reason || "—")}</td>
+    </tr>`).join("");
+    return `<div class="llm-recommendations-head"><div><span>Catálogo OpenRouter</span><h3>Modelos recomendados</h3><p>Ordenados por relación estimada entre calidad y coste.</p></div><div class="llm-generated-at">Actualizado<br><strong>${safeText(formatPollingEventDate(payload.generated_at))}</strong></div></div>
+        <div class="table-shell llm-recommendations-table"><table><thead><tr><th>#</th><th>Modelo</th><th>Quality</th><th>Value</th><th>Contexto</th><th>Precio</th><th>Coste estimado</th><th>Motivo</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty-state">No hay recomendaciones con los filtros actuales.</td></tr>`}</tbody></table></div>
+        <div class="llm-catalog-notes"><p>${safeText(payload.pricing_note || "")}</p><p>${safeText(payload.estimation_note || "")}</p></div>`;
+}
+
+async function loadLLMRecommendations() {
+    if (!IS_ADMIN) return;
+    const container = document.getElementById("llmRecommendationsContainer");
+    if (!container) return;
+    container.innerHTML = `<p class="empty-state">Consultando catálogo de modelos recomendados…</p>`;
+    try {
+        const response = await fetchWithAuth(`${API}/admin/llm/models/openrouter?limit=20`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        container.innerHTML = renderLLMRecommendations(await response.json());
+    } catch (error) {
+        container.innerHTML = `<div class="llm-error-state"><strong>No se pudo consultar el catálogo</strong><p>El proveedor de recomendaciones no está disponible en este momento.</p></div>`;
+    }
+}
+
+function showLLMAdminTab(tab) {
+    ACTIVE_LLM_ADMIN_TAB = tab === "recommendations" ? "recommendations" : "configuration";
+    document.querySelectorAll("[data-llm-tab]").forEach(button => {
+        const active = button.dataset.llmTab === ACTIVE_LLM_ADMIN_TAB;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+    });
+    const configPanel = document.getElementById("llmConfigurationPanel");
+    const recommendationsPanel = document.getElementById("llmRecommendationsPanel");
+    if (configPanel) configPanel.hidden = ACTIVE_LLM_ADMIN_TAB !== "configuration";
+    if (recommendationsPanel) recommendationsPanel.hidden = ACTIVE_LLM_ADMIN_TAB !== "recommendations";
+    refreshLLMAdminView();
+}
+
+function refreshLLMAdminView() {
+    return ACTIVE_LLM_ADMIN_TAB === "recommendations" ? loadLLMRecommendations() : loadLLMConfiguration();
+}
+
+async function applyLLMComponent(component, button) {
+    if (button) button.disabled = true;
+    try {
+        const payload = {
+            provider: document.getElementById(`llm-provider-${component}`).value.trim(),
+            model: document.getElementById(`llm-model-${component}`).value.trim(),
+            temperature: Number(document.getElementById(`llm-temperature-${component}`).value),
+        };
+        const response = await fetchWithAuth(`${API}/admin/llm/components/${encodeURIComponent(component)}`, {
+            method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        alertMessage("Configuración aplicada", "success");
+        await loadLLMConfiguration();
+    } catch (error) {
+        alertMessage("No se pudo aplicar la configuración LLM", "error");
+    } finally {
+        if (button?.isConnected) button.disabled = false;
+    }
+}
+
+async function applyLLMValidator(validatorId, button) {
+    if (button) button.disabled = true;
+    try {
+        const payload = {
+            provider: document.getElementById("llm-validator-provider").value.trim(),
+            model: document.getElementById("llm-validator-model").value.trim(),
+            temperature: Number(document.getElementById("llm-validator-temperature").value),
+        };
+        const response = await fetchWithAuth(`${API}/admin/llm/validators/${encodeURIComponent(validatorId)}`, {
+            method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        alertMessage("Configuración del validator aplicada", "success");
+        await loadLLMConfiguration();
+    } catch (error) {
+        alertMessage("No se pudo aplicar la configuración del validator", "error");
+    } finally {
+        if (button?.isConnected) button.disabled = false;
     }
 }
 
@@ -3033,6 +3300,10 @@ function initializeApp() {
     document.getElementById('btn-publishNew').addEventListener('click', publishNew);
     document.getElementById('btn-clearNews')?.addEventListener('click', clearNewsForm);
     document.getElementById("btn-generateAssertions").addEventListener("click", handleGenerateAssertions);
+    document.getElementById("btn-refresh-llm-config")?.addEventListener("click", refreshLLMAdminView);
+    document.querySelectorAll("[data-llm-tab]").forEach(button => {
+        button.addEventListener("click", () => showLLMAdminTab(button.dataset.llmTab));
+    });
 
     // 4. El resto de tus Listeners (Orders, TX, IPFS...)
     document.getElementById('btn-findOrder').addEventListener('click', findOrder);

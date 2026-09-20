@@ -54,7 +54,7 @@ Las cinco reglas personalizadas están ocupadas y conservan este orden:
 | Orden | Regla | Estado operativo |
 | ---: | --- | --- |
 | 1 | `Maintenance lock - assermetry.com` | Selectivo; comprobarlo antes de cada ventana |
-| 2 | `Permanent mTLS - Keycloak administration` | Activa y permanente |
+| 2 | `Permanent mTLS - administration` | Activa y permanente |
 | 3 | `Temporary mTLS gate - assermetry.com` | Activa hasta `v0.0.14` |
 | 4 | `Permanent block - non-public resources` | Activa |
 | 5 | `Permanent block - unexpected backend methods` | Activa |
@@ -70,8 +70,25 @@ La Free Managed Ruleset está habilitada. La única regla de rate limiting,
 Gateway con el umbral operativo de 5 peticiones por 10 segundos y mitigación de
 10 segundos. Login, refresh y polling no forman parte de esa regla.
 
-La asociación mTLS del hostname se conserva. Mientras la regla temporal siga
-activa:
+La asociación mTLS del hostname se conserva. La regla permanente de
+administración debe exigir certificado cliente válido para estos paths (sin
+excepciones por método):
+
+```text
+/auth/admin
+/auth/admin/*
+/auth/realms/master
+/auth/realms/master/*
+/backend/admin/llm
+/backend/admin/llm/*
+```
+
+Los dos últimos son la consola de configuración LLM. Esta inclusión es
+permanente: no depende de la regla temporal, de una feature flag ni del
+entorno local. Administrative LLM configuration endpoints require
+client-certificate authentication.
+
+Mientras la regla temporal siga activa:
 
 - una ruta administrativa sin certificado coincide con la regla permanente;
 - una ruta no administrativa sin certificado coincide con la regla temporal;
@@ -79,7 +96,8 @@ activa:
 - un certificado revocado debe ser rechazado.
 
 En `v0.0.14` se retirará únicamente la regla temporal. No se desasocia mTLS del
-hostname ni se elimina la regla administrativa.
+hostname ni se elimina la regla administrativa, incluidos los paths
+`/backend/admin/llm` y `/backend/admin/llm/*`.
 
 En esa misma ventana la regla temporal se sustituye por una regla permanente
 `default deny` de paths. Los Single Redirects de `/` y `/gui` no consumen slots

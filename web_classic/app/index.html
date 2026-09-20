@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Assermetry</title>
     <base href="/gui/">
-    <link rel="stylesheet" href="css/style.css?v=20260825-validation-feedback">
+    <link rel="stylesheet" href="css/style.css?v=20260920-llm-admin">
     <link rel="icon" type="image/svg+xml" href="img/assermetry_favicon.svg">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/auth/js/keycloak.js"></script>
@@ -31,6 +31,12 @@
                 <button class="nav-btn" onclick="showSection('orders')"><span>▦</span><span data-i18n="nav.orders">Listado de Órdenes</span></button>
                 <button class="nav-btn" onclick="showSection('order')"><span>⌕</span><span data-i18n="nav.searchOrders">Buscar Órdenes</span></button>
                 <button class="nav-btn" onclick="showSection('consistency')"><span>☑</span><span data-i18n="nav.consistency">Comprobar Consistencia</span></button>
+            </div>
+        </div>
+        <div id="llm-admin-nav" class="menu-group" style="display:none">
+            <h2 class="menu-title">Administración</h2>
+            <div class="submenu">
+                <button class="nav-btn" onclick="showSection('llm-config')"><span>⚙</span><span>Configuración LLM</span></button>
             </div>
         </div>
 
@@ -201,6 +207,27 @@
             <div id="validatorDetailContainer" class="details-shell dynamic-content"></div>
         </section>
 
+        <section id="llm-config" class="card page-card compact-tool">
+            <div class="page-head compact-head">
+                <div>
+                    <span class="section-kicker">Administración protegida</span>
+                    <h2>Configuración LLM</h2>
+                    <p>Gestiona modelos en caliente y consulta alternativas recomendadas. Las credenciales permanecen en el deployment.</p>
+                </div>
+                <div class="toolbar"><button id="btn-refresh-llm-config" class="btn-secondary">↻ Refrescar</button></div>
+            </div>
+            <div class="llm-admin-tabs" role="tablist" aria-label="Administración LLM">
+                <button type="button" class="llm-admin-tab active" data-llm-tab="configuration" role="tab" aria-selected="true">Configuración</button>
+                <button type="button" class="llm-admin-tab" data-llm-tab="recommendations" role="tab" aria-selected="false">LLM recomendados</button>
+            </div>
+            <div id="llmConfigurationPanel" class="llm-admin-panel" role="tabpanel">
+                <div id="llmConfigContainer" class="dynamic-content"></div>
+            </div>
+            <div id="llmRecommendationsPanel" class="llm-admin-panel" role="tabpanel" hidden>
+                <div id="llmRecommendationsContainer" class="dynamic-content"></div>
+            </div>
+        </section>
+
         <section id="contract" class="card page-card compact-tool">
             <div class="page-head compact-head"><div><span class="section-kicker">Smart Contract</span><h2 data-i18n="ui.smartContractPost">Smart Contract (Post)</h2></div></div>
             <div class="input-group search-row">
@@ -213,6 +240,6 @@
 </main>
 
 <script src="js/i18n.js?v=20260825-validation-feedback"></script>
-<script src="js/app.js?v=20260825-validation-feedback"></script>
+<script src="js/app.js?v=20260920-llm-admin-2"></script>
 </body>
 </html>

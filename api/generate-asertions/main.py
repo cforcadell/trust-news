@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import logging
+import math
 import uuid
 from typing import Any, List, Optional
 
@@ -50,6 +51,7 @@ from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
 from common.utils.llm_json import parse_model_list
 from common.llm import LLMConfigurationError, LLMRequest, acomplete
+from common.utils.llm_runtime import fetch_llm_runtime_override
 
 # ============================================================
 # Config / constantes (desde env)
@@ -91,6 +93,7 @@ PROMPT = os.getenv(
 
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.1"))
 MAX_ASSERTIONS = int(os.getenv("MAX_ASSERTIONS", "20"))
+LLM_CONFIG_VERSION = int(os.getenv("LLM_CONFIG_VERSION", "0"))
 
 def build_assertions_prompt(text: str) -> str:
     return (
@@ -138,58 +141,23 @@ app = FastAPI(title="Generate Assertions Worker (Typed)")
 # ============================================================
 # Admin config
 # ============================================================
-class ProviderRuntimeConfig(BaseModel):
-    api_url: Optional[str] = None
-    api_key: Optional[str] = None
-    model: Optional[str] = None
-
-
 class AdminConfigResponse(BaseModel):
-    provider: str
-    prompt: str
-    temperature: float
-    max_assertions: int
-    http_timeout: int
-    num_reintentos: int
-    retry_delay: float
-    admin_url: str
-    mistral: ProviderRuntimeConfig
-    gemini: ProviderRuntimeConfig
-    openrouter: ProviderRuntimeConfig
-
-
-class ProviderRuntimeConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    api_url: Optional[str] = None
-    api_key: Optional[str] = None
-    model: Optional[str] = None
+    provider: str
+    model: str
+    temperature: float
+    config_version: int = 0
+    credentials_configured: dict[str, bool]
 
 
 class AdminConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Optional[str] = None
-    prompt: Optional[str] = None
+    model: Optional[str] = None
     temperature: Optional[float] = None
-    max_assertions: Optional[int] = None
-    http_timeout: Optional[int] = None
-    num_reintentos: Optional[int] = None
-    retry_delay: Optional[float] = None
-    admin_url: Optional[str] = None
-    mistral: Optional[ProviderRuntimeConfigUpdate] = None
-    gemini: Optional[ProviderRuntimeConfigUpdate] = None
-    openrouter: Optional[ProviderRuntimeConfigUpdate] = None
-
-
-def mask_secret(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return value
-    return "*" * 8
-
-
-def is_masked_secret(value: Optional[str]) -> bool:
-    return bool(value) and set(str(value)) == {"*"}
+    config_version: Optional[int] = None
 
 
 def set_runtime_env(name: str, value: Any) -> None:
@@ -221,7 +189,7 @@ def normalize_non_negative_float(name: str, value: float) -> float:
         parsed = float(value)
     except Exception:
         raise HTTPException(status_code=400, detail=f"{name} debe ser numerico.")
-    if parsed < 0:
+    if not math.isfinite(parsed) or parsed < 0:
         raise HTTPException(status_code=400, detail=f"{name} no puede ser negativo.")
     return parsed
 
@@ -229,29 +197,23 @@ def normalize_non_negative_float(name: str, value: float) -> float:
 def normalize_admin_config_response() -> AdminConfigResponse:
     return AdminConfigResponse(
         provider=AI_PROVIDER,
-        prompt=PROMPT,
+        model=current_model(),
         temperature=TEMPERATURE,
-        max_assertions=MAX_ASSERTIONS,
-        http_timeout=HTTP_TIMEOUT,
-        num_reintentos=NUM_REINTENTOS,
-        retry_delay=RETRY_DELAY,
-        admin_url=ADMIN_URL,
-        mistral=ProviderRuntimeConfig(
-            api_url=MISTRAL_API_URL,
-            api_key=mask_secret(MISTRAL_API_KEY),
-            model=MISTRAL_MODEL,
-        ),
-        gemini=ProviderRuntimeConfig(
-            api_url=GEMINI_API_URL,
-            api_key=mask_secret(GEMINI_API_KEY),
-            model=GEMINI_MODEL,
-        ),
-        openrouter=ProviderRuntimeConfig(
-            api_url=OPENROUTER_API_URL,
-            api_key=mask_secret(OPENROUTER_API_KEY),
-            model=OPENROUTER_MODEL,
-        ),
+        config_version=LLM_CONFIG_VERSION,
+        credentials_configured={
+            "mistral": bool(MISTRAL_API_KEY),
+            "gemini": bool(GEMINI_API_KEY),
+            "openrouter": bool(OPENROUTER_API_KEY),
+        },
     )
+
+
+def current_model() -> str:
+    return {
+        "mistral": MISTRAL_MODEL,
+        "gemini": GEMINI_MODEL,
+        "openrouter": OPENROUTER_MODEL,
+    }.get(AI_PROVIDER, "")
 
 
 # ============================================================
@@ -360,6 +322,7 @@ def build_generated_document(
             "gemini": GEMINI_MODEL,
             "openrouter": OPENROUTER_MODEL,
         }.get(AI_PROVIDER),
+        config_version=LLM_CONFIG_VERSION,
         source_url=source_url,
         source_domain=source_domain,
     )
@@ -523,95 +486,42 @@ def get_admin_config():
 
 @app.put("/admin/config", tags=["Admin"])
 async def update_admin_config(config: AdminConfigUpdate):
-    """Modifica la configuracion runtime del generador de aserciones."""
-    global AI_PROVIDER, PROMPT, TEMPERATURE, MAX_ASSERTIONS, HTTP_TIMEOUT
-    global NUM_REINTENTOS, MAX_RETRIES, RETRY_DELAY, ADMIN_URL
-    global MISTRAL_API_URL, MISTRAL_API_KEY, MISTRAL_MODEL
-    global GEMINI_API_URL, GEMINI_API_KEY, GEMINI_MODEL
-    global OPENROUTER_API_URL, OPENROUTER_API_KEY, OPENROUTER_MODEL
+    """Hot-update non-secret LLM selection; credentials remain deployment-only."""
+    global AI_PROVIDER, TEMPERATURE, LLM_CONFIG_VERSION
+    global MISTRAL_MODEL, GEMINI_MODEL, OPENROUTER_MODEL
 
+    new_provider = normalize_provider(config.provider) if config.provider is not None else AI_PROVIDER
+    if config.model is not None and not config.model.strip():
+        raise HTTPException(status_code=400, detail="MODEL no puede estar vacío")
     if config.provider is not None:
-        AI_PROVIDER = normalize_provider(config.provider)
+        AI_PROVIDER = new_provider
         set_runtime_env("AI_PROVIDER", AI_PROVIDER)
-
-    if config.prompt is not None:
-        PROMPT = config.prompt
-        set_runtime_env("PROMPT", PROMPT)
-
+    if config.model is not None:
+        model = config.model.strip()
+        if new_provider == "mistral":
+            MISTRAL_MODEL = model
+            set_runtime_env("MISTRAL_MODEL", model)
+        elif new_provider == "gemini":
+            GEMINI_MODEL = model
+            set_runtime_env("GEMINI_MODEL", model)
+        else:
+            OPENROUTER_MODEL = model
+            set_runtime_env("OPENROUTER_MODEL", model)
     if config.temperature is not None:
         TEMPERATURE = normalize_non_negative_float("TEMPERATURE", config.temperature)
         set_runtime_env("TEMPERATURE", TEMPERATURE)
-
-    if config.max_assertions is not None:
-        MAX_ASSERTIONS = normalize_positive_int("MAX_ASSERTIONS", config.max_assertions)
-        set_runtime_env("MAX_ASSERTIONS", MAX_ASSERTIONS)
-
-    if config.http_timeout is not None:
-        HTTP_TIMEOUT = normalize_positive_int("HTTP_TIMEOUT", config.http_timeout)
-        set_runtime_env("HTTP_TIMEOUT", HTTP_TIMEOUT)
-
-    if config.num_reintentos is not None:
-        NUM_REINTENTOS = normalize_positive_int("NUM_REINTENTOS", config.num_reintentos)
-        MAX_RETRIES = NUM_REINTENTOS
-        set_runtime_env("NUM_REINTENTOS", NUM_REINTENTOS)
-        set_runtime_env("MAX_RETRIES", MAX_RETRIES)
-
-    if config.retry_delay is not None:
-        RETRY_DELAY = normalize_non_negative_float("RETRY_DELAY", config.retry_delay)
-        set_runtime_env("RETRY_DELAY", RETRY_DELAY)
-
-    if config.admin_url is not None:
-        ADMIN_URL = config.admin_url
-        set_runtime_env("ADMIN_URL", ADMIN_URL)
-
-    if config.mistral is not None:
-        if config.mistral.api_url is not None:
-            MISTRAL_API_URL = config.mistral.api_url
-            set_runtime_env("MISTRAL_API_URL", MISTRAL_API_URL)
-        if config.mistral.api_key is not None and not is_masked_secret(config.mistral.api_key):
-            MISTRAL_API_KEY = config.mistral.api_key
-            set_runtime_env("MISTRAL_API_KEY", MISTRAL_API_KEY)
-        if config.mistral.model is not None:
-            MISTRAL_MODEL = config.mistral.model
-            set_runtime_env("MISTRAL_MODEL", MISTRAL_MODEL)
-
-    if config.gemini is not None:
-        if config.gemini.api_url is not None:
-            GEMINI_API_URL = config.gemini.api_url
-            set_runtime_env("GEMINI_API_URL", GEMINI_API_URL)
-        if config.gemini.api_key is not None and not is_masked_secret(config.gemini.api_key):
-            GEMINI_API_KEY = config.gemini.api_key
-            set_runtime_env("GEMINI_API_KEY", GEMINI_API_KEY)
-        if config.gemini.model is not None:
-            GEMINI_MODEL = config.gemini.model
-            set_runtime_env("GEMINI_MODEL", GEMINI_MODEL)
-
-    if config.openrouter is not None:
-        if config.openrouter.api_url is not None:
-            OPENROUTER_API_URL = config.openrouter.api_url
-            set_runtime_env("OPENROUTER_API_URL", OPENROUTER_API_URL)
-        if config.openrouter.api_key is not None and not is_masked_secret(config.openrouter.api_key):
-            OPENROUTER_API_KEY = config.openrouter.api_key
-            set_runtime_env("OPENROUTER_API_KEY", OPENROUTER_API_KEY)
-        if config.openrouter.model is not None:
-            OPENROUTER_MODEL = config.openrouter.model
-            set_runtime_env("OPENROUTER_MODEL", OPENROUTER_MODEL)
+    if config.config_version is not None:
+        LLM_CONFIG_VERSION = normalize_positive_int("LLM_CONFIG_VERSION", config.config_version)
+        set_runtime_env("LLM_CONFIG_VERSION", LLM_CONFIG_VERSION)
 
     log_event(
         logger,
         logging.INFO,
         "runtime_config_updated",
         provider=AI_PROVIDER,
-        model={
-            "mistral": MISTRAL_MODEL,
-            "gemini": GEMINI_MODEL,
-            "openrouter": OPENROUTER_MODEL,
-        }.get(AI_PROVIDER),
-        max_assertions=MAX_ASSERTIONS,
+        model=current_model(),
+        config_version=LLM_CONFIG_VERSION,
         temperature=TEMPERATURE,
-        timeout_seconds=HTTP_TIMEOUT,
-        max_attempts=MAX_RETRIES,
-        retry_delay_seconds=RETRY_DELAY,
     )
     return {
         "status": "ok",
@@ -676,6 +586,13 @@ async def extraer_texto(
 # ============================================================
 @app.on_event("startup")
 async def startup_event():
+    override = await fetch_llm_runtime_override(ADMIN_URL, "llm:generate-asertions", logger)
+    if override:
+        try:
+            await update_admin_config(AdminConfigUpdate(**override))
+            logger.info("Applied persisted LLM runtime override for generate-asertions")
+        except Exception as exc:
+            logger.warning("Invalid persisted LLM runtime override; using deployment defaults: %s", exc.__class__.__name__)
     # lanzar consumer en background
     asyncio.create_task(consume_and_process())
     logger.info("Background consume_and_process task started")

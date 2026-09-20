@@ -226,6 +226,7 @@ class GeneratorInfo(BaseModel):
     service: str = "generate-asertions"
     provider: str = "unknown"
     model: Optional[str] = None
+    config_version: int = 0
     generated_at: str = Field(default_factory=utc_now_iso)
 
 
@@ -326,6 +327,7 @@ def build_assertions_document_v2(
     mode: ValidationMode | str,
     provider: str = "unknown",
     model: Optional[str] = None,
+    config_version: int = 0,
     post_id: Optional[int | str] = None,
     network: Optional[Dict[str, Any]] = None,
     source_url: Optional[str] = None,
@@ -347,7 +349,7 @@ def build_assertions_document_v2(
             source_domain=source_domain,
             language=_first_language(enriched),
         ),
-        generator=GeneratorInfo(provider=provider, model=model),
+        generator=GeneratorInfo(provider=provider, model=model, config_version=config_version),
         assertions=enriched,
     )
 

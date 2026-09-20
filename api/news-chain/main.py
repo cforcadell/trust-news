@@ -18,17 +18,15 @@ from aiokafka import AIOKafkaProducer
 from common.category_catalog import CATEGORY_IDS
 from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking
 from common.utils.hash_utils import (
-    safe_multihash_to_tuple,
     multihash_to_base58,
     multihash_to_base58_dict,
     hash_text_to_multihash,
+    cid_to_multihash_tuple,
     safe_hex,
 )
 from common.models.async_models import (
-    Multihash,
-    Assertion,
-    RegisterBlockchainRequest,
     BlockchainRegisteredResponse,
+    BlockchainRegistrationFailedResponse,
     RegisterBlockchainPayload,
     RequestValidationPayload,
     ValidationCompletedPayload,
@@ -153,7 +151,23 @@ def get_validator_categories(validator_address: str) -> List[Dict[str, Any]]:
     return categories
 
 
-def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
+def load_registration_document(cid: str) -> AssertionsDocumentV2:
+    raw_document = ipfs_get_json(cid)
+    if not raw_document:
+        raise ValueError(f"IPFS document not found or invalid JSON for cid={cid}")
+    document = AssertionsDocumentV2(**raw_document)
+    if document.mode != ValidationMode.BLOCKCHAIN:
+        raise ValueError(
+            f"IPFS document mode must be BLOCKCHAIN, received {document.mode.value}"
+        )
+    return document
+
+
+def parse_registernew_event(
+    receipt,
+    data: RegisterBlockchainPayload,
+    document: AssertionsDocumentV2,
+) -> dict:
     class AttrDict(dict):
         def __getattr__(self, item):
             return self[item]
@@ -165,32 +179,34 @@ def parse_registernew_event(receipt, data: RegisterBlockchainRequest) -> dict:
         logger.warning("No se encontró evento RegisterNewResult; devolviendo info mínima.")
         return {
             "postId": None,
+            "cid": data.cid,
             "hash_text": "",
             "assertions": [],
-            "tx_hash": getattr(receipt, "transactionHash", "0x")
+            "tx_hash": safe_hex(getattr(receipt, "transactionHash", "0x")),
         }
     event = events[0]
     postId = event['args']['postId']
     validator_addresses_by_asertion = event['args']['validatorAddressesByAsertion']
     asertions_output = []
-    for i, a in enumerate(data.assertions):
+    for i, a in enumerate(document.assertions):
         mh = hash_text_to_multihash(a.text)
         digest_hex = mh.digest[2:]
         addrs_raw = validator_addresses_by_asertion[i] if i < len(validator_addresses_by_asertion) else []
         addrs = [{"address": str(x)} for x in addrs_raw]
         asertions_output.append({
             "hash_asertion": "0x" + digest_hex,
-            "idAssertion": a.idAssertion or str(uuid.uuid4().hex[:8]),
-            "text": a.text,
+            "idAssertion": str(a.assertion_id),
+            "assertion_index": a.assertion_index,
             "categoryId": a.categoryId,
             "validatorAddresses": addrs
         })
-    hash_new = hash_text_to_multihash(data.text)
+    hash_new = hash_text_to_multihash(document.post.original_text)
     return {
         "postId": str(postId),
+        "cid": data.cid,
         "hash_text": hash_new.digest,
         "assertions": asertions_output,
-        "tx_hash": getattr(receipt, "transactionHash", "0x")
+        "tx_hash": safe_hex(getattr(receipt, "transactionHash", "0x")),
     }
 
 # =========================================================
@@ -200,42 +216,34 @@ app = FastAPI(title="TrustNews Smart Contract API")
 
 
 @app.post("/registerNew")
-def register_new(data: RegisterBlockchainRequest):
+def register_new(data: RegisterBlockchainPayload):
     """Lanza la transacción sin esperar al minado, devolviendo tx_hash."""
     try:
-        logger.info(f"registerNew() invoked by {data.publisher}")
-        hash_new = hash_text_to_multihash(data.text)
-        
-        # El CID de IPFS/Arweave se convierte a Multihash para el contrato
-        hash_ipfs = Multihash(
-            hash_function="0x12",
-            hash_size="0x20",
-            digest=data.cid 
-        )
-
-        asertions_struct = []
-        categoryIds = []
-        for a in data.assertions:
-            mh = hash_text_to_multihash(a.text)
-            
-            # Formato de aserción para el contrato (Multihash, array de validadores [vacío], categoryId)
-            as_tuple = (safe_multihash_to_tuple(mh), tuple([]), a.categoryId) 
-            asertions_struct.append(as_tuple)
-            # categoryId ya es int gracias a Pydantic
-            categoryIds.append(a.categoryId)
-
-        logger.info(f"Preparando llamada a registerNew con ipfs:{hash_ipfs} hash_new:{hash_new}.")
-        func_call = contract.functions.registerNew(
-            safe_multihash_to_tuple(hash_ipfs),
-            tuple(categoryIds)
-        )
-
-        tx_hash = send_signed_tx(w3,func_call, ACCOUNT_ADDRESS, PRIVATE_KEY)
-        return {"tx_hash": tx_hash, "result": False}
+        document = load_registration_document(data.cid)
+        return submit_registration(data, document)
 
     except Exception as e:
         logger.exception(f"Error en registerNew: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def submit_registration(
+    data: RegisterBlockchainPayload,
+    document: AssertionsDocumentV2,
+) -> dict:
+    logger.info(f"registerNew() invoked by {data.publisher} for cid={data.cid}")
+    cid_tuple = cid_to_multihash_tuple(data.cid)
+    category_ids = tuple(assertion.categoryId for assertion in document.assertions)
+    if not category_ids:
+        raise ValueError("Assertions document must contain at least one assertion")
+
+    logger.info(
+        f"Preparando llamada a registerNew con cid={data.cid} "
+        f"y {len(category_ids)} categorías"
+    )
+    func_call = contract.functions.registerNew(cid_tuple, category_ids)
+    tx_hash = send_signed_tx(w3, func_call, ACCOUNT_ADDRESS, PRIVATE_KEY)
+    return {"tx_hash": tx_hash, "result": False}
 
 @app.get("/tx/status/{tx_hash}")
 def tx_status(tx_hash: str):
@@ -631,16 +639,13 @@ async def blockchain_event_listener():
                                 # Descargar documento desde IPFS
                                 # ------------------------------------------------
                                 logger.info(f"📥 Descargando documento desde IPFS | cid={cid_post}")
-                                ipfs_content = ipfs_get_text(cid_post)
+                                post_json = ipfs_get_json(cid_post)
 
-                                if not ipfs_content:
+                                if not post_json:
                                     logger.warning(f"⚠️ Documento IPFS vacío o no encontrado | cid={cid_post}")
                                     continue
 
-                                logger.info(f"📄 Documento IPFS descargado ({len(ipfs_content)} bytes)")
-
-                                post_json = json.loads(ipfs_content)
-                                logger.info("🧩 JSON parseado correctamente desde IPFS")
+                                logger.info("🧩 Documento JSON recuperado correctamente desde IPFS")
                                 assertions_document = AssertionsDocumentV2(**post_json)
                                 logger.info(f"[news-chain] loaded assertions-document-v2 from IPFS cid={cid_post}")
 
@@ -792,6 +797,8 @@ async def consume_register_kafka():
         async for msg in consumer:
             payload_msg = {}
             start_time = asyncio.get_event_loop().time()
+            stage = "PAYLOAD_VALIDATION"
+            tx_hash = None
             
             try:
                 # 1. Parsear el mensaje JSON
@@ -804,30 +811,47 @@ async def consume_register_kafka():
                 # Extraemos el contenido de 'payload' del mensaje Kafka
                 inner_data = payload_msg.get("payload", {})
                 publish_input = RegisterBlockchainPayload(**inner_data)
-                
-                # TRACE CORREGIDA: Usamos .text (que sí existe) en lugar de .title
-                preview = publish_input.text[:40].replace('\n', ' ')
-                logger.info(f"[{order_id}] Payload validado. Contenido: '{preview}...'")
+
+                stage = "IPFS_READ"
+                assertions_document = await asyncio.to_thread(
+                    load_registration_document,
+                    publish_input.cid,
+                )
+                logger.info(
+                    f"[{order_id}] Payload y documento IPFS validados "
+                    f"cid={publish_input.cid} assertions={len(assertions_document.assertions)}"
+                )
 
                 # 3. Paso 1: Enviar transacción a la Blockchain (Geth)
+                stage = "TX_SUBMIT"
                 logger.info(f"[{order_id}] ⛓️ Enviando transacción a la red Ethereum...")
                 # Ejecutamos en un thread aparte porque web3.py suele ser bloqueante
-                tx_info = await asyncio.to_thread(register_new, publish_input)
+                tx_info = await asyncio.to_thread(
+                    submit_registration,
+                    publish_input,
+                    assertions_document,
+                )
                 tx_hash = tx_info["tx_hash"]
                 logger.info(f"[{order_id}] 🚀 TX enviada con éxito. Hash: {tx_hash}")
 
                 # 4. Paso 2: Esperar confirmación (Mining)
+                stage = "TX_MINING"
                 logger.info(f"[{order_id}] ⏳ Esperando a que el minero confirme el bloque...")
                 receipt = await asyncio.to_thread(wait_for_receipt_blocking, w3, tx_hash)
                 
                 if receipt.get('status') == 0:
-                    logger.error(f"[{order_id}] ❌ ERROR: La transacción fue revertida (Status 0)")
-                    continue
+                    raise RuntimeError("Blockchain transaction reverted with status 0")
 
                 logger.info(f"[{order_id}] ✅ TX minada en el bloque {receipt['blockNumber']}")
 
                 # 5. Paso 3: Parsear eventos de la transacción
-                result = await asyncio.to_thread(parse_registernew_event, receipt, publish_input)
+                stage = "EVENT_PARSE"
+                result = await asyncio.to_thread(
+                    parse_registernew_event,
+                    receipt,
+                    publish_input,
+                    assertions_document,
+                )
                 
                 # 6. Crear el modelo de respuesta
                 response_model = BlockchainRegisteredResponse(
@@ -848,9 +872,37 @@ async def consume_register_kafka():
 
             except ValidationError as ve:
                 logger.error(f"[{payload_msg.get('order_id', 'N/A')}] ❌ Error de validación: {ve}")
+                failure = BlockchainRegistrationFailedResponse(
+                    order_id=payload_msg.get("order_id", ""),
+                    payload={
+                        "stage": stage,
+                        "code": "BLOCKCHAIN_CONTRACT_VALIDATION_FAILED",
+                        "message": str(ve),
+                        "retryable": False,
+                        "tx_hash": safe_hex(tx_hash) if tx_hash else None,
+                    },
+                )
+                await producer.send_and_wait(
+                    KAFKA_RESPONSE_TOPIC,
+                    failure.model_dump_json(exclude_none=True).encode("utf-8"),
+                )
             except Exception as e:
                 # logger.exception nos dará el traceback completo en Stern
                 logger.exception(f"[{payload_msg.get('order_id', 'N/A')}] 💥 Error inesperado: {e}")
+                failure = BlockchainRegistrationFailedResponse(
+                    order_id=payload_msg.get("order_id", ""),
+                    payload={
+                        "stage": stage,
+                        "code": "BLOCKCHAIN_REGISTRATION_FAILED",
+                        "message": str(e),
+                        "retryable": stage in {"IPFS_READ", "TX_SUBMIT", "TX_MINING"},
+                        "tx_hash": safe_hex(tx_hash) if tx_hash else None,
+                    },
+                )
+                await producer.send_and_wait(
+                    KAFKA_RESPONSE_TOPIC,
+                    failure.model_dump_json(exclude_none=True).encode("utf-8"),
+                )
 
     except Exception as e:
         logger.error(f"Fallo crítico en el loop del consumidor: {e}")

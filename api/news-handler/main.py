@@ -720,35 +720,25 @@ async def update_client_consumed(client_id: str, field: str, new_value: int):
 # ===========================
 # manejo blockchain
 # ===========================
-async def handle_blockchain_request(order_id: str, text: str, cid: str, assertions: list):
+async def handle_blockchain_request(order_id: str, cid: str):
     global producer
 
-    try:
-        # Construir la request blockchain REAL
-        req = RegisterBlockchainRequest(
-            action="register_blockchain",
-            order_id=order_id,
-            payload={
-                "text": text,
-                "cid": cid,
-                "assertions": assertions,
-                "publisher": "news-handler"
-            }
-        )
-
-        # Enviar al topic real
-        await producer.send_and_wait(
-            TOPIC_REQUESTS_BLOCKCHAIN,
-            req.model_dump_json().encode("utf-8")
-        )
-
-        logger.info(f"[{order_id}] Mensaje enviado al topic {TOPIC_REQUESTS_BLOCKCHAIN}")
-
-        # Registrar evento
-        await log_event(order_id, req.action, TOPIC_REQUESTS_BLOCKCHAIN, req.payload.model_dump())
-
-    except ValidationError as e:
-        logger.exception(f"Error validando register_blockchain request: {e}")
+    req = RegisterBlockchainRequest(
+        action="register_blockchain",
+        order_id=order_id,
+        payload={
+            "schema_version": "register-blockchain-v2",
+            "cid": cid,
+            "publisher": "news-handler",
+        },
+    )
+    await producer.send_and_wait(
+        TOPIC_REQUESTS_BLOCKCHAIN,
+        req.model_dump_json().encode("utf-8"),
+    )
+    logger.info(f"[{order_id}] Mensaje enviado al topic {TOPIC_REQUESTS_BLOCKCHAIN}")
+    await log_event(order_id, req.action, TOPIC_REQUESTS_BLOCKCHAIN, req.payload.model_dump())
+    return req
 
 
 # =========================================================
@@ -965,10 +955,34 @@ async def process_kafka_message(data: dict):
             logger.info(f"[{order_id}] ✅ IPFS subido con CID={cid}")
             logger.info(f"[news-handler] mode=BLOCKCHAIN ipfs_cid={cid}")
 
-            chain_assertions = chain_assertions_for_contract(AssertionsDocumentV2(**doc["document"]))
-            await handle_blockchain_request(order_id, doc.get("text", ""), cid, chain_assertions)
-            await update_order(order_id, {"$set": {"status": "BLOCKCHAIN_PENDING"}})
-            logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain enviada (emulada o real según configuración).")
+            try:
+                AssertionsDocumentV2(**doc["document"])
+                await handle_blockchain_request(order_id, cid)
+            except Exception as exc:
+                error_details = {
+                    "stage": "REGISTER_REQUEST",
+                    "code": "BLOCKCHAIN_REQUEST_FAILED",
+                    "message": str(exc),
+                    "retryable": not isinstance(exc, ValidationError),
+                }
+                await update_order(order_id, {
+                    "$set": {
+                        "status": "BLOCKCHAIN_ERROR",
+                        "blockchain_error": error_details,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                })
+                logger.exception(f"[{order_id}] Error enviando petición de registro blockchain")
+                return
+
+            await update_order(order_id, {
+                "$set": {
+                    "status": "BLOCKCHAIN_REQUESTED",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "$unset": {"blockchain_error": ""},
+            })
+            logger.info(f"[{order_id}] ⛓️ Petición de registro blockchain confirmada por Kafka.")
 
         # ================================================================
         # 3️⃣ blockchain_registered
@@ -1001,11 +1015,15 @@ async def process_kafka_message(data: dict):
                 logger.warning(f"[{order_id}] ❌ Documento no encontrado en MongoDB.")
                 return
 
+            canonical_assertions = {
+                str(item.get("assertion_id")): item
+                for item in (doc.get("document", {}).get("assertions") or [])
+            }
             validators_info = []
             for i, a in enumerate(assertions_payload):
-                # a puede venir validado por Pydantic como dicts
                 assertion_id = a.get("idAssertion")
-                assertion_text = a.get("text")
+                canonical_assertion = canonical_assertions.get(str(assertion_id), {})
+                assertion_text = canonical_assertion.get("text", "")
                 category_id = int(a.get("categoryId", 0))
 
 
@@ -1027,7 +1045,9 @@ async def process_kafka_message(data: dict):
                     "idAssertion": assertion_id,
                     "validatorAddresses": validator_addresses,
                     "text": assertion_text,
-                    "categoryId": category_id
+                    "categoryId": category_id,
+                    "topic_code": canonical_assertion.get("topic_code"),
+                    "evidence_kind": canonical_assertion.get("evidence_kind"),
                 })
 
             # 🔍 DEBUG: Log before update
@@ -1047,6 +1067,20 @@ async def process_kafka_message(data: dict):
             await update_order(order_id, update_payload)
             
             logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones). post_id={postId} type={type(postId).__name__}")
+
+        elif action == "blockchain_registration_failed":
+            failure = parsed.payload.model_dump()
+            await update_order(order_id, {
+                "$set": {
+                    "status": "BLOCKCHAIN_ERROR",
+                    "blockchain_error": failure,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            })
+            logger.error(
+                f"[{order_id}] Registro blockchain fallido "
+                f"stage={failure.get('stage')} code={failure.get('code')}: {failure.get('message')}"
+            )
 
         # ================================================================
         # 4 request_validation  
@@ -1496,7 +1530,7 @@ async def _check_ipfs_consistency(client: httpx.AsyncClient, order_data: Dict[st
         results.append(ConsistencyCheckResult(test="Comparación de texto y aserciones", result="SKIP", details="Contenido IPFS vacío o no parseable."))
         return results, ipfs_content
         
-    ipfs_text = ipfs_content.get("text", "")
+    ipfs_text = (ipfs_content.get("post") or {}).get("original_text", "")
     ipfs_assertions = ipfs_content.get("assertions", [])
     
     # --- Prueba 3: Comparar texto de la noticia ---
@@ -1553,7 +1587,7 @@ async def _check_ipfs_consistency(client: httpx.AsyncClient, order_data: Dict[st
 
 async def _check_blockchain_consistency(client: httpx.AsyncClient, order_data: Dict[str, Any]) -> Tuple[List[ConsistencyCheckResult], Optional[Dict[str, Any]]]:
     """Pruebas 6, 7, 8: Comparar Order con el Post de la Blockchain."""
-    postId = order_data.get("postId")
+    postId = order_data.get("post_id") or order_data.get("postId")
     logger.info(f"-> INICIO: Chequeo de consistencia Blockchain para PostID: {postId}")
     results: List[ConsistencyCheckResult] = []
     post_data = None

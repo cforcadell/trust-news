@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from common.models.async_models import (
     AssertionsGeneratedResponse,
     AssertionsNotGeneratedResponse,
+    BlockchainRegistrationFailedResponse,
     BlockchainRegisteredResponse,
     IpfsUploadedResponse,
     LightValidationResponse,
@@ -17,6 +18,7 @@ ACTION_ASSERTIONS_GENERATED = "assertions_generated"
 ACTION_ASSERTIONS_NOT_GENERATED = "assertions_not_generated"
 ACTION_IPFS_UPLOADED = "ipfs_uploaded"
 ACTION_BLOCKCHAIN_REGISTERED = "blockchain_registered"
+ACTION_BLOCKCHAIN_REGISTRATION_FAILED = "blockchain_registration_failed"
 ACTION_REQUEST_VALIDATION = "request_validation"
 ACTION_VALIDATION_COMPLETED = "validation_completed"
 ACTION_NEW_VALIDATOR_CONFIG = "new_validator_config"
@@ -36,6 +38,7 @@ ACTION_TO_MODEL_RESPONSE: Dict[str, Type[BaseModel]] = {
     ACTION_ASSERTIONS_NOT_GENERATED: AssertionsNotGeneratedResponse,
     ACTION_IPFS_UPLOADED: IpfsUploadedResponse,
     ACTION_BLOCKCHAIN_REGISTERED: BlockchainRegisteredResponse,
+    ACTION_BLOCKCHAIN_REGISTRATION_FAILED: BlockchainRegistrationFailedResponse,
     ACTION_VALIDATION_COMPLETED: ValidationCompletedResponse,
     ACTION_REQUEST_VALIDATION: RequestValidationRequest,
     ACTION_NEW_VALIDATOR_CONFIG: ValidatorConfigEvent,

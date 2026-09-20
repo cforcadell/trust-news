@@ -364,9 +364,10 @@ class IpfsUploadedResponse(BaseModel):
 # ============================================================
 
 class RegisterBlockchainPayload(BaseModel):
-    text: str
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["register-blockchain-v2"] = "register-blockchain-v2"
     cid: str
-    assertions: List[Assertion]
     publisher: str
 
 
@@ -377,17 +378,44 @@ class RegisterBlockchainRequest(BaseModel):
 
 
 
+class BlockchainAssertionRegistration(BaseModel):
+    """Compact on-chain assignment; enriched assertion data remains in IPFS/MongoDB."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    idAssertion: str
+    assertion_index: int = Field(ge=0)
+    categoryId: CategoryId
+    hash_asertion: Optional[str] = None
+    validatorAddresses: List[ValidatorAddress] = Field(default_factory=list)
+
+
 class BlockchainRegisteredPayload(BaseModel):
     postId: str
+    cid: str
     hash_text: str
-    assertions: List[AssertionExtended]
+    assertions: List[BlockchainAssertionRegistration]
     tx_hash: str
+
+
+class BlockchainRegistrationFailedPayload(BaseModel):
+    stage: str
+    code: str
+    message: str
+    retryable: bool = False
+    tx_hash: Optional[str] = None
 
 
 class BlockchainRegisteredResponse(BaseModel):
     action: str = "blockchain_registered"
     order_id: str
     payload: BlockchainRegisteredPayload
+
+
+class BlockchainRegistrationFailedResponse(BaseModel):
+    action: str = "blockchain_registration_failed"
+    order_id: str
+    payload: BlockchainRegistrationFailedPayload
 
 
 

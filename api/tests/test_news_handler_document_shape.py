@@ -104,6 +104,113 @@ def test_start_light_flow_stores_the_full_protocol_document(monkeypatch):
     assert assertion_item["topic_code"] == "EMPLOYMENT"
 
 
+def test_blockchain_request_publishes_only_the_canonical_cid(monkeypatch):
+    module = load_news_handler_module()
+    calls = {}
+
+    class Producer:
+        async def send_and_wait(self, topic, payload):
+            calls["topic"] = topic
+            calls["payload"] = payload
+
+    async def fake_log_event(order_id, action, topic, payload):
+        calls["event"] = {
+            "order_id": order_id,
+            "action": action,
+            "topic": topic,
+            "payload": payload,
+        }
+
+    monkeypatch.setattr(module, "producer", Producer())
+    monkeypatch.setattr(module, "log_event", fake_log_event)
+
+    request = asyncio.run(module.handle_blockchain_request("order-123", "QmCID"))
+
+    assert request.payload.cid == "QmCID"
+    assert request.payload.schema_version == "register-blockchain-v2"
+    assert "text" not in request.payload.model_dump()
+    assert "assertions" not in request.payload.model_dump()
+    assert calls["event"]["payload"]["cid"] == "QmCID"
+
+
+def test_blockchain_registered_merges_assignments_with_canonical_document(monkeypatch):
+    module = load_news_handler_module()
+    updates = []
+    document = module.build_assertions_document_v2(
+        text="Texto de prueba",
+        assertions=[assertion_payload()],
+        mode=module.ValidationMode.BLOCKCHAIN,
+        provider="test",
+    ).model_dump(mode="json")
+
+    async def fake_get_order_doc(order_id):
+        return {"order_id": order_id, "document": document, "assertions": []}
+
+    async def fake_update_order(order_id, update):
+        updates.append(update)
+
+    async def fake_log_event(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(module, "get_order_doc", fake_get_order_doc)
+    monkeypatch.setattr(module, "update_order", fake_update_order)
+    monkeypatch.setattr(module, "log_event", fake_log_event)
+
+    asyncio.run(module.process_kafka_message({
+        "action": "blockchain_registered",
+        "order_id": "order-123",
+        "payload": {
+            "postId": "7",
+            "cid": "QmCID",
+            "hash_text": "0xabc",
+            "tx_hash": "0xdef",
+            "assertions": [{
+                "idAssertion": "1",
+                "assertion_index": 0,
+                "categoryId": 1,
+                "validatorAddresses": [{"address": "0x123"}],
+            }],
+        },
+    }))
+
+    persisted = updates[-1]["$set"]
+    assert persisted["post_id"] == 7
+    assert persisted["status"] == "VALIDATION_PENDING"
+    assert persisted["validators_pending"] == 1
+    assert persisted["validators"][0]["text"] == "El paro descendio en Espana."
+    assert persisted["validators"][0]["topic_code"] == "EMPLOYMENT"
+
+
+def test_blockchain_registration_failure_is_terminal_and_auditable(monkeypatch):
+    module = load_news_handler_module()
+    updates = []
+
+    async def fake_update_order(order_id, update):
+        updates.append(update)
+
+    async def fake_log_event(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(module, "update_order", fake_update_order)
+    monkeypatch.setattr(module, "log_event", fake_log_event)
+
+    asyncio.run(module.process_kafka_message({
+        "action": "blockchain_registration_failed",
+        "order_id": "order-123",
+        "payload": {
+            "stage": "IPFS_READ",
+            "code": "BLOCKCHAIN_REGISTRATION_FAILED",
+            "message": "missing document",
+            "retryable": True,
+        },
+    }))
+
+    persisted = updates[-1]["$set"]
+    assert persisted["status"] == "BLOCKCHAIN_ERROR"
+    assert persisted["blockchain_error"]["stage"] == "IPFS_READ"
+    assert persisted["blockchain_error"]["retryable"] is True
+
+
 def test_legacy_validation_weight_fallback_is_marked(monkeypatch):
     module = load_news_handler_module()
     order = {

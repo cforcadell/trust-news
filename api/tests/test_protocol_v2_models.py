@@ -8,6 +8,10 @@ from common.models.protocol_models import (
     build_assertion_validation_payload_v2,
     build_assertions_document_v2,
 )
+from common.models.async_models import (
+    BlockchainRegisteredResponse,
+    RegisterBlockchainRequest,
+)
 
 
 def sample_assertion():
@@ -62,6 +66,45 @@ def test_protocol_uses_normalized_taxonomy_and_chain_projection():
     assert dumped["assertions"][0]["topic_code"] == "EMPLOYMENT"
     assert dumped["assertions"][0]["evidence_kind"] == "STATISTICAL_DATA"
     assert doc.to_chain_assertions() == [{"idAssertion": "1", "text": sample_assertion()["text"], "categoryId": 1}]
+
+
+def test_blockchain_registration_contract_uses_cid_and_compact_assignments():
+    request = RegisterBlockchainRequest(
+        order_id="order-1",
+        payload={"cid": "QmCID", "publisher": "news-handler"},
+    )
+    assert request.payload.schema_version == "register-blockchain-v2"
+    assert request.payload.cid == "QmCID"
+    assert "assertions" not in request.payload.model_dump()
+
+    with pytest.raises(ValidationError):
+        RegisterBlockchainRequest(
+            order_id="order-1",
+            payload={
+                "cid": "QmCID",
+                "publisher": "news-handler",
+                "text": "legacy",
+                "assertions": [],
+            },
+        )
+
+    response = BlockchainRegisteredResponse(
+        order_id="order-1",
+        payload={
+            "postId": "7",
+            "cid": "QmCID",
+            "hash_text": "0xabc",
+            "tx_hash": "0xdef",
+            "assertions": [{
+                "idAssertion": "1",
+                "assertion_index": 0,
+                "categoryId": 1,
+                "validatorAddresses": [{"address": "0x123"}],
+            }],
+        },
+    )
+    assert response.payload.assertions[0].idAssertion == "1"
+    assert response.payload.assertions[0].validatorAddresses[0].address == "0x123"
 
 
 def test_document_builder_reindexes_filtered_assertions():

@@ -1,10 +1,11 @@
 # v0.0.13 — Estabilización funcional iterativa
 
-**En curso. Revisión: 2026-09-11.** LIGHT y BLOCKCHAIN completan el recorrido
-básico y la regresión local está en verde, pero siguen abiertos defectos de
-seguridad, calidad factual, presentación y operación. **La versión no acredita
-aún una verificación factual estable.** El inventario y los criterios de cada
-hallazgo están en [issues.md](issues.md).
+**En curso. Revisión: 2026-09-20.** LIGHT y BLOCKCHAIN completan el recorrido
+básico local; el segundo registra el CID, crea el post y recibe validaciones
+on-chain tras corregir sus contratos y el desempaquetado IPFS (ISSUE-023).
+Siguen abiertos defectos de seguridad, calidad factual, presentación y
+operación. **La versión no acredita aún una verificación factual estable.** El
+inventario y los criterios de cada hallazgo están en [issues.md](issues.md).
 
 Versiones publicadas: [releases.md](releases.md). Evolución posterior:
 [next_releases.md](next_releases.md).
@@ -70,8 +71,11 @@ El contrato operativo permanece en
 ### Iteración 13.2 — GUI, estados y consenso
 
 **En curso.** Login y los recorridos básicos pasan. ISSUE-007 tiene solución y
-validación local; quedan fechas, estado final, resumen, contadores, errores
-inducidos, móvil e idiomas: 005, 006, 008, 014, 019 y 020.
+validación local. El polling conserva la navegación y espera un render final
+antes de abrir el resumen; quedan por acreditar los contadores con llegadas
+parciales, duplicados y errores inducidos en ambos modos. Siguen abiertos
+fechas, estado final, resumen legacy, móvil e idiomas: 005, 006, 008, 014,
+019 y 020.
 
 Debe cubrir login, sesión, navegación, creación y seguimiento de órdenes,
 evidencias y enlaces, filtros, paginación, cuotas, estados vacío/error/timeout,
@@ -88,12 +92,16 @@ búsquedas, exportaciones y enlaces indirectos.
 
 ISSUE-001 requiere todavía concurrencia y arranque conjunto. ISSUE-003/004 deben
 corregirse o aplazarse mediante una decisión explícita antes de cerrar la
-versión.
+versión. ISSUE-023 está resuelta localmente: el E2E GUI Blockchain del
+2026-09-20 alcanzó `VALIDATED` con CID, post, transacción y doce validaciones.
 
 ### Iteración 13.4 — Calidad de evidencia y estabilidad del routing
 
-**Nueva; prioritaria antes de los ensayos finales.** Los casos reales han
-mostrado límites que no cubren las correcciones 013 y 015:
+**Nueva; prioritaria antes de los ensayos finales.** El contrato de citas se
+endureció el 2026-09-19: RAG solo puede seleccionar `context_id` canónicos,
+citables y descargados por el servidor; los snippets del proveedor ya no son
+evidencia. Los casos reales siguen mostrando límites que no cubren por sí
+solos las correcciones 013, 015 y 021:
 
 - Una cita puede pertenecer al corpus y aun proceder de la misma noticia que se
   intenta verificar; eso prueba coincidencia textual, no corroboración
@@ -149,6 +157,12 @@ inspección descubrió desbordamiento móvil, contadores y fechas incoherentes. 
 correcciones posteriores de aislamiento, JWT y enlaces están desplegadas; las
 de consenso, grounding y Source Router requieren completar sus comprobaciones
 de extremo a extremo según `issues.md`.
+
+El 2026-09-19 pasaron 27 pruebas focalizadas de grounding/búsqueda, 29 de
+consenso y 3 pruebas GUI de polling. La misma ejecución no pudo cargar las 12
+pruebas de orquestación de validadores porque `api/tests/venv` carece de
+`hexbytes`; no se considera una regresión verde ni sustituye los E2E de ambos
+modos.
 
 Limitaciones de la evidencia acumulada:
 

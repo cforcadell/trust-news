@@ -1,7 +1,9 @@
 # Incidencias de Assermetry
 
-Revisión: **2026-09-11**. Inventario acumulativo de hallazgos y criterios de
-cierre de [v0.0.13](version.md). La revisión inicial no modificó código.
+Revisión: **2026-09-20**. Inventario acumulativo de hallazgos y criterios de
+cierre de [v0.0.13](version.md). La revisión contrasta el código en
+`d7b4308`, las pruebas focalizadas y una ejecución LIGHT local; no equivale a
+validación completa en el entorno objetivo.
 011, 012 y 018 están solucionadas y desplegadas en Hetzner. Evidencia de código
 local no implica comportamiento demostrado en el despliegue.
 
@@ -31,16 +33,17 @@ cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
 | 010 | P1 | Abierto; evidencia detallada ya existe | 14 |
 | 011 | P1 | Solucionada y desplegada en Hetzner | 13 |
 | 012 | P1 | Solucionada y desplegada en Hetzner | 13 |
-| 013 | P1 | Validada localmente y desplegada en Hetzner el 2026-09-06 | 13 |
+| 013 | P1 | Solución reforzada; E2E Blockchain local correcto el 2026-09-20, objetivo pendiente | 13 |
 | 014 | P1 | Abierta; confirmada en código/sondas locales | 13 |
-| 015 | P1 | Solucionada y validada localmente el 2026-09-08; despliegue/E2E real pendiente | 13 |
+| 015 | P1 | Solucionada localmente; E2E LIGHT con proveedor externo correcto, despliegue objetivo pendiente | 13 |
 | 016 | P1 | Abierto; falsos positivos y diagnóstico incompleto | 13 |
 | 017 | P1 | Abierto; carencia de evaluación factual | 13, ampliar en 14 |
 | 018 | P1 | Solucionada y desplegada en Hetzner | 13 |
-| 019 | P1 | Abierto; contadores contradictorios en GUI | 13 |
+| 019 | P1 | Solución local de polling/contadores; falta validar parciales, duplicados y ambos modos | 13 |
 | 020 | P2 | Abierto; desbordamiento y mezcla de idiomas | 13 |
-| 021 | P1 | Abierto; autoconfirmación y política de fuentes no aplicada | 13 |
+| 021 | P1 | Parcialmente resuelta; grounding canónico y filtro oficial aplicados, PDF/independencia pendiente | 13 |
 | 022 | P2 | Abierto; taxonomía libre fragmenta y contamina rutas cacheadas | 13 |
+| 023 | P1 | Solucionada y validada localmente con E2E GUI BLOCKCHAIN el 2026-09-20 | 13 |
 
 Los P1 de objetivo 13 bloquean su cierre. 009–010 bloquean la experiencia de
 revisión/evidencia de 14. 020 debe corregirse antes de acreditar móvil. 022 debe
@@ -204,10 +207,20 @@ temporal debe limitar explícitamente el alcance de demo.
 - **Evidencia:** pruebas de grounding, contratos y UI; orden LIGHT
   `943346a6-1071-45f2-b97c-f10d746c150a` ejecutada con tres validadores RAG y
   persistencia de evidencias verificadas/rechazadas en MongoDB.
-- **Pendiente de cierre formal:** prueba de extremo a extremo de los tres tipos
-  y de los recorridos Kafka/IPFS/MongoDB/navegador en el entorno objetivo. La
-  comprobación de implicación semántica entre afirmación y cita se mantiene como
-  alcance de ISSUE-017.
+- **Refuerzo implementado (2026-09-19, `d7b4308`):** la referencia del modelo
+  debe incluir un `context_id` único, citable y creado por el servidor. URL,
+  título, texto, hash y chunk público se reconstruyen exclusivamente desde ese
+  contexto canónico. Se rechazan identificadores ambiguos/no recuperados, texto
+  no citable y fuentes que sean el documento original; los snippets del
+  proveedor quedan como diagnóstico, nunca como cita.
+- **Validación local nueva:** 27 pruebas de grounding y Evidence Search pasan;
+  cubren contexto inventado, ambiguo, no citable, URL/texto inyectados y fuente
+  original. La caché incorpora `citation_contract=retrieved-context-id-v1` para
+  no reutilizar respuestas incompatibles.
+- **Pendiente de cierre formal:** E2E de los tres tipos y de los recorridos
+  Kafka/IPFS/MongoDB/navegador, especialmente BLOCKCHAIN y el entorno objetivo.
+  La comprobación de implicación semántica entre afirmación y cita se mantiene
+  como alcance de ISSUE-017.
 - **Límite descubierto:** comprobar que una cita pertenece al corpus no acredita
   independencia ni calidad de la fuente. La autoconfirmación y la elegibilidad
   documental se separan en ISSUE-021 para no reabrir el alcance ya implementado.
@@ -239,7 +252,14 @@ temporal debe limitar explícitamente el alcance de demo.
 - **Validación:** tests unitarios cubren rutas regionales, nacionales y UE,
   firma normalizada, caché FRESH, stale fallback, rechazo de dominios inventados
   y orden `router -> evidence-search`. El script se aplicó y verificó dos veces
-  sobre MongoDB local. Falta E2E con APIs externas y recorridos desplegados.
+  sobre MongoDB local. El E2E LIGHT del 2026-09-19 resolvió cuatro rutas `FRESH`
+  y restringió la búsqueda a sus dominios antes de llamar a Evidence Search; los
+  12 validadores terminaron y la orden quedó `VALIDATED`. Falta repetirlo en
+  BLOCKCHAIN y en el entorno objetivo.
+- **Hallazgo de seguimiento:** la ruta italiana clasificó
+  `gazzettaufficiale.biz` como `OFFICIAL_GAZETTE/NATIONAL_PRIMARY` al nivel de
+  `gazzettaufficiale.it`. Debe corregirse el perfil o introducir una denegación
+  de mirrors antes de considerar la elegibilidad documental estable.
 - **Límite restante:** la extracción PDF y la clasificación documental fina se
   tratan en ISSUE-021; la estabilidad de la firma queda resuelta en ISSUE-022.
 
@@ -252,6 +272,11 @@ temporal debe limitar explícitamente el alcance de demo.
 - **Además:** el test de logs se corrigió para usar `caplog` y vuelve a comprobar
   `search_request`. `api/tests/requirements.txt` no reúne las
   dependencias de la suite y la fixture no exige credenciales antes de conectar.
+- **Comprobación 2026-09-19:** las pruebas aisladas de grounding/búsqueda (27),
+  scoring (29) y GUI de polling (3) pasan, pero las 12 pruebas de
+  `test_validator_source_orchestration.py` ni siquiera cargan porque
+  `api/tests/venv` no contiene `hexbytes`. Esto confirma el defecto de entorno
+  reproducible; no se debe publicar una línea base global verde.
 - **Cierre:** entorno de tests reproducible, `caplog`, fallos HTTP estrictos,
   comprobaciones de contenido/overflow y diagnóstico en `finally`; registrar
   identidad efectiva, revisión desplegada y metadatos, sin inferirlos del caso.
@@ -295,6 +320,12 @@ temporal debe limitar explícitamente el alcance de demo.
 - **Cierre:** una fuente autoritativa para esperadas/recibidas/error/pendientes;
   siempre total=recibidas+pendientes, sin superar 100 %. Probar llegada parcial,
   duplicados y reintentos en ambos modos.
+- **Implementado localmente (2026-09-19, `d7b4308`):** el resumen prioriza las
+  solicitudes de validación completas, calcula pendientes como el máximo entre
+  el campo persistido y la diferencia contra las completadas, y el polling
+  conserva la pestaña Proceso hasta tener un render terminal limpio. Las tres
+  pruebas Node de estado/polling pasan. Falta la matriz de cierre: llegada
+  parcial, duplicados, reintentos, error inducido y ambos modos.
 
 ### ISSUE-020 - Desbordamiento móvil y lenguaje de interfaz inconsistente
 
@@ -328,8 +359,11 @@ temporal debe limitar explícitamente el alcance de demo.
 - **Implementado:** URL/dominio de origen viajan en los contratos `v2`; Evidence
   Search conserva tipo, autoridad, puntuación, versión de perfil y relación con
   el origen; `EXT_ONLY_OFFICIAL` filtra después de recuperar; el grounding
-  rechaza `relationship_to_origin=ORIGINAL`. Sigue pendiente la extracción PDF
-  y una clasificación documental más fina que `UNKNOWN`.
+  rechaza `relationship_to_origin=ORIGINAL`. Desde `d7b4308` esa exclusión se
+  aplica contra el `context_id` canónico y no puede ser eludida aportando una
+  URL, texto o hash libres desde el modelo. Sigue pendiente la extracción PDF,
+  una clasificación documental más fina que `UNKNOWN` y la garantía de que una
+  fuente secundaria no sea la única base decisiva de una afirmación atribuida.
 - **Regresión:** la orden indicada debe priorizar y citar el informe de IEA. Si
   este no puede recuperarse, Libertad Digital puede conservarse como contexto o
   pista, sin producir por sí sola TRUE/FALSE documental.
@@ -364,3 +398,39 @@ temporal debe limitar explícitamente el alcance de demo.
   conceptos relacionados pero distintos permanecen separados. Registrar tasa
   de rutas nuevas, reutilización, colisiones y candidatos `OTHER` para revisar y
   repriorizar la taxonomía.
+
+### ISSUE-023 - El registro BLOCKCHAIN pierde los campos del contrato de aserciones v2
+
+- **Reproducido (2026-09-19):** el E2E GUI Blockchain publicó la orden
+  `11ea41f6-c315-4c13-9ab8-00fbbcc686f0`, generó cuatro aserciones y subió el
+  documento a IPFS (`QmQrPwqsPZafEvCuZ1xvoTk5XwNk2Z4bQJ3QkoAd4eedBo`). La orden
+  quedó en `BLOCKCHAIN_PENDING`, sin `post_id` ni `tx_hash`.
+- **Causa:** tras `ipfs_uploaded`, `news-handler` convierte el documento v2 con
+  `to_chain_assertion()` y lo entrega a `RegisterBlockchainRequest`. Esa
+  conversión conserva solo `idAssertion`, `text` y `categoryId`, mientras que
+  el modelo `RegisterBlockchainPayload` exige además `topic_code`,
+  `evidence_kind` y `context`. La validación Pydantic rechaza las cuatro
+  aserciones y `handle_blockchain_request` captura el error; el flujo continúa
+  marcando la orden como pendiente aunque nunca publica `register_blockchain`.
+- **Impacto:** no se crea el post ni la transacción y no se solicitan ni reciben
+  validaciones Blockchain. El caso GUI no puede satisfacer CID/post/tx/IPFS ni
+  alcanzar `VALIDATED`.
+- **Solución (2026-09-20):** `register_blockchain` usa ahora
+  `register-blockchain-v2` y transporta solo CID y publicador. `news-chain`
+  recupera y valida el `AssertionsDocumentV2` de IPFS, deriva sus categorías y
+  envía únicamente estas al contrato existente. La respuesta usa asignaciones
+  compactas y `news-handler` las combina con el documento canónico MongoDB.
+  Los fallos de petición o registro se persisten como `BLOCKCHAIN_ERROR` con
+  etapa, código y capacidad de reintento; no se anuncia un pendiente ficticio.
+- **Corrección asociada:** los listeners de `news-chain` y
+  `validate-asertions` desempaquetan la respuesta `{cid, content}` de IPFS antes
+  de validar V2; un evento inválido ya no termina el listener de un validador.
+- **Validación de cierre:** 28 pruebas focalizadas pasan. El E2E GUI Blockchain
+  `synthetic-blockchain-01` creó la orden
+  `a237441b-f1aa-4c32-8468-fe79163f865c`, CID
+  `QmNaWX2Ra7SKUzoswZERE7GGHwFpRxT3WZVwHaaWCbpXR3`, post `36` y transacción
+  `0x019cff71a2bf46fea9a5840f7b1426ad1b0fa44eb740b779caea2e64861a051b`.
+  Alcanzó `VALIDATED` con cuatro aserciones, doce validaciones y cero pendientes;
+  comprobó pestaña IPFS, escritorio/móvil y ausencia de errores HTTP/consola
+  inesperados. Artefactos: `/tmp/assermetry-e2e-blockchain-v2-retry-20260920`.
+- **Límite:** esta evidencia es del clúster local, no del entorno objetivo.

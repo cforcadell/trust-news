@@ -29,7 +29,11 @@ from common.models.protocol_models import (
     build_assertions_document_v2,
 )
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
-from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
+from common.utils.ipfs_client import (
+    upload_bytes_to_ipfs,
+    upload_json_to_ipfs as upload_json_payload_to_ipfs,
+    unwrap_ipfs_content,
+)
 from common.utils.llm_json import strip_json_markdown
 from common.llm import LLMRequest, complete
 from common.utils.logging_utils import configure_single_line_json_logging
@@ -1385,7 +1389,10 @@ class BlockchainEventAgent:
 
         while True:
             for event in event_filter.get_new_entries():
-                await self.process_event(event)
+                try:
+                    await self.process_event(event)
+                except Exception:
+                    logger.exception("Error no recuperable procesando evento blockchain; se continúa con el siguiente")
             await asyncio.sleep(2)
 
     async def process_event(self, event):
@@ -1402,8 +1409,8 @@ class BlockchainEventAgent:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{self.ipfs_api}/ipfs/{cid}")
             resp.raise_for_status()
-            post_json = json.loads(resp.text)
-            logger.info("🧩 JSON parseado correctamente desde IPFS")
+            post_json = unwrap_ipfs_content(resp.text)
+            logger.info("🧩 Documento JSON desempaquetado correctamente desde IPFS")
             
             assertions_document = AssertionsDocumentV2(**post_json)
             logger.info(f"[validate-asertions] loaded assertions-document-v2 from IPFS cid={cid}")

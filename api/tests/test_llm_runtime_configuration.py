@@ -159,6 +159,124 @@ async def test_dynamic_validator_discovery_filters_and_updates_only_selected_val
     assert detail_b["actual"]["model"] == "model-b"
 
 
+def test_deployed_llm_recommendation_compares_role_specific_token_cost():
+    admin = importlib.import_module("admin.main")
+    catalog = {
+        "google/gemini-2.5-flash-lite": {
+            "id": "google/gemini-2.5-flash-lite",
+            "name": "Gemini 2.5 Flash Lite",
+            "pricing": {"prompt": "0.0000001", "completion": "0.0000004"},
+        },
+        "google/gemini-3.8-flash": {
+            "id": "google/gemini-3.8-flash",
+            "name": "Gemini 3.8 Flash",
+            "pricing": {"prompt": "0.00000075", "completion": "0.00000375"},
+        },
+        "openai/gpt-5-nano": {
+            "id": "openai/gpt-5-nano",
+            "name": "GPT-5 Nano",
+            "pricing": {"prompt": "0.00000005", "completion": "0.0000004"},
+        },
+        "qwen/qwen3.7-flash": {
+            "id": "qwen/qwen3.7-flash",
+            "name": "Qwen3.7 Flash",
+            "pricing": {"prompt": "0.00000003", "completion": "0.00000013"},
+        },
+    }
+
+    recommendation = admin.build_deployed_recommendation(
+        target_id="generate-asertions",
+        target_kind="component",
+        current={"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
+        catalog=catalog,
+        profile=admin.recommendation_profile("generate-asertions"),
+    )
+
+    assert [option.tier for option in recommendation.options] == ["premium", "similar", "budget"]
+    assert recommendation.options[0].model == "google/gemini-3.8-flash"
+    assert recommendation.options[1].model == "openai/gpt-5-nano"
+    assert recommendation.options[2].model == "qwen/qwen3.7-flash"
+    assert recommendation.workload_key == "generateAssertions"
+    assert recommendation.reason_key == "generateAssertions"
+    assert recommendation.input_tokens == 3000
+    assert recommendation.output_tokens == 1200
+    assert recommendation.estimated_current_cost_usd == pytest.approx(0.00078)
+    assert recommendation.options[0].estimated_cost_usd == pytest.approx(0.00675)
+    assert recommendation.options[0].estimated_cost_delta_usd == pytest.approx(0.00597)
+    assert recommendation.options[0].estimated_cost_delta_percent == pytest.approx(765.38)
+    assert recommendation.options[2].estimated_cost_usd < recommendation.estimated_current_cost_usd
+
+
+def test_deployed_llm_recommendation_does_not_invent_non_openrouter_current_price():
+    admin = importlib.import_module("admin.main")
+    catalog = {
+        "mistralai/mistral-small-2603": {
+            "id": "mistralai/mistral-small-2603",
+            "name": "Mistral Small 4",
+            "pricing": {"prompt": "0.00000015", "completion": "0.0000006"},
+        },
+    }
+
+    recommendation = admin.build_deployed_recommendation(
+        target_id="validator-a",
+        target_kind="validator",
+        current={"provider": "gemini", "model": "gemini-direct"},
+        catalog=catalog,
+        profile=admin.recommendation_profile(
+            "validator", {"name": "LLM_MEMORY_VALIDATION"}, None,
+        ),
+    )
+
+    assert recommendation.current_price is None
+    assert recommendation.estimated_current_cost_usd is None
+    assert all(option.estimated_cost_delta_usd is None for option in recommendation.options)
+    assert all(option.estimated_cost_delta_percent is None for option in recommendation.options)
+
+
+@pytest.mark.asyncio
+async def test_deployed_recommendations_cover_components_and_each_llm_validator(monkeypatch):
+    admin = importlib.import_module("admin.main")
+    current_model = "google/gemini-2.5-flash-lite"
+
+    async def component(component):
+        return {"actual": {"provider": "openrouter", "model": current_model}}
+
+    async def validators():
+        return [
+            {"validator_id": "0xofficial", "provider": "openrouter", "model": current_model,
+             "validator_type": {"name": "RAG_EVIDENCE_VALIDATION"}, "evidence_search_strategy": "EXT_ONLY_OFFICIAL"},
+            {"validator_id": "0xlocal", "provider": "openrouter", "model": current_model,
+             "validator_type": {"name": "RAG_EVIDENCE_VALIDATION"}, "evidence_search_strategy": "LOCAL"},
+            {"validator_id": "0xdeterministic", "provider": "none", "model": "",
+             "validator_type": {"name": "DETERMINISTIC_VALIDATION"}, "evidence_search_strategy": None},
+        ]
+
+    def model(model_id, prompt="0.000001", completion="0.000002"):
+        return {"id": model_id, "name": model_id, "pricing": {"prompt": prompt, "completion": completion}}
+
+    catalog = {
+        model_id: model(model_id) for model_id in (
+            current_model,
+            "google/gemini-3.8-flash",
+            "google/gemini-3.5-flash-lite",
+            "openai/gpt-5.6-sol",
+            "mistralai/mistral-medium-3-5",
+        )
+    }
+    monkeypatch.setattr(admin, "get_llm_component", component)
+    monkeypatch.setattr(admin, "discover_validators", validators)
+
+    recommendations = await admin.deployed_llm_recommendations(catalog)
+
+    assert [item.target_id for item in recommendations] == [
+        "generate-asertions", "source-router", "0xofficial", "0xlocal",
+    ]
+    assert [item.options[0].model for item in recommendations] == [
+        "google/gemini-3.8-flash", "google/gemini-3.8-flash",
+        "openai/gpt-5.6-sol", "mistralai/mistral-medium-3-5",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_gateway_llm_admin_requires_verified_admin_role(monkeypatch):
     async def claims(request: Request):

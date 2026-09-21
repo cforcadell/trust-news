@@ -1126,13 +1126,21 @@ pre, .event-payload-pre {
 .llm-generated-at { color: var(--text-muted); font-size: .68rem; line-height: 1.5; text-align: right; }
 .llm-generated-at strong { color: #dce7f5; font-size: .72rem; }
 .llm-recommendations-table { max-height: calc(100vh - 350px); border: 1px solid var(--border-color); }
-.llm-recommendations-table table { min-width: 1120px; font-size: .76rem; }
+.llm-recommendations-table table { min-width: 1500px; font-size: .76rem; }
 .llm-recommendations-table thead { position: sticky; top: 0; z-index: 1; }
 .llm-recommendations-table td { vertical-align: middle; }
+.llm-recommendations-table th small { display: block; margin-top: 4px; color: var(--text-muted); font-size: .6rem; font-weight: 600; }
 .llm-recommendations-table td small { display: block; margin-top: 4px; color: var(--text-muted); font-size: .62rem; }
 .llm-recommendations-table td code { display: block; margin-top: 5px; color: #7dd3fc; font-size: .68rem; overflow-wrap: anywhere; white-space: normal; }
 .llm-model-name { display: block; max-width: 250px; }
 .llm-rank { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 8px; color: #baffea; background: rgba(16, 214, 154, .11); font-weight: 900; }
+.llm-cost-delta { display: inline-block; font-weight: 900; white-space: nowrap; }
+.llm-cost-delta.increase { color: #ff9aa7; }
+.llm-cost-delta.decrease { color: #63edbe; }
+.llm-cost-delta.neutral { color: #dce7f5; }
+.llm-cost-delta.unknown { color: var(--text-muted); }
+.llm-recommendation-option { display: grid; gap: 4px; min-width: 185px; }
+.llm-recommendation-option > span:not(.llm-cost-delta) { color: #eaf2ff; font-weight: 800; }
 .llm-reason { min-width: 220px; max-width: 320px; color: #bdc9da; line-height: 1.45; }
 .llm-catalog-notes { display: grid; gap: 4px; margin-top: 12px; color: var(--text-muted); font-size: .67rem; }
 .llm-catalog-notes p { margin: 0; }

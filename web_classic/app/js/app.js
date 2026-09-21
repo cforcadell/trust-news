@@ -3004,8 +3004,11 @@ let SELECTED_LLM_VALIDATOR_ID = "";
 
 function llmTypeSummary(validator) {
     const type = validator?.validator_type || {};
-    const strategy = validator?.evidence_search_strategy ? ` — ${validator.evidence_search_strategy}` : "";
-    return `${type.name || "UNKNOWN"}${strategy}`;
+    const typeLabel = type.id !== undefined && type.id !== null
+        ? t(`ui.validatorTypes.${type.id}`)
+        : type.name || t("llm.status.UNKNOWN");
+    const strategy = validator?.evidence_search_strategy ? ` — ${llmStrategyLabel(validator.evidence_search_strategy)}` : "";
+    return `${typeLabel}${strategy}`;
 }
 
 function llmStatusBadge(status) {
@@ -3013,7 +3016,8 @@ function llmStatusBadge(status) {
     const statusClass = value === "APPLIED" || value === "ACTIVE"
         ? "success"
         : value === "PENDING" ? "warning" : value === "ERROR" || value === "INACTIVE" ? "error" : "neutral";
-    return `<span class="llm-status ${statusClass}"><i></i>${safeText(value)}</span>`;
+    const label = t(`llm.status.${value}`);
+    return `<span class="llm-status ${statusClass}"><i></i>${safeText(label === `llm.status.${value}` ? value : label)}</span>`;
 }
 
 function llmProviderOptions(selected) {
@@ -3028,20 +3032,27 @@ function llmCategoryLabel(category) {
     if (typeof category !== "object") return String(category);
     const id = category.id ?? category.categoryId ?? category.category_id ?? category.value;
     const name = category.name ?? category.label ?? category.description;
-    if (id !== undefined && name) return `${id} · ${name}`;
-    if (id !== undefined) return String(id);
+    const label = id !== undefined ? categoryLabel(id) : name;
+    if (id !== undefined && name) return `${id} · ${label === `ui.categoriesMap.${id}` ? name : label}`;
+    if (id !== undefined) return label === `ui.categoriesMap.${id}` ? String(id) : label;
     if (name) return String(name);
     return JSON.stringify(category);
 }
 
 function renderLLMCategories(categories) {
     const values = (Array.isArray(categories) ? categories : []).map(llmCategoryLabel).filter(Boolean);
-    if (!values.length) return `<span class="llm-empty-value">Sin categorías declaradas</span>`;
+    if (!values.length) return `<span class="llm-empty-value">${safeText(t("llm.noCategories"))}</span>`;
     return `<div class="llm-category-list">${values.map(value => `<span>${safeText(value)}</span>`).join("")}</div>`;
 }
 
 function llmComponentTitle(component) {
-    return component === "generate-asertions" ? "Generate Assertions" : component === "source-router" ? "Source Router" : component;
+    return component === "generate-asertions" ? t("llm.generateAssertions") : component === "source-router" ? t("llm.sourceRouter") : component;
+}
+
+function llmStrategyLabel(strategy) {
+    if (!strategy) return t("llm.notApplicable");
+    const label = t(`ui.sourcePolicies.${strategy}.label`);
+    return label === `ui.sourcePolicies.${strategy}.label` ? String(strategy) : label;
 }
 
 function renderLLMComponent(component) {
@@ -3050,8 +3061,8 @@ function renderLLMComponent(component) {
     const title = llmComponentTitle(component.component || "");
     const initials = title.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
     const description = component.component === "source-router"
-        ? "Clasificación de dominios y autoridad de fuentes"
-        : "Extracción estructurada de afirmaciones verificables";
+        ? t("llm.sourceRouterDescription")
+        : t("llm.generateAssertionsDescription");
     return `<article class="llm-config-card">
         <header class="llm-card-head">
             <div class="llm-service-mark">${safeText(initials)}</div>
@@ -3059,11 +3070,11 @@ function renderLLMComponent(component) {
             ${llmStatusBadge(component.status)}
         </header>
         <div class="llm-form-grid">
-            <label><span>Proveedor</span><select id="llm-provider-${id}">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
-            <label class="llm-field-wide"><span>Modelo</span><input list="llm-model-catalog" id="llm-model-${id}" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
-            <label><span>Temperatura</span><input id="llm-temperature-${id}" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
+            <label><span>${safeText(t("llm.provider"))}</span><select id="llm-provider-${id}">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
+            <label class="llm-field-wide"><span>${safeText(t("llm.model"))}</span><input list="llm-model-catalog" id="llm-model-${id}" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
+            <label><span>${safeText(t("llm.temperature"))}</span><input id="llm-temperature-${id}" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
         </div>
-        <footer class="llm-card-actions"><span>Versión efectiva <strong>${safeText(component.config_version ?? 0)}</strong></span><button class="btn-primary" onclick="applyLLMComponent('${id}', this)">Aplicar cambios</button></footer>
+        <footer class="llm-card-actions"><span>${safeText(t("llm.effectiveVersion"))} <strong>${safeText(component.config_version ?? 0)}</strong></span><button class="btn-primary" onclick="applyLLMComponent('${id}', this)">${safeText(t("llm.applyChanges"))}</button></footer>
     </article>`;
 }
 
@@ -3071,31 +3082,33 @@ function renderLLMValidatorDetail(detail) {
     const actual = detail.actual || {};
     const validatorId = String(detail.validator_id || "");
     const escapedId = validatorId.replace(/'/g, "\\'");
-    const validatorType = detail.validator_type?.name || "UNKNOWN";
-    const strategy = detail.evidence_search_strategy || "No aplica";
+    const validatorType = detail.validator_type?.id !== undefined
+        ? t(`ui.validatorTypes.${detail.validator_type.id}`)
+        : detail.validator_type?.name || t("llm.status.UNKNOWN");
+    const strategy = llmStrategyLabel(detail.evidence_search_strategy);
     return `<article class="llm-validator-detail">
         <header class="llm-card-head">
             <div class="llm-service-mark validator">V</div>
-            <div><h3>Validator seleccionado</h3><p class="llm-address">${safeText(validatorId)}</p></div>
+            <div><h3>${safeText(t("llm.selectedValidator"))}</h3><p class="llm-address">${safeText(validatorId)}</p></div>
             ${llmStatusBadge(detail.status)}
         </header>
         <div class="llm-validator-layout">
             <div class="llm-readonly-panel">
                 <dl class="llm-meta-grid">
-                    <div><dt>Tipo</dt><dd>${safeText(validatorType)}</dd></div>
-                    <div><dt>Estrategia</dt><dd>${safeText(strategy)}</dd></div>
-                    <div><dt>Versión</dt><dd>${safeText(detail.config_version ?? 0)}</dd></div>
-                    <div class="llm-meta-wide"><dt>Categorías</dt><dd>${renderLLMCategories(detail.categories)}</dd></div>
+                    <div><dt>${safeText(t("llm.type"))}</dt><dd>${safeText(validatorType)}</dd></div>
+                    <div><dt>${safeText(t("llm.strategy"))}</dt><dd>${safeText(strategy)}</dd></div>
+                    <div><dt>${safeText(t("llm.version"))}</dt><dd>${safeText(detail.config_version ?? 0)}</dd></div>
+                    <div class="llm-meta-wide"><dt>${safeText(t("llm.categories"))}</dt><dd>${renderLLMCategories(detail.categories)}</dd></div>
                 </dl>
             </div>
             <div class="llm-edit-panel">
-                <h4>Configuración efectiva</h4>
+                <h4>${safeText(t("llm.effectiveConfiguration"))}</h4>
                 <div class="llm-form-grid">
-                    <label><span>Proveedor</span><select id="llm-validator-provider">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
-                    <label class="llm-field-wide"><span>Modelo</span><input list="llm-model-catalog" id="llm-validator-model" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
-                    <label><span>Temperatura</span><input id="llm-validator-temperature" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
+                    <label><span>${safeText(t("llm.provider"))}</span><select id="llm-validator-provider">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
+                    <label class="llm-field-wide"><span>${safeText(t("llm.model"))}</span><input list="llm-model-catalog" id="llm-validator-model" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
+                    <label><span>${safeText(t("llm.temperature"))}</span><input id="llm-validator-temperature" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
                 </div>
-                <div class="llm-card-actions"><span>El tipo y la estrategia son de solo lectura.</span><button class="btn-primary" onclick="applyLLMValidator('${escapedId}', this)">Aplicar cambios</button></div>
+                <div class="llm-card-actions"><span>${safeText(t("llm.readOnlyTypeStrategy"))}</span><button class="btn-primary" onclick="applyLLMValidator('${escapedId}', this)">${safeText(t("llm.applyChanges"))}</button></div>
             </div>
         </div>
     </article>`;
@@ -3105,13 +3118,13 @@ async function loadLLMValidatorDetail(validatorId) {
     const detail = document.getElementById("llmValidatorDetail");
     if (!validatorId || !detail) return;
     SELECTED_LLM_VALIDATOR_ID = validatorId;
-    detail.innerHTML = `<p class="empty-state">Cargando configuración efectiva…</p>`;
+    detail.innerHTML = `<p class="empty-state">${safeText(t("llm.loadingEffectiveConfiguration"))}</p>`;
     try {
         const response = await fetchWithAuth(`${API}/admin/llm/validators/${encodeURIComponent(validatorId)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         detail.innerHTML = renderLLMValidatorDetail(await response.json());
     } catch (error) {
-        detail.innerHTML = `<p class="empty-state">No se pudo cargar el validator seleccionado.</p>`;
+        detail.innerHTML = `<p class="empty-state">${safeText(t("llm.validatorLoadError"))}</p>`;
     }
 }
 
@@ -3119,7 +3132,7 @@ async function loadLLMConfiguration() {
     if (!IS_ADMIN) return;
     const container = document.getElementById("llmConfigContainer");
     if (!container) return;
-    container.innerHTML = `<p class="empty-state">Cargando configuración LLM…</p>`;
+    container.innerHTML = `<p class="empty-state">${safeText(t("llm.loadingConfiguration"))}</p>`;
     try {
         const [componentsResponse, validatorsResponse, modelsResponse] = await Promise.all([
             fetchWithAuth(`${API}/admin/llm/components`),
@@ -3134,17 +3147,17 @@ async function loadLLMConfiguration() {
         const models = recommendations.map(item => `<option value="${safeText(item.model || "")}"></option>`).join("");
         container.innerHTML = `<datalist id="llm-model-catalog">${models}</datalist>
             <div class="llm-config-section">
-                <div class="llm-section-heading"><div><span>Componentes</span><h3>Servicios de plataforma</h3></div><p>${components.length} servicios configurables</p></div>
+                <div class="llm-section-heading"><div><span>${safeText(t("llm.components"))}</span><h3>${safeText(t("llm.platformServices"))}</h3></div><p>${safeText(t("llm.configurableServices", {count: components.length}))}</p></div>
                 <div class="llm-component-grid">${components.map(renderLLMComponent).join("")}</div>
             </div>
             <div class="llm-config-section llm-validator-section">
-                <div class="llm-section-heading"><div><span>Validators</span><h3>Configuración por identidad</h3></div><p>${validators.length} disponibles</p></div>
+                <div class="llm-section-heading"><div><span>${safeText(t("llm.validators"))}</span><h3>${safeText(t("llm.configurationByIdentity"))}</h3></div><p>${safeText(t("llm.availableValidators", {count: validators.length}))}</p></div>
                 <div class="llm-selector-control">
-                    <label for="llm-validator-selector">Selecciona un validator registrado</label>
-                    <select id="llm-validator-selector"><option value="">Selecciona una identidad para consultar su configuración…</option>${options}</select>
-                    <small>La identidad, el tipo y el destino interno se resuelven desde el registro de validators.</small>
+                    <label for="llm-validator-selector">${safeText(t("llm.selectRegisteredValidator"))}</label>
+                    <select id="llm-validator-selector"><option value="">${safeText(t("llm.selectValidatorPlaceholder"))}</option>${options}</select>
+                    <small>${safeText(t("llm.validatorResolutionHelp"))}</small>
                 </div>
-                <div id="llmValidatorDetail" class="llm-validator-detail-host"><div class="llm-selection-placeholder"><span>◇</span><strong>Selecciona un validator</strong><p>Se cargará su configuración efectiva antes de permitir cambios.</p></div></div>
+                <div id="llmValidatorDetail" class="llm-validator-detail-host"><div class="llm-selection-placeholder"><span>◇</span><strong>${safeText(t("llm.selectValidator"))}</strong><p>${safeText(t("llm.selectValidatorHelp"))}</p></div></div>
             </div>`;
         const selector = document.getElementById("llm-validator-selector");
         selector?.addEventListener("change", event => loadLLMValidatorDetail(event.target.value));
@@ -3153,47 +3166,97 @@ async function loadLLMConfiguration() {
             await loadLLMValidatorDetail(SELECTED_LLM_VALIDATOR_ID);
         }
     } catch (error) {
-        container.innerHTML = `<p class="empty-state">No se pudo cargar la configuración LLM administrativa.</p>`;
+        container.innerHTML = `<p class="empty-state">${safeText(t("llm.configurationLoadError"))}</p>`;
     }
 }
 
 function formatLLMNumber(value, decimals = 2) {
+    if (value === null || value === undefined || value === "") return "—";
     const number = Number(value);
-    return Number.isFinite(number) ? number.toLocaleString("es-ES", {maximumFractionDigits: decimals}) : "—";
+    const locale = window.I18N?.getLanguage?.() === "en" ? "en-US" : "es-ES";
+    return Number.isFinite(number) ? number.toLocaleString(locale, {maximumFractionDigits: decimals}) : "—";
 }
 
 function formatLLMCurrency(value, decimals = 4) {
+    if (value === null || value === undefined || value === "") return "—";
     const number = Number(value);
-    return Number.isFinite(number) ? number.toLocaleString("es-ES", {style: "currency", currency: "USD", maximumFractionDigits: decimals}) : "—";
+    const locale = window.I18N?.getLanguage?.() === "en" ? "en-US" : "es-ES";
+    return Number.isFinite(number) ? number.toLocaleString(locale, {style: "currency", currency: "USD", maximumFractionDigits: decimals}) : "—";
+}
+
+function llmGenericRecommendationReason(item) {
+    const prompt = Number(item.price?.prompt_per_million_usd);
+    const completion = Number(item.price?.completion_per_million_usd);
+    if (prompt === 0 && completion === 0) return t("llm.genericReasonFree");
+    if (Number(item.quality_score) >= 90) return t("llm.genericReasonHighQuality");
+    if (prompt <= 0.5 && completion <= 2) return t("llm.genericReasonLowCost");
+    return t("llm.genericReasonBalanced");
+}
+
+function renderLLMRecommendationOption(option) {
+    if (!option) return `<span class="llm-empty-value">${safeText(t("llm.noTierOption"))}</span>`;
+    const delta = Number(option.estimated_cost_delta_usd);
+    const hasDelta = option.estimated_cost_delta_usd !== null && option.estimated_cost_delta_usd !== undefined && Number.isFinite(delta);
+    const deltaClass = hasDelta ? (delta > 0 ? "increase" : delta < 0 ? "decrease" : "neutral") : "unknown";
+    const deltaPrefix = hasDelta && delta > 0 ? "+" : "";
+    const percent = hasDelta && option.estimated_cost_delta_percent !== null
+        ? `${Number(option.estimated_cost_delta_percent) > 0 ? "+" : ""}${formatLLMNumber(option.estimated_cost_delta_percent, 1)} %`
+        : t("llm.currentPriceUnavailable");
+    return `<div class="llm-recommendation-option">
+        <strong class="llm-model-name">${safeText(option.name || option.model)}</strong><code>${safeText(option.model)}</code>
+        <span>${formatLLMCurrency(option.estimated_cost_usd, 6)}</span><small>${safeText(t("llm.estimatedPerExecution"))}</small>
+        <span class="llm-cost-delta ${deltaClass}">${hasDelta ? `${deltaPrefix}${formatLLMCurrency(delta, 6)}` : "—"}</span><small>${safeText(percent)}</small>
+    </div>`;
 }
 
 function renderLLMRecommendations(payload) {
+    const deployed = payload.deployment_recommendations || [];
+    if (deployed.length) {
+        const rows = deployed.map(item => {
+            const workload = item.workload_key ? t(`llm.workloads.${item.workload_key}`) : item.workload;
+            const reason = item.reason_key ? t(`llm.reasons.${item.reason_key}`) : item.reason;
+            const options = Object.fromEntries((item.options || []).map(option => [option.tier, option]));
+            return `<tr>
+                <td><strong>${safeText(llmComponentTitle(item.target_id))}</strong><small>${safeText(item.target_kind === "validator" ? t("llm.validator") : t("llm.component"))}</small></td>
+                <td><strong>${safeText(workload)}</strong><small>${safeText(t("llm.inputOutputSample", {input: formatLLMNumber(item.input_tokens, 0), output: formatLLMNumber(item.output_tokens, 0)}))}</small></td>
+                <td><code>${safeText(item.current_model || "—")}</code><small>${safeText(item.current_provider || "—")}</small><strong>${formatLLMCurrency(item.estimated_current_cost_usd, 6)}</strong><small>${safeText(t("llm.estimatedPerExecution"))}</small></td>
+                <td>${renderLLMRecommendationOption(options.premium)}</td>
+                <td>${renderLLMRecommendationOption(options.similar)}</td>
+                <td>${renderLLMRecommendationOption(options.budget)}</td>
+                <td class="llm-reason">${safeText(reason || "—")}</td>
+            </tr>`;
+        }).join("");
+        return `<div class="llm-recommendations-head"><div><span>${safeText(t("llm.deployedCatalog"))}</span><h3>${safeText(t("llm.deployedRecommendationsTitle"))}</h3><p>${safeText(t("llm.deployedRecommendationsHelp"))}</p></div><div class="llm-generated-at">${safeText(t("ui.updated"))}<br><strong>${safeText(formatPollingEventDate(payload.generated_at))}</strong></div></div>
+            <div class="table-shell llm-recommendations-table"><table><thead><tr><th>${safeText(t("llm.deployedLlm"))}</th><th>${safeText(t("llm.workloadAndSample"))}</th><th>${safeText(t("llm.currentModel"))}<small>${safeText(t("llm.currentCost"))}</small></th><th>${safeText(t("llm.premiumTier"))}<small>${safeText(t("llm.premiumTierHelp"))}</small></th><th>${safeText(t("llm.similarTier"))}<small>${safeText(t("llm.similarTierHelp"))}</small></th><th>${safeText(t("llm.budgetTier"))}<small>${safeText(t("llm.budgetTierHelp"))}</small></th><th>${safeText(t("llm.reason"))}</th></tr></thead><tbody>${rows}</tbody></table></div>
+            <div class="llm-catalog-notes"><p>${safeText(t("llm.pricingNote"))}</p><p>${safeText(t("llm.estimationNote"))}</p><p>${safeText(t("llm.benchmarkNotice"))}</p></div>`;
+    }
+
     const rows = (payload.recommendations || []).map(item => `<tr>
         <td><span class="llm-rank">${safeText(item.rank)}</span></td>
         <td><strong class="llm-model-name">${safeText(item.name || item.model)}</strong><code>${safeText(item.model)}</code></td>
-        <td><strong>${formatLLMNumber(item.quality_score, 1)}</strong><small>Calidad</small></td>
-        <td><strong>${formatLLMNumber(item.value_score, 1)}</strong><small>Valor</small></td>
+        <td><strong>${formatLLMNumber(item.quality_score, 1)}</strong><small>${safeText(t("llm.quality"))}</small></td>
+        <td><strong>${formatLLMNumber(item.value_score, 1)}</strong><small>${safeText(t("llm.value"))}</small></td>
         <td>${formatLLMNumber(item.context_length, 0)}</td>
-        <td><span>${formatLLMCurrency(item.price?.prompt_per_million_usd)}</span><small>Entrada / 1M</small><span>${formatLLMCurrency(item.price?.completion_per_million_usd)}</span><small>Salida / 1M</small></td>
-        <td><strong>${formatLLMCurrency(item.estimated_validation_cost_usd, 6)}</strong><small>por validación estimada</small></td>
-        <td class="llm-reason">${safeText(item.reason || "—")}</td>
+        <td><span>${formatLLMCurrency(item.price?.prompt_per_million_usd)}</span><small>${safeText(t("llm.inputPerMillion"))}</small><span>${formatLLMCurrency(item.price?.completion_per_million_usd)}</span><small>${safeText(t("llm.outputPerMillion"))}</small></td>
+        <td><strong>${formatLLMCurrency(item.estimated_validation_cost_usd, 6)}</strong><small>${safeText(t("llm.estimatedPerValidation"))}</small></td>
+        <td class="llm-reason">${safeText(llmGenericRecommendationReason(item))}</td>
     </tr>`).join("");
-    return `<div class="llm-recommendations-head"><div><span>Catálogo OpenRouter</span><h3>Modelos recomendados</h3><p>Ordenados por relación estimada entre calidad y coste.</p></div><div class="llm-generated-at">Actualizado<br><strong>${safeText(formatPollingEventDate(payload.generated_at))}</strong></div></div>
-        <div class="table-shell llm-recommendations-table"><table><thead><tr><th>#</th><th>Modelo</th><th>Quality</th><th>Value</th><th>Contexto</th><th>Precio</th><th>Coste estimado</th><th>Motivo</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty-state">No hay recomendaciones con los filtros actuales.</td></tr>`}</tbody></table></div>
-        <div class="llm-catalog-notes"><p>${safeText(payload.pricing_note || "")}</p><p>${safeText(payload.estimation_note || "")}</p></div>`;
+    return `<div class="llm-recommendations-head"><div><span>${safeText(t("llm.catalog"))}</span><h3>${safeText(t("llm.recommendedModelsTitle"))}</h3><p>${safeText(t("llm.recommendedModelsHelp"))}</p></div><div class="llm-generated-at">${safeText(t("ui.updated"))}<br><strong>${safeText(formatPollingEventDate(payload.generated_at))}</strong></div></div>
+        <div class="table-shell llm-recommendations-table"><table><thead><tr><th>${safeText(t("llm.rank"))}</th><th>${safeText(t("llm.model"))}</th><th>${safeText(t("llm.quality"))}</th><th>${safeText(t("llm.value"))}</th><th>${safeText(t("llm.context"))}</th><th>${safeText(t("llm.price"))}</th><th>${safeText(t("llm.estimatedCost"))}</th><th>${safeText(t("llm.reason"))}</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty-state">${safeText(t("llm.noRecommendations"))}</td></tr>`}</tbody></table></div>
+        <div class="llm-catalog-notes"><p>${safeText(t("llm.pricingNote"))}</p><p>${safeText(t("llm.estimationNote"))}</p></div>`;
 }
 
 async function loadLLMRecommendations() {
     if (!IS_ADMIN) return;
     const container = document.getElementById("llmRecommendationsContainer");
     if (!container) return;
-    container.innerHTML = `<p class="empty-state">Consultando catálogo de modelos recomendados…</p>`;
+    container.innerHTML = `<p class="empty-state">${safeText(t("llm.loadingRecommendations"))}</p>`;
     try {
         const response = await fetchWithAuth(`${API}/admin/llm/models/openrouter?limit=20`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         container.innerHTML = renderLLMRecommendations(await response.json());
     } catch (error) {
-        container.innerHTML = `<div class="llm-error-state"><strong>No se pudo consultar el catálogo</strong><p>El proveedor de recomendaciones no está disponible en este momento.</p></div>`;
+        container.innerHTML = `<div class="llm-error-state"><strong>${safeText(t("llm.recommendationsLoadErrorTitle"))}</strong><p>${safeText(t("llm.recommendationsLoadErrorHelp"))}</p></div>`;
     }
 }
 
@@ -3227,10 +3290,10 @@ async function applyLLMComponent(component, button) {
             method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        alertMessage("Configuración aplicada", "success");
+        alertMessage(t("llm.configurationApplied"), "success");
         await loadLLMConfiguration();
     } catch (error) {
-        alertMessage("No se pudo aplicar la configuración LLM", "error");
+        alertMessage(t("llm.configurationApplyError"), "error");
     } finally {
         if (button?.isConnected) button.disabled = false;
     }
@@ -3248,10 +3311,10 @@ async function applyLLMValidator(validatorId, button) {
             method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        alertMessage("Configuración del validator aplicada", "success");
+        alertMessage(t("llm.validatorConfigurationApplied"), "success");
         await loadLLMConfiguration();
     } catch (error) {
-        alertMessage("No se pudo aplicar la configuración del validator", "error");
+        alertMessage(t("llm.validatorConfigurationApplyError"), "error");
     } finally {
         if (button?.isConnected) button.disabled = false;
     }
@@ -4423,6 +4486,8 @@ window.addEventListener("trustnews:languagechange", () => {
         if (listContainer?._fullData) renderTableData(listContainer, listContainer._fullData);
     } else if (activeSectionId === "validators") {
         listValidatorsCache();
+    } else if (activeSectionId === "llm-config" && IS_ADMIN) {
+        refreshLLMAdminView();
     }
 
     const badge = document.getElementById("sessionBadge");

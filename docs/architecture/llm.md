@@ -182,12 +182,13 @@ volver. Además, el adaptador siempre envía `temperature`; algunos modelos de r
 no anuncian ese parámetro. Todo candidato debe superar primero una prueba de compatibilidad
 del payload real, no solo aparecer en el catálogo.
 
-`api/admin` obtiene `/api/v1/models` y calcula una recomendación calidad/precio sin llamar a
-un LLM. Su tabla de familias (`gpt-5`, `claude-4`, `gemini-2.5`, etc.) está desactualizada
-respecto al catálogo de septiembre de 2026; modelos actuales como GPT-6 Astra o Claude
-Sonnet 5 pueden caer en la puntuación genérica. Esa lista no debe usarse para una decisión
-de producción hasta sustituir la heurística estática por capacidades declaradas y
-resultados de evaluación propios.
+`api/admin` obtiene `/api/v1/models` sin llamar a un LLM. Mantiene un ranking general de
+calidad/precio por compatibilidad, pero la vista administrativa principal usa perfiles
+curados por carga: extracción, routing, RAG por estrategia, búsqueda y memoria. Combina la
+configuración efectiva de cada servicio con el precio vigente del catálogo y calcula el
+coste actual, el recomendado y su diferencia sobre una muestra de tokens visible. La
+selección sigue siendo un candidato para benchmark, no una decisión automática de
+producción: el catálogo no mide entailment, calibración ni calidad con el corpus propio.
 
 ## Ponderación de la necesidad de calidad
 
@@ -227,7 +228,7 @@ evaluación, en lugar de depender de alias `latest`.
 | `google/gemini-3.8-flash` | Generación, router y RAG equilibrado | Flash actual, gran contexto y salida estructurada documentada | Verificar compatibilidad real del schema en el endpoint elegido |
 | `google/gemini-3.5-flash-lite` | Router de alto volumen | Variante pequeña para clasificación barata | No asumir que corrige el problema observado con 2.5 Flash-Lite |
 | `anthropic/claude-sonnet-5` | RAG premium y diversidad de ensemble | Segunda familia de razonamiento disponible en OpenRouter | Solo vía OpenRouter con el código actual |
-| `mistral-medium-3-5` | Generación/RAG equilibrado y opción europea | Chat Completions y Structured Outputs oficiales | Evaluar español y entailment con el corpus propio |
+| `mistralai/mistral-medium-3-5` | Generación/RAG equilibrado y opción europea | Chat Completions y Structured Outputs oficiales | Evaluar español y entailment con el corpus propio |
 | `mistral-small-2603` | Router, memoria y generación económica | Sustituto vigente de la línea Small antigua; salida estructurada | No usar el ahorro como sustituto del benchmark RAG |
 
 Configuraciones iniciales razonables para el benchmark:

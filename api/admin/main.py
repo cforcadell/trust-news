@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiokafka import AIOKafkaConsumer
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing import Optional, List, Dict, Any
 
 # =========================================================
@@ -54,12 +54,40 @@ class OpenRouterModelRecommendation(BaseModel):
     env: OpenRouterValidatorEnv
     reason: str
 
+
+class OpenRouterRecommendationOption(BaseModel):
+    tier: str
+    model: str
+    name: str
+    price: OpenRouterPrice
+    estimated_cost_usd: float
+    estimated_cost_delta_usd: Optional[float] = None
+    estimated_cost_delta_percent: Optional[float] = None
+
+
+class DeployedLLMRecommendation(BaseModel):
+    target_id: str
+    target_kind: str
+    workload: str
+    workload_key: Optional[str] = None
+    current_provider: str
+    current_model: str
+    input_tokens: int
+    output_tokens: int
+    current_price: Optional[OpenRouterPrice] = None
+    estimated_current_cost_usd: Optional[float] = None
+    options: List[OpenRouterRecommendationOption]
+    reason: str
+    reason_key: Optional[str] = None
+
+
 class OpenRouterRecommendationsResponse(BaseModel):
     generated_at: datetime
     source_url: str
     pricing_note: str
     estimation_note: str
     recommendations: List[OpenRouterModelRecommendation]
+    deployment_recommendations: List[DeployedLLMRecommendation] = Field(default_factory=list)
 
 
 class ValidatorTypeWeightsUpdate(BaseModel):
@@ -337,6 +365,220 @@ def is_text_generation_model(model: Dict[str, Any]) -> bool:
     if output_modalities and "text" not in output_modalities:
         return False
     return True
+
+
+# Curated candidates are deliberately workload-specific. Catalog metadata can
+# confirm availability and price, but not evidence entailment or extraction quality.
+LLM_RECOMMENDATION_PROFILES: dict[str, dict[str, Any]] = {
+    "generate-asertions": {
+        "translation_key": "generateAssertions",
+        "workload": "Extracción estructurada de aserciones",
+        "tiers": {
+            "premium": ["google/gemini-3.8-flash", "mistralai/mistral-medium-3-5"],
+            "similar": ["openai/gpt-5-nano", "openai/gpt-4.1-nano"],
+            "budget": ["qwen/qwen3.7-flash", "qwen/qwen3-30b-a3b-instruct-2507"],
+        },
+        "input_tokens": 3000, "output_tokens": 1200,
+        "reason": "Prioriza extracción multilingüe, cobertura de hechos y salida estructurada; debe superar el benchmark de AssertionBatch antes del cambio.",
+    },
+    "source-router": {
+        "translation_key": "sourceRouter",
+        "workload": "Clasificación estructurada de fuentes",
+        "tiers": {
+            "premium": ["google/gemini-3.8-flash", "google/gemini-3.5-flash-lite"],
+            "similar": ["openai/gpt-5-nano", "openai/gpt-4.1-nano"],
+            "budget": ["mistralai/mistral-nemo", "qwen/qwen3.7-flash"],
+        },
+        "input_tokens": 2000, "output_tokens": 800,
+        "reason": "Modelo pequeño orientado a alto volumen, con contexto amplio y salida estructurada para clasificar autoridad y jurisdicción.",
+    },
+    "rag:ext_only_official": {
+        "translation_key": "ragExtOnlyOfficial",
+        "workload": "Validación RAG · solo fuentes oficiales externas",
+        "tiers": {
+            "premium": ["openai/gpt-5.6-sol", "google/gemini-3.1-pro-preview", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3-30b-a3b-instruct-2507", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["qwen/qwen3.7-flash", "amazon/nova-micro-v1"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Prioriza razonamiento probatorio y entailment sobre evidencias oficiales; es el uso con mayor impacto y justifica un modelo de gama alta.",
+    },
+    "rag:ext_official_first": {
+        "translation_key": "ragExtOfficialFirst",
+        "workload": "Validación RAG · fuentes oficiales primero",
+        "tiers": {
+            "premium": ["anthropic/claude-sonnet-5", "google/gemini-3.1-pro-preview", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3.7-flash", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["mistralai/mistral-nemo", "amazon/nova-micro-v1"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Aporta una familia distinta al ensemble y capacidad alta para distinguir soporte, contradicción y evidencia insuficiente.",
+    },
+    "rag:local": {
+        "translation_key": "ragLocal",
+        "workload": "Validación RAG · corpus local",
+        "tiers": {
+            "premium": ["mistralai/mistral-medium-3-5", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3-30b-a3b-instruct-2507", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["qwen/qwen3.7-flash", "mistralai/mistral-nemo"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Mantiene diversidad de proveedor y prioriza comprensión multilingüe de documentos locales con salida estructurada.",
+    },
+    "rag": {
+        "translation_key": "rag",
+        "workload": "Validación RAG",
+        "tiers": {
+            "premium": ["google/gemini-3.1-pro-preview", "openai/gpt-5.6-sol", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3-30b-a3b-instruct-2507", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["qwen/qwen3.7-flash", "amazon/nova-micro-v1"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Prioriza razonamiento probatorio y grounding; la elección final requiere medir entailment y citas con el corpus del proyecto.",
+    },
+    "search": {
+        "translation_key": "search",
+        "workload": "Validación con búsqueda online",
+        "tiers": {
+            "premium": ["google/gemini-3.8-flash", "openai/gpt-5.6-terra"],
+            "similar": ["openai/gpt-5-nano", "qwen/qwen3-30b-a3b-instruct-2507"],
+            "budget": ["qwen/qwen3.7-flash", "mistralai/mistral-nemo"],
+        },
+        "input_tokens": 2500, "output_tokens": 700,
+        "reason": "Equilibra síntesis y coste para búsqueda online; las citas siguen siendo no verificadas hasta persistir las anotaciones del proveedor.",
+    },
+    "memory": {
+        "translation_key": "memory",
+        "workload": "Validación por conocimiento del modelo",
+        "tiers": {
+            "premium": ["mistralai/mistral-small-2603", "google/gemini-3.5-flash-lite"],
+            "similar": ["openai/gpt-5-nano", "qwen/qwen3-30b-a3b-instruct-2507"],
+            "budget": ["mistralai/mistral-nemo", "qwen/qwen3.7-flash"],
+        },
+        "input_tokens": 1800, "output_tokens": 500,
+        "reason": "Prioriza calibración y coste moderado: un modelo más caro no corrige la falta de evidencia verificable de este tipo de validator.",
+    },
+}
+
+
+def openrouter_price(model: dict[str, Any]) -> Optional[OpenRouterPrice]:
+    pricing = model.get("pricing") or {}
+    prompt_price = decimal_or_none(pricing.get("prompt"))
+    completion_price = decimal_or_none(pricing.get("completion"))
+    if prompt_price is None or completion_price is None or prompt_price < 0 or completion_price < 0:
+        return None
+    return OpenRouterPrice(
+        prompt_per_token_usd=str(prompt_price), completion_per_token_usd=str(completion_price),
+        prompt_per_million_usd=round(price_per_million(prompt_price), 6),
+        completion_per_million_usd=round(price_per_million(completion_price), 6),
+    )
+
+
+def estimated_token_cost(price: OpenRouterPrice, input_tokens: int, output_tokens: int) -> float:
+    return float(
+        Decimal(price.prompt_per_token_usd) * Decimal(input_tokens)
+        + Decimal(price.completion_per_token_usd) * Decimal(output_tokens)
+    )
+
+
+def recommendation_profile(component: str, validator_type: Optional[dict[str, Any]] = None,
+                           strategy: Optional[str] = None) -> Optional[dict[str, Any]]:
+    if component in ("generate-asertions", "source-router"):
+        return LLM_RECOMMENDATION_PROFILES[component]
+    type_name = str((validator_type or {}).get("name") or "").upper()
+    if type_name == "RAG_EVIDENCE_VALIDATION":
+        key = f"rag:{str(strategy or '').lower()}"
+        return LLM_RECOMMENDATION_PROFILES.get(key, LLM_RECOMMENDATION_PROFILES["rag"])
+    if type_name == "LLM_SEARCH_VALIDATION":
+        return LLM_RECOMMENDATION_PROFILES["search"]
+    if type_name == "LLM_MEMORY_VALIDATION":
+        return LLM_RECOMMENDATION_PROFILES["memory"]
+    return None
+
+
+def build_deployed_recommendation(*, target_id: str, target_kind: str, current: dict[str, Any],
+                                  catalog: dict[str, dict[str, Any]], profile: dict[str, Any]) -> Optional[DeployedLLMRecommendation]:
+    input_tokens = int(profile["input_tokens"])
+    output_tokens = int(profile["output_tokens"])
+    current_provider = str(current.get("provider") or "").lower()
+    current_model = str(current.get("model") or "")
+    current_raw = catalog.get(current_model) if current_provider == "openrouter" else None
+    current_price = openrouter_price(current_raw) if current_raw else None
+    current_cost = estimated_token_cost(current_price, input_tokens, output_tokens) if current_price else None
+
+    options = []
+    for tier in ("premium", "similar", "budget"):
+        candidate_ids = profile.get("tiers", {}).get(tier, [])
+        for model_id in candidate_ids:
+            raw_model = catalog.get(model_id)
+            price = openrouter_price(raw_model) if raw_model else None
+            if not price or model_id == current_model:
+                continue
+            estimated_cost = estimated_token_cost(price, input_tokens, output_tokens)
+            if tier == "similar" and current_cost is not None and not current_cost * 0.5 <= estimated_cost <= current_cost * 1.5:
+                continue
+            if tier == "budget" and (current_cost is None or estimated_cost >= current_cost):
+                continue
+            delta = estimated_cost - current_cost if current_cost is not None else None
+            delta_percent = (delta / current_cost * 100) if delta is not None and current_cost else None
+            options.append(OpenRouterRecommendationOption(
+                tier=tier,
+                model=model_id,
+                name=raw_model.get("name") or model_id,
+                price=price,
+                estimated_cost_usd=round(estimated_cost, 8),
+                estimated_cost_delta_usd=round(delta, 8) if delta is not None else None,
+                estimated_cost_delta_percent=round(delta_percent, 2) if delta_percent is not None else None,
+            ))
+            break
+    if not options:
+        return None
+
+    return DeployedLLMRecommendation(
+        target_id=target_id, target_kind=target_kind, workload=profile["workload"],
+        workload_key=profile.get("translation_key"),
+        current_provider=current_provider, current_model=current_model,
+        input_tokens=input_tokens, output_tokens=output_tokens, current_price=current_price,
+        estimated_current_cost_usd=round(current_cost, 8) if current_cost is not None else None,
+        options=options,
+        reason=profile["reason"], reason_key=profile.get("translation_key"),
+    )
+
+
+async def deployed_llm_recommendations(catalog: dict[str, dict[str, Any]]) -> list[DeployedLLMRecommendation]:
+    component_calls = [get_llm_component(component) for component in LLM_COMPONENT_TARGETS]
+    results = await asyncio.gather(*component_calls, discover_validators(), return_exceptions=True)
+    recommendations: list[DeployedLLMRecommendation] = []
+
+    for component, result in zip(LLM_COMPONENT_TARGETS, results[:len(component_calls)]):
+        if isinstance(result, Exception):
+            logger.warning("Could not inspect deployed LLM component=%s error=%s", component, result.__class__.__name__)
+            continue
+        profile = recommendation_profile(component)
+        recommendation = build_deployed_recommendation(
+            target_id=component, target_kind="component", current=result.get("actual") or {},
+            catalog=catalog, profile=profile,
+        ) if profile else None
+        if recommendation:
+            recommendations.append(recommendation)
+
+    validator_result = results[-1]
+    if isinstance(validator_result, Exception):
+        logger.warning("Could not inspect deployed validators error=%s", validator_result.__class__.__name__)
+        return recommendations
+    for validator in validator_result:
+        profile = recommendation_profile(
+            "validator", validator.get("validator_type"), validator.get("evidence_search_strategy"),
+        )
+        if not profile or not validator.get("model"):
+            continue
+        recommendation = build_deployed_recommendation(
+            target_id=validator["validator_id"], target_kind="validator", current=validator,
+            catalog=catalog, profile=profile,
+        )
+        if recommendation:
+            recommendations.append(recommendation)
+    return recommendations
 
 
 # =========================================================
@@ -814,12 +1056,19 @@ async def get_openrouter_model_recommendations(
     for index, recommendation in enumerate(selected, start=1):
         recommendation.rank = index
 
+    catalog = {
+        model["id"]: model for model in raw_models
+        if isinstance(model, dict) and model.get("id") and is_text_generation_model(model)
+    }
+    deployment_recommendations = await deployed_llm_recommendations(catalog)
+
     return OpenRouterRecommendationsResponse(
         generated_at=datetime.now(timezone.utc),
         source_url=OPENROUTER_MODELS_URL,
         pricing_note="OpenRouter publica pricing.prompt y pricing.completion como USD por token; aquí también se muestra USD por millón de tokens.",
-        estimation_note="estimated_validation_cost_usd asume una validación típica de 1000 tokens de entrada y 250 de salida.",
+        estimation_note="El ranking general asume 1000 tokens de entrada y 250 de salida. La comparación por LLM usa la carga indicada en cada fila; no incluye búsqueda web, caché, razonamiento interno ni descuentos.",
         recommendations=selected,
+        deployment_recommendations=deployment_recommendations,
     )
 
 

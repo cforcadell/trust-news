@@ -6,7 +6,7 @@
 
 ## Endpoints
 
-- `GET /ai/openrouter/recommendations`: consulta modelos de OpenRouter y devuelve una recomendación ordenada por heurística de calidad/precio.
+- `GET /ai/openrouter/recommendations`: consulta el catálogo de OpenRouter y devuelve tanto el ranking general como tres alternativas por componente/validator LLM desplegado: mejora premium, opción de coste/capacidad comparable y opción de ahorro. Para cada una calcula su diferencia frente al modelo efectivo sobre una muestra de tokens explícita.
 - `POST /clients`: crea un cliente de cuotas.
 - `GET /clients`: lista clientes, con filtros opcionales por `status` y búsqueda parcial por `name`.
 - `GET /clients/{client_id}`: recupera cuotas, consumo y estado de un cliente.

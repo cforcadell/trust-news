@@ -44,6 +44,15 @@ informe no presenta el coste como facturación real.
 
 La contraseña nunca se escribe en los artefactos. Se admite:
 
+Para el cliente de servicio `TrustNewsApi` se recomienda `client_credentials`:
+
+    export ASSERMETRY_KEYCLOAK_CLIENT_ID='TrustNewsApi'
+    read -rsp 'TrustNewsApi client secret: ' ASSERMETRY_KEYCLOAK_CLIENT_SECRET
+    export ASSERMETRY_KEYCLOAK_CLIENT_SECRET
+
+El script obtiene y renueva el token cuando sea necesario. El secreto nunca se
+escribe en los artefactos.
+
     export ASSERMETRY_ACCESS_TOKEN='...'
 
 o, si el cliente de Keycloak permite Direct Access Grants:
@@ -135,6 +144,34 @@ Comparar dos perfiles y exigir un máximo normalizado de 0,25 USD por noticia:
       --repetitions 5 \
       --max-news-cost-usd 0.25 \
       --require-costs
+
+### Caché de Evidence Search
+
+Por defecto el runner conserva `evidence_search_cache_v2`. Esta es la opción
+adecuada para comparar modelos con evidencia ya recuperada, aunque para una
+comparación de calidad reproducible se recomienda un corpus congelado.
+
+Para medir cada repetición en frío se puede vaciar exclusivamente la caché de
+respuestas de Evidence Search inmediatamente antes de publicar la orden:
+
+    python3 scripts/llm-benchmark.py run \
+      --profile benchmarks/llm/profiles/current-openrouter.json \
+      --repetitions 3 \
+      --clear-evidence-cache
+
+El despliegue local publica Evidence Search en `http://localhost:8074`. Si no
+está accesible en esa dirección, se puede indicar su URL directa:
+
+    export ASSERMETRY_EVIDENCE_SEARCH_URL='http://localhost:8074'
+
+o usar `--evidence-search-url`. La limpieza se registra en `manifest.json` y
+en cada `run.json`, incluyendo la colección y el número de documentos
+eliminados. Si la limpieza falla, esa repetición falla sin publicar la orden.
+
+El flag no elimina `domain_profiles_v1` ni modifica `source_routes_v2`.
+Los perfiles de dominio son datos estables, no una caché. Además, una ruta
+`FRESH` puede evitar la ejecución del LLM de `source-router`; por tanto, este
+flag no basta por sí solo para comparar modelos de Source Router en frío.
 
 El perfil example-balanced-openrouter es una plantilla. Hay que revisar la
 disponibilidad y el precio de sus modelos antes de usarlo.

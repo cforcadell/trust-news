@@ -3,6 +3,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("llm_benchmark", ROOT / "scripts/llm-benchmark.py")
@@ -12,6 +13,52 @@ SPEC.loader.exec_module(benchmark)
 
 
 class LLMBenchmarkTests(unittest.TestCase):
+    def test_clear_evidence_cache_uses_delete_and_returns_audit_data(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "status": "ok",
+            "cache_collection": "evidence_search_cache_v2",
+            "deleted_count": 7,
+        }).encode()
+
+        with mock.patch.object(benchmark.urllib.request, "urlopen", return_value=response) as urlopen:
+            result = benchmark.clear_evidence_cache("http://evidence:8074/", False, 12)
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://evidence:8074/admin/cache")
+        self.assertEqual(request.get_method(), "DELETE")
+        self.assertEqual(result["deleted_count"], 7)
+        self.assertEqual(result["cache_collection"], "evidence_search_cache_v2")
+
+    def test_run_parser_exposes_opt_in_evidence_cache_clear(self):
+        with mock.patch.dict(benchmark.os.environ, {
+            "ASSERMETRY_EVIDENCE_SEARCH_URL": "http://evidence:8074",
+        }):
+            args = benchmark.parser().parse_args(["run", "--clear-evidence-cache"])
+        self.assertTrue(args.clear_evidence_cache)
+        self.assertEqual(args.evidence_search_url, "http://evidence:8074")
+
+    def test_token_provider_uses_client_credentials(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "access_token": "service-token",
+            "expires_in": 300,
+        }).encode()
+        environment = {
+            "ASSERMETRY_KEYCLOAK_CLIENT_ID": "TrustNewsApi",
+            "ASSERMETRY_KEYCLOAK_CLIENT_SECRET": "secret-for-test",
+        }
+        with mock.patch.dict(benchmark.os.environ, environment, clear=True):
+            with mock.patch.object(benchmark.urllib.request, "urlopen", return_value=response) as urlopen:
+                provider = benchmark.TokenProvider("https://localhost:7443", False)
+                self.assertEqual(provider.token(), "service-token")
+        request = urlopen.call_args.args[0]
+        form = dict(benchmark.urllib.parse.parse_qsl(request.data.decode()))
+        self.assertEqual(form, {
+            "grant_type": "client_credentials",
+            "client_id": "TrustNewsApi",
+            "client_secret": "secret-for-test",
+        })
     def test_profile_rejects_non_openrouter_provider(self):
         profile = {
             "schema_version": 1,

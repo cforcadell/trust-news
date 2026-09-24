@@ -137,7 +137,8 @@ class TokenProvider:
         self.username = os.getenv("ASSERMETRY_USERNAME", "").strip()
         self.password = os.getenv("ASSERMETRY_PASSWORD", "")
         self.realm = os.getenv("ASSERMETRY_KEYCLOAK_REALM", "TrustNews")
-        self.client_id = os.getenv("ASSERMETRY_KEYCLOAK_CLIENT_ID", "TrustNewsWeb")
+        self.client_secret = os.getenv("ASSERMETRY_KEYCLOAK_CLIENT_SECRET", "")
+        self.client_id = os.getenv("ASSERMETRY_KEYCLOAK_CLIENT_ID", "TrustNewsApi")
         self.token_endpoint = os.getenv(
             "ASSERMETRY_TOKEN_URL",
             f"{self.origin}/auth/realms/{urllib.parse.quote(self.realm)}/protocol/openid-connect/token",
@@ -161,9 +162,17 @@ class TokenProvider:
                 return str(self.access_token)
             except BenchmarkError:
                 self.refresh_token = None
+        if self.client_secret:
+            self._request_token({
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            })
+            return str(self.access_token)
         if not self.username or not self.password:
             raise BenchmarkError(
-                "Define ASSERMETRY_ACCESS_TOKEN o ASSERMETRY_USERNAME y ASSERMETRY_PASSWORD"
+                "Define ASSERMETRY_ACCESS_TOKEN, ASSERMETRY_KEYCLOAK_CLIENT_SECRET "
+                "o ASSERMETRY_USERNAME y ASSERMETRY_PASSWORD"
             )
         self._request_token({
             "grant_type": "password",
@@ -236,6 +245,41 @@ class ApiClient:
 
     def put(self, path: str, body: Any) -> Any:
         return self.request("PUT", path, body)
+
+
+def clear_evidence_cache(base_url: str, verify_tls: bool, timeout: float) -> dict[str, Any]:
+    """Clear only Evidence Search's response cache and return its audit payload."""
+    endpoint = f"{base_url.rstrip('/')}/admin/cache"
+    request = urllib.request.Request(
+        endpoint, headers={"Accept": "application/json"}, method="DELETE",
+    )
+    context = ssl.create_default_context() if verify_tls else ssl._create_unverified_context()
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise ApiError(exc.code, f"Evidence Search cache: {detail[:1000]}") from exc
+    except urllib.error.URLError as exc:
+        raise BenchmarkError(
+            f"No se pudo limpiar la caché de Evidence Search en {endpoint}: {exc}"
+        ) from exc
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as exc:
+        raise BenchmarkError(
+            "Evidence Search devolvió una respuesta no JSON al limpiar la caché"
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        raise BenchmarkError(f"Evidence Search no confirmó la limpieza de caché: {payload!r}")
+    return {
+        "cleared_at": utc_now(),
+        "endpoint": endpoint,
+        "deleted_count": int(payload.get("deleted_count") or 0),
+        "cache_collection": payload.get("cache_collection"),
+        "duration_seconds": round(time.monotonic() - started, 6),
+    }
 
 
 def actual_config(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1230,6 +1274,10 @@ def run_benchmark(args: argparse.Namespace) -> int:
         "base_url": base_url,
         "git": git_metadata(),
         "cost_method": "estimated; no se persiste usage real en las órdenes actuales",
+        "evidence_cache": {
+            "clear_before_each_repetition": args.clear_evidence_cache,
+            "url": args.evidence_search_url if args.clear_evidence_cache else None,
+        },
         "profile_plan": ({
             "plan_id": plan["plan_id"],
             "path": str(pathlib.Path(args.profile_plan).resolve()),
@@ -1294,6 +1342,11 @@ def run_benchmark(args: argparse.Namespace) -> int:
                             "resolved_profile": resolved,
                         }
                         try:
+                            if args.clear_evidence_cache:
+                                run["evidence_cache_clear"] = clear_evidence_cache(
+                                    args.evidence_search_url, verify_tls, args.http_timeout,
+                                )
+                                monotonic_start = time.monotonic()
                             published = client.post(
                                 "/orders/publishNew",
                                 {"text": case["news"], "validation_mode": "LIGHT"},
@@ -1437,6 +1490,21 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--require-costs", action="store_true")
     run.add_argument("--stop-on-failure", action="store_true")
     run.add_argument("--lock-file", default="/tmp/assermetry-llm-benchmark.lock")
+    run.add_argument(
+        "--clear-evidence-cache", action="store_true",
+        help=(
+            "Vacía evidence_search_cache_v2 antes de cada repetición para medir en frío; "
+            "no modifica rutas ni perfiles de dominio"
+        ),
+    )
+    run.add_argument(
+        "--evidence-search-url",
+        default=os.getenv("ASSERMETRY_EVIDENCE_SEARCH_URL", "http://localhost:8074"),
+        help=(
+            "URL directa de Evidence Search usada por --clear-evidence-cache "
+            "(por defecto ASSERMETRY_EVIDENCE_SEARCH_URL o http://localhost:8074)"
+        ),
+    )
     run.add_argument(
         "--verify-tls", action=argparse.BooleanOptionalAction,
         default=os.getenv("ASSERMETRY_TLS_VERIFY", "false").lower() in {"1", "true", "yes"},

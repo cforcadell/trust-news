@@ -562,11 +562,36 @@ class LightValidationResponse(BaseModel):
     payload: LightValidationResponsePayload
 
 class ValidatorAPIResponse(BaseModel):
-    resultado: str
+    model_config = ConfigDict(extra="forbid")
+
+    resultado: Literal["TRUE", "FALSE", "UNKNOWN"]
     descripcion: str
-    confidence: Optional[str] = None
+    confidence: Optional[Literal["HIGH", "MEDIUM", "LOW"]] = None
     sources: Optional[List[EvidenceItem]] = None
     evidence_used: Optional[List[EvidenceItem]] = None
+
+
+class RAGValidationEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context_id: str = Field(min_length=1)
+    supports: bool
+    reason: str = Field(min_length=1)
+
+
+class RAGValidatorAPIResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resultado: Literal["TRUE", "FALSE", "UNKNOWN"]
+    descripcion: str = Field(min_length=1)
+    confidence: Literal["HIGH", "MEDIUM", "LOW"]
+    evidence_used: List[RAGValidationEvidence]
+
+    @model_validator(mode="after")
+    def require_evidence_for_decisive_verdict(self):
+        if self.resultado in {"TRUE", "FALSE"} and not self.evidence_used:
+            raise ValueError("TRUE/FALSE require at least one evidence_used entry")
+        return self
 
 # ============================================================
 # 🔹 CONSISTENCY MODELS

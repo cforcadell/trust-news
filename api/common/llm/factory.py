@@ -34,10 +34,17 @@ def _attempts() -> int:
 
 
 def _validate_response(request: LLMRequest, response: LLMResponse) -> None:
-    if request.response_model is not None:
+    if request.response_model is not None and request.strict_response_validation:
         parse_structured_json(response.content, request.response_model)
     elif request.json_mode or request.response_schema:
         parse_structured_json(response.content)
+
+
+def parse_response(request: LLMRequest, response: LLMResponse):
+    """Parse a response using the same model used to generate its JSON Schema."""
+    if request.response_model is None:
+        raise LLMConfigurationError("Structured parsing requires response_model")
+    return parse_structured_json(response.content, request.response_model)
 
 
 def complete(provider_name: str, request: LLMRequest) -> LLMResponse:
@@ -74,3 +81,11 @@ async def acomplete(provider_name: str, request: LLMRequest) -> LLMResponse:
                 raise
             await asyncio.sleep(delay * attempt)
     raise LLMProviderError(provider.name, "LLM request failed")
+
+
+def complete_structured(provider_name: str, request: LLMRequest):
+    return parse_response(request, complete(provider_name, request))
+
+
+async def acomplete_structured(provider_name: str, request: LLMRequest):
+    return parse_response(request, await acomplete(provider_name, request))

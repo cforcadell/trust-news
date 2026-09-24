@@ -9,13 +9,13 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(generate)
 
 
-def test_openrouter_uses_prompted_json_with_strict_local_validation(monkeypatch):
+def test_openrouter_uses_the_same_strict_schema_as_other_providers(monkeypatch):
     monkeypatch.setattr(generate, "AI_PROVIDER", "openrouter")
 
     request = generate.build_assertions_llm_request("noticia", "model")
 
     assert request.json_mode is True
-    assert request.response_schema is None
+    assert request.response_schema == generate.get_assertions_schema()
     assert request.response_model is generate.AssertionBatch
 
 
@@ -24,9 +24,13 @@ def test_native_provider_keeps_json_schema(monkeypatch):
 
     request = generate.build_assertions_llm_request("noticia", "model")
 
-    assert request.json_mode is False
+    assert request.json_mode is True
     assert request.response_schema == generate.get_assertions_schema()
     assert request.response_model is generate.AssertionBatch
+
+
+def test_assertion_schema_enforces_the_configured_maximum():
+    assert generate.get_assertions_schema()["properties"]["assertions"]["maxItems"] == generate.MAX_ASSERTIONS
 
 
 def test_prompt_lists_context_contract_and_iso_region_example():

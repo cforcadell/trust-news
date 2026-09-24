@@ -6,7 +6,7 @@
 
 ## Endpoints
 
-- `GET /ai/openrouter/recommendations`: consulta el catálogo de OpenRouter y devuelve tanto el ranking general como tres alternativas por componente/validator LLM desplegado: mejora premium, opción de coste/capacidad comparable y opción de ahorro. Para cada una calcula su diferencia frente al modelo efectivo sobre una muestra de tokens explícita.
+- `GET /ai/openrouter/recommendations`: consulta el catálogo de OpenRouter y devuelve tanto el ranking general como tres alternativas por componente/validator LLM desplegado: mejora premium, opción de coste/capacidad comparable y opción de ahorro. Para cada una calcula su diferencia frente al modelo efectivo sobre una muestra de tokens explícita. El parámetro opcional `max_news_cost_usd` limita el coste LLM combinado de cada escenario para una noticia estimada de cinco aserciones; las combinaciones que no pueden cumplirlo se omiten, incluida la premium.
 - `POST /clients`: crea un cliente de cuotas.
 - `GET /clients`: lista clientes, con filtros opcionales por `status` y búsqueda parcial por `name`.
 - `GET /clients/{client_id}`: recupera cuotas, consumo y estado de un cliente.

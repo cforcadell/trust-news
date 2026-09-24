@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "id": "eu-news-2025-v1",
+  "title": "Cuatro afirmaciones europeas de 2025",
+  "language": "es",
+  "description": "Caso sintético. No publicar como información real.",
+  "news": "En 2025, Suecia reforzó sus programas públicos de vacunación infantil tras una recomendación de su autoridad sanitaria. Alemania mantuvo su compromiso de reducir las emisiones industriales mediante nuevas medidas de transición energética. Italia prohibió por completo el acceso de turistas a todos sus centros históricos para proteger el patrimonio cultural. España eliminó la enseñanza obligatoria de lenguas extranjeras en la educación secundaria.",
+  "match_threshold": 0.5,
+  "assertions": [
+    {
+      "id": "SE_VACCINATION",
+      "text": "Suecia reforzó sus programas públicos de vacunación infantil en 2025.",
+      "expected_verdict": "TRUE",
+      "category_ids": [
+        5
+      ],
+      "required_terms": [
+        "Suecia",
+        "vacunación",
+        "infantil",
+        "programas"
+      ]
+    },
+    {
+      "id": "DE_EMISSIONS",
+      "text": "Alemania mantuvo medidas para reducir emisiones industriales mediante la transición energética.",
+      "expected_verdict": "TRUE",
+      "category_ids": [
+        9
+      ],
+      "required_terms": [
+        "Alemania",
+        "emisiones",
+        "industriales",
+        "transición",
+        "energética"
+      ]
+    },
+    {
+      "id": "IT_TOURISM_BAN",
+      "text": "Italia prohibió por completo el acceso de turistas a todos sus centros históricos.",
+      "expected_verdict": "FALSE",
+      "category_ids": [
+        8
+      ],
+      "required_terms": [
+        "Italia",
+        "prohibió",
+        "turistas",
+        "todos",
+        "centros",
+        "históricos"
+      ]
+    },
+    {
+      "id": "ES_FOREIGN_LANGUAGES",
+      "text": "España eliminó la enseñanza obligatoria de lenguas extranjeras en secundaria.",
+      "expected_verdict": "FALSE",
+      "category_ids": [
+        10
+      ],
+      "required_terms": [
+        "España",
+        "eliminó",
+        "lenguas",
+        "extranjeras",
+        "secundaria"
+      ]
+    }
+  ]
+}

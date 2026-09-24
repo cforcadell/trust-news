@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from common.llm import LLMRequest, LLMResponse, acomplete, parse_structured_json
 from common.llm.errors import LLMConfigurationError, LLMProviderError
 from common.llm.factory import get_llm_provider
-from common.llm.openrouter import OpenAICompatibleProvider
+from common.llm.openrouter import OpenAICompatibleProvider, _strict_openrouter_schema
 from common.llm.provider import LLMProvider
 
 
@@ -112,9 +112,17 @@ def test_openrouter_payload_requires_strict_json_schema_support():
 
     assert payload["response_format"] == {
         "type": "json_schema",
-        "json_schema": {"name": "Payload", "strict": True, "schema": schema},
+        "json_schema": {"name": "Payload", "strict": True, "schema": _strict_openrouter_schema(schema)},
     }
     assert payload["provider"] == {"require_parameters": True}
+    assert "temperature" not in payload
+
+
+def test_response_model_derives_the_provider_schema():
+    request = LLMRequest(prompt="x", model="test", response_model=Payload)
+
+    assert request.json_mode is True
+    assert request.response_schema == Payload.model_json_schema()
 
 
 def test_all_llm_consumers_import_common_layer():

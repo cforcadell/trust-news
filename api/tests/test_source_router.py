@@ -163,7 +163,9 @@ async def test_classifier_retry_includes_validation_feedback(monkeypatch):
         SimpleNamespace(llm_provider="openrouter", llm_model="test", llm_temperature=0),
     )
     assert len(requests) == 2
-    assert requests[0].response_model is None
+    assert requests[0].response_model is models.ClassificationBatch
+    assert requests[0].strict_response_validation is False
+    assert requests[0].response_schema == models.ClassificationBatch.model_json_schema()
     assert "failed schema validation" in requests[1].prompt
     assert "CONTINENTAL" in requests[1].prompt
     assert result[0].authority_level.value == "NATIONAL_PRIMARY"

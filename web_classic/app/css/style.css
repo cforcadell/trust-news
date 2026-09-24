@@ -945,6 +945,30 @@ pre, .event-payload-pre {
   box-shadow: inset 0 0 0 1px rgba(16, 214, 154, .28);
 }
 .llm-admin-panel[hidden] { display: none; }
+.llm-budget-control {
+  display: grid;
+  grid-template-columns: minmax(190px, .55fr) minmax(280px, 1fr);
+  gap: 8px 16px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(16, 214, 154, .25);
+  border-radius: 12px;
+  background: rgba(16, 214, 154, .055);
+}
+.llm-budget-control label { color: #eef6ff; font-size: .78rem; font-weight: 800; }
+.llm-budget-control label small { color: var(--accent-green); }
+.llm-budget-control > div { display: flex; gap: 8px; }
+.llm-budget-control input {
+  width: min(230px, 100%);
+  margin: 0;
+  border: 1px solid rgba(148, 163, 184, .26);
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: rgba(4, 10, 22, .72);
+  color: #eef6ff;
+}
+.llm-budget-control > small { grid-column: 1 / -1; color: var(--text-muted); font-size: .68rem; }
 .llm-config-section {
   margin-top: 14px;
   padding: 20px;
@@ -1141,6 +1165,14 @@ pre, .event-payload-pre {
 .llm-cost-delta.unknown { color: var(--text-muted); }
 .llm-recommendation-option { display: grid; gap: 4px; min-width: 185px; }
 .llm-recommendation-option > span:not(.llm-cost-delta) { color: #eaf2ff; font-weight: 800; }
+.llm-news-cost-row td {
+  border-top: 2px solid rgba(16, 214, 154, .42);
+  background: linear-gradient(115deg, rgba(16, 214, 154, .12), rgba(34, 211, 238, .06));
+}
+.llm-news-cost-row td:first-child strong,
+.llm-news-cost-value { color: #c9fff0; font-size: .82rem; }
+.llm-news-cost-row .llm-reason strong { display: block; margin-bottom: 4px; color: #eaf2ff; }
+.llm-news-cost-row .llm-reason small { margin: 0; line-height: 1.45; }
 .llm-reason { min-width: 220px; max-width: 320px; color: #bdc9da; line-height: 1.45; }
 .llm-catalog-notes { display: grid; gap: 4px; margin-top: 12px; color: var(--text-muted); font-size: .67rem; }
 .llm-catalog-notes p { margin: 0; }
@@ -1154,6 +1186,9 @@ pre, .event-payload-pre {
 }
 @media (max-width: 680px) {
   .llm-admin-tabs { width: 100%; }
+  .llm-budget-control { grid-template-columns: 1fr; }
+  .llm-budget-control > div { flex-wrap: wrap; }
+  .llm-budget-control > small { grid-column: auto; }
   .llm-admin-tab { flex: 1; padding-inline: 10px; }
   .llm-config-section { padding: 14px; }
   .llm-section-heading,

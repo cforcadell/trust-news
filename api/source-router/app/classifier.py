@@ -111,7 +111,10 @@ async def classify_candidates(
                     prompt=prompt,
                     model=settings.llm_model,
                     temperature=settings.llm_temperature,
-                    response_schema=ClassificationBatch.model_json_schema(),
+                    response_model=ClassificationBatch,
+                    # A malformed row must not discard valid classifications.
+                    # The provider still receives the complete strict schema.
+                    strict_response_validation=False,
                 ),
             )
         except (LLMProviderError, LLMResponseError):

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Assermetry</title>
     <base href="/gui/">
-    <link rel="stylesheet" href="css/style.css?v=20260920-llm-admin">
+    <link rel="stylesheet" href="css/style.css?v=20260924-news-budget">
     <link rel="icon" type="image/svg+xml" href="img/assermetry_favicon.svg">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/auth/js/keycloak.js"></script>
@@ -224,6 +224,14 @@
                 <div id="llmConfigContainer" class="dynamic-content"></div>
             </div>
             <div id="llmRecommendationsPanel" class="llm-admin-panel" role="tabpanel" hidden>
+                <div class="llm-budget-control">
+                    <label for="llm-max-news-cost"><span data-i18n="llm.maxNewsCost">Coste máximo por noticia</span> <small>USD</small></label>
+                    <div>
+                        <input id="llm-max-news-cost" type="number" min="0.00000001" step="any" inputmode="decimal" placeholder="Sin límite" data-i18n-placeholder="llm.noCostLimit">
+                        <button id="btn-apply-llm-budget" type="button" class="btn-secondary" data-i18n="llm.recalculateRecommendations">Recalcular</button>
+                    </div>
+                    <small data-i18n="llm.maxNewsCostHelp">Presupuesto LLM combinado para una noticia de 5 aserciones; limita también la combinación premium.</small>
+                </div>
                 <div id="llmRecommendationsContainer" class="dynamic-content"></div>
             </div>
         </section>
@@ -239,7 +247,7 @@
     </div>
 </main>
 
-<script src="js/i18n.js?v=20260921-llm-i18n"></script>
-<script src="js/app.js?v=20260921-llm-i18n"></script>
+<script src="js/i18n.js?v=20260924-news-budget"></script>
+<script src="js/app.js?v=20260924-news-budget"></script>
 </body>
 </html>

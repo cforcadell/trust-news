@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 
 @pytest.fixture(scope="module")
@@ -89,6 +90,39 @@ def test_direct_llm_search_requires_an_implemented_online_provider(validator, mo
     monkeypatch.setattr(validator, "AI_PROVIDER", "openrouter")
     assert validator.openrouter_model_for_current_type("openai/gpt-5-mini") == "openai/gpt-5-mini:online"
     assert validator.openrouter_model_for_current_type("openai/gpt-5-mini:online") == "openai/gpt-5-mini:online"
+
+
+def test_configured_rag_validator_uses_shared_strict_schema(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    captured = {}
+    expected = validator.RAGValidatorAPIResponse(
+        resultado="UNKNOWN", descripcion="Insufficient evidence", confidence="LOW", evidence_used=[]
+    )
+
+    def fake_complete(provider, request):
+        captured.update(provider=provider, request=request)
+        return expected
+
+    monkeypatch.setattr(validator, "complete_structured", fake_complete)
+    client = validator.ConfiguredAIValidator("openrouter", "current-model", 0)
+    result = client.verificar_asercion("claim", "context", [])
+
+    assert result is expected
+    assert captured["provider"] == "openrouter"
+    assert captured["request"].response_model is validator.RAGValidatorAPIResponse
+    assert captured["request"].response_schema == validator.RAGValidatorAPIResponse.model_json_schema()
+
+
+def test_rag_response_contract_rejects_unsupported_decisive_verdicts(validator):
+    with pytest.raises(ValidationError, match="at least one evidence_used"):
+        validator.RAGValidatorAPIResponse(
+            resultado="TRUE", descripcion="Claim is true", confidence="HIGH", evidence_used=[]
+        )
+
+    with pytest.raises(ValidationError):
+        validator.RAGValidatorAPIResponse(
+            resultado="MAYBE", descripcion="Unclear", confidence="LOW", evidence_used=[]
+        )
 
 
 def routed_source():

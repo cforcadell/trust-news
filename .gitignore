@@ -62,3 +62,4 @@ __pycache__
 api/validate-asertions/__pycache__/main.cpython-312.pyc
 
 skaffold-v*.bak
+artifacts/llm-benchmark/

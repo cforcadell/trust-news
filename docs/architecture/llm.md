@@ -67,11 +67,10 @@ atómicas, autocontenidas y verificables. También asigna `categoryId`, `topic_c
 `evidence_kind`, entidades, lugares, jurisdicción, contexto temporal y pistas de búsqueda.
 
 **Contrato.** La respuesta se valida contra `AssertionBatch` y los modelos Pydantic de
-`common.models`. Con Gemini directo se envía un JSON Schema. Con OpenRouter el llamador
-marca `json_mode`, pero el adaptador actual no traduce esa marca a `response_format` para
-OpenRouter: en la práctica depende de la instrucción del prompt y valida después en local.
-Existe un comentario explícito indicando que Gemini 2.5 Flash-Lite devolvía objetos vacíos
-con el schema estricto a través de OpenRouter.
+`common.models`. El modelo Pydantic genera automáticamente el JSON Schema en `common/llm`:
+Gemini directo recibe `responseSchema`, OpenRouter recibe `response_format=json_schema`
+estricto y el resto de proveedores compatibles recibe modo JSON más validación local.
+`MAX_ASSERTIONS` se expresa también como `maxItems` y se comprueba al volver.
 
 **Tipo de modelo necesario.** Modelo de extracción de información multilingüe con muy
 buena obediencia a esquemas, cobertura de hechos, resolución de correferencias y
@@ -171,23 +170,40 @@ y asíncronas, reintentos, contabilización de tokens y validación de JSON. No 
 caso de uso: es la capa de transporte de los anteriores.
 
 OpenRouter recibe `response_format=json_schema`, `strict=true` y
-`provider.require_parameters=true` cuando el llamador proporciona un schema. Esto evita
+`provider.require_parameters=true` cuando el llamador proporciona un modelo Pydantic o un
+schema. La capa común normaliza el schema de Pydantic al subconjunto estricto aceptado por
+OpenAI/OpenRouter y omite `temperature` en peticiones estructuradas para no excluir modelos
+que no soportan ese parámetro. Esto evita
 enrutar deliberadamente a endpoints que ignoren el parámetro, aunque la documentación del
 proveedor advierte que el cumplimiento exacto puede variar por endpoint.
 
-Hay dos excepciones relevantes: `generate-asertions` no envía ahora el schema por
-OpenRouter debido a la incompatibilidad observada, y `validate-asertions` no configura ni
-schema ni modo JSON. Sus respuestas se estructuran mediante el prompt y se validan al
-volver. Además, el adaptador siempre envía `temperature`; algunos modelos de razonamiento
-no anuncian ese parámetro. Todo candidato debe superar primero una prueba de compatibilidad
-del payload real, no solo aparecer en el catálogo.
+`generate-asertions`, `source-router` y `validate-asertions` usan esta misma ruta
+estructurada. El router conserva una excepción local deliberada: valida cada clasificación
+por separado para recuperar filas válidas, aunque el proveedor recibe el schema completo.
+Los validadores RAG usan un contrato específico que exige veredicto, confianza y referencias
+`context_id`; además mantienen la comprobación determinista de grounding. Todo candidato
+debe superar primero una prueba de compatibilidad del payload real, no solo aparecer en el
+catálogo.
 
 `api/admin` obtiene `/api/v1/models` sin llamar a un LLM. Mantiene un ranking general de
 calidad/precio por compatibilidad, pero la vista administrativa principal usa perfiles
 curados por carga: extracción, routing, RAG por estrategia, búsqueda y memoria. Combina la
 configuración efectiva de cada servicio con el precio vigente del catálogo y calcula el
-coste actual, el recomendado y su diferencia sobre una muestra de tokens visible. La
-selección sigue siendo un candidato para benchmark, no una decisión automática de
+coste actual, el recomendado y su diferencia sobre una muestra de tokens visible. La GUI
+permite enviar `max_news_cost_usd`: un presupuesto global para una noticia de cinco
+aserciones medias. El backend evalúa conjuntamente generación, validadores y el routing de
+los RAG locales, y elimina cualquier combinación que supere el límite, incluida la premium.
+Para reducir huecos, el nivel similar admite candidatos curados cuyo coste esté entre el
+10 % y el 500 % del actual. Si ninguno entra en ese rango, selecciona el candidato curado
+más próximo, priorizando los que no incrementan el coste. Si los candidatos específicos de
+la carga no están disponibles, usa como último recurso el modelo textual con precio
+verificable más próximo del catálogo. Cuando una alternativa similar encarece demasiado la
+combinación global, se sustituye por la alternativa de ahorro de esa misma carga antes de
+omitirla. La combinación premium también se degrada primero a similar y después a ahorro;
+por tanto representa la mejor combinación viable bajo el límite, no una obligación de usar
+modelos de gama alta en todas las filas. Así se muestra al menos una alternativa siempre que exista
+un candidato con precio verificable y sea matemáticamente compatible con el límite.
+La selección sigue siendo un candidato para benchmark, no una decisión automática de
 producción: el catálogo no mide entailment, calibración ni calidad con el corpus propio.
 
 ## Ponderación de la necesidad de calidad
@@ -311,3 +327,14 @@ veredictos decisivos sin soporte.
 - [Structured Outputs de OpenRouter](https://openrouter.ai/docs/guides/features/structured-outputs)
 - [Búsqueda web de OpenRouter](https://openrouter.ai/docs/guides/features/plugins/web-search)
 - [Catálogo API de OpenRouter](https://openrouter.ai/api/v1/models)
+
+
+## Benchmark histórico de perfiles
+
+[scripts/llm-benchmark.py](../../scripts/llm-benchmark.py) permite comparar
+configuraciones completas exclusivamente OpenRouter sobre un caso versionado.
+El runner captura la configuración efectiva, aplica cada perfil, ejecuta órdenes
+LIGHT, calcula calidad y costes estimados, persiste JSON y SQLite y restaura la
+configuración inicial. El procedimiento, el esquema de perfiles, la puntuación
+y las garantías de recuperación se describen en
+[docs/tests/llm-benchmark.md](../tests/llm-benchmark.md).

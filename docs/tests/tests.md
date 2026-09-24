@@ -23,6 +23,19 @@ La suite E2E comprueba el recorrido y las invariantes operativas. No usa un
 oráculo factual estable: llegar a `VALIDATED` significa que el procesamiento
 terminó, no que el veredicto de la noticia sea correcto.
 
+## Benchmark histórico de configuraciones OpenRouter
+
+El batch [llm-benchmark.md](llm-benchmark.md) compara perfiles completos de
+generación, routing y validadores mediante una noticia sintética con oráculo
+factual. Ejecuta exclusivamente en modo LIGHT, conserva resultados JSON e
+indexa calidad, coste y duración en SQLite. Se valida localmente con:
+
+    python3 scripts/llm-benchmark.py validate-profiles
+
+A diferencia de la regresión E2E, este batch sí puntúa la calidad de extracción
+y de los veredictos. Requiere un entorno exclusivo porque cambia temporalmente
+la configuración LLM efectiva y la restaura al terminar.
+
 ## 1. Regresión E2E desde la GUI
 
 [`web_classic/test/run-regression.js`](../../web_classic/test/run-regression.js)

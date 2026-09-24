@@ -3209,7 +3209,86 @@ function renderLLMRecommendationOption(option) {
     </div>`;
 }
 
+const LLM_NEWS_ASSERTION_COUNT = 5;
+let LLM_RECOMMENDATIONS_REQUEST_ID = 0;
+
+function parseLLMNewsBudget(value) {
+    let normalized = String(value ?? "").trim().replace(/\s/g, "");
+    if (!normalized) return null;
+    if (normalized.includes(",") && normalized.includes(".")) {
+        if (normalized.lastIndexOf(",") > normalized.lastIndexOf(".")) {
+            normalized = normalized.replace(/\./g, "").replace(",", ".");
+        } else {
+            normalized = normalized.replace(/,/g, "");
+        }
+    } else if (normalized.includes(",")) {
+        normalized = normalized.replace(",", ".");
+    }
+    const budget = Number(normalized);
+    return Number.isFinite(budget) && budget > 0 ? budget : null;
+}
+
+function llmNewsExecutionCount(item, deployed) {
+    if (item.target_id === "generate-asertions") return 1;
+    if (item.target_id === "source-router") {
+        const localRagValidators = deployed.filter(candidate =>
+            candidate.target_kind === "validator" && candidate.workload_key === "ragLocal"
+        ).length;
+        return LLM_NEWS_ASSERTION_COUNT * localRagValidators;
+    }
+    if (item.target_kind === "validator") return LLM_NEWS_ASSERTION_COUNT;
+    return 0;
+}
+
+function estimateLLMNewsCost(deployed, tier = "current") {
+    let total = 0;
+    for (const item of deployed) {
+        const executions = llmNewsExecutionCount(item, deployed);
+        if (!executions) continue;
+        const option = tier === "current" ? null : (item.options || []).find(candidate => candidate.tier === tier);
+        const rawCost = option?.estimated_cost_usd ?? item.estimated_current_cost_usd;
+        const cost = Number(rawCost);
+        if (rawCost === null || rawCost === undefined || !Number.isFinite(cost)) return null;
+        total += cost * executions;
+    }
+    return total;
+}
+
+function enforceLLMRecommendationBudget(payload) {
+    const maxCost = Number(payload?.max_news_cost_usd);
+    if (payload?.max_news_cost_usd === null || payload?.max_news_cost_usd === undefined
+        || !Number.isFinite(maxCost) || maxCost <= 0) return payload;
+
+    let deployed = (payload.deployment_recommendations || []).map(item => ({
+        ...item,
+        options: [...(item.options || [])],
+    }));
+    const costs = {
+        ...(payload.estimated_news_costs_usd || {}),
+        current: estimateLLMNewsCost(deployed),
+    };
+    for (const tier of ["premium", "similar", "budget"]) {
+        let total = estimateLLMNewsCost(deployed, tier);
+        if (total === null || !Number.isFinite(total) || total > maxCost + Number.EPSILON) {
+            deployed = deployed.map(item => ({
+                ...item,
+                options: item.options.filter(option => option.tier !== tier),
+            }));
+            total = estimateLLMNewsCost(deployed, tier);
+        }
+        costs[tier] = total !== null && Number.isFinite(total) && total <= maxCost + Number.EPSILON
+            ? total
+            : null;
+    }
+    return {...payload, deployment_recommendations: deployed, estimated_news_costs_usd: costs};
+}
+
+function renderLLMNewsCost(value, contextKey) {
+    return `<strong class="llm-news-cost-value">${formatLLMCurrency(value, 6)}</strong><small>${safeText(t(contextKey))}</small>`;
+}
+
 function renderLLMRecommendations(payload) {
+    payload = enforceLLMRecommendationBudget(payload);
     const deployed = payload.deployment_recommendations || [];
     if (deployed.length) {
         const rows = deployed.map(item => {
@@ -3226,8 +3305,26 @@ function renderLLMRecommendations(payload) {
                 <td class="llm-reason">${safeText(reason || "—")}</td>
             </tr>`;
         }).join("");
+        const newsCosts = payload.estimated_news_costs_usd || {
+            current: estimateLLMNewsCost(deployed),
+            premium: estimateLLMNewsCost(deployed, "premium"),
+            similar: estimateLLMNewsCost(deployed, "similar"),
+            budget: estimateLLMNewsCost(deployed, "budget"),
+        };
+        const budgetContext = payload.max_news_cost_usd == null
+            ? t("llm.newsCostNoLimit")
+            : t("llm.newsCostLimit", {cost: formatLLMCurrency(payload.max_news_cost_usd, 6)});
+        const newsCostRow = `<tr class="llm-news-cost-row">
+            <td><strong>${safeText(t("llm.newsCostTitle"))}</strong><small>${safeText(t("llm.newsCostSample"))}</small></td>
+            <td>${safeText(t("llm.newsCostWorkload"))}</td>
+            <td>${renderLLMNewsCost(newsCosts.current, "llm.newsCostCurrent")}</td>
+            <td>${renderLLMNewsCost(newsCosts.premium, "llm.newsCostPremium")}</td>
+            <td>${renderLLMNewsCost(newsCosts.similar, "llm.newsCostSimilar")}</td>
+            <td>${renderLLMNewsCost(newsCosts.budget, "llm.newsCostBudget")}</td>
+            <td class="llm-reason"><strong>${safeText(t("llm.newsCostContextLabel"))}</strong><small>${safeText(budgetContext)}</small><small>${safeText(t("llm.newsCostContext"))}</small></td>
+        </tr>`;
         return `<div class="llm-recommendations-head"><div><span>${safeText(t("llm.deployedCatalog"))}</span><h3>${safeText(t("llm.deployedRecommendationsTitle"))}</h3><p>${safeText(t("llm.deployedRecommendationsHelp"))}</p></div><div class="llm-generated-at">${safeText(t("ui.updated"))}<br><strong>${safeText(formatPollingEventDate(payload.generated_at))}</strong></div></div>
-            <div class="table-shell llm-recommendations-table"><table><thead><tr><th>${safeText(t("llm.deployedLlm"))}</th><th>${safeText(t("llm.workloadAndSample"))}</th><th>${safeText(t("llm.currentModel"))}<small>${safeText(t("llm.currentCost"))}</small></th><th>${safeText(t("llm.premiumTier"))}<small>${safeText(t("llm.premiumTierHelp"))}</small></th><th>${safeText(t("llm.similarTier"))}<small>${safeText(t("llm.similarTierHelp"))}</small></th><th>${safeText(t("llm.budgetTier"))}<small>${safeText(t("llm.budgetTierHelp"))}</small></th><th>${safeText(t("llm.reason"))}</th></tr></thead><tbody>${rows}</tbody></table></div>
+            <div class="table-shell llm-recommendations-table"><table><thead><tr><th>${safeText(t("llm.deployedLlm"))}</th><th>${safeText(t("llm.workloadAndSample"))}</th><th>${safeText(t("llm.currentModel"))}<small>${safeText(t("llm.currentCost"))}</small></th><th>${safeText(t("llm.premiumTier"))}<small>${safeText(t("llm.premiumTierHelp"))}</small></th><th>${safeText(t("llm.similarTier"))}<small>${safeText(t("llm.similarTierHelp"))}</small></th><th>${safeText(t("llm.budgetTier"))}<small>${safeText(t("llm.budgetTierHelp"))}</small></th><th>${safeText(t("llm.reason"))}</th></tr></thead><tbody>${rows}</tbody><tfoot>${newsCostRow}</tfoot></table></div>
             <div class="llm-catalog-notes"><p>${safeText(t("llm.pricingNote"))}</p><p>${safeText(t("llm.estimationNote"))}</p><p>${safeText(t("llm.benchmarkNotice"))}</p></div>`;
     }
 
@@ -3248,14 +3345,40 @@ function renderLLMRecommendations(payload) {
 
 async function loadLLMRecommendations() {
     if (!IS_ADMIN) return;
+    const requestId = ++LLM_RECOMMENDATIONS_REQUEST_ID;
     const container = document.getElementById("llmRecommendationsContainer");
     if (!container) return;
     container.innerHTML = `<p class="empty-state">${safeText(t("llm.loadingRecommendations"))}</p>`;
     try {
-        const response = await fetchWithAuth(`${API}/admin/llm/models/openrouter?limit=20`);
+        const params = new URLSearchParams({limit: "20"});
+        const budgetInput = document.getElementById("llm-max-news-cost");
+        const rawBudget = budgetInput?.value.trim() || "";
+        let requestedBudget = null;
+        if (rawBudget) {
+            requestedBudget = parseLLMNewsBudget(rawBudget);
+            if (requestedBudget === null) {
+                budgetInput.setCustomValidity(t("llm.invalidNewsCost"));
+                budgetInput.reportValidity();
+                container.innerHTML = "";
+                return;
+            }
+            budgetInput.setCustomValidity("");
+            params.set("max_news_cost_usd", String(requestedBudget));
+        }
+        const response = await fetchWithAuth(`${API}/admin/llm/models/openrouter?${params}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        container.innerHTML = renderLLMRecommendations(await response.json());
+        const payload = await response.json();
+        if (requestId !== LLM_RECOMMENDATIONS_REQUEST_ID) return;
+        if (requestedBudget !== null) {
+            const echoedBudget = Number(payload.max_news_cost_usd);
+            if (!Number.isFinite(echoedBudget)
+                || Math.abs(echoedBudget - requestedBudget) > Number.EPSILON) {
+                throw new Error("El endpoint no aplicó el presupuesto solicitado");
+            }
+        }
+        container.innerHTML = renderLLMRecommendations(payload);
     } catch (error) {
+        if (requestId !== LLM_RECOMMENDATIONS_REQUEST_ID) return;
         container.innerHTML = `<div class="llm-error-state"><strong>${safeText(t("llm.recommendationsLoadErrorTitle"))}</strong><p>${safeText(t("llm.recommendationsLoadErrorHelp"))}</p></div>`;
     }
 }
@@ -3364,6 +3487,11 @@ function initializeApp() {
     document.getElementById('btn-clearNews')?.addEventListener('click', clearNewsForm);
     document.getElementById("btn-generateAssertions").addEventListener("click", handleGenerateAssertions);
     document.getElementById("btn-refresh-llm-config")?.addEventListener("click", refreshLLMAdminView);
+    document.getElementById("btn-apply-llm-budget")?.addEventListener("click", loadLLMRecommendations);
+    document.getElementById("llm-max-news-cost")?.addEventListener("input", event => event.target.setCustomValidity(""));
+    document.getElementById("llm-max-news-cost")?.addEventListener("keydown", event => {
+        if (event.key === "Enter") loadLLMRecommendations();
+    });
     document.querySelectorAll("[data-llm-tab]").forEach(button => {
         button.addEventListener("click", () => showLLMAdminTab(button.dataset.llmTab));
     });

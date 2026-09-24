@@ -88,6 +88,8 @@ class OpenRouterRecommendationsResponse(BaseModel):
     estimation_note: str
     recommendations: List[OpenRouterModelRecommendation]
     deployment_recommendations: List[DeployedLLMRecommendation] = Field(default_factory=list)
+    max_news_cost_usd: Optional[float] = None
+    estimated_news_costs_usd: Dict[str, Optional[float]] = Field(default_factory=dict)
 
 
 class ValidatorTypeWeightsUpdate(BaseModel):
@@ -369,6 +371,10 @@ def is_text_generation_model(model: Dict[str, Any]) -> bool:
 
 # Curated candidates are deliberately workload-specific. Catalog metadata can
 # confirm availability and price, but not evidence entailment or extraction quality.
+SIMILAR_COST_MIN_RATIO = 0.10
+SIMILAR_COST_MAX_RATIO = 5.00
+
+
 LLM_RECOMMENDATION_PROFILES: dict[str, dict[str, Any]] = {
     "generate-asertions": {
         "translation_key": "generateAssertions",
@@ -515,7 +521,13 @@ def build_deployed_recommendation(*, target_id: str, target_kind: str, current: 
             if not price or model_id == current_model:
                 continue
             estimated_cost = estimated_token_cost(price, input_tokens, output_tokens)
-            if tier == "similar" and current_cost is not None and not current_cost * 0.5 <= estimated_cost <= current_cost * 1.5:
+            if (
+                tier == "similar"
+                and current_cost is not None
+                and not current_cost * SIMILAR_COST_MIN_RATIO
+                <= estimated_cost
+                <= current_cost * SIMILAR_COST_MAX_RATIO
+            ):
                 continue
             if tier == "budget" and (current_cost is None or estimated_cost >= current_cost):
                 continue
@@ -531,9 +543,69 @@ def build_deployed_recommendation(*, target_id: str, target_kind: str, current: 
                 estimated_cost_delta_percent=round(delta_percent, 2) if delta_percent is not None else None,
             ))
             break
-    if not options:
-        return None
 
+    if not any(option.tier == "similar" for option in options):
+        fallback_candidates: list[tuple[tuple[float, float], str, dict[str, Any], OpenRouterPrice, float]] = []
+        seen_models: set[str] = set()
+        for tier in ("similar", "budget", "premium"):
+            for model_id in profile.get("tiers", {}).get(tier, []):
+                if model_id in seen_models or model_id == current_model:
+                    continue
+                seen_models.add(model_id)
+                raw_model = catalog.get(model_id)
+                price = openrouter_price(raw_model) if raw_model else None
+                if not raw_model or not price:
+                    continue
+                estimated_cost = estimated_token_cost(price, input_tokens, output_tokens)
+                if current_cost is not None and current_cost > 0:
+                    sort_key = (
+                        0.0 if estimated_cost <= current_cost else 1.0,
+                        abs(math.log(estimated_cost / current_cost)) if estimated_cost > 0 else float("inf"),
+                    )
+                else:
+                    sort_key = (0.0, estimated_cost)
+                fallback_candidates.append(
+                    (sort_key, model_id, raw_model, price, estimated_cost)
+                )
+        if not fallback_candidates:
+            for model_id, raw_model in catalog.items():
+                if model_id == current_model:
+                    continue
+                price = openrouter_price(raw_model)
+                if not price:
+                    continue
+                estimated_cost = estimated_token_cost(price, input_tokens, output_tokens)
+                if current_cost is not None and current_cost > 0:
+                    sort_key = (
+                        0.0 if estimated_cost <= current_cost else 1.0,
+                        abs(math.log(estimated_cost / current_cost))
+                        if estimated_cost > 0 else float("inf"),
+                    )
+                else:
+                    sort_key = (0.0, estimated_cost)
+                fallback_candidates.append(
+                    (sort_key, model_id, raw_model, price, estimated_cost)
+                )
+        if fallback_candidates:
+            _, model_id, raw_model, price, estimated_cost = min(
+                fallback_candidates, key=lambda item: item[0],
+            )
+            delta = estimated_cost - current_cost if current_cost is not None else None
+            delta_percent = (delta / current_cost * 100) if delta is not None and current_cost else None
+            options.append(OpenRouterRecommendationOption(
+                tier="similar",
+                model=model_id,
+                name=raw_model.get("name") or model_id,
+                price=price,
+                estimated_cost_usd=round(estimated_cost, 8),
+                estimated_cost_delta_usd=round(delta, 8) if delta is not None else None,
+                estimated_cost_delta_percent=round(delta_percent, 2) if delta_percent is not None else None,
+            ))
+    if not any(option.tier == "premium" for option in options):
+        similar = next((option for option in options if option.tier == "similar"), None)
+        if similar is not None:
+            options.append(similar.model_copy(update={"tier": "premium"}))
+    options.sort(key=lambda option: RECOMMENDATION_TIERS.index(option.tier))
     return DeployedLLMRecommendation(
         target_id=target_id, target_kind=target_kind, workload=profile["workload"],
         workload_key=profile.get("translation_key"),
@@ -543,6 +615,105 @@ def build_deployed_recommendation(*, target_id: str, target_kind: str, current: 
         options=options,
         reason=profile["reason"], reason_key=profile.get("translation_key"),
     )
+
+
+NEWS_ASSERTION_COUNT = 5
+RECOMMENDATION_TIERS = ("premium", "similar", "budget")
+
+
+def recommendation_news_executions(
+    recommendation: DeployedLLMRecommendation,
+    recommendations: list[DeployedLLMRecommendation],
+) -> int:
+    if recommendation.target_id == "generate-asertions":
+        return 1
+    if recommendation.target_id == "source-router":
+        local_rag_validators = sum(
+            item.target_kind == "validator" and item.workload_key == "ragLocal"
+            for item in recommendations
+        )
+        return NEWS_ASSERTION_COUNT * local_rag_validators
+    if recommendation.target_kind == "validator":
+        return NEWS_ASSERTION_COUNT
+    return 0
+
+
+def estimated_recommendation_news_cost(
+    recommendations: list[DeployedLLMRecommendation],
+    tier: str = "current",
+) -> Optional[float]:
+    total = 0.0
+    for recommendation in recommendations:
+        executions = recommendation_news_executions(recommendation, recommendations)
+        if not executions:
+            continue
+        option = next((item for item in recommendation.options if item.tier == tier), None)
+        cost = option.estimated_cost_usd if option else recommendation.estimated_current_cost_usd
+        if cost is None or not math.isfinite(cost):
+            return None
+        total += cost * executions
+    return round(total, 8)
+
+
+def constrain_recommendations_by_news_cost(
+    recommendations: list[DeployedLLMRecommendation],
+    max_news_cost_usd: Optional[float],
+) -> dict[str, Optional[float]]:
+    totals: dict[str, Optional[float]] = {
+        "current": estimated_recommendation_news_cost(recommendations),
+    }
+    for tier in RECOMMENDATION_TIERS:
+        total = estimated_recommendation_news_cost(recommendations, tier)
+        if max_news_cost_usd is not None:
+            while total is not None and total > max_news_cost_usd:
+                removable: list[tuple[float, DeployedLLMRecommendation]] = []
+                for recommendation in recommendations:
+                    option = next((item for item in recommendation.options if item.tier == tier), None)
+                    current_cost = recommendation.estimated_current_cost_usd
+                    if option is None or current_cost is None:
+                        continue
+                    saving = (
+                        option.estimated_cost_usd - current_cost
+                    ) * recommendation_news_executions(recommendation, recommendations)
+                    if saving > 0:
+                        removable.append((saving, recommendation))
+                if not removable:
+                    break
+                _, recommendation = max(removable, key=lambda item: item[0])
+                current_option = next(
+                    item for item in recommendation.options if item.tier == tier
+                )
+                fallback_tiers = {
+                    "premium": ("similar", "budget"),
+                    "similar": ("budget",),
+                }.get(tier, ())
+                replacements = [
+                    item for item in recommendation.options
+                    if item.tier in fallback_tiers
+                    and item.model != current_option.model
+                    and item.estimated_cost_usd < current_option.estimated_cost_usd
+                ]
+                replacement = min(
+                    replacements,
+                    key=lambda item: (
+                        fallback_tiers.index(item.tier), item.estimated_cost_usd,
+                    ),
+                    default=None,
+                )
+                recommendation.options = [item for item in recommendation.options if item.tier != tier]
+                if replacement is not None:
+                    recommendation.options.append(replacement.model_copy(update={"tier": tier}))
+                    recommendation.options.sort(
+                        key=lambda option: RECOMMENDATION_TIERS.index(option.tier)
+                    )
+                total = estimated_recommendation_news_cost(recommendations, tier)
+
+            if total is None or total > max_news_cost_usd:
+                for recommendation in recommendations:
+                    recommendation.options = [item for item in recommendation.options if item.tier != tier]
+                total = None
+        totals[tier] = total
+    return totals
 
 
 async def deployed_llm_recommendations(catalog: dict[str, dict[str, Any]]) -> list[DeployedLLMRecommendation]:
@@ -996,6 +1167,9 @@ async def get_openrouter_model_recommendations(
     limit: int = Query(8, ge=1, le=30, description="Número de modelos recomendados a devolver"),
     include_free: bool = Query(True, description="Incluir modelos gratuitos en la recomendación"),
     min_quality_score: float = Query(70, ge=1, le=100, description="Calidad mínima estimada por heurística interna"),
+    max_news_cost_usd: Optional[float] = Query(
+        None, gt=0, description="Coste LLM máximo combinado en USD para una noticia estimada de 5 aserciones",
+    ),
 ):
     """
     Devuelve modelos de OpenRouter ordenados por relación calidad/precio.
@@ -1061,6 +1235,9 @@ async def get_openrouter_model_recommendations(
         if isinstance(model, dict) and model.get("id") and is_text_generation_model(model)
     }
     deployment_recommendations = await deployed_llm_recommendations(catalog)
+    estimated_news_costs = constrain_recommendations_by_news_cost(
+        deployment_recommendations, max_news_cost_usd,
+    )
 
     return OpenRouterRecommendationsResponse(
         generated_at=datetime.now(timezone.utc),
@@ -1069,6 +1246,8 @@ async def get_openrouter_model_recommendations(
         estimation_note="El ranking general asume 1000 tokens de entrada y 250 de salida. La comparación por LLM usa la carga indicada en cada fila; no incluye búsqueda web, caché, razonamiento interno ni descuentos.",
         recommendations=selected,
         deployment_recommendations=deployment_recommendations,
+        max_news_cost_usd=max_news_cost_usd,
+        estimated_news_costs_usd=estimated_news_costs,
     )
 
 

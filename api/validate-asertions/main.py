@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking, send_and_wait, receipt_succeeded, require_successful_receipt
 from common.utils.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple,cid_to_multihash_tuple
 from common.models.veredicto import Veredicto, Validacion
-from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidenceSearchStrategy, evidence_search_strategy_supported
+from common.models.async_models import VerifyInputModel, ValidatorAPIResponse, RAGValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidenceSearchStrategy, evidence_search_strategy_supported
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     AssertionValidationPayloadV2,
@@ -37,7 +37,7 @@ from common.utils.ipfs_client import (
 )
 from common.utils.llm_json import strip_json_markdown
 from common.utils.llm_runtime import fetch_llm_runtime_override
-from common.llm import LLMRequest, complete
+from common.llm import LLMRequest, complete_structured
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.evidence import evaluate_evidence_grounding
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
@@ -214,7 +214,7 @@ class AdminConfigUpdate(BaseModel):
 # =========================================================
 class AIValidator(ABC):
     @abstractmethod
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> BaseModel:
         pass
 
 
@@ -581,51 +581,29 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
         logger.exception("Evidence search failed")
         raise
 
-class MistralValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        self.api_url = api_url
-        self.api_key = api_key
+def validation_response_model() -> type[BaseModel]:
+    if uses_evidence_search():
+        return RAGValidatorAPIResponse
+    return ValidatorAPIResponse
+
+
+class ConfiguredAIValidator(AIValidator):
+    """Provider-neutral validator backed by the shared structured LLM layer."""
+
+    def __init__(self, provider: str, model: str, temperature: float = 0.3):
+        self.provider = provider
         self.model = model
         self.temperature = temperature
 
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        contenido = build_prompt_content(texto, contexto, evidences)
-        return complete("mistral", LLMRequest(prompt=contenido, model=self.model, temperature=self.temperature)).content
-
-class GeminiValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        self.api_url = api_url
-        self.api_key = api_key
-        self.model = model
-        self.temperature = temperature
-
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        prompt = build_prompt_content(texto, contexto, evidences)
-        return complete("gemini", LLMRequest(prompt=prompt, model=self.model, temperature=self.temperature)).content
-
-class OpenRouterValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        self.api_url = api_url
-        self.api_key = api_key
-        self.model = model
-        self.temperature = temperature
-
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        contenido = build_prompt_content(texto, contexto, evidences)
-        model = openrouter_model_for_current_type(self.model)
-        return complete("openrouter", LLMRequest(prompt=contenido, model=model, temperature=self.temperature)).content
-
-class GrokValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        # xAI usa el formato estándar de OpenAI
-        self.api_url = api_url if api_url else "https://api.x.ai/v1/chat/completions"
-        self.api_key = api_key
-        self.model = model
-        self.temperature = temperature
-
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        contenido = build_prompt_content(texto, contexto, evidences)
-        return complete("grok", LLMRequest(prompt=contenido, model=self.model, temperature=self.temperature)).content
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> BaseModel:
+        model = openrouter_model_for_current_type(self.model) if self.provider == "openrouter" else self.model
+        request = LLMRequest(
+            prompt=build_prompt_content(texto, contexto, evidences),
+            model=model,
+            temperature=self.temperature,
+            response_model=validation_response_model(),
+        )
+        return complete_structured(self.provider, request)
     
 def build_ai_validator() -> Optional[AIValidator]:
     if not is_automatic_validator():
@@ -635,16 +613,15 @@ def build_ai_validator() -> Optional[AIValidator]:
         raise RuntimeError("AI_PROVIDER must be different from 'none' for LLM validator types")
     if uses_online_search() and AI_PROVIDER != "openrouter":
         raise RuntimeError("LLM_SEARCH_VALIDATION currently requires AI_PROVIDER=openrouter")
-    if AI_PROVIDER == "mistral":
-        return MistralValidator(API_URL, API_KEY, os.getenv("MODEL", "mistral-tiny"), TEMPERATURE)
-    elif AI_PROVIDER == "gemini":
-        return GeminiValidator(API_URL, API_KEY, os.getenv("MODEL", "gemini-1.5-flash"), TEMPERATURE)
-    elif AI_PROVIDER == "openrouter":
-        return OpenRouterValidator(API_URL, API_KEY, os.getenv("MODEL", "gpt-4o-mini"), TEMPERATURE)
-    elif AI_PROVIDER == "grok":
-        return GrokValidator(API_URL, API_KEY, os.getenv("MODEL", "grok-beta"), TEMPERATURE)
-    else:
+    defaults = {
+        "mistral": "mistral-tiny",
+        "gemini": "gemini-1.5-flash",
+        "openrouter": "gpt-4o-mini",
+        "grok": "grok-beta",
+    }
+    if AI_PROVIDER not in defaults:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
+    return ConfiguredAIValidator(AI_PROVIDER, os.getenv("MODEL", defaults[AI_PROVIDER]), TEMPERATURE)
 
 def clean_ai_response_text(text: str) -> str:
     return strip_json_markdown(text)
@@ -664,18 +641,20 @@ def kafka_security_kwargs():
     )
 
 
-def parse_validator_api_response(result_text: str) -> Tuple[Validacion, str, Dict[str, Any]]:
-    parsed_result = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
-    normalized = parsed_result.resultado.upper()
+def parse_validator_api_response(result: str | BaseModel) -> Tuple[Validacion, str, Dict[str, Any]]:
+    response_model = validation_response_model()
+    parsed_result = result if isinstance(result, response_model) else response_model.model_validate_json(clean_ai_response_text(result))
+    normalized = parsed_result.resultado
+    dumped = parsed_result.model_dump(mode="json")
     extras = {
         "resultado_raw": parsed_result.resultado,
         "confidence": parsed_result.confidence,
-        "sources": parsed_result.sources or [],
-        "evidence_used": parsed_result.evidence_used or [],
+        "sources": dumped.get("sources") or [],
+        "evidence_used": dumped.get("evidence_used") or [],
     }
-    if normalized in {"TRUE"}:
+    if normalized == "TRUE":
         return Validacion.TRUE, parsed_result.descripcion, extras
-    if normalized in {"FALSE"}:
+    if normalized == "FALSE":
         return Validacion.FALSE, parsed_result.descripcion, extras
     return Validacion.UNKNOWN, parsed_result.descripcion, extras
 

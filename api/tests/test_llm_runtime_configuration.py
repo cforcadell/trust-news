@@ -233,6 +233,229 @@ def test_deployed_llm_recommendation_does_not_invent_non_openrouter_current_pric
     assert all(option.estimated_cost_delta_percent is None for option in recommendation.options)
 
 
+def test_deployed_llm_recommendation_keeps_current_cost_without_alternatives():
+    admin = importlib.import_module("admin.main")
+    current_model = "custom/current-model"
+    catalog = {
+        current_model: {
+            "id": current_model,
+            "name": "Current",
+            "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+        },
+    }
+
+    recommendation = admin.build_deployed_recommendation(
+        target_id="generate-asertions",
+        target_kind="component",
+        current={"provider": "openrouter", "model": current_model},
+        catalog=catalog,
+        profile=admin.recommendation_profile("generate-asertions"),
+    )
+
+    assert recommendation is not None
+    assert recommendation.options == []
+    assert recommendation.estimated_current_cost_usd == pytest.approx(0.0054)
+
+
+def test_similar_recommendation_accepts_a_wider_cost_range():
+    admin = importlib.import_module("admin.main")
+    catalog = {
+        "current": {
+            "id": "current", "name": "Current",
+            "pricing": {"prompt": "0.000001", "completion": "0"},
+        },
+        "four-times": {
+            "id": "four-times", "name": "Four times",
+            "pricing": {"prompt": "0.000004", "completion": "0"},
+        },
+    }
+    profile = {
+        "workload": "test", "reason": "test", "input_tokens": 1000, "output_tokens": 0,
+        "tiers": {"premium": [], "similar": ["four-times"], "budget": []},
+    }
+
+    recommendation = admin.build_deployed_recommendation(
+        target_id="validator", target_kind="validator",
+        current={"provider": "openrouter", "model": "current"},
+        catalog=catalog, profile=profile,
+    )
+
+    similar = next(option for option in recommendation.options if option.tier == "similar")
+    assert similar.model == "four-times"
+
+
+def test_similar_recommendation_falls_back_to_a_curated_cheaper_model():
+    admin = importlib.import_module("admin.main")
+    catalog = {
+        "current": {
+            "id": "current", "name": "Current",
+            "pricing": {"prompt": "0.000001", "completion": "0"},
+        },
+        "too-expensive": {
+            "id": "too-expensive", "name": "Too expensive",
+            "pricing": {"prompt": "0.000010", "completion": "0"},
+        },
+        "cheaper": {
+            "id": "cheaper", "name": "Cheaper",
+            "pricing": {"prompt": "0.0000005", "completion": "0"},
+        },
+    }
+    profile = {
+        "workload": "test", "reason": "test", "input_tokens": 1000, "output_tokens": 0,
+        "tiers": {
+            "premium": ["too-expensive"], "similar": ["too-expensive"],
+            "budget": ["cheaper"],
+        },
+    }
+
+    recommendation = admin.build_deployed_recommendation(
+        target_id="validator", target_kind="validator",
+        current={"provider": "openrouter", "model": "current"},
+        catalog=catalog, profile=profile,
+    )
+
+    similar = next(option for option in recommendation.options if option.tier == "similar")
+    assert similar.model == "cheaper"
+
+
+def test_similar_recommendation_falls_back_to_the_priced_catalog():
+    admin = importlib.import_module("admin.main")
+    catalog = {
+        "current": {
+            "id": "current", "name": "Current",
+            "pricing": {"prompt": "0.000001", "completion": "0"},
+        },
+        "catalog-alternative": {
+            "id": "catalog-alternative", "name": "Catalog alternative",
+            "pricing": {"prompt": "0.0000008", "completion": "0"},
+        },
+    }
+    profile = {
+        "workload": "test", "reason": "test", "input_tokens": 1000,
+        "output_tokens": 0, "tiers": {"premium": [], "similar": [], "budget": []},
+    }
+
+    recommendation = admin.build_deployed_recommendation(
+        target_id="validator", target_kind="validator",
+        current={"provider": "openrouter", "model": "current"},
+        catalog=catalog, profile=profile,
+    )
+
+    similar = next(option for option in recommendation.options if option.tier == "similar")
+    assert similar.model == "catalog-alternative"
+
+
+def test_global_news_cost_limit_constrains_every_recommendation_tier():
+    admin = importlib.import_module("admin.main")
+    price = admin.OpenRouterPrice(
+        prompt_per_token_usd="0", completion_per_token_usd="0",
+        prompt_per_million_usd=0, completion_per_million_usd=0,
+    )
+
+    def deployed(target_id, target_kind, workload_key, current_cost, premium_cost):
+        return admin.DeployedLLMRecommendation(
+            target_id=target_id, target_kind=target_kind, workload=workload_key,
+            workload_key=workload_key, current_provider="openrouter", current_model="current",
+            input_tokens=1, output_tokens=1, estimated_current_cost_usd=current_cost,
+            options=[admin.OpenRouterRecommendationOption(
+                tier="premium", model="premium", name="Premium", price=price,
+                estimated_cost_usd=premium_cost,
+            )],
+            reason="test",
+        )
+
+    recommendations = [
+        deployed("generate-asertions", "component", "generateAssertions", 0.10, 0.20),
+        deployed("source-router", "component", "sourceRouter", 0.01, 0.02),
+        deployed("local-validator", "validator", "ragLocal", 0.05, 0.15),
+    ]
+
+    totals = admin.constrain_recommendations_by_news_cost(recommendations, 0.60)
+
+    assert totals["current"] == pytest.approx(0.40)
+    assert totals["premium"] == pytest.approx(0.55)
+    assert totals["premium"] <= 0.60
+    assert any(option.tier == "premium" for option in recommendations[0].options)
+    assert not any(option.tier == "premium" for option in recommendations[2].options)
+
+    impossible = copy.deepcopy(recommendations)
+    for recommendation in impossible:
+        recommendation.options = [admin.OpenRouterRecommendationOption(
+            tier="premium", model="premium", name="Premium", price=price,
+            estimated_cost_usd=recommendation.estimated_current_cost_usd,
+        )]
+    impossible_totals = admin.constrain_recommendations_by_news_cost(impossible, 0.20)
+
+    assert impossible_totals["premium"] is None
+    assert all(not any(option.tier == "premium" for option in item.options) for item in impossible)
+
+
+def test_global_limit_replaces_an_expensive_similar_option_with_savings():
+    admin = importlib.import_module("admin.main")
+    price = admin.OpenRouterPrice(
+        prompt_per_token_usd="0", completion_per_token_usd="0",
+        prompt_per_million_usd=0, completion_per_million_usd=0,
+    )
+    recommendation = admin.DeployedLLMRecommendation(
+        target_id="generate-asertions", target_kind="component", workload="test",
+        current_provider="openrouter", current_model="current",
+        input_tokens=1, output_tokens=1, estimated_current_cost_usd=0.10,
+        options=[
+            admin.OpenRouterRecommendationOption(
+                tier="similar", model="expensive", name="Expensive", price=price,
+                estimated_cost_usd=0.30,
+            ),
+            admin.OpenRouterRecommendationOption(
+                tier="budget", model="cheaper", name="Cheaper", price=price,
+                estimated_cost_usd=0.05,
+            ),
+        ],
+        reason="test",
+    )
+
+    totals = admin.constrain_recommendations_by_news_cost([recommendation], 0.15)
+
+    similar = next(option for option in recommendation.options if option.tier == "similar")
+    assert similar.model == "cheaper"
+    assert totals["similar"] == pytest.approx(0.05)
+    assert totals["similar"] <= 0.15
+
+
+def test_global_limit_degrades_premium_before_hiding_the_alternative():
+    admin = importlib.import_module("admin.main")
+    price = admin.OpenRouterPrice(
+        prompt_per_token_usd="0", completion_per_token_usd="0",
+        prompt_per_million_usd=0, completion_per_million_usd=0,
+    )
+    recommendation = admin.DeployedLLMRecommendation(
+        target_id="generate-asertions", target_kind="component", workload="test",
+        current_provider="openrouter", current_model="current",
+        input_tokens=1, output_tokens=1, estimated_current_cost_usd=0.10,
+        options=[
+            admin.OpenRouterRecommendationOption(
+                tier="premium", model="expensive", name="Expensive", price=price,
+                estimated_cost_usd=0.30,
+            ),
+            admin.OpenRouterRecommendationOption(
+                tier="similar", model="compatible", name="Compatible", price=price,
+                estimated_cost_usd=0.12,
+            ),
+            admin.OpenRouterRecommendationOption(
+                tier="budget", model="cheaper", name="Cheaper", price=price,
+                estimated_cost_usd=0.05,
+            ),
+        ],
+        reason="test",
+    )
+
+    totals = admin.constrain_recommendations_by_news_cost([recommendation], 0.15)
+
+    premium = next(option for option in recommendation.options if option.tier == "premium")
+    assert premium.model == "compatible"
+    assert totals["premium"] == pytest.approx(0.12)
+    assert totals["premium"] <= 0.15
+
+
 @pytest.mark.asyncio
 async def test_deployed_recommendations_cover_components_and_each_llm_validator(monkeypatch):
     admin = importlib.import_module("admin.main")
@@ -300,9 +523,12 @@ async def test_gateway_llm_admin_requires_verified_admin_role(monkeypatch):
             assert (await client.get("/admin/llm/models/openrouter", headers={"x-test-auth": "invalid"})).status_code == 401
             assert (await client.get("/admin/llm/models/openrouter", headers={"x-test-auth": "user"})).status_code == 403
             recommended = await client.get(
-                "/admin/llm/models/openrouter?limit=12", headers={"x-test-auth": "admin"},
+                "/admin/llm/models/openrouter?limit=12&max_news_cost_usd=0.25",
+                headers={"x-test-auth": "admin"},
             )
             assert recommended.status_code == 200
-            assert recommended.json()["target"].endswith("/ai/openrouter/recommendations?limit=12")
+            assert recommended.json()["target"].endswith(
+                "/ai/openrouter/recommendations?limit=12&max_news_cost_usd=0.25"
+            )
     finally:
         gateway.app.dependency_overrides.pop(gateway.get_current_user, None)

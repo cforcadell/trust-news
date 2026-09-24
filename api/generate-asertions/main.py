@@ -8,7 +8,7 @@ from typing import Any, List, Optional
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 from common.utils.logging_utils import (
     configure_single_line_json_logging,
@@ -50,7 +50,7 @@ from common.routing_taxonomy import (
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
 from common.utils.llm_json import parse_model_list
-from common.llm import LLMConfigurationError, LLMRequest, acomplete
+from common.llm import LLMConfigurationError, LLMRequest, acomplete_structured
 from common.utils.llm_runtime import fetch_llm_runtime_override
 
 # ============================================================
@@ -223,7 +223,7 @@ def current_model() -> str:
 
 class AssertionBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    assertions: List[Assertion]
+    assertions: List[Assertion] = Field(max_length=MAX_ASSERTIONS)
 
 
 def get_assertions_schema() -> dict:
@@ -236,21 +236,13 @@ def parse_assertions_content(content) -> List[Assertion]:
 
 
 def build_assertions_llm_request(text: str, model: str) -> LLMRequest:
-    """Build a provider-compatible request while keeping local validation strict."""
-    request = {
-        "prompt": build_assertions_prompt(text),
-        "model": model,
-        "temperature": TEMPERATURE,
-        "response_model": AssertionBatch,
-    }
-    if AI_PROVIDER == "openrouter":
-        # Gemini 2.5 Flash Lite via OpenRouter currently returns empty objects
-        # for both the full and minimal strict json_schema contracts. Prompted
-        # JSON remains populated and is still validated by response_model.
-        request["json_mode"] = True
-    else:
-        request["response_schema"] = get_assertions_schema()
-    return LLMRequest(**request)
+    """Build one structured request; common.llm handles provider differences."""
+    return LLMRequest(
+        prompt=build_assertions_prompt(text),
+        model=model,
+        temperature=TEMPERATURE,
+        response_model=AssertionBatch,
+    )
 
 
 async def _call_configured_llm(text: str) -> List[Assertion]:
@@ -262,11 +254,12 @@ async def _call_configured_llm(text: str) -> List[Assertion]:
     if not model:
         return []
     try:
-        response = await acomplete(
+        request = build_assertions_llm_request(text, model)
+        batch = await acomplete_structured(
             AI_PROVIDER,
-            build_assertions_llm_request(text, model),
+            request,
         )
-        return parse_assertions_content(response.content)
+        return parse_assertions_content(batch.model_dump(mode="json"))
     except LLMConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:

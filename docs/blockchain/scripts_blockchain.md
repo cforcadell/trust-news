@@ -21,7 +21,7 @@ npx hardhat node --hostname 0.0.0.0
 ## 1. Compile & Deploy Smart Contract (Local) and Run Basic Tests
 ```bash
 cd smart-contracts
-npx hardhat run scripts/testTrustNews.js
+npx hardhat run ../tests/contracts/manual/testTrustNews.js
 ```
 
 ---

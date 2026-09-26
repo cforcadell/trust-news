@@ -651,7 +651,7 @@ kubectl top pods -A
 La persistencia de Loki puede verificarse sin imprimir logs crudos:
 
 ```bash
-./scripts/k8s/infra/verify-loki-persistence.sh --execute
+tests/operations/verify-loki-persistence.sh --execute
 ```
 
 Para Grafana se usa un port-forward transportado por SSH; no se publica el

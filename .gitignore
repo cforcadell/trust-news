@@ -18,14 +18,14 @@ api/kafka/kafka_server_jaas.conf
 api/couchdb/init-couchdb.sh
 volumes/ipfs_data/*
 volumes/mongo/data/*
-api/tests/venv/*
+tests/api/venv/*
 volumes/*
 .gitignore
 ethereum/password.txt
 api/validate-asertions/.env_gemini
 api/validate-asertions/.env_mistral
 api/validate-asertions/.env_openrouter
-api/tests/__pycache__/*
+tests/api/__pycache__/*
 api/generate-asertions/__pycache__/*
 api/mongo/mongo.txt
 blockchain/geth-client/setup.txt
@@ -33,7 +33,7 @@ accounts/*
 news.txt
 blockchain/setup.txt
 api/stats/venv/*
-api/stats/output/*
+tests/artifacts/historical-stats/*
 api/stats/__pycache__/statistics.cpython-312.pyc
 api/validate-asertions/.env_openrouter2
 api/stats/venv/bin/tabulate
@@ -41,7 +41,7 @@ api/stats/venv/bin/tabulate
 docs/password_unlock.txt
 api/validate-asertions/.env_openrouter1
 api/validate-asertions/.env_openrouter3
-api/stats/saved_tests/*
+tests/resources/historical-stats/*
 api/mongo/mongo.txt
 api/mongo/mongo.txt
 k8s/blockchain/secret-template.yaml
@@ -62,4 +62,8 @@ __pycache__
 api/validate-asertions/__pycache__/main.cpython-312.pyc
 
 skaffold-v*.bak
-artifacts/llm-benchmark/
+tests/llm-benchmark/artifacts/
+/tests/artifacts/
+/tests/frontend/e2e/artifacts/
+/tests/llm-benchmark/artifacts/
+/tests/resources/historical-stats/

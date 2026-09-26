@@ -16,13 +16,13 @@ alias `latest`, para que una ejecución siempre identifique una versión concret
 
 Antes de ejecutar una versión:
 
-    python3 scripts/llm-benchmark.py validate-profiles \
-      --profile benchmarks/llm/profiles/homologated/prod-openrouter-2026-09-24.json
+    python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
+      --profile tests/llm-benchmark/resources/profiles/homologated/prod-openrouter-2026-09-24.json
 
 Para usarla en el benchmark local:
 
-    python3 scripts/llm-benchmark.py run \
-      --profile benchmarks/llm/profiles/homologated/prod-openrouter-2026-09-24.json \
+    python3 tests/llm-benchmark/llm-benchmark.py run \
+      --profile tests/llm-benchmark/resources/profiles/homologated/prod-openrouter-2026-09-24.json \
       --repetitions 3 \
       --require-costs
 

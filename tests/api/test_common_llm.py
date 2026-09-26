@@ -128,7 +128,7 @@ def test_response_model_derives_the_provider_schema():
 def test_all_llm_consumers_import_common_layer():
     from pathlib import Path
 
-    api = Path(__file__).resolve().parents[1]
+    api = Path(__file__).resolve().parents[2] / "api"
     assert "from common.llm import" in (api / "generate-asertions" / "main.py").read_text()
     assert "from common.llm import" in (api / "validate-asertions" / "main.py").read_text()
     assert "from common.llm import" in (api / "source-router" / "app" / "classifier.py").read_text()

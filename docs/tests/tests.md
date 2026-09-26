@@ -6,18 +6,43 @@ cobertura de integración, pero suele ser más lento, variable y dependiente del
 entorno. Las pruebas locales aíslan mejor una causa y deben ejecutarse antes de
 la regresión desplegada.
 
+## Organización
+
+Todas las fuentes de prueba, sus recursos y sus salidas viven bajo `tests/`:
+
+```text
+tests/
+├── api/                         # suite Python y requisitos
+├── frontend/
+│   ├── unit/                    # node:test
+│   └── e2e/
+│       ├── resources/           # casos e identidades
+│       └── artifacts/           # informes y capturas de E2E
+├── llm-benchmark/
+│   ├── resources/               # caso y perfiles versionados
+│   └── artifacts/               # SQLite, planes e informes
+├── contracts/
+│   ├── mocha/                   # pruebas cargadas por Hardhat
+│   └── manual/                  # comprobaciones ejecutables con hardhat run
+├── operations/                  # sondas operativas de prueba
+├── resources/historical-stats/  # muestras históricas de métricas
+└── artifacts/                   # caché de pytest y salidas de métricas
+```
+
+Los directorios de artefactos se ignoran en Git. Cada ejecutor usa su subcarpeta predeterminada; `ASSERMETRY_ARTIFACTS_DIR` permite sustituirla explícitamente para el E2E.
+
 ## Matriz de pruebas
 
 | Nivel | Suite | Alcance real | Dependencias | Entrada principal | Ejecución |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Regresión GUI LIGHT + BLOCKCHAIN | Chrome, Keycloak, frontend, Gateway, APIs, Kafka, MongoDB, validadores y, en BLOCKCHAIN, IPFS/Ethereum | Despliegue local/Kind completo, Chrome y dos identidades | Noticia sintética multiafirmación sobre Suecia, Alemania, Italia y España | `node web_classic/test/run-regression.js` |
-| 2 | Flujo backend de orden | News Handler y dependencias desplegadas hasta `VALIDATED` | Keycloak, cuotas y backend completo | Noticia sintética de población de Catalunya | `PYTHONPATH=api pytest api/tests/test_news-handler.py` |
+| 1 | Regresión GUI LIGHT + BLOCKCHAIN | Chrome, Keycloak, frontend, Gateway, APIs, Kafka, MongoDB, validadores y, en BLOCKCHAIN, IPFS/Ethereum | Despliegue local/Kind completo, Chrome y dos identidades | Noticia sintética multiafirmación sobre Suecia, Alemania, Italia y España | `node tests/frontend/e2e/run-regression.js` |
+| 2 | Flujo backend de orden | News Handler y dependencias desplegadas hasta `VALIDATED` | Keycloak, cuotas y backend completo | Noticia sintética de población de Catalunya | `PYTHONPATH=api pytest tests/api/test_news-handler.py` |
 | 3 | Integraciones HTTP por servicio | APIs reales de generación, cuotas, IPFS, news-chain y validador | Servicios seleccionados desplegados | Payloads sintéticos específicos | Véase “Integraciones HTTP” |
 | 4 | Integración en proceso | Varias capas Python conectadas mediante ASGI, repositorios o dependencias simuladas | Sin despliegue; dependencias Python | Fixtures controladas | Suite local de `pytest` |
 | 5 | Contratos y unidades backend | Modelos, routing, evidencia, consenso, seguridad, LLM, URLs y logging | Sólo proceso Python | Fixtures y proveedores simulados | Suite local de `pytest` |
-| 6 | Unidades frontend | Funciones de presentación y navegación extraídas de `app.js` | Node.js | Objetos JavaScript controlados | `node --test web_classic/test/*.test.js` |
+| 6 | Unidades frontend | Funciones de presentación y navegación extraídas de `app.js` | Node.js | Objetos JavaScript controlados | `node --test tests/frontend/unit/*.test.js` |
 | 7 | Consistencia estática | Catálogo backend frente a semillas Blockchain y uso de capas compartidas | Sólo repositorio | Archivos versionados | Incluida en la suite local |
-| Operación | Persistencia de Loki | Ingesta, consulta y persistencia tras reiniciar Loki | Kubernetes local configurado | Sonda HTTP identificable | `scripts/k8s/infra/verify-loki-persistence.sh --execute` |
+| Operación | Persistencia de Loki | Ingesta, consulta y persistencia tras reiniciar Loki | Kubernetes local configurado | Sonda HTTP identificable | `tests/operations/verify-loki-persistence.sh --execute` |
 
 La suite E2E comprueba el recorrido y las invariantes operativas. No usa un
 oráculo factual estable: llegar a `VALIDATED` significa que el procesamiento
@@ -30,7 +55,7 @@ generación, routing y validadores mediante una noticia sintética con oráculo
 factual. Ejecuta exclusivamente en modo LIGHT, conserva resultados JSON e
 indexa calidad, coste y duración en SQLite. Se valida localmente con:
 
-    python3 scripts/llm-benchmark.py validate-profiles
+    python3 tests/llm-benchmark/llm-benchmark.py validate-profiles
 
 A diferencia de la regresión E2E, este batch sí puntúa la calidad de extracción
 y de los veredictos. Requiere un entorno exclusivo porque cambia temporalmente
@@ -38,17 +63,17 @@ la configuración LLM efectiva y la restaura al terminar.
 
 ## 1. Regresión E2E desde la GUI
 
-[`web_classic/test/run-regression.js`](../../web_classic/test/run-regression.js)
+[`tests/frontend/e2e/run-regression.js`](../../tests/frontend/e2e/run-regression.js)
 ejecuta secuencialmente dos escenarios mediante Chrome DevTools Protocol:
 
-- [`light.json`](../../web_classic/test/cases/light.json): exige una orden LIGHT
+- [`light.json`](../../tests/frontend/e2e/resources/cases/light.json): exige una orden LIGHT
   terminal, aserciones, validaciones y la pestaña IPFS deshabilitada.
-- [`blockchain.json`](../../web_classic/test/cases/blockchain.json): exige una
+- [`blockchain.json`](../../tests/frontend/e2e/resources/cases/blockchain.json): exige una
   orden BLOCKCHAIN terminal, `cid`, `post_id`, `tx_hash` y la pestaña IPFS.
 
 Los dos escenarios usan actualmente el mismo texto sintético multiafirmación
-([`light-news.txt`](../../web_classic/test/cases/light-news.txt) y
-[`blockchain-news.txt`](../../web_classic/test/cases/blockchain-news.txt)). Es
+([`light-news.txt`](../../tests/frontend/e2e/resources/cases/light-news.txt) y
+[`blockchain-news.txt`](../../tests/frontend/e2e/resources/cases/blockchain-news.txt)). Es
 una noticia con cuatro afirmaciones independientes, relativas a vacunación en
 Suecia, transición energética en Alemania, acceso turístico en Italia y
 enseñanza de lenguas extranjeras en España. Esos ficheros son la fuente de
@@ -71,28 +96,28 @@ El runner comprueba login, creación y seguimiento de la orden, estado terminal,
 estructura de la respuesta, pestañas, errores HTTP/consola y vistas de escritorio
 y móvil. La preparación, limpieza, identidades, variables y artefactos están
 documentados en
-[`web_classic/test/README.md`](../../web_classic/test/README.md).
+[`tests/frontend/e2e/README.md`](../../tests/frontend/e2e/README.md).
 
 Validar únicamente las definiciones de caso, sin abrir Chrome:
 
 ```bash
-node web_classic/test/run-regression.js --validate
+node tests/frontend/e2e/run-regression.js --validate
 ```
 
 Ejecutar el E2E, una vez configuradas las credenciales descritas en su README:
 
 ```bash
-node web_classic/test/run-regression.js
+node tests/frontend/e2e/run-regression.js
 ```
 
-[`ui-smoke-test.js`](../../web_classic/test/ui-smoke-test.js) también puede
+[`ui-smoke-test.js`](../../tests/frontend/e2e/ui-smoke-test.js) también puede
 ejecutar un solo caso. Sin `ASSERMETRY_CASE_FILE` usa todo
 [`docs/fake_news/news.txt`](../fake_news/news.txt); ese modo es exploratorio y
 no sustituye la regresión versionada.
 
 ## 2. Flujo E2E del backend
 
-[`test_news-handler.py`](../../api/tests/test_news-handler.py) llama al News
+[`test_news-handler.py`](../../tests/api/test_news-handler.py) llama al News
 Handler desplegado, crea o restablece cuota, publica una noticia y consulta la
 orden hasta `VALIDATED`. Como no envía `validation_mode`, usa el valor por
 defecto `BLOCKCHAIN` del contrato actual.
@@ -109,7 +134,7 @@ IPFS y Blockchain disponibles. Tiene un timeout corto y comparte el `order_id`
 entre funciones, por lo que debe ejecutarse como fichero completo y en orden:
 
 ```bash
-PYTHONPATH=api pytest api/tests/test_news-handler.py -q
+PYTHONPATH=api pytest tests/api/test_news-handler.py -q
 ```
 
 ## 3. Integraciones HTTP con servicios desplegados
@@ -128,11 +153,11 @@ ejecutarse contra producción.
 Ejecución individual:
 
 ```bash
-PYTHONPATH=api pytest api/tests/test_extraer_integration.py -q
-PYTHONPATH=api pytest api/tests/test_quotas.py -q
-PYTHONPATH=api pytest api/tests/test_ipfs_integration.py -q
-PYTHONPATH=api pytest api/tests/test_news-chain_integration.py -q
-PYTHONPATH=api pytest api/tests/test_validator_api.py -q
+PYTHONPATH=api pytest tests/api/test_extraer_integration.py -q
+PYTHONPATH=api pytest tests/api/test_quotas.py -q
+PYTHONPATH=api pytest tests/api/test_ipfs_integration.py -q
+PYTHONPATH=api pytest tests/api/test_news-chain_integration.py -q
+PYTHONPATH=api pytest tests/api/test_validator_api.py -q
 ```
 
 `test_extraer_integration.py`, `test_ipfs_integration.py`,
@@ -167,7 +192,7 @@ LLM reales.
 
 ## 5. Pruebas locales de backend
 
-El resto de `api/tests` se distribuye así:
+El resto de `tests/api` se distribuye así:
 
 | Área | Ficheros |
 | --- | --- |
@@ -183,19 +208,19 @@ Desde la raíz del repositorio, esta selección excluye todos los ficheros que
 hacen llamadas a servicios desplegados:
 
 ```bash
-PYTHONPATH=api pytest api/tests -q \
-  --ignore=api/tests/test_extraer_integration.py \
-  --ignore=api/tests/test_ipfs_integration.py \
-  --ignore=api/tests/test_news-chain_integration.py \
-  --ignore=api/tests/test_validator_api.py \
-  --ignore=api/tests/test_news-handler.py \
-  --ignore=api/tests/test_quotas.py
+PYTHONPATH=api pytest tests/api -q \
+  --ignore=tests/api/test_extraer_integration.py \
+  --ignore=tests/api/test_ipfs_integration.py \
+  --ignore=tests/api/test_news-chain_integration.py \
+  --ignore=tests/api/test_validator_api.py \
+  --ignore=tests/api/test_news-handler.py \
+  --ignore=tests/api/test_quotas.py
 ```
 
-Las dependencias de `api/tests/requirements.txt` cubren pytest y Kafka, pero la
+Las dependencias de `tests/api/requirements.txt` cubren pytest y Kafka, pero la
 colección importa código de varios servicios. El entorno de pruebas debe incluir
 también las dependencias de los servicios afectados. Ejecutar simplemente
-`pytest api/tests` implica además disponer de las integraciones externas
+`pytest tests/api` implica además disponer de las integraciones externas
 anteriores.
 
 ## 6. Pruebas unitarias del frontend
@@ -214,21 +239,21 @@ Los tests `node:test` no abren navegador ni llaman a APIs:
 Ejecución:
 
 ```bash
-node --test web_classic/test/*.test.js
+node --test tests/frontend/unit/*.test.js
 ```
 
 ## 7. Smart contracts y comprobaciones operativas
 
 `npx hardhat compile`, desde `smart-contracts`, comprueba que
 `TrustNews.sol` compila. No existe actualmente una suite funcional vigente del
-contrato TrustNews. `smart-contracts/test/Token.js` es el ejemplo inicial de
+contrato TrustNews. `tests/contracts/mocha/Token.js` es el ejemplo inicial de
 Hardhat y referencia un contrato `Token` que ya no existe; no debe usarse como
 prueba del sistema ni incluirse en una regresión.
 
 La persistencia de Loki tiene una sonda operativa separada:
 
 ```bash
-scripts/k8s/infra/verify-loki-persistence.sh --execute
+tests/operations/verify-loki-persistence.sh --execute
 ```
 
 La sonda genera una petición, confirma su ingestión, reinicia Loki y verifica

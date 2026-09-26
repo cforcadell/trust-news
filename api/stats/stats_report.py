@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 from tabulate import tabulate  # pip install tabulate
 
-OUTPUT_DIR = "output"
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "tests", "artifacts", "historical-stats")
 TIME_FORMAT = "%m/%d/%Y %H:%M:%S"
 
 

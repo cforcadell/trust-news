@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from common.models.evidence_models import EvidenceSearchPolicy, EvidenceSearchRequestV2, EvidenceSearchResponseV2
 
 
-ROOT = Path(__file__).resolve().parents[1] / "evidence-search"
+ROOT = Path(__file__).resolve().parents[2] / "api" / "evidence-search"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 MODULE_PATH = ROOT / "main.py"

@@ -1,6 +1,6 @@
 # Benchmark histórico de configuraciones LLM
 
-scripts/llm-benchmark.py compara configuraciones completas de los módulos LLM
+tests/llm-benchmark/llm-benchmark.py compara configuraciones completas de los módulos LLM
 usando exclusivamente OpenRouter. Ejecuta órdenes LIGHT, conserva artefactos
 JSON inmutables e indexa las métricas en SQLite para compararlas con el tiempo.
 
@@ -9,7 +9,7 @@ configuración efectiva y consume cuota de generación y validación.
 
 ## Alcance
 
-El caso inicial benchmarks/llm/cases/eu-news-2025-v1.json contiene la noticia
+El caso inicial tests/llm-benchmark/resources/cases/eu-news-2025-v1.json contiene la noticia
 sintética sobre Suecia, Alemania, Italia y España y cuatro resultados esperados.
 El runner mide por separado:
 
@@ -72,9 +72,9 @@ confianza:
 Este comando valida el esquema del caso y de los perfiles y comprueba que todos
 declaran OpenRouter:
 
-    python3 scripts/llm-benchmark.py validate-profiles \
-      --profile benchmarks/llm/profiles/current-openrouter.json \
-      --profile benchmarks/llm/profiles/example-balanced-openrouter.json
+    python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
+      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
+      --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json
 
 No modifica configuración, no usa credenciales y no crea órdenes.
 
@@ -84,19 +84,19 @@ No modifica configuración, no usa credenciales y no crea órdenes.
 OpenRouter, pero no cambia modelos ni crea órdenes. Este ejemplo solicita un
 máximo de 0,25 USD para una noticia de cinco aserciones medias:
 
-    python3 scripts/llm-benchmark.py generate-profiles \
+    python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
       --max-news-cost-usd 0.25
 
 Por defecto reserva un margen del 5 %. Por tanto, con un máximo solicitado de
 0,25 USD solo genera configuraciones cuyo coste estimado no supera 0,2375 USD.
 Se puede cambiar el margen explícitamente:
 
-    python3 scripts/llm-benchmark.py generate-profiles \
+    python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
       --max-news-cost-usd 0.25 \
       --budget-headroom-percent 10
 
 La salida se guarda en
-`artifacts/llm-benchmark/generated/<plan-id>/` e incluye:
+`tests/llm-benchmark/artifacts/generated/<plan-id>/` e incluye:
 
     plan.json
     effective-configuration.json
@@ -119,8 +119,8 @@ plan; por eso la ejecución siempre vuelve a comprobar el coste.
 
 Para ejecutar todos los perfiles de un plan:
 
-    python3 scripts/llm-benchmark.py run \
-      --profile-plan artifacts/llm-benchmark/generated/<plan-id>/plan.json \
+    python3 tests/llm-benchmark/llm-benchmark.py run \
+      --profile-plan tests/llm-benchmark/artifacts/generated/<plan-id>/plan.json \
       --repetitions 5 \
       --require-costs
 
@@ -132,15 +132,15 @@ máximo menor. `--profile` y `--profile-plan` son mutuamente excluyentes.
 
 Línea base actual, tres repeticiones:
 
-    python3 scripts/llm-benchmark.py run \
-      --profile benchmarks/llm/profiles/current-openrouter.json \
+    python3 tests/llm-benchmark/llm-benchmark.py run \
+      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
       --repetitions 3
 
 Comparar dos perfiles y exigir un máximo normalizado de 0,25 USD por noticia:
 
-    python3 scripts/llm-benchmark.py run \
-      --profile benchmarks/llm/profiles/current-openrouter.json \
-      --profile benchmarks/llm/profiles/example-balanced-openrouter.json \
+    python3 tests/llm-benchmark/llm-benchmark.py run \
+      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
+      --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json \
       --repetitions 5 \
       --max-news-cost-usd 0.25 \
       --require-costs
@@ -154,8 +154,8 @@ comparación de calidad reproducible se recomienda un corpus congelado.
 Para medir cada repetición en frío se puede vaciar exclusivamente la caché de
 respuestas de Evidence Search inmediatamente antes de publicar la orden:
 
-    python3 scripts/llm-benchmark.py run \
-      --profile benchmarks/llm/profiles/current-openrouter.json \
+    python3 tests/llm-benchmark/llm-benchmark.py run \
+      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
       --repetitions 3 \
       --clear-evidence-cache
 
@@ -258,7 +258,7 @@ externas vivas miden actualidad, no reproducibilidad.
 
 Por defecto se crean:
 
-    artifacts/llm-benchmark/
+    tests/llm-benchmark/artifacts/
     ├── history.sqlite
     └── <batch-id>/
         ├── manifest.json
@@ -285,11 +285,11 @@ Los artefactos se excluyen de Git.
 
 Listar las últimas ejecuciones:
 
-    python3 scripts/llm-benchmark.py list-runs --limit 20
+    python3 tests/llm-benchmark/llm-benchmark.py list-runs --limit 20
 
 Comparar dos run_id:
 
-    python3 scripts/llm-benchmark.py compare \
+    python3 tests/llm-benchmark/llm-benchmark.py compare \
       --baseline <run-id-base> \
       --candidate <run-id-candidato>
 

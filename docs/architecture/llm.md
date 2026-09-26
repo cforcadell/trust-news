@@ -331,7 +331,7 @@ veredictos decisivos sin soporte.
 
 ## Benchmark histórico de perfiles
 
-[scripts/llm-benchmark.py](../../scripts/llm-benchmark.py) permite comparar
+[tests/llm-benchmark/llm-benchmark.py](../../tests/llm-benchmark/llm-benchmark.py) permite comparar
 configuraciones completas exclusivamente OpenRouter sobre un caso versionado.
 El runner captura la configuración efectiva, aplica cada perfil, ejecuta órdenes
 LIGHT, calcula calidad y costes estimados, persiste JSON y SQLite y restaura la

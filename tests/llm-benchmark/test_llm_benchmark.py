@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("llm_benchmark", ROOT / "scripts/llm-benchmark.py")
+SPEC = importlib.util.spec_from_file_location("llm_benchmark", ROOT / "tests/llm-benchmark/llm-benchmark.py")
 benchmark = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(benchmark)
@@ -309,6 +309,50 @@ class LLMBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(result["delta"]["quality_score"], 10)
         self.assertAlmostEqual(result["delta"]["sample_cost_usd"], -0.05)
+
+
+    def test_order_polling_reports_status_and_latest_event_without_affecting_result(self):
+        class Client:
+            def __init__(self):
+                self.paths = []
+
+            def get(self, path):
+                self.paths.append(path)
+                if path.endswith("/events"):
+                    return [{
+                        "action": "validation_completed",
+                        "created_at": "2026-09-26T08:00:00Z",
+                        "event_id": "event-1",
+                    }]
+                return {"status": "VALIDATED", "order_id": "order-1"}
+
+        client = Client()
+        progress = []
+        order = benchmark.wait_for_order(
+            client, "order-1", timeout_seconds=1, poll_seconds=0,
+            progress=lambda current, status, event: progress.append((current, status, event)),
+        )
+
+        self.assertEqual(order["status"], "VALIDATED")
+        self.assertEqual(progress[0][1], "VALIDATED")
+        self.assertEqual(progress[0][2], "action:validation_completed,at:2026-09-26T08:00:00Z,id:event-1")
+        self.assertEqual(client.paths, ["/orders/order-1", "/orders/order-1/events"])
+
+    def test_event_diagnostic_failure_does_not_interrupt_order_polling(self):
+        class Client:
+            def get(self, path):
+                if path.endswith("/events"):
+                    raise benchmark.BenchmarkError("events unavailable")
+                return {"status": "VALIDATED"}
+
+        progress = []
+        order = benchmark.wait_for_order(
+            Client(), "order-1", timeout_seconds=1, poll_seconds=0,
+            progress=lambda current, status, event: progress.append((status, event)),
+        )
+
+        self.assertEqual(order["status"], "VALIDATED")
+        self.assertEqual(progress, [("VALIDATED", "unavailable:BenchmarkError")])
 
 
 if __name__ == "__main__":

@@ -80,7 +80,7 @@ class Collection:
 
 @pytest.fixture(scope="module")
 def handler():
-    path = Path(__file__).resolve().parents[1] / "news-handler" / "main.py"
+    path = Path(__file__).resolve().parents[2] / "api" / "news-handler" / "main.py"
     spec = importlib.util.spec_from_file_location("isolation_news_handler", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

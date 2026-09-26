@@ -15,15 +15,17 @@ de un perfil temporal aislado.
 ## Contenido
 
 ```text
-web_classic/test/
+tests/frontend/e2e/
 ├── run-regression.js
 ├── ui-smoke-test.js
-├── identities.example.json
-└── cases/
-    ├── light.json
-    ├── light-news.txt
-    ├── blockchain.json
-    └── blockchain-news.txt
+├── artifacts/                  # salidas fechadas, ignoradas por Git
+└── resources/
+    ├── identities.example.json
+    └── cases/
+        ├── light.json
+        ├── light-news.txt
+        ├── blockchain.json
+        └── blockchain-news.txt
 ```
 
 Los textos son sintéticos. Los resultados esperados son invariantes
@@ -60,7 +62,7 @@ habilitada. El caso Light exige esa pestaña deshabilitada.
   `org-alpha` y otro a `org-beta`.
 - Validadores disponibles para las categorías generadas.
 
-`identities.example.json` define los alias y los nombres de variables para
+`resources/identities.example.json` define los alias y los nombres de variables para
 administradores, usuarios y clientes API de las dos organizaciones. No contiene
 usuarios reales, contraseñas ni secretos.
 
@@ -70,10 +72,10 @@ La validación comprueba los JSON, modos, identidades y ficheros de noticias, si
 abrir Chrome ni necesitar credenciales:
 
 ```bash
-node web_classic/test/run-regression.js --validate
+node tests/frontend/e2e/run-regression.js --validate
 ```
 
-Se escriben `manifest.json` y `summary.json` en un directorio temporal y el
+Se escriben `manifest.json` y `summary.json` en `tests/frontend/e2e/artifacts/<run-id>/` y el
 proceso termina con código cero si los casos son válidos.
 
 ## Ejecutar Light y Blockchain
@@ -92,7 +94,7 @@ read -rsp "Password org-beta: " ASSERMETRY_ORG_BETA_PASSWORD
 export ASSERMETRY_ORG_BETA_PASSWORD
 printf '\n'
 
-node web_classic/test/run-regression.js
+node tests/frontend/e2e/run-regression.js
 
 unset ASSERMETRY_ORG_ALPHA_PASSWORD ASSERMETRY_ORG_BETA_PASSWORD
 ```
@@ -128,7 +130,7 @@ export ASSERMETRY_SETUP_HOOK=/ruta/segura/setup-regression
 export ASSERMETRY_CLEANUP_HOOK=/ruta/segura/cleanup-regression
 export ASSERMETRY_REQUIRE_MANAGED_STATE=true
 
-node web_classic/test/run-regression.js
+node tests/frontend/e2e/run-regression.js
 ```
 
 Los hooks se ejecutan directamente, sin `shell`, argumentos ni interpolación.
@@ -163,8 +165,8 @@ comparables:
 ```bash
 for repetition in 1 2 3; do
   ASSERMETRY_RUN_ID="regression-${repetition}" \
-    ASSERMETRY_ARTIFACTS_DIR="/tmp/assermetry-regression-${repetition}" \
-    node web_classic/test/run-regression.js || break
+    ASSERMETRY_ARTIFACTS_DIR="tests/frontend/e2e/artifacts/regression-${repetition}" \
+    node tests/frontend/e2e/run-regression.js || break
 done
 ```
 
@@ -179,14 +181,14 @@ de CPU/memoria y PVC mediante operaciones de solo lectura:
 
 ```bash
 ASSERMETRY_CAPTURE_K8S_BASELINE=true \
-  node web_classic/test/run-regression.js
+  node tests/frontend/e2e/run-regression.js
 ```
 
 Esto crea `kubernetes-baseline.json`. Si la captura debe ser obligatoria:
 
 ```bash
 ASSERMETRY_REQUIRE_K8S_BASELINE=true \
-  node web_classic/test/run-regression.js
+  node tests/frontend/e2e/run-regression.js
 ```
 
 En el segundo caso, cualquier fallo de `kubectl` hace fallar la ejecución.
@@ -200,8 +202,8 @@ export ASSERMETRY_USERNAME=regression-alpha-user
 read -rsp "Password: " ASSERMETRY_PASSWORD
 export ASSERMETRY_PASSWORD
 
-ASSERMETRY_CASE_FILE=web_classic/test/cases/light.json \
-  node web_classic/test/ui-smoke-test.js
+ASSERMETRY_CASE_FILE=tests/frontend/e2e/resources/cases/light.json \
+  node tests/frontend/e2e/ui-smoke-test.js
 
 unset ASSERMETRY_PASSWORD
 ```
@@ -217,7 +219,7 @@ ejecución es un smoke manual y no sustituye el paquete sintético completo.
 | `ASSERMETRY_CASES` | Casos Light y Blockchain incluidos | Lista de JSON separada por comas. |
 | `ASSERMETRY_CASE_FILE` | Vacío | Caso usado por el runner individual. |
 | `ASSERMETRY_RUN_ID` | Fecha y hora | Identificador de ejecución. |
-| `ASSERMETRY_ARTIFACTS_DIR` | Directorio fechado en `/tmp` | Evidencia agregada. |
+| `ASSERMETRY_ARTIFACTS_DIR` | `tests/frontend/e2e/artifacts/<run-id>` | Evidencia agregada. |
 | `ASSERMETRY_ORG_ALPHA_USERNAME` | Obligatoria | Usuario pseudónimo del caso Light. |
 | `ASSERMETRY_ORG_ALPHA_PASSWORD` | Obligatoria | Contraseña del caso Light; nunca se informa. |
 | `ASSERMETRY_ORG_BETA_USERNAME` | Obligatoria | Usuario pseudónimo del caso Blockchain. |

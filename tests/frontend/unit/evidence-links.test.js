@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 // Exercise the actual rendering functions without booting the application.
-const source = fs.readFileSync(path.join(__dirname, '../app/js/app.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../../web_classic/app/js/app.js'), 'utf8');
 const context = vm.createContext({ URL, t: key => key });
 for (const name of ['escapeHTML', 'safeText', 'compactText', 'validationEvidenceItems', 'validationEvidenceSelection',
     'isGenericEvidenceLabel', 'evidenceUrlHost', 'safeEvidenceUrl',

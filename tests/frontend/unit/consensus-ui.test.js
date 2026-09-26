@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const appSource = fs.readFileSync(path.join(__dirname, '../app/js/app.js'), 'utf8');
-const i18nSource = fs.readFileSync(path.join(__dirname, '../app/js/i18n.js'), 'utf8');
+const appSource = fs.readFileSync(path.join(__dirname, '../../../web_classic/app/js/app.js'), 'utf8');
+const i18nSource = fs.readFileSync(path.join(__dirname, '../../../web_classic/app/js/i18n.js'), 'utf8');
 
 function functionBlock(name, nextName) {
     const start = appSource.indexOf(`function ${name}(`);

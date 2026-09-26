@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../app/js/app.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../../web_classic/app/js/app.js'), 'utf8');
 const start = source.indexOf('function getAssertionId(');
 const end = source.indexOf('function assertionMatchesId(', start);
 

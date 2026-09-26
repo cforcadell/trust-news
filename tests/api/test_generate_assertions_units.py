@@ -2,7 +2,7 @@ import importlib.util
 from pathlib import Path
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "generate-asertions" / "main.py"
+MODULE_PATH = Path(__file__).resolve().parents[2] / "api" / "generate-asertions" / "main.py"
 SPEC = importlib.util.spec_from_file_location("generate_assertions_main", MODULE_PATH)
 generate = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

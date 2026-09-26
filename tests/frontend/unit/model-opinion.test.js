@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../app/js/app.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../../web_classic/app/js/app.js'), 'utf8');
 const context = vm.createContext({ t: key => key });
 for (const name of ['escapeHTML', 'safeText', 'evidenceValidationResult', 'unverifiedModelOpinion', 'renderModelOpinionAudit']) {
     const start = source.indexOf(`function ${name}(`);

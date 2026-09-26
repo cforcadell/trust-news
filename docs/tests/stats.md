@@ -18,15 +18,15 @@ Los scripts conservan el contrato histórico de News Handler:
 El API actual exige identidad y ámbito de cliente, y sus contratos de eventos y
 fechas han evolucionado. Por ello `collector.py` y `refetch_orders.py` no deben
 usarse contra el despliegue actual sin adaptarlos primero. Los JSON presentes en
-`api/stats/output` y `api/stats/saved_tests` son muestras históricas, no
+`tests/artifacts/historical-stats` y `tests/resources/historical-stats` son muestras históricas, no
 resultados reproducibles de la versión actual.
 
 ## Componentes conservados
 
 | Script | Función histórica | Entrada/salida |
 | --- | --- | --- |
-| `collector.py` | Publicar el mismo texto varias veces y esperar `VALIDATED` | Escribe `output/orders.csv` y un directorio JSON por orden |
-| `refetch_orders.py` | Volver a descargar órdenes ya enumeradas | Lee `output/orders.csv` y reemplaza `order.json`/`events.json` |
+| `collector.py` | Publicar el mismo texto varias veces y esperar `VALIDATED` | Escribe `tests/artifacts/historical-stats/orders.csv` y un directorio JSON por orden |
+| `refetch_orders.py` | Volver a descargar órdenes ya enumeradas | Lee `tests/artifacts/historical-stats/orders.csv` y reemplaza `order.json`/`events.json` |
 | `stats_report.py` | Calcular agregados de aserciones, votos y tiempos | Lee los JSON capturados e imprime tablas con `tabulate` |
 
 Antes de reactivar estas herramientas debe añadirse autenticación, propagación
@@ -36,6 +36,6 @@ trabajar sobre un directorio de ejecución nuevo, sin sobrescribir las muestras
 históricas.
 
 Hasta que se realice esa adaptación, las métricas válidas para regresión son los
-artefactos fechados producidos por `web_classic/test/run-regression.js`; estos
+artefactos fechados producidos por `tests/frontend/e2e/run-regression.js`; estos
 registran escenario, duración, comprobaciones, órdenes creadas y errores sin
 confundirse con un test de calidad factual.

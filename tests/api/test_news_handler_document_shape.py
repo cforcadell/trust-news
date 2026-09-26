@@ -8,7 +8,7 @@ import pytest
 
 
 def load_news_handler_module():
-    api_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    api_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "api"))
     if api_root not in sys.path:
         sys.path.insert(0, api_root)
     path = os.path.join(api_root, "news-handler", "main.py")

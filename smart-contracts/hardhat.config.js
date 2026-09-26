@@ -8,6 +8,9 @@ const deployerAccounts = configuredPrivateKey
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: "0.8.28",
+  paths: {
+    tests: "../tests/contracts/mocha",
+  },
   networks: {
     hardhat: {
       chainId: 31337,

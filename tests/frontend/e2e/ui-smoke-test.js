@@ -13,7 +13,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const DEFAULT_NEWS_FILE = path.join(REPO_ROOT, "docs", "fake_news", "news.txt");
 const RUN_ID = process.env.ASSERMETRY_RUN_ID
   || new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
@@ -38,7 +38,7 @@ const MOBILE_WIDTH = positiveNumber("ASSERMETRY_MOBILE_WIDTH", 390);
 const MOBILE_HEIGHT = positiveNumber("ASSERMETRY_MOBILE_HEIGHT", 844);
 const ARTIFACTS_DIR = process.env.ASSERMETRY_ARTIFACTS_DIR
   ? path.resolve(process.env.ASSERMETRY_ARTIFACTS_DIR)
-  : path.join(os.tmpdir(), `assermetry-ui-${RUN_ID}`);
+  : path.join(__dirname, "artifacts", RUN_ID);
 const EXPECTED = normalizeExpected(TEST_CASE.expected || {});
 const NEWS = loadNews(TEST_CASE, CASE_FILE);
 

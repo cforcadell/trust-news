@@ -270,12 +270,12 @@ temporal debe limitar explícitamente el alcance de demo.
   evita agregar errores de red/consola: la ejecución interrumpida registra 400
   de autenticación y dos errores de consola, pero el resumen cuenta cero.
 - **Además:** el test de logs se corrigió para usar `caplog` y vuelve a comprobar
-  `search_request`. `api/tests/requirements.txt` no reúne las
+  `search_request`. `tests/api/requirements.txt` no reúne las
   dependencias de la suite y la fixture no exige credenciales antes de conectar.
 - **Comprobación 2026-09-19:** las pruebas aisladas de grounding/búsqueda (27),
   scoring (29) y GUI de polling (3) pasan, pero las 12 pruebas de
   `test_validator_source_orchestration.py` ni siquiera cargan porque
-  `api/tests/venv` no contiene `hexbytes`. Esto confirma el defecto de entorno
+  el entorno virtual de pruebas no contiene `hexbytes`. Esto confirma el defecto de entorno
   reproducible; no se debe publicar una línea base global verde.
 - **Cierre:** entorno de tests reproducible, `caplog`, fallos HTTP estrictos,
   comprobaciones de contenido/overflow y diagnóstico en `finally`; registrar

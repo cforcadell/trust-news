@@ -103,7 +103,7 @@ async def test_search_retries_retryable_provider_failure(monkeypatch):
 
 
 def test_search_consumers_use_shared_layer():
-    api = Path(__file__).resolve().parents[1]
+    api = Path(__file__).resolve().parents[2] / "api"
     evidence = (api / "evidence-search" / "main.py").read_text()
     router = (api / "source-router" / "app" / "service.py").read_text()
     assert "from common.search import search_with_provider" in evidence

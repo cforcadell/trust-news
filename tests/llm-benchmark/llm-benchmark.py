@@ -23,12 +23,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from typing import Any
+from typing import Any, Callable
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-DEFAULT_CASE = ROOT / "benchmarks/llm/cases/eu-news-2025-v1.json"
-DEFAULT_PROFILE = ROOT / "benchmarks/llm/profiles/current-openrouter.json"
-DEFAULT_ARTIFACTS = ROOT / "artifacts/llm-benchmark"
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+TEST_ROOT = ROOT / "tests" / "llm-benchmark"
+DEFAULT_CASE = TEST_ROOT / "resources/cases/eu-news-2025-v1.json"
+DEFAULT_PROFILE = TEST_ROOT / "resources/profiles/current-openrouter.json"
+DEFAULT_ARTIFACTS = TEST_ROOT / "artifacts"
 DEFAULT_DATABASE = DEFAULT_ARTIFACTS / "history.sqlite"
 DEFAULT_GENERATED_PLANS = DEFAULT_ARTIFACTS / "generated"
 TERMINAL_OK = {"VALIDATED", "VALIDATED_WITH_ERRORS"}
@@ -50,6 +51,17 @@ QUALITY_WEIGHTS = {
 
 class BenchmarkError(RuntimeError):
     pass
+
+
+def trace(phase: str, **fields: Any) -> None:
+    """Emit a concise, secret-free progress record for interactive runs and logs."""
+    parts = [f"phase={phase}"]
+    for key, value in fields.items():
+        if value is None:
+            continue
+        text = str(value).replace("\n", " ").replace("\r", " ").strip()
+        parts.append(f"{key}={text or '-'}")
+    print("LLM_BENCHMARK_TRACE " + " ".join(parts), flush=True)
 
 
 class ApiError(BenchmarkError):
@@ -766,12 +778,38 @@ def collect_costs(
     }
 
 
-def wait_for_order(client: ApiClient, order_id: str, timeout_seconds: float, poll_seconds: float) -> dict[str, Any]:
+def last_order_event(client: ApiClient, order_id: str) -> str:
+    """Return a small, display-safe summary of the latest event, without affecting polling."""
+    try:
+        payload = client.get(f"/orders/{urllib.parse.quote(order_id, safe='')}/events")
+    except Exception as exc:  # Event diagnostics must never alter benchmark control flow.
+        return f"unavailable:{type(exc).__name__}"
+    events = payload.get("events") if isinstance(payload, dict) else payload
+    if not isinstance(events, list) or not events:
+        return "none"
+    event = next((item for item in reversed(events) if isinstance(item, dict)), None)
+    if event is None:
+        return "none"
+    action = event.get("action") or event.get("event") or event.get("type") or "unknown"
+    timestamp = event.get("created_at") or event.get("timestamp") or event.get("date") or "-"
+    event_id = event.get("event_id") or event.get("id") or "-"
+    return f"action:{action},at:{timestamp},id:{event_id}"
+
+
+def wait_for_order(
+    client: ApiClient,
+    order_id: str,
+    timeout_seconds: float,
+    poll_seconds: float,
+    progress: Callable[[dict[str, Any], str, str], None] | None = None,
+) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, Any] | None = None
     while time.monotonic() < deadline:
         last = client.get(f"/orders/{urllib.parse.quote(order_id, safe='')}")
         status = str(last.get("status") or "").upper()
+        if progress is not None:
+            progress(last, status, last_order_event(client, order_id))
         if status in TERMINAL_OK:
             return last
         if status in TERMINAL_FAIL:
@@ -1286,6 +1324,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
         } if plan else None),
     }
     write_json(batch_dir / "manifest.json", manifest)
+    trace("batch.prepared", batch_id=batch_id, case_id=case["id"], profiles=len(profiles), repetitions=args.repetitions, artifacts=batch_dir)
     history.start_batch(manifest)
     all_runs: list[dict[str, Any]] = []
     batch_status = "FAIL"
@@ -1293,18 +1332,27 @@ def run_benchmark(args: argparse.Namespace) -> int:
     restore_errors: list[str] = []
 
     try:
+        trace("lock.wait", path=args.lock_file)
         with exclusive_lock(pathlib.Path(args.lock_file)):
+            trace("lock.acquired", path=args.lock_file)
+            trace("configuration.snapshot.start")
             initial_snapshot = manager.snapshot()
+            trace("configuration.snapshot.complete", components=len(initial_snapshot["components"]), validators=len(initial_snapshot["validators"]))
             write_json(batch_dir / "initial-configuration.json", initial_snapshot)
             for profile in profiles:
                 profile_runs: list[dict[str, Any]] = []
+                trace("profile.start", profile_id=profile["id"])
                 resolved = manager.resolve_profile(profile, initial_snapshot)
                 profile_dir = batch_dir / str(profile["id"])
                 write_json(profile_dir / "resolved-profile.json", resolved)
                 try:
+                    trace("configuration.apply.start", profile_id=profile["id"])
                     changes = manager.apply(resolved, initial_snapshot)
+                    trace("configuration.apply.complete", profile_id=profile["id"], changes=len(changes))
                     write_json(profile_dir / "configuration-changes.json", changes)
+                    trace("pricing.snapshot.start", profile_id=profile["id"])
                     pricing = pricing_snapshot(client, args.max_news_cost_usd)
+                    trace("pricing.snapshot.complete", profile_id=profile["id"])
                     write_json(profile_dir / "pricing-snapshot.json", pricing)
                     expected_targets = {
                         *resolved["components"].keys(), *resolved["validators"].keys(),
@@ -1314,6 +1362,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     )
                     write_json(profile_dir / "preflight-costs.json", preflight_costs)
                     normalized_cost = preflight_costs["normalized_5_assertions_total_usd"]
+                    trace("pricing.preflight", profile_id=profile["id"], complete=preflight_costs["complete"], normalized_5_assertions_cost_usd=normalized_cost)
                     if (
                         args.max_news_cost_usd is not None
                         and (
@@ -1342,11 +1391,15 @@ def run_benchmark(args: argparse.Namespace) -> int:
                             "resolved_profile": resolved,
                         }
                         try:
+                            trace("repetition.start", run_id=run_id, profile_id=profile["id"], repetition=repetition)
                             if args.clear_evidence_cache:
+                                trace("evidence_cache.clear.start", run_id=run_id)
                                 run["evidence_cache_clear"] = clear_evidence_cache(
                                     args.evidence_search_url, verify_tls, args.http_timeout,
                                 )
+                                trace("evidence_cache.clear.complete", run_id=run_id, deleted_count=run["evidence_cache_clear"].get("deleted_count"))
                                 monotonic_start = time.monotonic()
+                            trace("order.publish.start", run_id=run_id)
                             published = client.post(
                                 "/orders/publishNew",
                                 {"text": case["news"], "validation_mode": "LIGHT"},
@@ -1355,10 +1408,18 @@ def run_benchmark(args: argparse.Namespace) -> int:
                             if not order_id:
                                 raise BenchmarkError("publishNew no devolvió order_id")
                             run["order_id"] = order_id
+                            trace("order.publish.complete", run_id=run_id, order_id=order_id)
+                            trace("order.poll.start", run_id=run_id, order_id=order_id, timeout_seconds=args.result_timeout, interval_seconds=args.poll_interval)
                             order = wait_for_order(
                                 client, order_id, args.result_timeout, args.poll_interval,
+                                progress=lambda current, status, event: trace(
+                                    "order.poll", run_id=run_id, order_id=order_id,
+                                    status=status or "UNKNOWN", last_event=event,
+                                ),
                             )
+                            trace("order.terminal", run_id=run_id, order_id=order_id, status=order.get("status"))
                             write_json(run_dir / "order.json", order)
+                            trace("score.start", run_id=run_id, order_id=order_id)
                             score = score_order(case, order)
                             costs = collect_costs(
                                 pricing, len(collect_assertions(order)), expected_targets,
@@ -1366,9 +1427,11 @@ def run_benchmark(args: argparse.Namespace) -> int:
                             if args.require_costs and not costs["complete"]:
                                 raise BenchmarkError("No se pudo calcular el coste completo")
                             run.update({"status": "PASS", "score": score, "costs": costs})
+                            trace("score.complete", run_id=run_id, quality_score=score["quality_score"], generated_assertions=score["metrics"]["generated_assertions"])
                             write_json(run_dir / "score.json", score)
                             write_json(run_dir / "costs.json", costs)
                         except Exception as exc:
+                            trace("repetition.failed", run_id=run_id, error=type(exc).__name__)
                             run.update({"status": "FAIL", "error": str(exc)})
                         run["finished_at"] = utc_now()
                         run["duration_seconds"] = round(time.monotonic() - monotonic_start, 6)
@@ -1383,7 +1446,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
                         if run["status"] != "PASS" and args.stop_on_failure:
                             raise BenchmarkError(run.get("error") or f"Falló {run_id}")
                 finally:
+                    trace("configuration.restore.start", profile_id=profile["id"])
                     errors = manager.restore(initial_snapshot, manager.applied_targets)
+                    trace("configuration.restore.complete", profile_id=profile["id"], errors=len(errors))
                     restore_errors.extend(errors)
                     write_json(profile_dir / "restore.json", {
                         "finished_at": utc_now(), "status": "PASS" if not errors else "FAIL",
@@ -1392,8 +1457,10 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     if errors:
                         raise BenchmarkError("Falló la restauración: " + "; ".join(errors))
             batch_status = "PASS" if all_runs and all(run["status"] == "PASS" for run in all_runs) else "FAIL"
+            trace("batch.complete", batch_id=batch_id, status=batch_status, runs=len(all_runs))
     except Exception as exc:
         manifest["runner_error"] = str(exc)
+        trace("batch.failed", batch_id=batch_id, error=type(exc).__name__)
         print(f"LLM_BENCHMARK_ERROR {exc}", file=sys.stderr)
     finally:
         if initial_snapshot and restore_errors:

@@ -66,7 +66,7 @@ idempotentes, manifiestos sin secretos, timeout configurable y logs JSON. La
 sesión disponible usó una única cuenta y no ejecutó preparación, limpieza ni
 captura Kubernetes; por ello no acredita aislamiento ni estado reproducible.
 El contrato operativo permanece en
-[web_classic/test](../web_classic/test/README.md).
+[tests/frontend/e2e](../tests/frontend/e2e/README.md).
 
 ### Iteración 13.2 — GUI, estados y consenso
 
@@ -160,7 +160,7 @@ de extremo a extremo según `issues.md`.
 
 El 2026-09-19 pasaron 27 pruebas focalizadas de grounding/búsqueda, 29 de
 consenso y 3 pruebas GUI de polling. La misma ejecución no pudo cargar las 12
-pruebas de orquestación de validadores porque `api/tests/venv` carece de
+pruebas de orquestación de validadores porque el entorno virtual de pruebas carece de
 `hexbytes`; no se considera una regresión verde ni sustituye los E2E de ambos
 modos.
 

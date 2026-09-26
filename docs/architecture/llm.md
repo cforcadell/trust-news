@@ -1,39 +1,35 @@
-# Uso de LLM en Assermetry
+# Use of LLM in Assermetry
 
-> Inventario y recomendación de arquitectura revisados el 20 de septiembre de 2026.
-> Los nombres de modelos cambian con rapidez: deben considerarse candidatos para una
-> evaluación reproducible, no una configuración que se deba copiar sin medirla.
+> Inventory and recommendation of architecture revised on September 20, 2026.
+> Model names change rapidly: they should be considered candidates for a
+> reproducible evaluation, not a configuration that should be copied without measuring it.
 
-## Resumen ejecutivo
+## Executive summary
 
-El proyecto realiza inferencia con LLM en tres módulos:
+The project inferences with LLM in three modules:
 
-1. `generate-asertions`: extrae y estructura las aserciones verificables de una noticia.
-2. `source-router`: clasifica los dominios candidatos para decidir qué fuentes son
-   apropiadas para una ruta de evidencia.
-3. `validate-asertions`: emite un veredicto `TRUE`, `FALSE` o `UNKNOWN`. Tiene tres
-   variantes LLM: memoria, búsqueda online del proveedor y RAG con evidencias recuperadas
-   por Assermetry.
+1. `generate-asertions`: Extracts and structures verifiable assertions from a news story.
+2. `source-router`: sort candidate domains to decide which sources are
+appropriate for a path of evidence.
+3. `validate-asertions`: issues a verdict `TRUE`, `FALSE` or `UNKNOWN`. Has three
+LLM variants: memory, online search of the supplier and RAG with evidence recovered by Assermetry.
 
-La prioridad de calidad debe ser:
+The quality priority should be:
 
-1. **Validador RAG**: necesita el mejor razonamiento probatorio y, si se incorpora, un
-   segundo modelo especializado en entailment/NLI.
-2. **Generador de aserciones**: necesita un modelo fuerte en extracción semántica y salida
-   estructurada, porque un error suyo se propaga a toda la cadena.
-3. **Validador con búsqueda online**: necesita un modelo competente y buen motor de
-   búsqueda, aunque su traza actual no es auditable por Assermetry.
-4. **Clasificador del source router**: puede usar un modelo pequeño y rápido, siempre con
-   reglas deterministas y abstención.
-5. **Validador por memoria**: un modelo mejor reduce errores, pero no corrige su carencia
-   fundamental de evidencia actual y verificable; no conviene concentrar aquí el gasto.
+1. **RAG Validator**: needs the best evidentiary reasoning and, if incorporated, a
+second model specializing in entailment/NLI.
+2. **Assertion generator**: needs a strong model in semantic extraction and output
+structured, because one of your mistakes spreads to the entire chain.
+3. **Validator with online search**: needs a competent model and good engine
+search, although its current trace is not auditable by Assermetry.
+4. **Source router creator**: you can use a small and fast model, always with
+deterministic rules and abstention.
+5. **Memory Validator**: a better model reduces errors, but does not correct its lack
+The main reason for this is the current and verifiable evidence; it is not appropriate to concentrate expenditure here.
 
-No usan LLM `evidence-search`, `news-handler`, `news-chain`, `gateway`, IPFS ni los
-contratos. `evidence-search` recupera y fragmenta documentos; el LLM que interpreta esos
-fragmentos vive en `validate-asertions`. `admin` tampoco hace inferencia: consulta el
-catálogo de OpenRouter y ordena modelos mediante una heurística local.
+They do not use LLM `evidence-search`, `news-handler`, `news-chain`, `gateway`, IPFS or contracts. `evidence-search` recovers and fragments documents; the LLM interpreting these fragments lives in `validate-asertions`. `admin` also does not inference: consult the OpenRouter catalog and sort models using a local heuristic.
 
-## Flujo
+## Flow
 
 ```text
 noticia
@@ -58,256 +54,152 @@ generate-asertions -- LLM de extracción estructurada
              consenso / cadena
 ```
 
-## Inventario por módulo
+## Inventory by module
 
 ### `api/generate-asertions`
 
-**Uso.** Convierte el texto completo en un máximo configurable de afirmaciones factuales,
-atómicas, autocontenidas y verificables. También asigna `categoryId`, `topic_code`,
-`evidence_kind`, entidades, lugares, jurisdicción, contexto temporal y pistas de búsqueda.
+**Use.** It converts the entire text into a configurable maximum of factual, atomic, self-contained and verifiable statements. It also assigns `categoryId`, `topic_code`, `evidence_kind`, entities, places, jurisdiction, temporal context and search trails.
 
-**Contrato.** La respuesta se valida contra `AssertionBatch` y los modelos Pydantic de
-`common.models`. El modelo Pydantic genera automáticamente el JSON Schema en `common/llm`:
-Gemini directo recibe `responseSchema`, OpenRouter recibe `response_format=json_schema`
-estricto y el resto de proveedores compatibles recibe modo JSON más validación local.
-`MAX_ASSERTIONS` se expresa también como `maxItems` y se comprueba al volver.
+**Contract.** The response is validated against `AssertionBatch` and `common.models` Pydatic models. The Pydantic model automatically generates the JSON Schema in `common/llm`: Direct Gemini receives `responseSchema`, OpenRouter receives strict `response_format=json_schema` and the rest of supported providers receives more local validation. `MAX_ASSERTIONS` is also expressed as `maxItems` and checked when returned.
 
-**Tipo de modelo necesario.** Modelo de extracción de información multilingüe con muy
-buena obediencia a esquemas, cobertura de hechos, resolución de correferencias y
-normalización taxonómica. No necesita navegar por Internet ni resolver la verdad de la
-noticia. Debe preferir precisión a creatividad y trabajar a temperatura baja.
+** Type of model needed.** Multilingual information extraction model with very good obedience to schemes, coverage of facts, resolution of correlations and taxonomic normalization. You do not need to browse the Internet or solve the truth of the news. You should prefer precision to creativity and work at low temperature.
 
-**Riesgo principal.** Es el mayor punto de propagación: una aserción omitida, compuesta,
-mal contextualizada o mal clasificada condiciona el routing, la recuperación de evidencia,
-los validadores y el resultado final.
+**Main risk.** It is the largest point of propagation: an omitted, composite, poorly contextualized or poorly classified assertion conditions the routing, the recovery of evidence, the validators and the final result.
 
-**Configuración encontrada.** La base de Kubernetes usa
-`google/gemini-2.5-flash-lite` vía OpenRouter; producción sobrescribe el modelo con
-`openai/gpt-5-nano`. El fichero `.env` de desarrollo no debe tomarse como descripción del
-despliegue.
+**Settings found.**The Kubernetes database uses `google/gemini-2.5-flash-lite` via OpenRouter; production overwrites the model with `openai/gpt-5-nano`. The `.env` file for development should not be taken as a description of deployment.
 
 ### `api/source-router`
 
-**Uso.** El buscador descubre una lista cerrada de dominios candidatos. El LLM asigna a
-cada uno tipo de fuente, nivel de autoridad, jurisdicciones, temas, clases de evidencia,
-idiomas y grado de coincidencia con la ruta solicitada. No debe buscar dominios, seleccionar
-fuentes ni decidir si la aserción es cierta.
+**Use.** The search engine discovers a closed list of candidate domains. The LLM assigns to each type of source, level of authority, jurisdictions, topics, classes of evidence, languages and degree of coincidence with the requested path. It should not search for domains, select sources or decide if the assertion is true.
 
-**Guardas existentes.** El código rechaza dominios que no estén en la entrada, valida los
-enums y el JSON Schema, normaliza jurisdicciones redundantes y reintenta solamente los
-dominios omitidos o inválidos. El perfil persistido registra el modelo que hizo la
-clasificación.
+**Existing guards.** The code rejects domains that are not in the entry, validates the enums and JSON Schema, normalizes redundant jurisdictions and retrys only the omitted or invalid domains. The persistent profile records the model that made the classification.
 
-**Tipo de modelo necesario.** Modelo pequeño de clasificación estructurada, rápido y
-barato. La especialización deseable es clasificación de autoridad documental y
-jurisdicción, no razonamiento general de frontera.
+** Type of model needed.** Small structured classification model, fast and cheap. The desirable specialization is classification of documentary authority and jurisdiction, not general bordering sound.
 
-**Riesgo principal.** Confundir un dominio secundario o impostor con una fuente oficial.
-El LLM no debe ser la frontera de confianza: allowlists, identidad del dominio, metadatos
-firmados y reglas por jurisdicción deben prevalecer sobre su clasificación.
+**Main risk.** Confused a secondary domain or impostor with an official source. LLM should not be the border of trust: allowlists, domain identity, signed metadata and rules by jurisdiction should prevail over its classification.
 
-**Configuración encontrada.** La base usa `google/gemini-2.5-flash-lite` vía OpenRouter.
+**Settings found.** The base uses `google/gemini-2.5-flash-lite` via OpenRouter.
 
 ### `api/validate-asertions`
 
-El mismo módulo ejecuta tres tareas epistemológicamente distintas. No deben compararse
-como si solo cambiaran de prompt.
+The same module executes three epistemologically distinct tasks. They should not be compared as if they were just changing prompt.
 
 #### Tipo 1: `LLM_MEMORY_VALIDATION`
 
-Decide con conocimiento paramétrico y lógica, sin corpus recuperado. El servidor marca la
-base del resultado como `MODEL_KNOWLEDGE`. Necesita conocimiento general amplio, buena
-calibración y disposición a responder `UNKNOWN`.
+You decide with parametric and logical knowledge, without recovered corpus. The server marks the base of the result as `MODEL_KNOWLEDGE`. It needs comprehensive general knowledge, good calibration and willingness to respond `UNKNOWN`.
 
-Un modelo de frontera puede mejorar el razonamiento, pero no aporta trazabilidad ni
-garantiza actualidad. Por eso el peso de consenso predeterminado es `0.25` y no se
-recomienda gastar aquí el modelo más caro.
+A border model can improve reasoning, but does not provide traceability or guarantee currentity. That is why the default consensus weight is `0.25` and it is not recommended to spend the most expensive model here.
 
 #### Tipo 2: `LLM_SEARCH_VALIDATION`
 
-Solo está implementado para OpenRouter. El código añade `:online` al identificador del
-modelo y la búsqueda queda dentro del proveedor. OpenRouter documenta que `:online` activa
-su plugin web y que devuelve anotaciones normalizadas de citas, pero el adaptador actual de
-Assermetry conserva únicamente `message.content`; no captura `message.annotations`.
+It is only implemented for OpenRouter. The code adds `:online` to the model identifier and the search remains within the provider. OpenRouter documents that `:online` activates its web plugin and returns standardized dating annotations, but the current Assermetry adapter retains only `message.content`; it does not capture `message.annotations`.
 
-Por ello las fuentes declaradas no pueden verificarse contra un corpus controlado y el
-resultado se marca `PROVIDER_SEARCH_UNVERIFIED`. Requiere un modelo competente en búsqueda,
-síntesis de fuentes y calibración, pero su señal debe seguir pesando menos que RAG. El peso
-predeterminado actual es `0.5`.
+Therefore, declared sources cannot be verified against a controlled corpus and the result is marked `PROVIDER_SEARCH_UNVERIFIED`. It requires a competent model in search, source synthesis and calibration, but its signal must continue to weigh less than RAG. The current default weight is `0.5`.
 
 #### Tipo 3: `RAG_EVIDENCE_VALIDATION`
 
-`source-router` y `evidence-search` obtienen el corpus. El prompt exige usar exclusivamente
-los fragmentos entregados y citar sus `context_id`. Después de la inferencia, el servidor
-reconstruye las citas desde el corpus y convierte un `TRUE` o `FALSE` sin soporte verificable
-en `UNKNOWN`.
+`source-router` and `evidence-search` obtain the corpus. The prompt requires exclusively to use the delivered fragments and cite their `context_id`. After inference, the server reconstructs the citations from the corpus and converts a `TRUE` or `FALSE` without verifiable support in `UNKNOWN`.
 
-**Tipo de modelo necesario.** Modelo de razonamiento sobre evidencia con excelente
-entailment: debe distinguir soporte directo, contradicción, contexto insuficiente,
-coincidencias parciales y cambios de entidad, fecha, magnitud o jurisdicción. También debe
-resistir instrucciones hostiles contenidas dentro de documentos recuperados.
+**Type of model needed.** Model of reasoning on evidence with excellent detail: must distinguish direct support, contradiction, insufficient context, partial coincidences and changes of entity, date, magnitude or jurisdiction. It must also resist hostile instructions contained within recovered documents.
 
-Este es el único uso donde se justifica de forma sistemática el modelo generalista más
-fuerte. La especialización más útil sería un segundo clasificador multilingüe entrenado en
-NLI/fact verification que puntúe cada par `aserción-fragmento`. No debe sustituir al LLM que
-redacta la explicación: debe funcionar como comprobación independiente y provocar
-`UNKNOWN` cuando ambos discrepen.
+This is the only use where the strongest generalist model is systematically justified. The most user-friendly should be a second multilingual NLI/fact-trained sorter verification that scores each pair `aserción-fragmento`. It should not replace the LLM that is the expansion: it should function as an independent check and cause `UNKNOWN` when both disagree.
 
-**Configuración encontrada.** Los tres workers local y prod son RAG y usan, vía
-OpenRouter, `meta-llama/llama-3.1-8b-instruct`,
-`qwen/qwen3-30b-a3b-instruct-2507` y
-`mistralai/mistral-small-24b-instruct-2501`. Cada worker cambia además la estrategia de
-evidencia (`EXT_ONLY_OFFICIAL`, `EXT_OFFICIAL_FIRST` y `LOCAL`). La diversidad de familias
-es positiva para evitar errores correlacionados, pero `mistral-small-2501` figura ya como
-retirado en el catálogo actual de Mistral y debe migrarse.
+**Settings found.** The three local and prod workers are RAG and use, via OpenRouter, `meta-llama/llama-3.1-8b-instruct`, `qwen/qwen3-30b-a3b-instruct-2507` and `mistralai/mistral-small-24b-instruct-2501`. Each worker also changes the evidence strategy (`EXT_ONLY_OFFICIAL`, `EXT_OFFICIAL_FIRST` and `LOCAL`).The diversity of families is positive to avoid correlated errors, but `mistral-small-2501` is already listed as removed in the current Mistral catalog and must migrate.
 
-Los tipos 4 (`DETERMINISTIC_VALIDATION`) y 5 (`HUMAN`) no ejecutan inferencia LLM automática.
+Type 4 (`DETERMINISTIC_VALIDATION`) and type 5 (`HUMAN`) do not execute automatic LLM inference.
 
-### Infraestructura compartida y administración
+### Shared infrastructure and administration
 
-`api/common/llm` abstrae `mistral`, `gemini`, `openrouter` y `grok`, con llamadas síncronas
-y asíncronas, reintentos, contabilización de tokens y validación de JSON. No es un cuarto
-caso de uso: es la capa de transporte de los anteriores.
+`api/common/llm` abstracts `mistral`, `gemini`, `openrouter` and `grok`, with synchronous and asynchronous calls, retrying, token counting and JSON validation. It is not a fourth case of use: it is the transport layer of the above.
 
-OpenRouter recibe `response_format=json_schema`, `strict=true` y
-`provider.require_parameters=true` cuando el llamador proporciona un modelo Pydantic o un
-schema. La capa común normaliza el schema de Pydantic al subconjunto estricto aceptado por
-OpenAI/OpenRouter y omite `temperature` en peticiones estructuradas para no excluir modelos
-que no soportan ese parámetro. Esto evita
-enrutar deliberadamente a endpoints que ignoren el parámetro, aunque la documentación del
-proveedor advierte que el cumplimiento exacto puede variar por endpoint.
+OpenRouter receives `response_format=json_schema`, `strict=true` and `provider.require_parameters=true` when the caller provides a Pydantic model or a schema. The common layer normalizes the Pydantic schema to the strict subset accepted by OpenAI/OpenRouter and omits `temperature` in structured requests not to exclude models that do not support that parameter. This prevents deliberately routing to endpoints that ignore the parameter, although the provider documentation warns that exact compliance may vary by endpoint.
 
-`generate-asertions`, `source-router` y `validate-asertions` usan esta misma ruta
-estructurada. El router conserva una excepción local deliberada: valida cada clasificación
-por separado para recuperar filas válidas, aunque el proveedor recibe el schema completo.
-Los validadores RAG usan un contrato específico que exige veredicto, confianza y referencias
-`context_id`; además mantienen la comprobación determinista de grounding. Todo candidato
-debe superar primero una prueba de compatibilidad del payload real, no solo aparecer en el
-catálogo.
+`generate-asertions`, `source-router` and `validate-asertions` use this same structured path. The router retains a local deliberation exception: it validates each rating separately to retrieve valid rows, then the provider receives the full schema. RAG validators use a specific contract that requires verdict, trust and reference `context_id`; they also maintain the surrounding deterministic check. Each candidate must first pass a real payload compatibility test, not only in the catalog.
 
-`api/admin` obtiene `/api/v1/models` sin llamar a un LLM. Mantiene un ranking general de
-calidad/precio por compatibilidad, pero la vista administrativa principal usa perfiles
-curados por carga: extracción, routing, RAG por estrategia, búsqueda y memoria. Combina la
-configuración efectiva de cada servicio con el precio vigente del catálogo y calcula el
-coste actual, el recomendado y su diferencia sobre una muestra de tokens visible. La GUI
-permite enviar `max_news_cost_usd`: un presupuesto global para una noticia de cinco
-aserciones medias. El backend evalúa conjuntamente generación, validadores y el routing de
-los RAG locales, y elimina cualquier combinación que supere el límite, incluida la premium.
-Para reducir huecos, el nivel similar admite candidatos curados cuyo coste esté entre el
-10 % y el 500 % del actual. Si ninguno entra en ese rango, selecciona el candidato curado
-más próximo, priorizando los que no incrementan el coste. Si los candidatos específicos de
-la carga no están disponibles, usa como último recurso el modelo textual con precio
-verificable más próximo del catálogo. Cuando una alternativa similar encarece demasiado la
-combinación global, se sustituye por la alternativa de ahorro de esa misma carga antes de
-omitirla. La combinación premium también se degrada primero a similar y después a ahorro;
-por tanto representa la mejor combinación viable bajo el límite, no una obligación de usar
-modelos de gama alta en todas las filas. Así se muestra al menos una alternativa siempre que exista
-un candidato con precio verificable y sea matemáticamente compatible con el límite.
-La selección sigue siendo un candidato para benchmark, no una decisión automática de
-producción: el catálogo no mide entailment, calibración ni calidad con el corpus propio.
+`api/admin` terms `/api/v1/models` without calling a LLM. It maintains a general ranking of calidad/precio for compatibility, but the main administrative view uses profiles cured by load: extraction, routing, RAG per strategy, search and memory. It combines the effective configuration of each service with the current price of the catalog and calculates the current cost, recommended and its differential over a sample of tokens visible. The GUI allows sensing `max_news_cost_usd`: a global budget for a news of five years old, including the premium.
 
-## Ponderación de la necesidad de calidad
+## Weighting the need for quality
 
-La puntuación pondera impacto en el resultado (30 %), dificultad de razonamiento y
-grounding (25 %), propagación del error (20 %), exigencia de salida estructurada (15 %) y
-necesidad de actualidad/búsqueda (10 %). La columna de inversión reparte el esfuerzo de
-evaluación y optimización; **no es el peso de voto en el consenso ni una cuota exacta de
-coste por tokens**.
+The score weighs impact on the result (30 %), difficulty of reasoning and grounding (25 %), spread of error (20 %), structured output requirement (15 %) and need for actualidad/busqueda (10 %). The investment column shares the evaluation and optimization effort; **is not the voting weight in the consensus nor an exact cost share per tokens**.
 
-| Uso | Puntuación | Inversión orientativa | Nivel recomendado | Especialización |
+| Uso | Score | Guidance investment | Nivel recomendado | Specialization |
 |---|---:|---:|---|---|
-| Validación RAG | 4.45/5 | 35 % | Frontera o gama alta | Sí: entailment/NLI y grounding |
-| Generación de aserciones | 4.05/5 | 30 % | Gama media-alta | Sí: extracción y schema estricto |
-| Validación con búsqueda online | 3.75/5 | 15 % | Gama media-alta con búsqueda | Sí: búsqueda y síntesis con citas |
-| Clasificación de fuentes | 3.40/5 | 15 % | Pequeño/rápido | Sí: clasificación; muchas reglas pueden ser deterministas |
-| Validación por memoria | 2.55/5 | 5 % | Gama media | No; priorizar calibración y `UNKNOWN` |
+| RAG validation | 4.45/5 | 35 % | High-end or border | Yes: entailment/NLI and grounding |
+| Generation of assertions | 4.05/5 | 30 % | Gama media-alta | Yes: strict extraction and schema |
+| Validation with online search | 3.75/5 | 15 % | Medium-high range with search | Yes: search and synthesis with quotations |
+| Source classification | 3.40/5 | 15 % | Small/fast | Yes: classification; many rules can be deterministic |
+| Memory Validation | 2.55/5 | 5 % | Gama media | No; prioritize calibration and `UNKNOWN` |
 
-Conclusión: si solo se puede mejorar un modelo, debe ser el de RAG. Si se pueden mejorar
-dos, el segundo es `generate-asertions`. El router no debe competir por el mismo presupuesto
-de inferencia que esos dos usos.
+Conclusion: if only one model can be improved, it must be RAG. If two can be improved, the second is `generate-asertions`. The router must not compete for the same inference budget as those two uses.
 
 ## Candidatos a evaluar
 
-La lista se basa en los catálogos oficiales consultados en la fecha de revisión. No afirma
-que un modelo sea mejor para este proyecto sin ejecutar el benchmark de Assermetry.
-OpenRouter permite usar slugs propios; Gemini y Mistral también pueden utilizarse por sus
-adaptadores directos. En producción debe fijarse una versión concreta después de la
-evaluación, en lugar de depender de alias `latest`.
+The list is based on official catalogues consulted at the revision date. It does not state that a model is better for this project without running the Assermetry benchmark. OpenRouter allows using its own slugs; Gemini and Mistral can also be used by its direct adapters. In production a specific version must be set after the evaluation, instead of relying on alias `latest`.
 
-| Familia/candidato | Papel candidato | Motivo para incluirlo | Precaución |
+| Familia/candidato | Papel candidato | Reason for including | Caution |
 |---|---|---|---|
-| `openai/gpt-6-astra` | RAG premium y juez de referencia | Modelo de máxima capacidad para casos difíciles | Coste/latencia altos; probar schema por OpenRouter |
-| `openai/gpt-5.6-sol` | RAG premium | Alternativa fuerte al modelo máximo | Sobredimensionado para router |
-| `openai/gpt-5.6-terra` | Generación, RAG equilibrado y búsqueda online | Equilibrio oficial entre capacidad y coste | Medir calibración factual, no inferirla del posicionamiento comercial |
-| `openai/gpt-5.6-luna` | Router y generación de alto volumen | Orientado a cargas sensibles a coste | No adoptarlo para RAG sin superar entailment y citas |
-| `google/gemini-3.1-pro-preview` | RAG premium y juez de referencia | Familia Pro para razonamiento complejo | Es preview; no fijarlo como único proveedor crítico |
-| `google/gemini-3.8-flash` | Generación, router y RAG equilibrado | Flash actual, gran contexto y salida estructurada documentada | Verificar compatibilidad real del schema en el endpoint elegido |
-| `google/gemini-3.5-flash-lite` | Router de alto volumen | Variante pequeña para clasificación barata | No asumir que corrige el problema observado con 2.5 Flash-Lite |
-| `anthropic/claude-sonnet-5` | RAG premium y diversidad de ensemble | Segunda familia de razonamiento disponible en OpenRouter | Solo vía OpenRouter con el código actual |
-| `mistralai/mistral-medium-3-5` | Generación/RAG equilibrado y opción europea | Chat Completions y Structured Outputs oficiales | Evaluar español y entailment con el corpus propio |
-| `mistral-small-2603` | Router, memoria y generación económica | Sustituto vigente de la línea Small antigua; salida estructurada | No usar el ahorro como sustituto del benchmark RAG |
+| `openai/gpt-6-astra` | Premium RAG and judge of reference | Maximum capacity model for difficult cases | Coste/latencia high; try Schema by OpenRouter |
+| `openai/gpt-5.6-sol` | RAG premium | Strong alternative to the maximum model | Oversized for router |
+| `openai/gpt-5.6-terra` | Generation, balanced RAG and online search | Official balance between capacity and cost | Measure factual calibration, not infer it from commercial positioning |
+| `openai/gpt-5.6-luna` | Router and high volume generation | Orientado a cargas sensibles a coste | Do not adopt it for RAG without exceeding retailing and dating |
+| `google/gemini-3.1-pro-preview` | Premium RAG and judge of reference | Pro Family for Complex Reasoning | It's preview; not fix it as the only critical provider |
+| `google/gemini-3.8-flash` | Generation, router and balanced RAG | Current Flash, Great Context and Documented Structured Output | Verify current schema compatibility in the chosen endpoint |
+| `google/gemini-3.5-flash-lite` | High Volume Router | Small variant for cheap sorting | Do not assume that it fixes the problem observed with 2.5 Flash-Lite |
+| `anthropic/claude-sonnet-5` | Premium RAG and diversity of ensemble | Second family of reasoning available in OpenRouter | Only via OpenRouter with current code |
+| `mistralai/mistral-medium-3-5` | Balanced generation/ADR and European option | Chat Supplements and Structured Outputs Official | Evaluate Spanish and retail with your own corpus |
+| `mistral-small-2603` | Router, memory and economic generation | Current replacement of the old Small line; structured exit | Do not use savings as a substitute for the RAG benchmark |
 
-Configuraciones iniciales razonables para el benchmark:
+Reasonable initial settings for the benchmark:
 
-- **RAG:** GPT-6 Astra, GPT-5.6 Sol, Gemini 3.1 Pro Preview, Claude Sonnet 5 y
+- **RAG:** GPT-6 Astra, GPT-5.6 Sol, Gemini 3.1 Pro Preview, Claude Sonnet 5 and
   Mistral Medium 3.5.
-- **Generación:** GPT-5.6 Terra, Gemini 3.8 Flash y Mistral Medium 3.5; añadir Luna o
-  Mistral Small 4 como baseline económico.
-- **Router:** GPT-5.6 Luna, Gemini 3.5 Flash-Lite y Mistral Small 4.
-- **Online:** las variantes `:online` de GPT-5.6 Terra, Gemini 3.8 Flash y Claude Sonnet 5,
-  después de implementar la captura y persistencia de anotaciones de citas.
-- **Memoria:** uno de los modelos equilibrados anteriores, nunca como fuente principal de
-  verdad para hechos recientes.
+- **Generation:** GPT-5.6 Terra, Gemini 3.8 Flash and Mistral Medium 3.5; add Moon or
+Mistral Small 4 as an economic baseline.
+- **Router:** GPT-5.6 Luna, Gemini 3.5 Flash-Lite and Mistral Small 4.
+- **Online:** the `:online` variants of GPT-5.6 Terra, Gemini 3.8 Flash and Claude Sonnet 5,
+after implementing the capture and persistence of citation annotations.
+- **Memory:** one of the previous balanced models, never as the main source of
+for recent events.
 
-No conviene usar el mismo modelo en todos los validadores: la diversidad de proveedor y
-familia reduce fallos correlacionados. Tampoco conviene mezclar en una misma comparación
-un cambio de modelo y un cambio de corpus/estrategia de búsqueda, porque no se sabría cuál
-explica el resultado.
+It is not appropriate to use the same model in all validators: the diversity of provider and family reduces correlated failures. Nor should a change of model and a change of corpus/estrategia search be mixed in the same comparison, because one would not know which explains the result.
 
-## Evaluación mínima antes de cambiar modelos
+## Minimum evaluation before changing models
 
-Construir un conjunto versionado en español y otros idiomas soportados, con casos
-verdaderos, falsos y genuinamente indeterminados. Debe incluir negaciones, cifras próximas,
-fechas, homónimos, cambio de jurisdicción, fuentes en conflicto, fragmentos irrelevantes y
-prompt injection dentro de la evidencia.
+Build a versioned set in Spanish and other supported languages, with true, false and genuinely undetermined cases. It must include denials, close numbers, dates, homonyms, change of jurisdiction, conflicting sources, irrelevant fragments and prompt injection within the evidence.
 
-Medir por tarea:
+Measure by task:
 
-- **Generación:** validez de schema, precisión y recall de aserciones centrales, atomicidad,
-  fidelidad al texto, exactitud de contexto/taxonomía y éxito posterior de recuperación.
-- **Router:** precisión por `authority_level`, jurisdicción y tipo de fuente; recall de
-  fuentes oficiales; tasa de impostores aceptados; abstenciones y dominios omitidos.
-- **RAG:** macro-F1 de `TRUE/FALSE/UNKNOWN`, calibración, precisión de citas, cobertura de
-  evidencia decisiva y tasa de veredictos decisivos degradados a `UNKNOWN` por grounding.
-- **Online:** exactitud, actualidad, calidad de dominio y porcentaje de citas recuperables.
-- **Memoria:** calibración y uso correcto de `UNKNOWN`, separado por antigüedad del hecho.
-- **Operación:** p50/p95 de latencia, errores, reintentos, JSON inválido y coste por noticia
-  completa, no solo por llamada.
+- **Generation:** schema validity, precision and recall of central assertions, atomism,
+text fidelity, contexto/taxonom accuracy and subsequent recovery success.
+- **Router:** `authority_level` accuracy, jurisdiction and source type; recall of
+official sources; accepted impostors rate; abstentions and omitted domains.
+- **RAG:** `TRUE/FALSE/UNKNOWN` macro-F1, calibration, citation accuracy, coverage of
+decisive evidence and rate of decisive verdicts degraded to `UNKNOWN` by grounding.
+- **Online:** accuracy, current affairs, domain quality and percentage of recoverable appointments.
+- **Memory:** calibration and correct use of `UNKNOWN`, separated by age from the event.
+- **Operation:** p50/p95 of latency, errors, retry, invalid JSON and cost per news
+Complete, not just by call.
 
-El criterio de promoción debe imponer umbrales, no un promedio único. Para RAG, por
-ejemplo, un modelo no debería aprobar si mejora el F1 pero aumenta las citas falsas o los
-veredictos decisivos sin soporte.
+The promotion criterion should impose thresholds, not a single average. For RAG, for example, a model should not approve if it improves F1 but increases false quotes or unsupported decisive verdicts.
 
-## Cambios de arquitectura recomendados
+## Recommended architecture changes
 
-1. Añadir un `task` explícito a la configuración (`ASSERTION_EXTRACTION`,
-   `SOURCE_CLASSIFICATION`, `RAG_VERDICT`, etc.) y mantener selección de modelo por tarea.
-2. Hacer que los tres validadores RAG usen familias distintas y modelos vigentes; conservar
-   también estrategias de evidencia distintas, pero evaluarlas por separado.
-3. Añadir un verificador NLI multilingüe como segunda señal del RAG. Ante desacuerdo con el
-   LLM o evidencia insuficiente, producir `UNKNOWN`, no forzar mayoría.
-4. Capturar `message.annotations` y metadatos de búsqueda en `LLMResponse.raw_metadata`;
-   validar y persistir las citas del modo online antes de aumentar su peso.
-5. Recuperar Structured Outputs para `generate-asertions` vía OpenRouter solo con endpoints
-   que lo soporten y mantener siempre la validación Pydantic local.
-6. Reemplazar la heurística de calidad de `admin` por filtros de capacidades
-   (`structured_outputs`, parámetros requeridos, contexto, versión/retirada) más métricas del
-   benchmark propio.
-7. Registrar en cada ejecución proveedor, slug exacto/versionado, prompt versionado,
-   temperatura, tokens, latencia, estrategia de evidencia y hashes del corpus. Sin ello no
-   hay comparación reproducible ni auditoría completa.
+1. Add an explicit `task` to the configuration (`ASSERTION_EXTRACTION`,
+`SOURCE_CLASSIFICATION`, `RAG_VERDICT`, etc.) and maintain model selection by task.
+2. Make the three RAG validators use different families and existing models;
+different evidence strategies, but evaluate them separately.
+3. Add a multilingual NLI verifier as the second signal of the RAG.
+LLM or insufficient evidence, produce `UNKNOWN`, do not force majority.
+4. Capture `message.annotations` and search metadata in `LLMResponse.raw_metadata`;
+validate and persist online mode quotes before increasing your weight.
+5. Recover Structured Outputs for `generate-asertions` via OpenRouter with endpoints only
+support it and always maintain local Pydatic validation.
+6. Replace `admin` quality heuristics with capacity filters
+(`structured_outputs`, required parameters, context, version/withdrawn) more metrics of your own benchmark.
+7. Register on each provider run, exacto/versionado slug, prompt versioned,
+temperature, tokens, latency, evidence strategy and corpus hashes. Without this there is no reproducible comparison or complete audit.
 
-## Referencias del repositorio
+## Repository references
 
 - [`api/generate-asertions/main.py`](../../api/generate-asertions/main.py)
 - [`api/source-router/app/classifier.py`](../../api/source-router/app/classifier.py)
@@ -318,7 +210,7 @@ veredictos decisivos sin soporte.
 - [`k8s/apis/source-router/base/configmap.yaml`](../../k8s/apis/source-router/base/configmap.yaml)
 - [`k8s/apis/validate-asertions`](../../k8s/apis/validate-asertions)
 
-## Fuentes externas
+## External sources
 
 - [Catálogo oficial de modelos de OpenAI](https://developers.openai.com/api/docs/models)
 - [Catálogo oficial de Gemini](https://ai.google.dev/gemini-api/docs/models)
@@ -329,12 +221,6 @@ veredictos decisivos sin soporte.
 - [Catálogo API de OpenRouter](https://openrouter.ai/api/v1/models)
 
 
-## Benchmark histórico de perfiles
+## Benchmark Historical Profiles
 
-[tests/llm-benchmark/llm-benchmark.py](../../tests/llm-benchmark/llm-benchmark.py) permite comparar
-configuraciones completas exclusivamente OpenRouter sobre un caso versionado.
-El runner captura la configuración efectiva, aplica cada perfil, ejecuta órdenes
-LIGHT, calcula calidad y costes estimados, persiste JSON y SQLite y restaura la
-configuración inicial. El procedimiento, el esquema de perfiles, la puntuación
-y las garantías de recuperación se describen en
-[docs/tests/llm-benchmark.md](../tests/llm-benchmark.md).
+[tests/llm-benchmark/llm-benchmark.py](../../tests/llm-benchmark/llm-benchmark.py) allows you to compare complete OpenRouter configurations exclusively on a versioned case. The runner captures the effective configuration, applies each profile, executes LIGHT commands, calculates estimated quality and costs, persists JSON and SQLite and restores the initial configuration. The procedure, profile scheme, score and recovery guarantees are described in [docs/tests/llm-benchmark.md](../tests/llm-benchmark.md).

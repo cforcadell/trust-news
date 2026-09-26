@@ -1,41 +1,28 @@
-# Recogida de métricas históricas
+# Collection of historical metrics
 
-`api/stats` contiene herramientas manuales para capturar órdenes y calcular
-estadísticas. No es una suite de tests, no tiene aserciones de aceptación y no
-forma parte de la regresión descrita en [tests.md](tests.md).
+`api/stats` contains manual tools for capturing commands and calculating statistics. It is not a test suite, it has no acceptance assertions and is not part of the regression described in [tests.md](tests.md).
 
-## Estado actual
+## Current status
 
-Los scripts conservan el contrato histórico de News Handler:
+The scripts retain the historic contract of News Handler:
 
 - URL fija `http://127.0.0.1:8072`;
-- llamadas a `/publishNew`, `/orders/{order_id}` y
-  `/news/{order_id}/events` sin autenticación ni `client_id`;
-- finalización exclusivamente en estado `VALIDATED`;
-- timestamps con formato `%m/%d/%Y %H:%M:%S` y eventos
+- calls to `/publishNew`, `/orders/{order_id}` and
+`/news/{order_id}/events` without authentication or `client_id`;
+- `VALIDATED` status only;
+- timestamps with `%m/%d/%Y %H:%M:%S` format and events
   `request_validation`/`validation_completed`.
 
-El API actual exige identidad y ámbito de cliente, y sus contratos de eventos y
-fechas han evolucionado. Por ello `collector.py` y `refetch_orders.py` no deben
-usarse contra el despliegue actual sin adaptarlos primero. Los JSON presentes en
-`tests/artifacts/historical-stats` y `tests/resources/historical-stats` son muestras históricas, no
-resultados reproducibles de la versión actual.
+The current API requires identity and client scope, and its event and date contracts have evolved. That's why `collector.py` and `refetch_orders.py` should not be used against the current deployment without first adapting them. JSONs present in `tests/artifacts/historical-stats` and `tests/resources/historical-stats` are historical samples, not reproducible results of the current version.
 
-## Componentes conservados
+## Conserved components
 
-| Script | Función histórica | Entrada/salida |
+| Script | Historical function | Entrada/salida |
 | --- | --- | --- |
-| `collector.py` | Publicar el mismo texto varias veces y esperar `VALIDATED` | Escribe `tests/artifacts/historical-stats/orders.csv` y un directorio JSON por orden |
-| `refetch_orders.py` | Volver a descargar órdenes ya enumeradas | Lee `tests/artifacts/historical-stats/orders.csv` y reemplaza `order.json`/`events.json` |
-| `stats_report.py` | Calcular agregados de aserciones, votos y tiempos | Lee los JSON capturados e imprime tablas con `tabulate` |
+| `collector.py` | Post the same text several times and wait `VALIDATED` | Type `tests/artifacts/historical-stats/orders.csv` and a JSON directory in order |
+| `refetch_orders.py` | Re-downloading already listed commands | Read `tests/artifacts/historical-stats/orders.csv` and replace `order.json`/`events.json` |
+| `stats_report.py` | Calculate aggregates of assertions, votes and times | Read captured JSONs and print tables with `tabulate` |
 
-Antes de reactivar estas herramientas debe añadirse autenticación, propagación
-del `client_id`, selección explícita de LIGHT/BLOCKCHAIN, estados terminales
-actuales, parsing ISO-8601 y soporte para los eventos vigentes. Después deberán
-trabajar sobre un directorio de ejecución nuevo, sin sobrescribir las muestras
-históricas.
+Before reactivating these tools, authentication, propagation of `client_id`, explicit selection of LIGHT/BLOCKCHAIN, current terminal states, parsing ISO-8601 and support for current events must be added. Then you must work on a new running directory, without overwriting historical samples.
 
-Hasta que se realice esa adaptación, las métricas válidas para regresión son los
-artefactos fechados producidos por `tests/frontend/e2e/run-regression.js`; estos
-registran escenario, duración, comprobaciones, órdenes creadas y errores sin
-confundirse con un test de calidad factual.
+Until such adaptation is made, the valid regression metrics are the dated artifacts produced by `tests/frontend/e2e/run-regression.js`; they record scenario, duration, checks, created commands and errors without being confused with a factual quality test.

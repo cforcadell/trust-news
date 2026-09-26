@@ -1,49 +1,49 @@
 # News Handler
 
-## Descripción
+## Description
 
-`api/news-handler` es el orquestador principal del flujo Assermetry. Crea órdenes, persiste su estado en MongoDB, publica solicitudes a Kafka para generar aserciones, subir documentos a IPFS, registrar noticias en blockchain y solicitar validaciones. También consolida las respuestas de esos servicios y expone consultas de órdenes, eventos, validadores y consistencia.
+`api/news-handler` is the main conductor of the Assermetry flow. It creates orders, persists its status in MongoDB, publishes requests to Kafka to generate assertions, upload documents to IPFS, register news on blockchain and request validations. It also consolidates the responses of those services and exposes queries of commands, events, validators and consistency.
 
 ## Endpoints
 
-- `POST /publishNew`: crea una orden nueva para un texto, comprueba cuota `news_generation`, guarda la orden y publica `generate_assertions` en Kafka.
-- `POST /publishWithAssertions`: crea una orden con aserciones proporcionadas por el cliente y publica una respuesta sintética `assertions_generated` para continuar el flujo.
-- `GET /orders/{order_id}`: devuelve la orden, sus datos enriquecidos, snapshots de validadores y resultados agregados por aserción.
-- `GET /news/{order_id}/events`: devuelve los eventos registrados para una orden.
-- `GET /news`: lista órdenes/noticias, filtrando por `client_id` salvo en modo admin.
-- `GET /validators/cache`: lista el cache de validadores, opcionalmente refrescado desde blockchain/IPFS.
-- `GET /validators/cache/{validator_hash}`: devuelve el detalle de configuración de un validador cacheado.
-- `GET /validators/cache/{validator_hash}/validations`: devuelve validaciones asociadas a un validador, con filtros por proveedor/modelo y opciones de detalle.
-- `POST /find-order-by-text`: calcula el hash del texto y busca órdenes con el mismo `hash_text`.
-- `POST /extract_text_from_url`: descarga una URL pública segura, extrae el texto principal del artículo con Readability/BeautifulSoup y devuelve título, URL final y texto.
-- `GET /checkOrderConsistency/{order_id}`: ejecuta comprobaciones de consistencia entre Order, documento IPFS y datos del contrato.
+- `POST /publishNew`: creates a new command for a text, checks `news_generation` quota, saves the command and publishes `generate_assertions` in Kafka.
+- `POST /publishWithAssertions`: creates an order with customer-provided assertions and publishes a synthetic `assertions_generated` response to continue the flow.
+- `GET /orders/{order_id}`: returns the command, its enriched data, validation snapshots and results added by assertion.
+- `GET /news/{order_id}/events`: returns the events registered for a command.
+- `GET /news`: lists commands/news, filtering by `client_id` except in admin mode.
+- `GET /validators/cache`: Check the validator cache, optionally refreshed from blockchain/IPFS.
+- `GET /validators/cache/{validator_hash}`: returns the configuration detail of a cached validator.
+- `GET /validators/cache/{validator_hash}/validations`: returns validations associated with a validator, with proveedor/modelo filters and detail options.
+- `POST /find-order-by-text`: calculates the text hash and searches for commands with the same `hash_text`.
+- `POST /extract_text_from_url`: download a secure public URL, extract the main text of the article with Readability/BeautifulSoup and return title, final URL and text.
+- `GET /checkOrderConsistency/{order_id}`: performs consistency checks between Order, IPFS document and contract details.
 
 ## Daemons
 
-- Consumidor Kafka `consume_responses_loop`: escucha `TOPIC_RESPONSES` y `TOPIC_LIGHT_VALIDATION_RESPONSES` con `group_id=fake-news-orchestrator-group`. Procesa acciones como aserciones generadas, subida a IPFS, registro blockchain, solicitudes/completados de validación y eventos de configuración de validadores. Actualiza estado de órdenes, eventos, validaciones y cache de validadores.
-- Productor Kafka global: publica solicitudes a tópicos de generación, IPFS, blockchain, validación y validación light según avanza el flujo.
+- Consumer Kafka `consume_responses_loop`: listen `TOPIC_RESPONSES` and `TOPIC_LIGHT_VALIDATION_RESPONSES` with `group_id=fake-news-orchestrator-group`. Processes actions such as generated assertions, upload to IPFS, blockchain log, solicitudes/completados validation and validation configuration events. Updates command status, events, validations and cache of validators.
+- Global Kafka Producer: publishes applications to generation topics, IPFS, blockchain, validation and light validation as the flow progresses.
 
-## Inicialización
+## Initialisation
 
-En `startup` conecta con MongoDB, inicializa colecciones de órdenes, eventos y validaciones, crea índices útiles, carga el cache de validadores desde blockchain/IPFS, arranca el productor Kafka y lanza el consumidor de respuestas. En `shutdown` detiene productor, consumidor y conexión MongoDB.
+In `startup` connects to MongoDB, initializes collections of commands, events and validations, creates pay indexes, loads the cache of validators from blockchain/IPFS, starts the producer Kafka and launches the consumer responses. In `shutdown` stops producer, consumer and MongoDB connection.
 
-## Variables de entorno
+## Environment variables
 
-- `KAFKA_BROKER`, `KAFKA_USERNAME`, `KAFKA_PASSWORD`, `KAFKA_SECURITY_PROTOCOL`, `KAFKA_MECHANISM`: conexión y seguridad Kafka.
-- `TOPIC_REQUESTS_GENERATE`: tópico para solicitar generación de aserciones.
-- `TOPIC_REQUESTS_IPFS`: tópico para solicitar subida a IPFS.
-- `TOPIC_REQUESTS_BLOCKCHAIN`: tópico para solicitar registro en blockchain.
-- `TOPIC_REQUESTS_VALIDATE`: tópico legacy/validación.
-- `TOPIC_RESPONSES`: tópico principal de respuestas.
-- `TOPIC_LIGHT_VALIDATION_REQUESTS`, `TOPIC_LIGHT_VALIDATION_RESPONSES`: tópicos del modo de validación light.
-- `MONGO_URI` o variables `MONGO_APP_*`: conexión MongoDB.
-- `MONGO_DBNAME`: base de datos.
-- `MONGO_COLLECTION`: colección de órdenes.
-- `MONGO_EVENTS_COLLECTION`: colección de eventos.
-- `MONGO_VALIDATIONS_COLLECTION`: colección de validaciones.
-- `MAX_WORKERS`: concurrencia configurable del orquestador.
-- `ADMIN_URL`: URL del servicio admin para cuotas.
-- `IPFS_FASTAPI_URL`: URL del servicio IPFS.
-- `NEWS_CHAIN_URL`: URL del servicio blockchain.
-- `GENERATE_ASSERTIONS_URL`: URL del generador de aserciones.
-- `IMPORT_URL_TIMEOUT_SECONDS`, `IMPORT_URL_MAX_REDIRECTS`, `IMPORT_URL_MAX_BYTES`, `IMPORT_URL_USER_AGENT`: límites y cabeceras de importación de URLs.
+- `KAFKA_BROKER`, `KAFKA_USERNAME`, `KAFKA_PASSWORD`, `KAFKA_SECURITY_PROTOCOL`, `KAFKA_MECHANISM`: Kafka connection and security.
+- `TOPIC_REQUESTS_GENERATE`: Topic to request generation of assertions.
+- `TOPIC_REQUESTS_IPFS`: Topic to request IPFS upload.
+- `TOPIC_REQUESTS_BLOCKCHAIN`: Topical for blockchain registration.
+- `TOPIC_REQUESTS_VALIDATE`: legacy/validacion topic.
+- `TOPIC_RESPONSES`: main topic of answers.
+- `TOPIC_LIGHT_VALIDATION_REQUESTS`, `TOPIC_LIGHT_VALIDATION_RESPONSES`: topics of light validation mode.
+- `MONGO_URI` or `MONGO_APP_*` variables: MongoDB connection.
+- `MONGO_DBNAME`: database.
+- `MONGO_COLLECTION`: command collection.
+- `MONGO_EVENTS_COLLECTION`: Event collection.
+- `MONGO_VALIDATIONS_COLLECTION`: validation collection.
+- `MAX_WORKERS`: configurable orchestrator attendance.
+- `ADMIN_URL`: URL of the admin service for installments.
+- `IPFS_FASTAPI_URL`: IPFS service URL.
+- `NEWS_CHAIN_URL`: URL of the blockchain service.
+- `GENERATE_ASSERTIONS_URL`: URL of the assertion generator.
+- `IMPORT_URL_TIMEOUT_SECONDS`, `IMPORT_URL_MAX_REDIRECTS`, `IMPORT_URL_MAX_BYTES`, `IMPORT_URL_USER_AGENT`: URL import boundaries and headers.

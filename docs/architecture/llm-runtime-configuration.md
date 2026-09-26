@@ -1,10 +1,10 @@
-# Configuración LLM runtime
+# LLM Runtime Settings
 
-La configuración de modelos LLM se administra desde la GUI únicamente para usuarios con el rol realm `trust-admin`. Los componentes configurables son `generate-asertions`, `source-router` y cada instancia registrada de `validate-asertions`.
+LLM model configuration is managed from GUI only for users with the realm `trust-admin` role. Configurable components are `generate-asertions`, `source-router` and each registered instance of `validate-asertions`.
 
-## Seguridad y frontera
+## Security and border
 
-Las APIs de configuración LLM administrativa requieren autenticación mediante certificado cliente. La protección es permanente y se compone de las tres capas siguientes:
+Administrative LLM configuration APIs require authentication by client certificate. Protection is permanent and consists of the following three layers:
 
 ```text
 cliente con certificado mTLS
@@ -15,24 +15,24 @@ cliente con certificado mTLS
   -> Admin API interna
 ```
 
-El navegador solo llama a Gateway. `Admin`, `generate-asertions`, `source-router` y los workers son servicios `ClusterIP`; sus rutas internas `/admin/config` no se publican mediante Ingress. El Gateway descarta las cabeceras de identidad suministradas por el navegador y crea la identidad de auditoría a partir del JWT validado.
+The browser only calls Gateway. `Admin`, `generate-asertions`, `source-router` and workers are `ClusterIP` services; their internal `/admin/config` routes are not published by Ingress. The Gateway discards the identity headers provided by the browser and creates the audit identity from the validated JWT.
 
-## Origen y precedencia de configuración
+## Origin and precedence of configuration
 
 | Almacenamiento | Contenido | Uso |
 | --- | --- | --- |
-| ConfigMap / environment | provider, model y temperatura por defecto | valor de arranque |
-| Kubernetes Secret / environment | API keys, private keys y demás credenciales | única fuente de secretos |
-| MongoDB `config` | `desired`, `actual`, versión, estado y auditoría no sensibles | override runtime persistente |
-| Memoria del proceso | configuración efectiva | aplicación inmediata sin reinicio |
+| ConfigMap / environment | default provider, model and temperature | boot value |
+| Kubernetes Secret / environment | API keys, private keys and other credentials | only source of secrets |
+| MongoDB `config` | `desired`, `actual`, non-sensitive version, status and audit | override runtime persistente |
+| Process Memory | effective configuration | immediate application without rebooting |
 
-Al iniciar, cada servicio toma sus valores por defecto del environment y pide el override `llm:*` al Admin. Si Admin o Mongo no están disponibles, registra un warning y continúa con los valores por defecto. No se modifican ConfigMaps, Secrets ni se usa la API de Kubernetes.
+When starting, each service takes its default values from the environment and asks for the override `llm:*` to Admin. If Admin or Mongo are not available, it registers a warning and continues with the default values. ConfigMaps, Secrets are not modified and the Kubernetes API is not used.
 
 Los PUT runtime solo admiten `provider`, `model` y `temperature` (la versión es asignada por Admin). Los schemas rechazan campos adicionales: no se aceptan ni se muestran `api_key`, `private_key`, tokens, passwords, ni secretos aunque estén enmascarados. Las respuestas solo exponen el booleano `credentials_configured` cuando resulta útil.
 
-## Operación
+## Operation
 
-La ruta externa es `/backend/admin/llm/*` y las rutas internas de Admin son:
+The external route is `/backend/admin/llm/*` and the internal Admin routes are:
 
 ```text
 GET/PUT /llm/components/generate-asertions
@@ -41,25 +41,25 @@ GET     /llm/validators?type=&strategy=
 GET/PUT /llm/validators/{validator_id}
 ```
 
-Admin persiste primero `desired` como `PENDING`, llama al `GET/PUT /admin/config` del servicio y compara el resultado efectivo. Si coincide pasa a `APPLIED`; si falla conserva el último `actual` y marca `ERROR`. Cada cambio deja componente o validator, provider/model anterior y nuevo, versión, usuario, fecha y resultado en `config.last_audit`.
+Admin persists first `desired` as `PENDING`, calls `GET/PUT /admin/config` as the service and compares the effective result. If it matches it passes to `APPLIED`; if it fails it retains the latest `actual` and marks `ERROR`. Each change leaves component or validator, provider/model previous and new version, user, date and result in `config.last_audit`.
 
-Los validators se descubren dinámicamente desde el cache existente de `news-handler`, respaldado por blockchain/IPFS. Su identificador estable es `ACCOUNT_ADDRESS` y su configuración registrada aporta el `service_url` usado solo por Admin dentro del cluster. La GUI nunca envía una URL interna. Antes de leer o modificar un worker, Admin vuelve a descubrirlo y exige que esté activo y accesible. El tipo se deriva del enum `ValidatorType` y se devuelve como `{id, name}`; para RAG se devuelve también la estrategia de evidencia.
+Validators are dynamically discovered from the existing `news-handler` cache, backed by blockchain/IPFS. Its stable identifier is `ACCOUNT_ADDRESS` and its registered configuration provides the `service_url` used only by Admin within the cluster. The GUI never sends an internal URL. Before reading or modifying a worker, Admin re-discovers it and requires it to be active and accessible. The type is derived from the enum `ValidatorType` and returned as `{id, name}`; for RAG the evidence strategy is also returned.
 
-Cambiar un validator reutiliza su `PUT /admin/config`: reconstruye el cliente AI y conserva sus actualizaciones de configuración IPFS, blockchain y eventos existentes. El cambio no altera el tipo de validator ni la estrategia de evidencia.
+Changing a validator reuses your `PUT /admin/config`: rebuilds the AI client and retains its IPFS configuration updates, blockchain and existing events. The change does not alter the type of validator or the evidence strategy.
 
 ## Trazabilidad
 
-Los documentos de aserciones incluyen provider, model y versión. El router guarda modelo y versión de clasificación en perfiles y rutas nuevas. Las respuestas de validación compatibles incorporan provider, model y versión LLM; la identidad del validator ya forma parte de su contrato.
+The assertion documents include provider, model and version. The router saves model and classification version in new profiles and paths. Supported validation responses incorporate provider, model and LLM version; the identity of the validator is already part of your contract.
 
-## Matriz de verificación manual de mTLS
+## mTLS manual verification matrix
 
-La regla de Cloudflare debe probarse desde un cliente externo, nunca desde el port-forward local:
+The Cloudflare rule must be tested from an external client, never from the local port-forward:
 
-| Certificado cliente | JWT / rol | Resultado esperado |
+| Certificado cliente | JWT / rol | Expected outcome |
 | --- | --- | --- |
-| Ausente | JWT `trust-admin` válido | Cloudflare rechaza antes de Gateway |
-| Válido | Ausente o inválido | Gateway responde 401 |
-| Válido | JWT válido sin `trust-admin` | Gateway responde 403 |
-| Válido | JWT válido con `trust-admin` | Gateway permite la operación |
+| Ausente | Valid JWT `trust-admin` | Cloudflare rejects before Gateway |
+| Valid | Absent or invalid | Gateway responde 401 |
+| Valid | Valid JWT without `trust-admin` | Gateway responde 403 |
+| Valid | Valid JWT with `trust-admin` | Gateway allows operation |
 
-La política exacta y el procedimiento de revisión de Cloudflare están en [`skaffold-server.md`](../deploy/skaffold-server.md#12-cloudflare).
+The exact Cloudflare policy and review procedure are in [`skaffold-server.md`](../deploy/skaffold-server.md#12-cloudflare).

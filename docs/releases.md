@@ -1,113 +1,106 @@
-# Versiones publicadas
+# Published versions
 
-Este documento conserva el resultado funcional de las versiones anteriores a la
-versión en curso. La planificación activa está en [`version.md`](version.md) y
-las versiones futuras en [`next_releases.md`](next_releases.md).
+This document retains the functional result of versions prior to the current version. Active planning is in [`version.md`](version.md) and future versions in [`next_releases.md`](next_releases.md).
 
-## v0.0.12 - Cierre del perímetro y acceso administrativo
+## v0.0.12 - Closure of the perimeter and administrative access
 
-- `assermetry.com` quedó publicado mediante Cloudflare con TLS estricto y el
-  origen de Hetzner limitado a sus redes verificadas.
-- Se conservaron el mTLS general temporal hasta `v0.0.14` y la protección mTLS
-  administrativa permanente de Keycloak.
-- OIDC quedó alineado con el issuer canónico y se comprobaron login, sesión,
+- `assermetry.com` was published using Cloudflare with strict TLS and the
+Hetzner's origin limited to its verified networks.
+- The mTLS general temporary condition was maintained as `v0.0.14` and mTLS protection
+Permanent Administrative Office of Keycloak.
+- OIDC was aligned with the canonical issuer and log login, session were checked,
   renovación del token y logout.
-- Gateway rechazó las peticiones sin JWT y aceptó un JWT válido con el rol
+- Gateway rejected the petitions without JWT and accepted a valid JWT with the role
   administrativo esperado.
-- Los recorridos Light y Blockchain se completaron bajo el acceso protegido.
-- El lock de mantenimiento bloqueó sesiones válidas de usuario y administrador
-  y permitió recuperar ambos accesos al deshabilitarlo.
-- La línea base de cierre registró el nodo y los 29 pods preparados sin
-  reinicios, nueve PVC `Bound` y observabilidad disponible.
-- `ISSUE-001` permanece mitigada y su resolución se traslada a `v0.0.13`.
-- La revocación controlada de un certificado administrativo desechable se
-  realizará en `v0.0.14`.
+- The Light and Blockchain tours were completed under protected access.
+- The maintenance lock locked valid user and administrator sessions
+and allowed both access to be recovered by disableting it.
+- The base line closed the node and the 29 pods prepared without
+Restarts, nine `Bound` PVC and observability available.
+- `ISSUE-001` remains mitigated and its resolution is moved to `v0.0.13`.
+- Controlled revocation of a disposable administrative certificate
+will be done in `v0.0.14`.
 
 [Detalle completo del cierre de v0.0.12](releases/v0.0.12.md).
 
-## v0.0.11 - Validadores con evidencia y renovación del frontend
+## v0.0.11 - Validators with evidence and renewal of the frontend
 
-- Se añadieron endpoints de recomendación de modelos económicos mediante un
-  router de API.
-- Se renovaron el tema de login de Keycloak, el estilo del frontend y la
-  presentación de los resultados de validación.
-- Se incorporó soporte en español e inglés.
-- Se añadió monitorización de MongoDB y Kafka mediante Kafdrop.
-- Se separaron los usuarios administradores y normales y se adoptó un usuario
-  de aplicación para las APIs.
-- Se centralizaron los modelos Pydantic y las funciones comunes.
-- Los validadores quedaron clasificados como:
-  `LLM_MEMORY_VALIDATION`, `LLM_SEARCH_VALIDATION`,
-  `RAG_EVIDENCE_VALIDATION`, `DETERMINISTIC_VALIDATION` y `HUMAN`.
-- Se creó el servicio `evidence-search`, con proveedor de búsqueda abstraído,
-  soporte de Exa, perfiles de dominios preferidos, caché y descarga de contenido
-  en chunks para los validadores RAG.
-- Se configuró un validador RAG con dominios preferidos y dos validadores RAG
-  adicionales, con modelos distintos, sin esa restricción.
-- Los validadores con búsqueda online admiten los modos `LOCAL`, `NONE`,
-  `EXT_OFFICIAL_FIRST` y `EXT_ONLY_OFFICIAL`.
-- El generador de aserciones limita cada aserción a un solo hecho y usa las
-  categorías estándar a lo largo de toda la cadena.
-- Traefik pasó a ser el Ingress común de los entornos local y productivo.
+- Economic model recommendation endpoints were added through a
+API router.
+- The Keycloak login theme, the frontend style and the
+presentation of validation results.
+- Support was incorporated in Spanish and English.
+- Monitoring of MongoDB and Kafka was added by Kafdrop.
+- Admin and normal users separated and one user adopted
+application for APIs.
+- The Pydatic models and common functions were centralized.
+- Validators were classified as:
+`LLM_MEMORY_VALIDATION`, `LLM_SEARCH_VALIDATION`, `RAG_EVIDENCE_VALIDATION`, `DETERMINISTIC_VALIDATION` and `HUMAN`.
+- The `evidence-search` service was created, with an abstracted search provider,
+Exa support, preferred domain profiles, cache and download content to chunks for RAG validators.
+- A RAG validator with preferred domains and two RAG validators was configured
+additional models, without such restriction.
+- Online search validators support `LOCAL`, `NONE` modes,
+`EXT_OFFICIAL_FIRST` and `EXT_ONLY_OFFICIAL`.
+- The assertion generator limits each assertion to a single fact and uses the
+standard categories throughout the chain.
+- Traefik became the common Ingress of local and productive environments.
 
-La fuente histórica dejó sin confirmación la prueba de que el modo Light no
-envía validaciones cuando los validadores no superan el health check.
+The historical source left unconfirmed proof that Light mode does not send validations when validators do not exceed health check.
 
-## v0.0.10 - Configuración de validadores y protocolo de aserciones v2
+## v0.0.10 - Validators configuration and v2 assertion protocol
 
-- La configuración de cada validador se almacena en IPFS y su hash queda
-  registrado en blockchain durante el alta, la actualización y la baja.
-- El contrato emite `new_validator_config` y permite recuperar validadores con
-  sus hashes de configuración.
-- `validate-assertions` sincroniza la configuración registrada al arrancar,
-  al cambiar la configuración administrativa y al dar de baja un validador.
-- `news-chain` expone los validadores, escucha los cambios on-chain, recupera
-  la configuración de IPFS y publica los eventos correspondientes en Kafka.
-- `news-handler` mantiene una caché de validadores, la actualiza mediante
-  eventos y guarda la configuración aplicable junto con cada validación.
-- Se añadieron consultas por hash, proveedor y modelo, con recuperación
-  opcional de validaciones y enlaces a sus órdenes.
-- Gateway protege y enruta los nuevos endpoints con el mismo modelo de seguridad
-  que el resto de la API.
-- El frontend permite listar validadores, consultar su configuración y navegar
-  desde sus validaciones hasta las órdenes relacionadas.
-- Los modelos Pydantic compartidos se trasladaron al módulo común.
-- Se introdujo el protocolo de aserciones v2 para generación, validación, modo
-  Light y blockchain, con payloads enriquecidos, contexto de búsqueda,
-  selección de dominios, caché y respuestas RAG.
-- Los servicios de aserciones, validación, cadena y búsqueda de evidencias
-  adoptaron la nueva forma del payload y persisten los metadatos de evidencia.
+- The settings of each validator are stored in IPFS and your hash remains
+registered in blockchain during discharge, upgrade and drop.
+- The contract issues `new_validator_config` and allows to recover validators with
+Your configuration hashes.
+- `validate-assertions` synchronizes the settings recorded when booting,
+when changing the administrative configuration and de-coding a validator.
+- `news-chain` exposes validators, listens to on-chain changes, recovers
+IPFS configuration and publishes the relevant events in Kafka.
+- `news-handler` maintains a cache of validators, updates it by
+events and saves the applicable settings along with each validation.
+- Added queries by hash, supplier and model, with recovery
+optional validations and links to your orders.
+- Gateway protects and routes new endpoints with the same security model
+that the rest of the API.
+- The frontend allows you to list validators, consult their settings and browse
+from its validations to related orders.
+- The shared Pydatic models were moved to the common module.
+- The v2 assertion protocol was introduced for generation, validation, mode
+Light and blockchain, with rich payloads, search context, domain selection, cache and RAG responses.
+- The services of assertions, validation, chain and search for evidence
+adopted the new form of payload and evidence metadata persist.
 
-La configuración versionada de un validador contiene nombre, tipo, proveedor,
-modelo, fechas de alta y actualización, fecha de baja y estado.
+The versioned settings of a validator contain name, type, supplier, model, high and update dates, low date and status.
 
-## v0.0.9.1 - Consumo efectivo de cuotas
+## v0.0.9.1 - Current consumption of quotes
 
-- Las cuotas se descuentan al consumir el servicio.
-- `news-handler` procesa los eventos recibidos y genera las aserciones
+- Fees are deducted when consuming the service.
+- `news-handler` processes the received events and generates the assertions
   correspondientes.
 
-## v0.0.9 - Rate limit y administración de usuarios
+## v0.0.9 - Limit Rate and User Management
 
-- Se incorporó control de claves y rate limiting.
-- Los usuarios disponen de límites de consumo para generación de aserciones y
+- Key control and rate limitation were incorporated.
+- Users have consumption limits for the generation of assertions and
   validaciones.
-- Se añadió un módulo administrativo para gestionar nuevos usuarios.
-- Se actualizaron las pruebas Python.
-- Gateway deriva y aplica automáticamente el `client_id` en los endpoints de
-  órdenes.
-- El frontend restringe la visibilidad de las órdenes al cliente efectivo.
+- An administrative module was added to manage new users.
+- The Python tests were updated.
+- Gateway automatically drifts and applies `client_id` to endpoints of
+orders.
+- The frontend restricts the visibility of the orders to the effective customer.
 
-## v0.0.8 - Gateway, Keycloak y preparación productiva
+## v0.0.8 - Gateway, Keycloak and productive preparation
 
-- Se optimizaron y endurecieron los Dockerfile.
-- Se integró Keycloak.
-- Se incorporó un Gateway único, con APIs públicas e integración con Keycloak.
-- Nginx dirige las llamadas exclusivamente a través del Gateway.
-- Kafka funciona en modo KRaft, sin ZooKeeper.
-- Se añadieron validación estricta del issuer, hostname y HTTPS.
-- La configuración volátil se trasladó a variables de entorno y se añadieron
-  ficheros `.env` de ejemplo sin secretos.
-- Las pruebas automáticas validan las llamadas de creación y consulta de
+- They optimized and hardened the Dockerfiles.
+- Keycloak's integrated.
+- A unique Gateway was incorporated, with public APIs and integration with Keycloak.
+- Nginx directs calls exclusively through the Gateway.
+- Kafka works in KRaft mode, without ZooKeeper.
+- Strict validation of the issuer, hostname and HTTPS was added.
+- Volatile configuration moved to environment variables and were added
+`.env` files without secrets.
+- Automatic testing validates the creation and consultation calls of
   órdenes obteniendo previamente un token OAuth.
-- Se prepararon los perfiles y la configuración de despliegue productivo.
+- Profiles and productive deployment configurations were prepared.

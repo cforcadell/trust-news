@@ -1,61 +1,54 @@
-# Anexo: mensajeria Kafka y casos de uso Assermetry
+# Annex: Kafka courier and cases of use Assermetry
 
-## Vision general
+## General Vision
 
-Assermetry usa Kafka como bus asincrono entre microservicios. El patron principal es:
+Assermetry uses Kafka as an asynchronic bus between microservices. The main pattern is:
 
-1. news-handler crea una orden y publica una peticion.
-2. Un microservicio especializado consume esa peticion.
-3. El microservicio publica una respuesta o evento.
-4. news-handler consume respuestas, actualiza MongoDB y avanza el estado de la orden.
+1. news-handler creates an order and publishes a petition.
+2. A specialized microservice consumes that request.
+3. The microservice publishes a response or event.
+4. news-handler consumes responses, updates MongoDB and advances the order status.
 
-La coleccion principal de ordenes se mantiene en MongoDB, normalmente orders. Los eventos se registran tambien en events para trazabilidad.
+The main order collection is maintained in MongoDB, usually orders. Events are also recorded in events for traceability.
 
-## Servicios implicados
+## Services involved
 
-| Servicio | Rol |
+| Service | Rol |
 |---|---|
-| news-handler | Orquestador principal, API consumida por frontend/gateway, estado de ordenes, cache de validadores |
-| generate-asertions | Genera aserciones desde texto |
-| ipfs-fastapi | Sube y lee documentos desde IPFS |
-| news-chain | Integra smart contract y escucha eventos blockchain |
-| validate-asertions | Worker de validacion por validador |
-| evidence-search | Servicio HTTP interno para evidencias RAG; no consume Kafka |
-| admin | Cuotas y recomendaciones de modelos |
+| news-handler | Main Orchestrator, API consumed by frontend/gateway, command status, validator cache |
+| generate-asertions | Generates assertions from text |
+| ipfs-fastapi | Upload and read documents from IPFS |
+| news-chain | Integrates smart contract and listens to blockchain events |
+| validate-asertions | Validator validation worker |
+| evidence-search | Internal HTTP service for RAG evidence; does not consume Kafka |
+| admin | Assessments and model recommendations |
 
 ## Topics principales
 
-Los nombres pueden configurarse por entorno, pero los valores habituales son:
+Names can be set by environment, but the usual values are:
 
-| Topic | Productor | Consumidor | Mensajes principales |
+| Topic | Productor | Consumidor | Main messages |
 |---|---|---|---|
 | fake_news_requests_generate | news-handler | generate-asertions | generate_assertions |
 | fake_news_requests_ipfs | news-handler | ipfs-fastapi | upload_ipfs |
 | fake_news_requests_blockchain | news-handler | news-chain | register_blockchain |
-| fake_news_requests_validate | news-chain o flujo heredado | validate-asertions/orquestacion heredada | request_validation |
+| fake_news_requests_validate | news-chain or inherited flow | validate-asertions/orquestacion heredada | request_validation |
 | fake_news_requests_light_validation | news-handler | validate-asertions | light_validation_request |
-| fake_news_responses | Todos los workers | news-handler | respuestas y eventos |
+| fake_news_responses | All workers | news-handler | responses and events |
 
-Nota: en codigo existen defaults historicos trustnews.validation.requests y trustnews.validation.responses, pero los ConfigMaps actuales apuntan el flujo light a fake_news_requests_light_validation y fake_news_responses.
+Note: in code there are historical faults trustnews.validation.requests and trustnews.validation.responses, but the current ConfigMaps point the flow light to fake_news_requests_light_validation and fake_news_responses.
 
 ## Acciones Kafka normalizadas
 
 ### generate_assertions
 
-Publicado por news-handler a fake_news_requests_generate.
+Posted by news-handler a fake_news_requests_generate.
 
 Payload conceptual:
 
-{
-  "action": "generate_assertions",
-  "order_id": "uuid",
-  "payload": {
-    "text": "texto de la noticia",
-    "validation_mode": "BLOCKCHAIN | LIGHT"
-  }
-}
+{ "action": "generate_assertions", "order_id": "uuid", "payload": { "text": "texto de la noticia", "validation_mode": "BLOCKCHAIN | LIGHT" } }
 
-Respuesta esperada:
+Expected response:
 
 {
   "action": "assertions_generated",
@@ -78,50 +71,50 @@ Respuesta esperada:
   }
 }
 
-Si falla, se publica assertions_not_generated con error y numero de intentos.
+If failed, statements_not_generated is published with error and number of attempts.
 
-## Caso de uso 1: publicacion normal con blockchain
+## Use case 1: normal publication with blockchain
 
-Objetivo: publicar una noticia, generar aserciones, subir documento a IPFS, registrar post en blockchain y solicitar validaciones automaticas.
+Objective: to publish a news story, generate assertions, upload document to IPFS, register post in blockchain and request automatic validations.
 
-Flujo:
+Flow:
 
 1. Cliente llama a news-handler, normalmente POST /publishNew.
-2. news-handler crea orden en MongoDB con estado inicial.
-3. news-handler publica generate_assertions en fake_news_requests_generate.
-4. generate-asertions consume, genera aserciones y publica assertions_generated en fake_news_responses.
+2. news-handler creates order in MongoDB with initial status.
+3. news-handler publishes generation_assertions in fake_news_requests_generate.
+4. generate-assertions consumes, generates assertions and publishes assertions_generated in fake_news_responses.
 5. news-handler consume assertions_generated.
-6. Si validation_mode=BLOCKCHAIN, valida/normaliza assertions-document-v2 y publica upload_ipfs en fake_news_requests_ipfs.
-7. ipfs-fastapi sube documento a IPFS y responde ipfs_uploaded.
-8. news-handler consume ipfs_uploaded, guarda cid y publica register_blockchain en fake_news_requests_blockchain.
-9. news-chain registra el post en el contrato. El contrato selecciona validadores por categoria.
-10. news-chain publica blockchain_registered en fake_news_responses.
-11. news-handler guarda postId, tx_hash, assertions, validadores esperados por asercion y validators_pending.
-12. El contrato emite ValidationRequested por cada validador/asercion.
-13. Cada instancia validate-asertions escucha eventos blockchain filtrados por su ACCOUNT_ADDRESS.
-14. Si VALIDATOR_TYPE es automatico, valida la asercion: tipo 1 memoria, tipo 2 online, tipo 3 RAG.
-15. validate-asertions sube documento de validacion a IPFS y registra validacion en blockchain.
-16. news-chain detecta o consume la validacion y publica validation_completed.
-17. news-handler consume validation_completed, actualiza validations, recalcula pendientes y, si termina todo, marca status=VALIDATED.
-18. El endpoint de orden devuelve assertion_results con scores ponderados.
+6. If validation_mode=BLOCKCHAIN, valida/normaliza statements-document-v2 and publishes upload_ipfs in fake_news_requests_ipfs.
+7. ipfs-fastapi uploads document to IPFS and responds ipfs_uploaded.
+8. news-handler consumes ipfs_uploaded, saves cid and publishes register_blockchain in fake_news_requests_blockchain.
+9. news-chain records the post in the contract. The contract selects validators by category.
+10. news-chain publishes blockchain_registered in fake_news_responses.
+11. news-handler saves postId, tx_hash, assertions, validations expected by assertion and validators_pending.
+12. The contract issues ValidationRequested for each validador/asercion.
+13. Each validation-aserstions instance listens to blockchain events filtered by its ACCOUNT_ADDRESS.
+14. If VALIDATOR_TYPE is automatic, it validates the assertion: type 1 memory, type 2 online, type 3 RAG.
+15. validate-aserstions uploads validation document to IPFS and registers validation in blockchain.
+16. news-chain detects or consumes validation and publishes validation_completed.
+17. news-handler consumes validation_completed, updates validations, recalculates pending and, if it all ends, marks status=VALIDATED.
+18. The order endpoint returns assertion_results with weighted scores.
 
-## Caso de uso 2: validacion LIGHT sin blockchain/IPFS
+## Use case 2: LIGHT validation without blockchain/IPFS
 
-Objetivo: validar aserciones de forma rapida usando Kafka, sin registrar noticia ni validaciones en blockchain.
+Objective: to validate assertions quickly using Kafka, without registering news or validations in blockchain.
 
-Flujo:
+Flow:
 
-1. Cliente publica con validation_mode=LIGHT.
-2. Se generan aserciones igual que en el flujo normal.
-3. news-handler detecta validation_mode=LIGHT al recibir assertions_generated.
+1. Client publishes with validation_mode=LIGHT.
+2. Assertions are generated as in normal flow.
+3. news-handler detects validation_mode=LIGHT upon receiving assertions_generated.
 4. No envia a IPFS ni blockchain.
-5. Crea documento local y calcula validadores activos desde validators_cache por categoria on-chain.
-6. Filtra validadores no automaticos: excluye DETERMINISTIC_VALIDATION y HUMAN.
-7. Publica un mensaje por asercion/validador en fake_news_requests_light_validation con action=light_validation_request y assertion-validation-payload-v2 inline.
-8. Cada worker validate-asertions consume el topic, pero solo procesa mensajes cuyo validator_id coincide con su ACCOUNT_ADDRESS.
-9. El worker valida segun VALIDATOR_TYPE y publica light_validation_completed en fake_news_responses.
-10. news-handler guarda la validacion en la orden y en la coleccion validations.
-11. Cuando no quedan pendientes, marca la orden como VALIDATED.
+5. Create local document and calculate active validators from validators_cache by on-chain category.
+6. Non-automatic validators filter: excludes DETERMINISTIC_VALIDATION and HUMAN.
+7. Post a message by asercion/validador in fake_news_requests_light_validation with action=light_validation_request and assertion-validation-payload-v2 online.
+8. Each worker validate-asers consumes the topic, but only processes messages whose validater_id matches your ACCOUNT_ADDRESS.
+9. The worker validates according to VALIDATOR_TYPE and publishes light_validation_completed in fake_news_responses.
+10. news-handler saves validation in order and in validations collection.
+11. When no outstanding, mark the command as VALIDATED.
 
 Payload conceptual de light_validation_request:
 
@@ -140,7 +133,7 @@ Payload conceptual de light_validation_request:
   }
 }
 
-Respuesta conceptual light_validation_completed:
+Concept answer light_validation_completed:
 
 {
   "action": "light_validation_completed",
@@ -166,32 +159,32 @@ Respuesta conceptual light_validation_completed:
   }
 }
 
-## Caso de uso 3: validador RAG con evidence-search
+## Use case 3: RAG validator with evidence-search
 
-Objetivo: validar una asercion usando evidencias externas gestionadas por Assermetry, no por el proveedor LLM.
+Objective: to validate an assertion using external evidence managed by Assermetry, not by the LLM provider.
 
-Configuracion del worker:
+Worker Configuration:
 
 - VALIDATOR_TYPE: "3"
 - EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
 
-Flujo:
+Flow:
 
-1. El worker recibe una solicitud de validacion por blockchain event o Kafka light.
-2. Para `LOCAL` ejecuta `POST /routes/resolve` en Source Router; las estrategias `EXT_*` omiten este paso.
-3. Source Router consulta `source_routes_v2` y `domain_profiles_v1`; en MISSING/STALE descubre URLs reales, clasifica en un batch LLM y aplica elegibilidad/ranking en código.
-4. El worker ejecuta `POST /search/evidence`; con `LOCAL` adjunta `preferred_sources[]` completos.
-5. Evidence Search consulta Exa/Tavily y construye evidencia/chunks; no conoce la memoria de rutas.
-6. El worker inyecta las evidencias en el prompt RAG mediante `common/llm`.
-7. El LLM debe responder usando exclusivamente esas evidencias.
-8. La respuesta puede incluir confidence y evidence_used.
-9. news-handler conserva esos campos y frontend los muestra.
+1. The worker receives a request for validation by blockchain event or Kafka light.
+2. For `LOCAL`, run `POST /routes/resolve` on Source Router; `EXT_*` strategies omit this step.
+3. Source Router consults `source_routes_v2` and `domain_profiles_v1`; in MISSING/STALE discovers real URLs, ranks in a LLM batch and applies elegibilidad/ranking in code.
+4. The worker runs `POST /search/evidence`; with `LOCAL` attached `preferred_sources[]` complete.
+5. Evidence Search query Exa/Tavily and build evidencia/chunks; does not know path memory.
+6. The worker injects the evidence into the RAG prompt by `common/llm`.
+7. The LLM must respond using those evidence only.
+8. The answer may include confidence and evidence_used.
+9. news-handler keeps those fields and frontend shows them.
 
-## Caso de uso 4: validador online via OpenRouter
+## Use case 4: Validator online via OpenRouter
 
-Objetivo: usar un modelo con busqueda online propia del proveedor.
+Objective: to use a model with online search of the supplier.
 
-Configuracion:
+Configuration:
 
 - VALIDATOR_TYPE: "2"
 - AI_PROVIDER: "openrouter"
@@ -199,38 +192,38 @@ Configuracion:
 
 Comportamiento:
 
-- El worker no llama a evidence-search; la busqueda online se deriva de `VALIDATOR_TYPE=2`.
-- Para OpenRouter, envia el modelo con sufijo :online.
-- El prompt pide buscar información actual; no exige fuentes porque Assermetry no recibe el corpus privado del proveedor.
-- El voto se conserva con `basis=PROVIDER_SEARCH_UNVERIFIED`.
-- Los enlaces opcionales se publican como `sources_declared`; nunca como `evidence_used`.
+- The worker does not call evidence-search; the online search is derived from `VALIDATOR_TYPE=2`.
+- For OpenRouter, send the model with suffix :online.
+- The prompt asks to search for current information; it does not require sources because Assermetry does not receive the supplier's private corpus.
+- The vote is retained with `basis=PROVIDER_SEARCH_UNVERIFIED`.
+- Optional links are published as `sources_declared`; never as `evidence_used`.
 
-## Caso de uso 5: validador humano o determinista
+## Use case 5: human or deterministic validator
 
-Objetivo: registrar validadores que no deben participar todavia en validacion automatica.
+Objective: to register validators that should not yet participate in automatic validation.
 
-Configuracion determinista:
+Deterministic configuration:
 
 - VALIDATOR_TYPE: "4"
 - AI_PROVIDER: "none"
 
-Configuracion humana:
+Human configuration:
 
 - VALIDATOR_TYPE: "5"
 - AI_PROVIDER: "none"
 
 Comportamiento:
 
-- Se registran contra smart contract.
-- Publican o actualizan config de validador para cache.
-- No levantan listeners automaticos de validacion.
+- They're registered against smart contract.
+- They post or update cache validator config.
+- They don't raise automatic validation listeners.
 - No consumen Kafka light.
 - No llaman LLM.
 - No llaman evidence-search.
 
-## Eventos de configuracion de validadores
+## Validator configuration events
 
-Cuando un validador se registra, actualiza config o arranca, validate-asertions publica new_validator_config en fake_news_responses.
+When a validator is registered, updates config or bootes, validate-aserstions publishes new_validator_config in fake_news_responses.
 
 Payload conceptual:
 
@@ -253,9 +246,9 @@ Payload conceptual:
   }
 }
 
-news-handler consume este evento y actualiza validators_cache.
+news-handler consumes this event and updates validators_cache.
 
-La cache agrega campos operativos que no forman parte de IPFS:
+The cache adds operating fields that are not part of IPFS:
 
 {
   "validator_type": 3,
@@ -263,49 +256,49 @@ La cache agrega campos operativos que no forman parte de IPFS:
   "metrics_reset_at": null
 }
 
-## Calculo de resultado despues de mensajes de validacion
+## Result calculation after validation messages
 
-Cada vez que news-handler devuelve una orden, adjunta assertion_results.
+Each time newshandler returns an order, attach assertion_results.
 
-Para cada asercion:
+For each assertion:
 
 1. Lee validaciones completadas.
-2. Obtiene tipo y reputation desde validator_config o cache.
+2. It gets type and reputation from validation_config or cache.
 3. Calcula effective_weight = validator_type_weight * reputation.
-4. Agrupa por resultado normalizado.
-5. Calcula score_result = sum(effective_weight del resultado) / num_validators.
-6. El ganador es el resultado con mayor score.
+4. Group by normalized result.
+5. Calculate score_result = sum(effective_weight of the result) / num_validators.
+6. The winner is the result with the highest score.
 
-Ejemplo:
+Example:
 
-| Validador | Tipo | Resultado | Peso efectivo |
+| Validator | Tipo | Outcome | Peso efectivo |
 |---|---|---|---:|
 | A | Memory | TRUE | 0.25 |
 | B | Search | TRUE | 0.5 |
 | C | RAG | FALSE | 0.8 |
 
-Resultado:
+Outcome:
 
 - score_TRUE = (0.25 + 0.5) / 3 = 0.25
 - score_FALSE = 0.8 / 3 = 0.2667
 - winner = FALSE
 
-## Estados de orden relevantes
+## Relevant order states
 
-| Estado | Significado |
+| State | Significado |
 |---|---|
-| ASSERTIONS_REQUESTED | Se pidio generacion de aserciones |
+| ASSERTIONS_REQUESTED | It was requested to generate assertions |
 | DOCUMENT_CREATED | Documento preparado localmente |
 | IPFS_UPLOADED | Documento subido a IPFS |
-| BLOCKCHAIN_REGISTERED | Noticia registrada en smart contract |
+| BLOCKCHAIN_REGISTERED | Notice registered in smart contract |
 | VALIDATION_PENDING | Hay validaciones pendientes |
-| VALIDATED | Todas las validaciones esperadas terminaron |
-| NO_VALIDATORS_AVAILABLE | No hay validadores para la categoria |
+| VALIDATED | All expected validations ended |
+| NO_VALIDATORS_AVAILABLE | No validators for the category |
 | QUOTA_EXCEEDED | Cuota insuficiente |
 
 ## Trazabilidad
 
-news-handler registra cada evento en MongoDB en db.events.
+news-handler records each event in MongoDB at db.events.
 
 Campos principales:
 
@@ -315,7 +308,7 @@ Campos principales:
 - timestamp
 - payload
 
-Las validaciones se guardan tambien en db.validations.
+Validations are also saved in db.validations.
 
 Campos principales:
 
@@ -330,8 +323,8 @@ Campos principales:
 
 ## Consideraciones operativas
 
-- Todos los consumidores deben ser idempotentes: news-handler ignora validaciones duplicadas por order_id + idAssertion + idValidator.
-- new_validator_config puede llegar sin order_id; se procesa como evento global de cache.
-- En modo light, correlation_id permite enlazar request/response.
-- En modo blockchain, el contrato es la fuente de verdad para solicitudes y validaciones on-chain.
-- evidence-search no esta expuesto por gateway/frontend; solo se usa por red interna del namespace apis.
+- All consumers must be idepotent: news-handler ignores duplicate validations by order_id + idAssertion + idValidator.
+- new_validator_config can arrive without order_id; it is processed as a global cache event.
+- In light mode, correlation_id allows linking request/response.
+- In blockchain mode, the contract is the source of truth for on-chain applications and validations.
+- evidence-search is not exposed by gateway/frontend; it is only used by internal network of namespace apis.

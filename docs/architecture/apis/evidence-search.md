@@ -1,49 +1,31 @@
 # Evidence Search
 
-`api/evidence-search` recupera documentos concretos para validadores RAG. No
-descubre autoridades, no clasifica dominios y no consulta `source-router`.
+`api/evidence-search` recovers specific documents for RAG validators. It does not uncover authorities, does not classify domains, and does not consult `source-router`.
 
-## Contrato v2
+## Contract v2
 
 `POST /search/evidence` recibe:
 
-- `assertion`: aserción completa de `assertions-document-v2`.
-- `origin_document`: URL/dominio de la noticia, o ambos a `null` si se desconocen.
-- `search_policy`: una estrategia RAG, límites y `preferred_sources`.
+- `assertion`: Full `assertions-document-v2` assertion.
+- `origin_document`: URL/dominio of the news, or both to `null` if unknown.
+- `search_policy`: A RAG strategy, boundaries and `preferred_sources`.
 
-Solo existen tres estrategias:
+There are only three strategies:
 
 | Estrategia | Dominios | Plan |
 |---|---|---|
-| `LOCAL` | `preferred_sources` obligatorio, producido por Source Router | Búsqueda restringida, sin ampliación general |
-| `EXT_OFFICIAL_FIRST` | No acepta `preferred_sources` | Petición oficial preferente y después búsqueda general |
-| `EXT_ONLY_OFFICIAL` | No acepta `preferred_sources` | Petición solo oficial y filtro determinista posterior por `source_type` |
+| `LOCAL` | Required `preferred_sources` produced by Source Router | Restricted search, no general expansion |
+| `EXT_OFFICIAL_FIRST` | No acepta `preferred_sources` | Preferential official request and then general search |
+| `EXT_ONLY_OFFICIAL` | No acepta `preferred_sources` | Official single request and subsequent deterministic filter by `source_type` |
 
-`NONE` no existe. La búsqueda web autónoma ya está representada por
-`LLM_SEARCH_VALIDATION` y no atraviesa este servicio.
+`NONE` does not exist. The autonomous web search is already represented by `LLM_SEARCH_VALIDATION` and does not go through this service.
 
-La respuesta contiene el plan ejecutado como objetos estructurados, la resolución
-de dominios y evidencias normalizadas. Cada evidencia conserva `source_type`,
-`authority_level`, `route_score`, `profile_version` y
-`relationship_to_origin`. El documento original puede aparecer como contexto,
-pero el grounding no lo admite como evidencia decisiva independiente.
+The answer contains the plan executed as structured objects, the resolution of normalized domains and evidences. Each evidence retains `source_type`, `authority_level`, `route_score`, `profile_version` and `relationship_to_origin`. The original document may appear as context, but grounding does not admit it as independent decisive evidence.
 
-Una fuente sólo es citable cuando Evidence Search descarga el documento,
-extrae su texto y genera contextos con `context_id`, `text_sha256`,
-`origin=fetched_document` y `citation_eligible=true`. Si la descarga falla o la
-extracción de texto está deshabilitada, se conservan URL, título y snippet para
-diagnóstico, pero `contexts` queda vacío y `citation_status=unavailable`. Un
-snippet del proveedor no constituye evidencia documental citable.
+A source is only citationable when Evidence Search downloads the document, extracts its text and generates contexts with `context_id`, `text_sha256`, `origin=fetched_document` and `citation_eligible=true`. If the download fails or the extracting of text is disabled, URL, title and snippet are preserved for diagnosis, but `contexts` is empty and `citation_status=unavailable`. A supplier snippet does not constitute documentary evidence of a citation.
 
-El validador selecciona únicamente `context_id`; no controla la URL ni el texto
-persistidos. Validate Asertions reconstruye `evidence_used` desde el contexto
-canónico y rechaza identificadores ausentes o ambiguos.
+The validator selects only `context_id`; it does not control the URL or the text that persists. Validate Asers reconstructs `evidence_used` from the canonical context and rejects missing or ambiguous identifiers.
 
-MongoDB solo guarda `evidence_search_cache_v2` con TTL. La clave incluye la
-aserción normalizada, el origen, la estrategia completa, los perfiles enrutados
-y la configuración del backend de búsqueda, incluida la versión del contrato de
-citas. Cambiar cualquiera de ellos separa la entrada de caché. La nueva versión
-no reutiliza respuestas antiguas, por lo que no requiere eliminar la colección.
+MongoDB only saves `evidence_search_cache_v2` with TTL. The key includes standardized assertion, origin, full strategy, routed profiles and search backend settings, including the dating contract version. Changing any of them separates the cache entry. The new version does not reuse old responses, so it does not require deleting the collection.
 
-`DELETE /admin/cache` vacía exclusivamente esa caché. Las colecciones antiguas se
-eliminan mediante `scripts/k8s/realign-source-routing-mongodb.sh`.
+`DELETE /admin/cache` empties that cache exclusively. Old collections are removed by `scripts/k8s/realign-source-routing-mongodb.sh`.

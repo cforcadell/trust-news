@@ -1,50 +1,42 @@
-# Benchmark histórico de configuraciones LLM
+# Benchmark LLM configurations historical
 
-tests/llm-benchmark/llm-benchmark.py compara configuraciones completas de los módulos LLM
-usando exclusivamente OpenRouter. Ejecuta órdenes LIGHT, conserva artefactos
-JSON inmutables e indexa las métricas en SQLite para compararlas con el tiempo.
+tests/llm-benchmark/llm-benchmark.py compares complete configurations of LLM modules using OpenRouter exclusively. It executes LIGHT commands, retains immutable JSON artifacts and indesulates metrics in SQLite to compare them with time.
 
-No debe ejecutarse contra producción. El runner cambia temporalmente la
-configuración efectiva y consume cuota de generación y validación.
+It should not be run against production. The runner temporarily changes the effective configuration and consumes generation and validation quota.
 
-## Alcance
+## Scope
 
-El caso inicial tests/llm-benchmark/resources/cases/eu-news-2025-v1.json contiene la noticia
-sintética sobre Suecia, Alemania, Italia y España y cuatro resultados esperados.
-El runner mide por separado:
+The initial case tests/llm-benchmark/resources/cases/eu-news-2025-v1.json contains the synthetic news about Sweden, Germany, Italy and Spain and four expected results. The runner measures separately:
 
-- extracción y correspondencia de aserciones;
-- categoría;
+- extraction and correspondence of assertions;
+- category;
 - veredicto agregado;
-- veredicto por validador;
-- evidencia usada por validadores RAG;
-- respuestas completadas y latencia de validadores;
-- coste estimado por módulo y global.
+- a validator verdict;
+- evidence used by RAG validators;
+- completed responses and latency of validators;
+- cost estimated per module and global.
 
-La muestra tiene cuatro aserciones. Se guardan dos costes:
+The sample has four assertions. Two costs are saved:
 
-- sample_total_usd: estimación para las aserciones realmente generadas;
-- normalized_5_assertions_total_usd: estimación normalizada a cinco aserciones,
-  compatible con la vista administrativa de recomendaciones.
+- sample_total_usd: estimation for the actually generated assertions;
+- normalized_5_assertions_total_usd: estimate standardized to five assertions,
+compatible with the administrative hearing of recommendations.
 
-El coste actual es una estimación basada en los precios del catálogo OpenRouter
-y las muestras de tokens configuradas en api/admin. Aunque el adaptador LLM lee
-usage del proveedor, las órdenes todavía no persisten esos tokens; por ello el
-informe no presenta el coste como facturación real.
+The current cost is an estimate based on the prices of the OpenRouter catalog and token samples configured in api/admin. Although the LLM adapter reads use from the supplier, the orders still do not persist these tokens; therefore the report does not present the cost as actual billing.
 
-## Requisitos
+## Requirements
 
-- Python 3.11 o posterior. sqlite3 forma parte de Python y no requiere instalar
+- Python 3.11 or later. sqlite3 is part of Python and does not require installation
   SQLite ni paquetes adicionales.
-- Despliegue local accesible, por defecto en https://localhost:7443/backend.
-- Usuario con rol administrativo y cuotas suficientes.
-- Todos los componentes y validadores LLM incluidos deben usar OpenRouter.
-- Ninguna otra persona o automatización debe cambiar la configuración durante
-  el batch.
+- Local deployment accessible, default in https://localhost:7443/backend.
+- User with sufficient administrative role and quotas.
+- All LLM components and validators included must use OpenRouter.
+- No other person or automation should change settings during
+The batch.
 
-La contraseña nunca se escribe en los artefactos. Se admite:
+Password is never written in artifacts.
 
-Para el cliente de servicio `TrustNewsApi` se recomienda `client_credentials`:
+`TrustNewsApi` service client recommends `client_credentials`:
 
     export ASSERMETRY_KEYCLOAK_CLIENT_ID='TrustNewsApi'
     read -rsp 'TrustNewsApi client secret: ' ASSERMETRY_KEYCLOAK_CLIENT_SECRET
@@ -55,48 +47,40 @@ escribe en los artefactos.
 
     export ASSERMETRY_ACCESS_TOKEN='...'
 
-o, si el cliente de Keycloak permite Direct Access Grants:
+or, if the Keycloak client allows Direct Access Grants:
 
     export ASSERMETRY_USERNAME='benchmark-admin'
     read -rsp 'Password: ' ASSERMETRY_PASSWORD
     export ASSERMETRY_PASSWORD
 
-El entorno local usa normalmente un certificado autofirmado. La verificación
-TLS está desactivada por defecto para este runner local. Para un certificado de
-confianza:
+The local environment normally uses a self-signed certificate. The TLS verification is disabled by default for this local runner. For a trust certificate:
 
     export ASSERMETRY_TLS_VERIFY=true
 
-## Validación sin red
+## Networkless validation
 
-Este comando valida el esquema del caso y de los perfiles y comprueba que todos
-declaran OpenRouter:
+This command validates the case and profile schema and checks that everyone declares OpenRouter:
 
     python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
       --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
       --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json
 
-No modifica configuración, no usa credenciales y no crea órdenes.
+It does not modify settings, does not use credentials, and does not create commands.
 
-## Generación de perfiles por presupuesto
+## Generation of profiles by budget
 
-`generate-profiles` consulta la configuración efectiva y el catálogo de
-OpenRouter, pero no cambia modelos ni crea órdenes. Este ejemplo solicita un
-máximo de 0,25 USD para una noticia de cinco aserciones medias:
+`generate-profiles` consults the effective configuration and OpenRouter catalog, but does not change models or create commands. This example requests a maximum of USD 0.25 for a news of five average assertions:
 
     python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
       --max-news-cost-usd 0.25
 
-Por defecto reserva un margen del 5 %. Por tanto, con un máximo solicitado de
-0,25 USD solo genera configuraciones cuyo coste estimado no supera 0,2375 USD.
-Se puede cambiar el margen explícitamente:
+By default, it reserves a margin of 5%. Therefore, with a maximum requested of 0.25 USD, it only generates configurations whose estimated cost does not exceed 0.2375 USD. The margin can be changed explicitly:
 
     python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
       --max-news-cost-usd 0.25 \
       --budget-headroom-percent 10
 
-La salida se guarda en
-`tests/llm-benchmark/artifacts/generated/<plan-id>/` e incluye:
+The output is saved in `tests/llm-benchmark/artifacts/generated/<plan-id>/` and includes:
 
     plan.json
     effective-configuration.json
@@ -105,38 +89,28 @@ La salida se guarda en
     profiles/balanced-safe.json
     profiles/budget-safe.json
 
-Solo aparecen los perfiles que el endpoint puede verificar bajo el máximo
-efectivo. Los niveles con la misma configuración se deduplican y quedan
-registrados en `plan.json` como descartados. Cada validador usa un selector por
-ID exacto para que el plan no cambie de significado si más adelante se añaden
-validadores del mismo tipo. El plan conserva fecha, presupuesto, margen,
-precios, hash de la configuración efectiva y hash de cada perfil.
+Only the profiles that the endpoint can verify under the maximum effective level appear. The levels with the same configuration are deduplicated and recorded in `plan.json` as discarded. Each validator uses an exact ID selector so that the plan does not change meaning if later validators of the same type are added. The plan retains date, budget, margin, prices, hash of the effective configuration and hash of each profile.
 
-La generación falla de forma segura si falta el precio de cualquier componente
-o validador LLM, si alguno no usa OpenRouter o si la configuración cambia entre
-la captura y la recomendación. Los precios pueden cambiar después de generar el
-plan; por eso la ejecución siempre vuelve a comprobar el coste.
+The generation fails safely if the price of any component or LLM validation is missing, if any does not use OpenRouter or if the configuration changes between capture and recommendation. Prices may change after generating the plan; therefore the execution always checks the cost.
 
-Para ejecutar todos los perfiles de un plan:
+To execute all the profiles of a plan:
 
     python3 tests/llm-benchmark/llm-benchmark.py run \
       --profile-plan tests/llm-benchmark/artifacts/generated/<plan-id>/plan.json \
       --repetitions 5 \
       --require-costs
 
-`run --profile-plan` verifica los hashes, hereda el máximo efectivo del plan y
-no permite relajarlo mediante `--max-news-cost-usd`. Sí se puede indicar un
-máximo menor. `--profile` y `--profile-plan` son mutuamente excluyentes.
+`run --profile-plan` checks the hashes, inherits the maximum effective plan and does not allow you to relax using `--max-news-cost-usd`. A lower maximum can be indicated. `--profile` and `--profile-plan` are mutually exclusive.
 
-## Ejecución
+## Implementation
 
-Línea base actual, tres repeticiones:
+Current baseline, three repetitions:
 
     python3 tests/llm-benchmark/llm-benchmark.py run \
       --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
       --repetitions 3
 
-Comparar dos perfiles y exigir un máximo normalizado de 0,25 USD por noticia:
+Compare two profiles and require a maximum standard of 0.25 USD per news:
 
     python3 tests/llm-benchmark/llm-benchmark.py run \
       --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
@@ -145,118 +119,70 @@ Comparar dos perfiles y exigir un máximo normalizado de 0,25 USD por noticia:
       --max-news-cost-usd 0.25 \
       --require-costs
 
-### Caché de Evidence Search
+### Evidence Search Cache
 
-Por defecto el runner conserva `evidence_search_cache_v2`. Esta es la opción
-adecuada para comparar modelos con evidencia ya recuperada, aunque para una
-comparación de calidad reproducible se recomienda un corpus congelado.
+By default, the runner retains `evidence_search_cache_v2`. This is the right option to compare models with evidence already recovered, although for a reproducible quality comparison a frozen corpus is recommended.
 
-Para medir cada repetición en frío se puede vaciar exclusivamente la caché de
-respuestas de Evidence Search inmediatamente antes de publicar la orden:
+To measure each cold repeat, you can empty the Evidence Search response cache immediately before publishing the order:
 
     python3 tests/llm-benchmark/llm-benchmark.py run \
       --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
       --repetitions 3 \
       --clear-evidence-cache
 
-El despliegue local publica Evidence Search en `http://localhost:8074`. Si no
-está accesible en esa dirección, se puede indicar su URL directa:
+The local display publishes Evidence Search in `http://localhost:8074`. If it is not accessible at that address, you can indicate your direct URL:
 
     export ASSERMETRY_EVIDENCE_SEARCH_URL='http://localhost:8074'
 
-o usar `--evidence-search-url`. La limpieza se registra en `manifest.json` y
-en cada `run.json`, incluyendo la colección y el número de documentos
-eliminados. Si la limpieza falla, esa repetición falla sin publicar la orden.
+or use `--evidence-search-url`. Cleaning is recorded in `manifest.json` and in each `run.json`, including the collection and number of deleted documents. If cleaning fails, that repetition fails without publishing the command.
 
-El flag no elimina `domain_profiles_v1` ni modifica `source_routes_v2`.
-Los perfiles de dominio son datos estables, no una caché. Además, una ruta
-`FRESH` puede evitar la ejecución del LLM de `source-router`; por tanto, este
-flag no basta por sí solo para comparar modelos de Source Router en frío.
+The flag does not remove `domain_profiles_v1` or modify `source_routes_v2`. Domain profiles are stable data, not a cache. Furthermore, a `FRESH` path can prevent the execution of `source-router` LLM; therefore, this flag alone is not enough to compare Cold Source Router models.
 
-El perfil example-balanced-openrouter es una plantilla. Hay que revisar la
-disponibilidad y el precio de sus modelos antes de usarlo.
+The example-balanced-openrouter profile is a template. You need to review the availability and price of your models before using it.
 
-El runner:
+The runner:
 
 1. adquiere /tmp/assermetry-llm-benchmark.lock;
-2. captura la configuración efectiva completa;
-3. resuelve $current y aplica el perfil;
-4. confirma la configuración efectiva;
-5. captura recomendaciones y precios;
-6. rechaza la configuración si incumple el presupuesto solicitado;
-7. ejecuta las repeticiones en modo LIGHT;
-8. guarda orden, puntuación y costes aun cuando una repetición falla;
-9. restaura la configuración inicial en un bloque finally;
-10. devuelve código distinto de cero ante fallos o restauración incompleta.
+2. captures the complete effective configuration;
+3. resolves $current and applies the profile;
+4. confirms the effective configuration;
+5. capture recommendations and prices;
+6. rejects the configuration if it fails to comply with the requested budget;
+7. executes repetitions in LIGHT mode;
+8. keeps order, score and costs even when a repeat fails;
+9. restores the initial configuration in a finally block;
+10. returns code other than zero for faults or incomplete restoration.
 
-El bloqueo evita dos runners simultáneos en el mismo host. No es un bloqueo
-distribuido entre máquinas.
+The lock prevents two simultaneous runners in the same host. It is not a block distributed between machines.
 
 ## Perfiles
 
-Un perfil tiene schema_version 1, un id estable, componentes y reglas para
-validadores. Ejemplo conceptual:
+A profile has schema_version 1, a stable id, components and rules for validators. Concept example:
 
-    {
-      "schema_version": 1,
-      "id": "candidate-a",
-      "components": {
-        "generate-asertions": {
-          "provider": "openrouter",
-          "model": "modelo/generador",
-          "temperature": 0
-        },
-        "source-router": {
-          "provider": "openrouter",
-          "model": "modelo/router",
-          "temperature": 0
-        }
-      },
-      "validators": [
-        {
-          "selector": {
-            "types": ["RAG_EVIDENCE_VALIDATION"],
-            "strategies": ["LOCAL"]
-          },
-          "provider": "openrouter",
-          "model": "modelo/rag",
-          "temperature": 0
-        }
-      ]
-    }
+{ "schema_version": 1, "id": "candidate-a", "components": { "generate-assertions": { "provider": "openrouter", "model": "modelo/generador", "temperature": 0 }, "source-router": { "provider": "openrouter", "model": "modelo/router", "temperature": 0 } }, "validators": [{ "selector": {types": ["RAG_EVIDENCE_VALIDATION"], "strategies": ["LOCAL"] }, "provider": "openrouter", "model": "modelo/rag", "temperature": 0 }}}}
 
-Los selectores admiten id, types y strategies. Las reglas se procesan en orden;
-si varias coinciden, prevalece la última. Cada validador LLM descubierto debe
-quedar cubierto. $current conserva el modelo efectivo, pero sigue exigiendo que
-su proveedor sea OpenRouter.
+Selectors support id, types and strategies. Rules are processed in order; if several match, the latter prevails. Each discovered LLM validator must be covered. $current retains the effective model, but continues to require its provider to be OpenRouter.
 
-Para atribuir causas se recomienda cambiar un módulo cada vez. Los perfiles
-completos deben reservarse para candidatos ya filtrados.
+To attribute causes it is recommended to change a module each time. Full profiles should be reserved for already filtered candidates.
 
-## Puntuación
+## Score
 
-La puntuación de calidad es de 0 a 100:
+The quality score is from 0 to 100:
 
-| Área | Peso |
+| Area | Peso |
 |---|---:|
-| Extracción, cobertura, precisión, cantidad y categoría | 25 % |
-| Veredicto agregado frente al esperado | 45 % |
-| Evidencia usada por validadores RAG | 20 % |
+| Extraction, coverage, accuracy, quantity and category | 25 % |
+| Added Verdict versus Expected | 45 % |
+| Evidence used by RAG validators | 20 % |
 | Validaciones completadas | 10 % |
 
-Si una métrica no aplica, sus pesos se normalizan entre las restantes. El
-emparejamiento de aserciones es determinista y usa required_terms del caso.
-Cada cambio del caso o del criterio debe crear una nueva versión, no alterar
-resultados históricos.
+If a metric does not apply, its weights are normalized between the remaining ones. The pairing of assertions is deterministic and uses the required_terms of the case. Each change of case or criterion must create a new version, not alter historical results.
 
-Cuatro aserciones no bastan para conclusiones estadísticas fuertes. Se
-recomiendan al menos tres repeticiones y preferiblemente cinco. Para evaluar
-RAG de forma reproducible debe usarse además un corpus congelado; las búsquedas
-externas vivas miden actualidad, no reproducibilidad.
+Four assertions are not enough for strong statistical conclusions. At least three repetitions and preferably five are recommended. A frozen corpus must also be used to evaluate RAG; external searches are current, not reproducibility.
 
 ## Artefactos
 
-Por defecto se crean:
+By default they are created:
 
     tests/llm-benchmark/artifacts/
     ├── history.sqlite
@@ -277,13 +203,11 @@ Por defecto se crean:
                 ├── costs.json
                 └── run.json
 
-Los JSON son la evidencia canónica. SQLite es un índice histórico append-only
-con batches, ejecuciones, costes por módulo, resultados por aserción y métricas.
-Los artefactos se excluyen de Git.
+JSONs are canonical evidence. SQLite is a historical index append-only with batches, executions, costs per module, results by assertion and metrics. Artifacts are excluded from Git.
 
-## Histórico y comparación
+## History and comparison
 
-Listar las últimas ejecuciones:
+List the latest executions:
 
     python3 tests/llm-benchmark/llm-benchmark.py list-runs --limit 20
 
@@ -293,16 +217,10 @@ Comparar dos run_id:
       --baseline <run-id-base> \
       --candidate <run-id-candidato>
 
-La comparación muestra diferencias de calidad, exactitud, coste de la muestra,
-coste normalizado y duración. Un coste menor produce un delta negativo.
+The comparison shows differences in quality, accuracy, sample cost, standard cost and duration. A lower cost produces a negative delta.
 
-## Recuperación
+## Recovery
 
-Si el proceso recibe una excepción normal, intenta restaurar la configuración.
-SIGKILL, pérdida de máquina o un fallo de red durante la restauración pueden
-impedirlo. Antes de ejecutar se guarda initial-configuration.json. Si
-restore.json indica FAIL, hay que restaurar esos valores desde la administración
-LLM y verificar la configuración efectiva antes de iniciar otro batch.
+If the process receives a normal exception, try to restore the configuration. SIGKILL, machine loss or network failure during restoration may prevent it. Before running it saves initial-configuring.json. If restare.json indicates FAIL, it is necessary to restore those values from the LLM administration and verify the effective configuration before starting another batch.
 
-Las contraseñas, tokens y claves de proveedor nunca se incluyen en perfiles,
-SQLite ni artefactos.
+Passwords, tokens, and provider keys are never included in profiles, SQLite, or artifacts.

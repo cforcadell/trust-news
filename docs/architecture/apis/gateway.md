@@ -1,61 +1,56 @@
 # API Gateway
 
-## Descripción
+## Description
 
 `api/gateway` expone la API pública unificada bajo `root_path=/backend`. Valida tokens JWT de Keycloak y reenvía las peticiones autenticadas a los microservicios internos de órdenes, generación de aserciones, IPFS y blockchain. También calcula el `client_id` efectivo a partir del token y propaga permisos de administración.
 
 ## Endpoints
 
-- `GET /auth/is-admin`: devuelve si el usuario autenticado tiene el rol `trust-admin`.
-- `POST /assertions/generate`: reenvía el texto a `generate-asertions` (`/extraer`) e inyecta `client_id` para control de cuotas.
-- `POST /orders/publishNew`: crea una orden nueva en `news-handler` para generar aserciones y continuar el flujo de validación.
-- `POST /orders/publishWithAssertions`: crea una orden en `news-handler` usando aserciones pre-generadas.
-- `POST /extract_text_from_url`: reenvía la extracción de texto de URL a `news-handler`.
-- `GET /orders/list`: lista órdenes desde `news-handler`; si el usuario es admin y `view_all=true`, permite ver todas.
-- `GET /orders/{order_id}`: recupera una orden concreta, propagando `client_id` y flag `admin`.
-- `GET /orders/checkOrderConsistency/{order_id}`: reenvía la comprobación de consistencia Order/IPFS/Blockchain.
-- `GET /orders/{order_id}/events`: recupera eventos de una orden desde `news-handler`.
-- `GET /ipfs/{cid}`: recupera contenido de IPFS mediante el servicio IPFS.
-- `GET /blockchain/tx/{hash}`: consulta una transacción en `news-chain`.
-- `GET /blockchain/block/{block_id}`: consulta un bloque en `news-chain`.
-- `GET /blockchain/post/{post_id}`: consulta un post registrado en el contrato.
-- `GET /validators/cache`: lista validadores cacheados desde `news-handler`.
-- `GET /validators/cache/{validator_hash}`: recupera detalle de un validador cacheado.
-- `GET /validators/cache/{validator_hash}/validations`: recupera validaciones asociadas a un validador, con filtros opcionales por proveedor/modelo.
+- `GET /auth/is-admin`: returns if the authenticated user has the `trust-admin` role.
+- `POST /assertions/generate`: forward the text to `generate-asertions` (`/extraer`) and inject `client_id` for quota control.
+- `POST /orders/publishNew`: Creates a new command in `news-handler` to generate assertions and continue validation flow.
+- `POST /orders/publishWithAssertions`: Creates an order in `news-handler` using pre-generated assertions.
+- `POST /extract_text_from_url`: forwards text extraction from URL to `news-handler`.
+- `GET /orders/list`: Lists commands from `news-handler`; if the user is admin and `view_all=true`, it allows you to view all.
+- `GET /orders/{order_id}`: recovers a specific command, spreading `client_id` and flag `admin`.
+- `GET /orders/checkOrderConsistency/{order_id}`: forwards Order/IPFS/Blockchain. consistency check
+- `GET /orders/{order_id}/events`: Recovers events from an order from `news-handler`.
+- `GET /ipfs/{cid}`: Recovers IPFS content using IPFS service.
+- `GET /blockchain/tx/{hash}`: Consult a transaction in `news-chain`.
+- `GET /blockchain/block/{block_id}`: Consult a block in `news-chain`.
+- `GET /blockchain/post/{post_id}`: see a post registered in the contract.
+- `GET /validators/cache`: Checked validation list from `news-handler`.
+- `GET /validators/cache/{validator_hash}`: recovers detail from a cached validator.
+- `GET /validators/cache/{validator_hash}/validations`: recovers validations associated with a validator, with optional filters by proveedor/modelo.
 
-## Limites y trazabilidad
+## Limits and traceability
 
-El middleware de seguridad rechaza con `413` cualquier cuerpo que supere el
-maximo, incluido si llega fragmentado o sin `Content-Length`. Antes de invocar
-el proxy almacena como maximo ese volumen y reproduce el cuerpo para FastAPI.
-Cada respuesta genera un evento JSON `gateway_access` y devuelve
-`X-Request-ID`; no se registran tokens, query strings ni cuerpos.
+The security middleware rejects with `413` any body that exceeds the maximum, including if it arrives fragmented or without `Content-Length`. Before invoking the proxy stores as maximum that volume and reproduces the body for FastAPI. Each response generates a JSON `gateway_access` event and returns `X-Request-ID`; no tokens, query strings or bodies are recorded.
 
 ## Daemons
 
-No arranca consumidores ni productores propios. Su cometido es actuar como proxy HTTP autenticado.
+It does not start consumers or producers of its own. Its task is to act as an authenticated HTTP proxy.
 
-## Inicialización
+## Initialisation
 
-Al arrancar carga `.env`, configura logging, construye URLs internas de microservicios y URLs de Keycloak. En cada petición protegida descarga el JWKS de Keycloak, valida firma e issuer del JWT, y usa los claims para calcular identidad y rol de administración.
+When booting up `.env`, configure logging, build internal Keycloak microservices and URLs URLs. In each protected request, download the Keycloak JWKS, valid JWT signature and issuer, and use the claims to calculate identity and management role.
 
-## Variables de entorno
+## Environment variables
 
-- `LOG_LEVEL`: nivel de logging.
-- `NEWS_HANDLER_URL`: URL interna del orquestador de órdenes.
-- `NEWS_CHAIN_URL`: URL interna del servicio blockchain.
-- `IPFS_API_URL`: URL interna del servicio IPFS.
-- `GENERATE_ASSERTIONS_URL`: URL interna del generador de aserciones.
+- `LOG_LEVEL`: logging level.
+- `NEWS_HANDLER_URL`: Internal command orchestrator URL.
+- `NEWS_CHAIN_URL`: Internal URL of the blockchain service.
+- `IPFS_API_URL`: IPFS service internal URL.
+- `GENERATE_ASSERTIONS_URL`: internal URL of the assertion generator.
 - `KEYCLOAK_ISSUER_URL`: issuer público exacto que debe contener el token.
-- `KEYCLOAK_JWKS_URL`: URL interna completa usada para descargar las claves
-  públicas de Keycloak. No altera el issuer que se valida.
-- `KEYCLOAK_SERVER_INNER_URL`: compatibilidad con configuraciones antiguas; solo
-  se utiliza para construir la URL JWKS cuando `KEYCLOAK_JWKS_URL` no está
-  definida.
-- `KEYCLOAK_REALM`: realm utilizado por el fallback de configuración local.
-- `GATEWAY_API_DOCS_ENABLED`: habilita `/docs`, `/redoc` y `/openapi.json`.
-  Los overlays productivos lo establecen a `false`.
-- `GATEWAY_MAX_REQUEST_BODY_BYTES`: maximo positivo del cuerpo HTTP; por
-  defecto `5242880` (5 MiB) y debe coincidir con el middleware de Traefik.
+- `KEYCLOAK_JWKS_URL`: Full internal URL used to download keys
+Keycloak public. It does not alter the validated issuer.
+- `KEYCLOAK_SERVER_INNER_URL`: compatibility with old configurations; only
+is used to build the JWKS URL when `KEYCLOAK_JWKS_URL` is not defined.
+- `KEYCLOAK_REALM`: realm used by the local configuration fallback.
+- `GATEWAY_API_DOCS_ENABLED`: enables `/docs`, `/redoc` and `/openapi.json`.
+Productive overlays are set at `false`.
+- `GATEWAY_MAX_REQUEST_BODY_BYTES`: HTTP body maximum positive; by
+defect `5242880` (5 MiB) and must match the middleware of Traefik.
 
-- `PORT`: puerto de uvicorn si se ejecuta directamente.
+- `PORT`: uvicorn port if executed directly.

@@ -1,14 +1,11 @@
 # Source Router
 
-Servicio interno usado exclusivamente por `RAG_EVIDENCE_VALIDATION + LOCAL`.
-Descubre dominios reales, clasifica candidatos con enums cerrados, aplica elegibilidad
-geográfica y ranking determinista, y separa dos memorias en MongoDB:
+Internal service used exclusively by `RAG_EVIDENCE_VALIDATION + LOCAL`. Discover real domains, rank candidates with closed enums, apply geographic eligibility and deterministic ranking, and separate two memories in MongoDB:
 
-- `domain_profiles_v1`: propiedades estables del dominio (`source_type`,
-  `authority_level`, jurisdicciones, temas, tipos de evidencia e idiomas).
-- `source_routes_v2`: rutas reutilizables formadas por `topic_code`,
-  `evidence_kind` y jurisdicción canónica; solo contienen referencias y puntuaciones
-  propias de esa ruta.
+- `domain_profiles_v1`: Stable Domain Properties (`source_type`,
+`authority_level`, jurisdictions, topics, types of evidence and languages).
+- `source_routes_v2`: reusable routes formed by `topic_code`,
+`evidence_kind` and canonical jurisdiction; they contain only references and scores that are typical of that path.
 
 ```text
 RouteSignature -> source_routes_v2 -> FRESH -> unir DomainProfile -> ranking
@@ -18,145 +15,72 @@ RouteSignature -> source_routes_v2 -> FRESH -> unir DomainProfile -> ranking
 
 ## API
 
-`POST /routes/resolve` acepta `topic_code`, `evidence_kind`, `jurisdiction` y
-`language`. Todos salvo el idioma son vocabularios cerrados de
-`routing-taxonomy-v1`. Devuelve `route_key`, `route_state`, `router_version` y
-`sources[]` con dominio, tipo, autoridad, jurisdicciones, puntuación y versión
-del perfil. Una ruta `FRESH` no realiza llamadas externas.
+`POST /routes/resolve` accepts `topic_code`, `evidence_kind`, `jurisdiction` and `language`. All except for the language are `routing-taxonomy-v1` closed vocabulary. Returns `route_key`, `route_state`, `router_version` and `sources[]` with domain, type, authority, jurisdictions, score, and profile version. A `FRESH` path does not make external calls.
 
-La clave es:
+The key is:
 
 ```text
 route-v2|routing-taxonomy-v1|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY
 ```
 
-Texto, entidades y fechas no fragmentan esta memoria temática. Esos datos aparecen
-después en la consulta concreta de Evidence Search.
+Text, entities and dates do not fragment this thematic memory. These data appear later in the specific query of Evidence Search.
 
-`GET /routes` admite filtros `route_key`, `topic_code`, `evidence_kind`,
-`jurisdiction_key` y `limit`. `GET /routes/{route_key}` recupera una ruta exacta.
-Ambos endpoints son Mongo-only y nunca ejecutan discovery o LLM.
+`GET /routes` supports `route_key`, `topic_code`, `evidence_kind`, `jurisdiction_key` and `limit` filters. `GET /routes/{route_key}` recovers an exact route. Both endpoints are Mongo-only and never run Discovery or LLM.
 
-## Flujo de resolución e interconexión
+## Resolution and interconnection flow
 
-El llamador habitual es `validate-asertions`. Para una aserción en modo LOCAL
-construye el payload a partir de `assertion.topic_code`,
-`assertion.evidence_kind`, `assertion.context.jurisdiction` y el idioma del
-contexto. `source-router` no recibe el texto de la aserción, entidades ni
-fechas: esos datos permanecen en `evidence-search` y se usan al construir la
-consulta final.
+The usual caller is `validate-asertions`. For an assertion in LOCAL mode, build the payload from `assertion.topic_code`, `assertion.evidence_kind`, `assertion.context.jurisdiction` and the context language. `source-router` does not receive the text of the assertion, entities or dates: that data remains in `evidence-search` and is used when constructing the final query.
 
-La resolución sigue estas etapas:
+The resolution follows these steps:
 
-1. `signatures.py` construye `RouteSignature` y la `route_key` canónica.
-2. Si existe una ruta cuya `refresh_after` aún no ha vencido, se recuperan sus
-   perfiles de dominio y se recalcula el ranking sin llamar a buscador ni LLM.
-3. Para una ruta `MISSING` o caducada (`STALE`), `query_builder.py` genera la
-   consulta de discovery a partir del tipo de evidencia, tema y jurisdicción.
-   Los códigos ISO siguen siendo la representación interna y la identidad de la
-   ruta, pero se expanden a nombres geográficos completos —incluida la variante
-   del idioma solicitado cuando está disponible— antes de llamar a Exa o
-   Tavily. `search_with_provider` deduplica los resultados por dominio
-   normalizado.
-4. `classifier.py` clasifica todos los candidatos en un lote LLM. La salida se
-   valida por candidato contra `SourceClassification`; el LLM describe
-   propiedades y compatibilidad, pero no decide la selección ni la veracidad.
-5. `eligibility.py` aplica reglas deterministas: coincidencia de tema y
-   evidencia, tipo de fuente permitido por `EVIDENCE_SOURCE_TYPES`, cobertura
-   jurisdiccional y autoridad distinta de `UNKNOWN`/`OTHER`.
-6. Las clasificaciones elegibles actualizan `domain_profiles_v1` y se convierten
-   en `RouteCandidate`. `ranking.py` las ordena; el límite por defecto es
-   `SOURCE_ROUTER_MAX_SOURCES` (8).
-7. Se persiste la ruta y se devuelve `ResolveRouteResponse`.
+1. `signatures.py` builds `RouteSignature` and the canonical `route_key`.
+2. If there is a route whose `refresh_after` has not yet expired, your
+domain profiles and recalculates the ranking without calling search engine or LLM.
+3. For a `MISSING` or expired (`STALE`), `query_builder.py` generates the
+Discovery query based on the type of evidence, subject and jurisdiction. ISO codes remain the internal representation and identity of the route, but expand to complete geographical names — including the variant of the language requested when available — before calling Exa or Tavily. `search_with_provider` doubles the results by standard domain.
+4. `classifier.py` ranks all candidates in an LLM batch. The output is
+valid per candidate against `SourceClassification`; LLM describes properties and compatibility, but does not decide the selection or veracity.
+5. `eligibility.py` applies deterministic rules: theme matching and
+evidence, type of source allowed by `EVIDENCE_SOURCE_TYPES`, jurisdictional coverage and authority other than `UNKNOWN`/`OTHER`.
+6. Eligible ratings update `domain_profiles_v1` and become
+in `RouteCandidate`. `ranking.py` commands them; the default limit is `SOURCE_ROUTER_MAX_SOURCES` (8).
+7. The path is persistent and `ResolveRouteResponse` is returned.
 
-La conexión posterior es unidireccional: `validate-asertions` pasa `sources[]`
-como `search_policy.preferred_sources` a `evidence-search`; este último crea
-peticiones con `include_domains` y nunca llama de nuevo a Source Router. Si
-LOCAL no recibe fuentes elegibles, la búsqueda se omite con
-`no_eligible_local_sources`.
+The rear connection is unidirectional: `validate-asertions` passes `sources[]` as `search_policy.preferred_sources` to `evidence-search`; the latter creates requests with `include_domains` and never calls Source Router again. If LOCAL does not receive eligible sources, the search is omitted with `no_eligible_local_sources`.
 
-## Contratos y metadata
+## Contracts and metadata
 
-La metadata se separa deliberadamente entre identidad de ruta, perfil estable y
-decisión de selección:
+The metadata deliberately separates between route identity, stable profile and selection decision:
 
 - `RouteSignature` contiene `taxonomy_version`, `topic_code`, `evidence_kind`,
-  la `jurisdiction` completa y `jurisdiction_key`. La jurisdicción admite
-  `GLOBAL`, `SUPRANATIONAL`, `COUNTRY`, `REGION`, `LOCAL` y `UNKNOWN`, con
-  códigos validados según el ámbito.
-- `DomainProfile` conserva propiedades reutilizables del dominio: `source_type`,
-  `authority_level`, jurisdicciones, temas, tipos de evidencia, idiomas,
-  `classification_confidence`, `classification_model`, `profile_version` y
-  `last_verified_at`. La actualización combina cobertura previa y nueva; un
-  fallback no prolonga `last_verified_at`.
-- `RouteCandidate` conserva únicamente los campos dependientes de la ruta:
-  coincidencias temática y de evidencia, relevancia semántica, score del
-  proveedor, justificación y `base_score`.
-- `RoutedSource` es la metadata que cruza el límite hacia Evidence Search:
-  dominio, tipo, autoridad, jurisdicciones, temas, evidencias compatibles,
-  idiomas, `route_score`, `rank`, `reason` y `profile_version`.
+la `jurisdiction` completa y `jurisdiction_key`. La jurisdicción admite `GLOBAL`, `SUPRANATIONAL`, `COUNTRY`, `REGION`, `LOCAL` y `UNKNOWN`, con códigos validados según el ámbito.
+- `DomainProfile` retains reusable domain properties: `source_type`,
+`authority_level`, jurisdictions, topics, types of evidence, languages, `classification_confidence`, `classification_model`, `profile_version` and `last_verified_at`. The update combines previous and new coverage; a fallback does not prolong `last_verified_at`.
+- `RouteCandidate` retains only the path dependent fields:
+thematic and evidence coincidences, semantic relevance, supplier score, justification and `base_score`.
+- `RoutedSource` is the metadata that crosses the boundary to Evidence Search:
+domain, type, authority, jurisdictions, themes, supported evidence, languages, `route_score`, `rank`, `reason` and `profile_version`.
 
-El `route_score` combina autoridad (30%), especificidad geográfica (25%),
-coincidencia del tipo de evidencia (16%), tema (14%), relevancia semántica (8%),
-confianza de clasificación (5%) y score del proveedor (2%). Se añade un bonus
-de 0,03 cuando el idioma solicitado figura en el perfil. Los empates se
-resuelven por dominio para mantener resultados reproducibles.
+The `route_score` combines authority (30%), geographic specificity (25%), match of the type of evidence (16%), theme (14%), semantic relevance (8%), rating confidence (5%) and vendor score (2%). A bonus of 0.03 is added when the requested language is on the profile. The draws are resolved by domain to maintain reproducible results.
 
-Evidence Search vuelve a copiar esta metadata en cada evidencia: `source_type`,
-`authority_level`, `route_score`, `why_selected` y `profile_version`. También
-calcula `relationship_to_origin` (`ORIGINAL`, `INDEPENDENT` o `UNKNOWN`), de
-modo que la evidencia y la decisión de routing permanecen auditables de extremo
-a extremo.
+Evidence Search recopy this metadata in every evidence: `source_type`, `authority_level`, `route_score`, `why_selected` and `profile_version`. It also calculates `relationship_to_origin` (`ORIGINAL`, `INDEPENDENT` or `UNKNOWN`), so that evidence and decision of routing remain auditable from end to end.
 
-El clasificador no puede añadir dominios ni decidir veracidad. Un candidato con
-tema o evidencia `NONE`, autoridad desconocida/no admitida o jurisdicción
-incompatible se descarta. Un refresh fallido puede reutilizar una ruta `STALE`;
-un `MISSING` fallido no fabrica dominios.
+The classifier cannot add domains or decide truthfulness. A candidate with the theme or evidence `NONE`, desconocida/no authority admitted or incompatible jurisdiction is ruled out. A failed refresh can reuse a `STALE` path; a failed `MISSING` does not manufacture domains.
 
-## Clasificación parcial y recuperación
+## Partial classification and recovery
 
-La respuesta del LLM se valida por candidato. Los dominios válidos se conservan
-entre intentos; se solicita una corrección solo de los inválidos u omitidos,
-con un máximo de dos llamadas. Un error de formato o de proveedor en el segundo
-intento tampoco elimina los resultados válidos del primero. No se aceptan dominios
-que no aparezcan en el descubrimiento.
+The LLM response is validated by candidate. Valid domains are retained between attempts; a correction is requested only of invalids or omitted ones, with a maximum of two calls. A format or supplier error in the second attempt also does not eliminate the valid results of the first attempt. Domains that do not appear in the discovery are not accepted.
 
-El prompt explicita las restricciones de cada jurisdicción. La normalización
-solo elimina redundancias inequívocas (por ejemplo, `COUNTRY/ES` con
-`jurisdiction_code=ES`). No elimina una región real ni inventa códigos ausentes
-o países miembros de una entidad supranacional; esos casos requieren corrección
-del clasificador.
+The prompt explains the restrictions of each jurisdiction. Standardisation only eliminates unequivocal redundancys (e.g., `COUNTRY/ES` with `jurisdiction_code=ES`). It does not remove a real region or invent absent codes or member countries of a supranational entity; such cases require correction of the classifier.
 
-Para los dominios descubiertos cuya clasificación falla se pueden reutilizar
-perfiles existentes de `domain_profiles_v1`. Deben tener la misma versión del
-router, una verificación más reciente que `SOURCE_ROUTE_REFRESH_SECONDS`,
-incluir tema y tipo de evidencia, y superar las reglas de autoridad, tipo de
-fuente y jurisdicción. Esta recuperación no actualiza la fecha de verificación
-del perfil. No incorpora dominios sin clasificar ni cambia LOCAL a búsqueda externa.
+For discovered domains whose classification fails, existing profiles of `domain_profiles_v1` can be reused. They must have the same version of the router, a more recent verification than `SOURCE_ROUTE_REFRESH_SECONDS`, include theme and type of evidence, and exceed the rules of authority, source type, and jurisdiction. This recovery does not update the date of profile verification. It does not incorporate domains without classifying or changing LOCAL to external search.
 
-Las rutas parciales o recuperadas llevan `degraded=true` y caducan como máximo
-en cinco minutos para permitir reconstruirlas. El diagnóstico se conserva en
-MongoDB y en respuestas de caché. Una respuesta sin candidatos elegibles no crea
-una ruta vacía con caducidad de 30 días; si existe una ruta anterior se reutiliza
-como `STALE`.
+Partial or recovered routes carry `degraded=true` and expire in up to five minutes to allow reconstruction. The diagnosis is preserved in MongoDB and cache responses. An answer without eligible candidates does not create an empty route with 30 days expiration; if there is an earlier route it is reused as `STALE`.
 
-`diagnostic_code` distingue `CLASSIFICATION_PARTIAL`, `CLASSIFICATION_FAILED`,
-`PROFILE_FALLBACK`, `NO_DISCOVERY_CANDIDATES` y `NO_ELIGIBLE_SOURCES`.
-`diagnostics` enumera dominios descubiertos, clasificados, rechazados por
-elegibilidad, fallidos y recuperados de perfiles. El validador conserva estos
-campos en `evidence_search_response.route`, y continúa buscando evidencias cuando
-la respuesta degradada contiene fuentes.
+`diagnostic_code` distinguishes `CLASSIFICATION_PARTIAL`, `CLASSIFICATION_FAILED`, `PROFILE_FALLBACK`, `NO_DISCOVERY_CANDIDATES` and `NO_ELIGIBLE_SOURCES`. `diagnostics` lists domains that have been discovered, classified, rejected by eligibility, failed and recovered from profiles. The validator keeps these fields in `evidence_search_response.route`, and continues to look for evidence when the degraded response contains sources.
 
-Los logs incluyen la clave de ruta, consulta y URLs del descubrimiento, errores
-por candidato y el JSON del candidato rechazado (limitado a 4000 caracteres).
-No se almacena la respuesta cruda completa del proveedor. Esta traza permite
-distinguir ausencia de resultados, errores de esquema y rechazos de elegibilidad.
+Logs include the path key, query and URLs of the discovery, errors per candidate and the JSON of the rejected candidate (limited to 4000 characters). The complete raw response of the supplier is not stored. This trace allows to distinguish absence of results, schema errors and eligibility rejections.
 
-Variables de persistencia: `SOURCE_ROUTES_COLLECTION=source_routes_v2`,
-`SOURCE_DOMAIN_PROFILES_COLLECTION=domain_profiles_v1` y
-`SOURCE_ROUTER_VERSION=source-router-v2`.
+Persistence variables: `SOURCE_ROUTES_COLLECTION=source_routes_v2`, `SOURCE_DOMAIN_PROFILES_COLLECTION=domain_profiles_v1` and `SOURCE_ROUTER_VERSION=source-router-v2`.
 
-`SOURCE_ROUTER_DISCOVERY_MAX_RESULTS` controla los candidatos solicitados por
-el router (12 por defecto). La capa compartida de búsqueda respeta ese valor;
-`SEARCH_PROVIDER_MAX_RESULTS` es únicamente un guardrail técnico común (50 por
-defecto), no el límite funcional de Evidence Search.
+`SOURCE_ROUTER_DISCOVERY_MAX_RESULTS` controls the candidates requested by the router (12 default). The shared search layer respects that value; `SEARCH_PROVIDER_MAX_RESULTS` is only a common technical guardrail (50 default), not the functional limit of Evidence Search.

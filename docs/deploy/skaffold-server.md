@@ -1,40 +1,35 @@
-# Assermetry Kubernetes - Despliegue server/Hetzner
+# Assermetry Kubernetes - server/Hetzner Deployment
 
-Runbook operativo del entorno Hetzner. Este documento contiene únicamente:
+Runbook operating the Hetzner environment. This document contains only:
 
-- la fotografía técnica vigente;
-- procedimientos repetibles de despliegue, verificación y recuperación;
-- los próximos pasos que todavía no se han ejecutado.
+- the current technical photograph;
+- repeatable deployment, verification and recovery procedures;
+- the next steps that have not yet been implemented.
 
-El estado de la versión actual está en [`version.md`](../version.md), el roadmap
-en [`next_releases.md`](../next_releases.md), la evidencia de versiones cerradas
-en [`releases.md`](../releases.md) y las incidencias en
-[`issues.md`](../issues.md). Los procedimientos compartidos con local están en
-[`k8s-common.md`](k8s-common.md).
+The status of the current version is in [`version.md`](../version.md), the roadmap in [`next_releases.md`](../next_releases.md), the evidence of closed versions in [`releases.md`](../releases.md) and the incidences in [`issues.md`](../issues.md). The procedures shared with local are in [`k8s-common.md`](k8s-common.md).
 
-No registrar aquí cronologías de pruebas, intentos de pipeline, identificadores,
-direcciones IP, huellas, tokens, certificados ni datos personales.
+Do not record here chronologies of tests, attempts of pipeline, identifiers, IP addresses, fingerprints, tokens, certificates or personal data.
 
 ---
 
-## 1. Fotografía actual
+## 1. Current photo
 
-### 1.1 Plataforma y perfiles
+### 1.1 Platform and profiles
 
-| Ámbito | Estado vigente |
+| Scope | State in force |
 | --- | --- |
-| Plataforma | K3s en un único nodo de Hetzner |
-| Dominio | `https://assermetry.com`, proxificado por Cloudflare |
-| Ingress | Traefik sobre `websecure` |
-| TLS de origen | Cloudflare Origin CA en `kube-system/trustnews-origin-tls` |
-| Identidad | Keycloak, realm `TrustNews` y display name `Assermetry` |
+| Plataforma | K3s in a single Hetzner node |
+| Dominio | `https://assermetry.com`, Proxified by Cloudflare |
+| Ingress | Trafik over `websecure` |
+| Origin TLS | Cloudflare Origin CA in `kube-system/trustnews-origin-tls` |
+| Identity | Keycloak, realm `TrustNews` and display name `Assermetry` |
 | Issuer | `https://assermetry.com/auth/realms/TrustNews` |
-| Perfiles | `setup`, `traefik-prod`, `infra-prod`, `blockchain-prod` y `apis-frontend-prod` |
+| Perfiles | `setup`, `traefik-prod`, `infra-prod`, `blockchain-prod` and `apis-frontend-prod` |
 | Overlays productivos | Keycloak, Gateway e Ingress usan `prod-domain` |
-| Entrada al origen | `TCP/443` solo desde las redes verificadas de Cloudflare |
-| Puertos cerrados | `80/tcp`, `6443/tcp` y el resto de puertos públicos de aplicación |
+| Entry to origin | `TCP/443` only from the verified Cloudflare networks |
+| Puertos cerrados | `80/tcp`, `6443/tcp` and the rest of public application ports |
 
-Contrato público después de completar el cutover de `/gui`:
+Public contract after completing the `/gui` cutover:
 
 ```text
 https://assermetry.com/          -> 302 de Cloudflare a /gui/
@@ -44,35 +39,25 @@ https://assermetry.com/backend   -> Gateway
 https://assermetry.com/auth      -> Keycloak
 ```
 
-Los servicios internos, bases de datos, Kafka, IPFS, RPC, paneles y APIs
-administrativas permanecen como `ClusterIP`, sin Ingress ni NodePort.
+Internal services, databases, Kafka, IPFS, RPC, panels and administrative APIs remain as `ClusterIP`, without Ingress or NodePort.
 
 ### 1.2 Cloudflare
 
-Las cinco reglas personalizadas están ocupadas y conservan este orden:
+The five custom rules are occupied and retain this order:
 
-| Orden | Regla | Estado operativo |
+| Orden | Regla | Operational status |
 | ---: | --- | --- |
-| 1 | `Maintenance lock - assermetry.com` | Selectivo; comprobarlo antes de cada ventana |
-| 2 | `Permanent mTLS - administration` | Activa y permanente |
-| 3 | `Temporary mTLS gate - assermetry.com` | Activa hasta `v0.0.14` |
+| 1 | `Maintenance lock - assermetry.com` | Selective; check it before each window |
+| 2 | `Permanent mTLS - administration` | Active and permanent |
+| 3 | `Temporary mTLS gate - assermetry.com` | Activate to `v0.0.14` |
 | 4 | `Permanent block - non-public resources` | Activa |
 | 5 | `Permanent block - unexpected backend methods` | Activa |
 
-El lock existe y, mientras no haya redirects en una fase anterior, puede
-bloquear todo el hostname. Su estado no se presupone: el operador lo habilita
-o deshabilita deliberadamente según la ventana de trabajo. Su estado observado
-actual es deshabilitado. Antes de cambiarlo se confirma el estado deseado y, al
-terminar, se deja registrado en la evidencia operativa, no en este runbook.
+The lock exists and, as long as there are no redirects in an earlier phase, it can block the entire hostname. Its status is not assumed: the operator deliberately enables or disables it according to the working window. Its current observed state is disabled. Before changing it, the desired state is confirmed and, at the end, is left registered in the operational evidence, not in this runbook.
 
-La Free Managed Ruleset está habilitada. La única regla de rate limiting,
-`Expensive backend operations per IP`, protege las operaciones costosas del
-Gateway con el umbral operativo de 5 peticiones por 10 segundos y mitigación de
-10 segundos. Login, refresh y polling no forman parte de esa regla.
+The Free Managed Rulet is enabled. The only rule of rate limiting, `Expensive backend operations per IP`, protects the costly operations of the Gateway with the operating threshold of 5 requests for 10 seconds and 10 seconds mitigation. Login, refresh and Polling are not part of that rule.
 
-La asociación mTLS del hostname se conserva. La regla permanente de
-administración debe exigir certificado cliente válido para estos paths (sin
-excepciones por método):
+The hostname mTLS association is preserved. The permanent rule of administration must require valid customer certificate for these paths (without exceptions by method):
 
 ```text
 /auth/admin
@@ -83,67 +68,48 @@ excepciones por método):
 /backend/admin/llm/*
 ```
 
-Los dos últimos son la consola de configuración LLM. Esta inclusión es
-permanente: no depende de la regla temporal, de una feature flag ni del
-entorno local. Administrative LLM configuration endpoints require
-client-certificate authentication.
+The last two are the LLM configuration console. This inclusion is permanent: it does not depend on the time rule, a feature flag or the local environment. Administrative LLM configuration endpoints requires client-certificate authentication.
 
-Mientras la regla temporal siga activa:
+As long as the time rule is active:
 
-- una ruta administrativa sin certificado coincide con la regla permanente;
-- una ruta no administrativa sin certificado coincide con la regla temporal;
-- un certificado válido permite continuar hasta los controles posteriores;
-- un certificado revocado debe ser rechazado.
+- an administrative route without a certificate is consistent with the permanent rule;
+- a non-administrative route without a certificate matches the time rule;
+- a valid certificate allows for continuation until subsequent checks;
+- a revoked certificate must be rejected.
 
-En `v0.0.14` se retirará únicamente la regla temporal. No se desasocia mTLS del
-hostname ni se elimina la regla administrativa, incluidos los paths
-`/backend/admin/llm` y `/backend/admin/llm/*`.
+In `v0.0.14`, only the time rule will be removed. MTLS is not removed from the hostname and the administrative rule, including `/backend/admin/llm` and `/backend/admin/llm/*`, is not removed.
 
-En esa misma ventana la regla temporal se sustituye por una regla permanente
-`default deny` de paths. Los Single Redirects de `/` y `/gui` no consumen slots
-de Custom Rules. Si se conserva el maintenance lock, la composición final sigue
-ocupando cinco reglas: lock, mTLS administrativo, recursos no públicos, métodos
-del Gateway y `default deny`. Si el lock se elimina por una decisión operativa
-separada, quedan cuatro; las tres reglas permanentes anteriores por sí solas no
-bloquean rutas como `/wp-admin/` en Cloudflare.
+In that same window the time rule is replaced by a permanent `default deny` rule of paths. `/` and `/gui` single redirects do not consume Custom Rules slots. If the maintenance lock is retained, the final composition still occupies five rules: lock, administrative mTLS, non-public resources, Gateway methods and `default deny`. If the lock is removed by a separate operational decision, four remain; the previous three permanent rules alone do not block routes such as `/wp-admin/` in Cloudflare.
 
-### 1.3 Traefik, observabilidad y línea base
+### 1.3 Traefik, observability and baseline
 
-Traefik se instala mediante el perfil `traefik-prod`, fija el chart `41.0.2` y
-usa:
+Traefik is installed using the `traefik-prod` profile, fixes the `41.0.2` chart and uses:
 
 - `externalTrafficPolicy: Local`;
 - `forwardedHeaders.insecure: false`;
 - `kubernetesIngress.strictPrefixMatching: true`;
-- las redes oficiales de Cloudflare en `websecure.forwardedHeaders.trustedIPs`;
-- access logs JSON sin cabeceras ni parámetros de consulta;
-- upgrades Helm con `--atomic`.
+- Cloudflare official networks in `websecure.forwardedHeaders.trustedIPs`;
+- JSON log accesses without headers or query parameters;
+- Helm upgrades with `--atomic`.
 
-Loki y Grafana usan PVC persistentes, probes y conservaron datos y datasource
-después del reemplazo de sus pods. Fluent Bit incluye `kube-system` para
-recoger los logs de Traefik.
+Loki and Grafana use persistent PVC, test and store data and datasource after reacting their pods. Fluent Bit includes `kube-system` to collect Traefik logs.
 
-La última medición operativa disponible está resumida en
-[`version.md`](../version.md): 29 pods preparados, cero reinicios, nueve PVC
-`Bound` y nodo `Ready`. Es la línea base estable de cierre de la Fase 7. La
-memoria al 76 %, `DNSConfigForming` y el fallo transitorio de planificación de
-Loki durante el rollout siguen bajo observación; no deben convertirse en cifras
-permanentes dentro de este runbook.
+The latest operational measurement available is summarized in [`version.md`](../version.md): 29 pods prepared, zero resets, nine PVC `Bound` and `Ready` node. It is the stable baseline for Phase 7 closure. 76% memory, `DNSConfigForming` and Loki's transient planning failure during the rollout are still under observation; they should not become permanent figures within this runbook.
 
 ---
 
-## 2. Accesos y variables
+## 2. Accesses and variables
 
-El servidor debe disponer de:
+The server must have:
 
-- K3s y `kubectl` funcionales;
+- K3s and `kubectl` functional;
 - Skaffold;
-- acceso SSH por `2222/tcp` con clave para el usuario de despliegue;
-- GitLab Runner con tag `hetzner-runner`;
-- Docker para el job de build;
+- SSH access by `2222/tcp` with key for deployment user;
+- GitLab Runner with tag `hetzner-runner`;
+- Docker for the build job;
 - pull secret del GitLab Registry en los namespaces necesarios.
 
-Variables CI/CD protegidas y enmascaradas:
+CI/CD variables protected and masked:
 
 ```dotenv
 HETZNER_IP=<ip-publica-hetzner>
@@ -153,24 +119,17 @@ KUBECONFIG_DATA=<kubeconfig-en-base64>
 PROFILE=apis-frontend-prod
 ```
 
-`CI_REGISTRY`, `CI_REGISTRY_IMAGE`, `CI_REGISTRY_USER` y
-`CI_REGISTRY_PASSWORD` los aporta GitLab.
+`CI_REGISTRY`, `CI_REGISTRY_IMAGE`, `CI_REGISTRY_USER` and `CI_REGISTRY_PASSWORD` are provided by GitLab.
 
-La rama `postTFM` debe estar protegida cuando las variables de despliegue sean
-`Protected`. El scope de las variables debe coincidir con el environment del
-job.
+The `postTFM` branch must be protected when the deployment variables are `Protected`. The scope of the variables must match the environment of the job.
 
-El job de despliegue abre un túnel local
-`127.0.0.1:6443 -> Hetzner:127.0.0.1:6443` y fuerza el endpoint del kubeconfig
-a `https://127.0.0.1:6443`. Este túnel es para el API de K3s y no cambia el
-issuer público de la aplicación.
+The deployment job opens a local `127.0.0.1:6443 -> Hetzner:127.0.0.1:6443` tunnel and forces the Kubeconfig endpoint to `https://127.0.0.1:6443`. This tunnel is for the K3s API and does not change the application's public issuer.
 
 ---
 
 ## 3. Secrets productivos
 
-Los ficheros `.env` y el material criptográfico se mantienen fuera del
-repositorio.
+`.env` files and cryptographic material are kept outside the repository.
 
 ### 3.1 Helpers idempotentes
 
@@ -228,7 +187,7 @@ No borrar primero un Secret para actualizarlo.
 | `blockchain` | `ethereum-secrets` | `ethereum.env` |
 | `kube-system` | `trustnews-origin-tls` | `tls-origin.env` |
 
-Aplicación:
+Implementation:
 
 ```bash
 apply_secret apis validator-secret-1 worker-1.env
@@ -252,9 +211,7 @@ apply_tls_secret kube-system trustnews-origin-tls \
   "$HOME/trustnews-origin-ca/tls-origin.env"
 ```
 
-`MONGO_APP_USER` y `MONGO_APP_PWD` deben coincidir con el usuario creado por el
-bootstrap de MongoDB. Después de levantar MongoDB se ejecuta el procedimiento
-idempotente de [`k8s-common.md`](k8s-common.md#6-mongodb-bootstrap).
+`MONGO_APP_USER` and `MONGO_APP_PWD` must match the user created by MongoDB's bootstrap. After lifting MongoDB the [`k8s-common.md`](k8s-common.md#6-mongodb-bootstrap)'s idepotent procedure is executed.
 
 ### 3.3 Pull secret
 
@@ -276,9 +233,9 @@ done
 
 ---
 
-## 4. Dominio, Traefik y TLS
+## 4. Domain, Traefik and TLS
 
-### 4.1 Configuración declarativa vigente
+### 4.1 Declarative configuration in force
 
 `infra-prod` usa `k8s/infra/keycloak/overlays/prod-domain`.
 `apis-frontend-prod` usa:
@@ -286,16 +243,13 @@ done
 - `k8s/apis/gateway/overlays/prod-domain`;
 - `k8s/ingress/overlays/prod-domain`.
 
-Los tres Ingress usan `host: assermetry.com` y `websecure`. El frontend sirve
-HTTP dentro del clúster; Traefik termina TLS y enruta `/gui`, `/backend` y
-`/auth`. Un middleware `StripPrefix` elimina `/gui` antes de entregar la
-petición al nginx del frontend. No existe un Ingress catch-all para `/`.
+All three Ingress use `host: assermetry.com` and `websecure`. The frontend serves HTTP within the cluster; Traefik finishes TLS and routes `/gui`, `/backend` and `/auth`. A `StripPrefix` middleware eliminates `/gui` before delivering the request to the frontend nginx. There is no Ingress catch-all for `/`.
 
-No desplegar overlays `local` o `prod` con issuer `localhost` sobre Hetzner.
+Do not deploy overlays `local` or `prod` with `localhost` issuer over Hetzner.
 
 ### 4.2 Origin CA
 
-El fichero privado `tls-origin.env` referencia el material, no contiene PEM:
+The private file `tls-origin.env` reference material, does not contain PEM:
 
 ```dotenv
 TLS_CERT_FILE=/home/sysadmin/trustnews-origin-ca/assermetry-origin.pem
@@ -303,7 +257,7 @@ TLS_KEY_FILE=/home/sysadmin/trustnews-origin-ca/assermetry-origin.key
 TLS_CA_FILE=/home/sysadmin/trustnews-origin-ca/cloudflare-origin-ca-rsa-root.pem
 ```
 
-Antes de aplicar:
+Before applying:
 
 ```bash
 test -r "$TLS_CERT_FILE"
@@ -334,15 +288,11 @@ kubectl get tlsstore default -n kube-system \
   -o jsonpath='{.spec.defaultCertificate.secretName}{"\n"}'
 ```
 
-Las dos huellas deben coincidir y `TLSStore/default` debe devolver
-`trustnews-origin-tls`. Conservar el material anterior validado para rollback.
-La revocación en Cloudflare solo se realiza después de recuperar el servicio o
-si existe pérdida o compromiso de la clave.
+The two prints must match and `TLSStore/default` must return `trustnews-origin-tls`. Keep the previously validated material for rollback. Cloudflare revocation is only done after the service is recovered or if there is loss or compromise of the key.
 
-### 4.3 Diagnóstico por túnel
+### 4.3 Tunnel diagnosis
 
-El túnel es una herramienta de diagnóstico. No restaura el antiguo issuer de
-`localhost`.
+The tunnel is a diagnostic tool. It does not restore the old `localhost` issuer.
 
 ```bash
 ssh -i ./id_rsa_hetzner_deploy -p 2222 \
@@ -352,7 +302,7 @@ ssh -i ./id_rsa_hetzner_deploy -p 2222 \
       -n kube-system svc/traefik 9443:443"
 ```
 
-Validar SNI, hostname y cadena:
+Validate SNI, hostname and chain:
 
 ```bash
 openssl s_client \
@@ -363,7 +313,7 @@ openssl s_client \
   -verify_return_error </dev/null
 ```
 
-Para peticiones HTTP se preserva el hostname canónico:
+For HTTP requests, the canonical hostname is preserved:
 
 ```bash
 curl --resolve assermetry.com:9443:127.0.0.1 \
@@ -371,7 +321,7 @@ curl --resolve assermetry.com:9443:127.0.0.1 \
   https://assermetry.com:9443/gui/
 ```
 
-El discovery debe seguir publicando:
+The discovery should continue to publish:
 
 ```text
 https://assermetry.com/auth/realms/TrustNews
@@ -379,44 +329,38 @@ https://assermetry.com/auth/realms/TrustNews
 
 ---
 
-## 5. Cloudflare y firewall
+## 5. Cloudflare and firewall
 
-### 5.1 Comprobación previa
+### 5.1 Pre-check
 
-Antes de una ventana operativa:
+Before an operating window:
 
-1. Confirmar el estado deliberado del lock.
-2. Confirmar que las cinco reglas conservan el orden documentado.
-3. Confirmar que la regla mTLS administrativa y la temporal están activas.
-4. Confirmar que la Free Managed Ruleset y el rate limit están activos.
-5. Revisar Security Events sin copiar IP, Ray ID, Rule ID ni datos sensibles.
-6. Confirmar en Hetzner que `443/tcp` solo admite Cloudflare y que `80/tcp` y
+1. Confirm the deliberate status of the lock.
+2. Confirm that the five rules retain the documented order.
+3. Confirm that the administrative and temporary mTLS rule are active.
+4. Confirm that the Free Managed Rulet and the limit rate are active.
+5. Check Security Events without copying IP, Ray ID, Rule ID or sensitive data.
+6. Confirm in Hetzner that `443/tcp` only supports Cloudflare and that `80/tcp` and
    `6443/tcp` siguen cerrados.
 
-No hay slots libres de reglas personalizadas en el plan actual.
+There are no custom rule-free slots in the current plan.
 
-### 5.2 Comportamiento esperado del lock
+### 5.2 Expected behaviour of the lock
 
-Antes de crear los Single Redirects, con el lock habilitado todo
-`assermetry.com` queda bloqueado incluso para un usuario o administrador con
-certificado válido. Después de crearlos, `/` y `/gui` responden con el `302`
-antes de llegar al WAF; el destino `/gui/` y el resto del hostname sí quedan
-bloqueados. Si una ventana exige un `403` absoluto para todo el host, desactivar
-también esos dos redirects mientras el lock esté habilitado.
+Before creating the Single Redirects, with the lock enabled all `assermetry.com` is locked even for a valid user or administrator. After creating them, `/` and `/gui` respond with the `302` before reaching WAF; the `/gui/` destination and the rest of the hostname do remain locked. If a window requires an absolute `403` for the entire host, also disable those two redirects while the lock is enabled.
 
-Con el lock deshabilitado:
+With the lock disabled:
 
-- `/` y las rutas no administrativas exigen el certificado temporal;
-- las rutas administrativas se atribuyen a la regla mTLS permanente;
-- los recursos no públicos y métodos inesperados siguen bloqueados;
-- Gateway exige JWT en las rutas protegidas.
+- `/` and non-administrative routes require temporary certification;
+- administrative routes are attributed to the mTLS rule on a permanent basis;
+- non-public resources and unexpected methods remain blocked;
+- Gateway requires JWT on protected routes.
 
-El cambio de estado del lock no altera DNS, TLS, mTLS, firewall, Keycloak ni
-Kubernetes.
+The change in status of the lock does not alter DNS, TLS, mTLS, firewall, Keycloak or Kubernetes.
 
 ### 5.3 Reglas permanentes
 
-La regla administrativa cubre:
+The administrative rule covers:
 
 ```text
 /auth/admin
@@ -425,17 +369,15 @@ La regla administrativa cubre:
 /auth/realms/master/*
 ```
 
-La regla de recursos no públicos bloquea, como mínimo, OpenAPI, Swagger, Redoc
-y rutas `.git` del hostname público.
+The non-public resource rule blocks, at a minimum, OpenAPI, Swagger, Redoc and `.git` routes from the public hostname.
 
-La regla de métodos del Gateway permite únicamente `GET`, `HEAD`, `POST` y
-`OPTIONS` bajo `/backend`.
+The Gateway method rule allows only `GET`, `HEAD`, `POST` and `OPTIONS` under `/backend`.
 
-El límite de cuerpo es 5 MiB tanto en Traefik como en Gateway.
+The body limit is 5 MiB both in Traefik and Gateway.
 
-### 5.4 Redirects y frontera pública tras retirar el mTLS general
+### 5.4 Redirects and public border after withdrawal of the general mTLS
 
-Crear dos Single Redirects, inicialmente con `302` y preservando la query:
+Create two Single Redirects, initially with `302` and preserving the query:
 
 ```text
 (http.host eq "assermetry.com" and http.request.uri.path eq "/")
@@ -445,10 +387,9 @@ Crear dos Single Redirects, inicialmente con `302` y preservando la query:
   -> https://assermetry.com/gui/
 ```
 
-No usar un redirect comodín del hostname: rutas desconocidas deben continuar
-hasta la regla WAF que las bloquea, no convertirse en `/gui/`.
+Do not use a hostname wildcard: unknown routes must continue to the WAF rule that blocks them, not become `/gui/`.
 
-Después de comprobar `/gui/`, añadir como última Custom Rule:
+After checking `/gui/`, add as last Custom Rule:
 
 ```text
 (http.host eq "assermetry.com" and
@@ -461,42 +402,36 @@ Después de comprobar `/gui/`, añadir como última Custom Rule:
  ))
 ```
 
-Acción: `Block`. La comparación se mantiene sensible a mayúsculas. Conservar
-activadas URL Normalization, la Free Managed Ruleset y la regla de rate limit.
-Los redirects exactos se evalúan antes del WAF y son terminantes; por eso `/` y
-`/gui` no se exceptúan en el `default deny`. Si un redirect se deshabilita por
-error, el path queda bloqueado en lugar de alcanzar el origen.
-Esta allowlist reduce la superficie pública, pero no sustituye el WAF sobre
-payloads válidos dentro de `/backend`, `/auth` o `/gui`.
+Action: `Block`. Comparison remains capital sensitive. Keep URL Normalization, Free Managed Rulet and the limit rate rule on. Exact redirects are evaluated before WAF and are final; therefore `/` and `/gui` are not excluded in `default deny`. If a redirect is disabled by mistake, the path is blocked instead of reaching the source. This allowslist reduces the public surface, but does not replace WAF over valid payloads within `/backend`, `/auth` or `/gui`.
 
 ---
 
-## 6. Despliegue
+## 6. Deployment
 
 ### 6.1 Perfiles productivos
 
-| Perfil | Alcance |
+| Perfil | Scope |
 | --- | --- |
 | `setup` | Namespaces |
 | `traefik-prod` | Traefik productivo |
-| `infra-prod` | MongoDB, Kafka, IPFS, Keycloak y observabilidad |
+| `infra-prod` | MongoDB, Kafka, IPFS, Keycloak and observability |
 | `blockchain-prod` | Red privada Geth |
-| `apis-frontend-prod` | APIs, Gateway, frontend e Ingress del dominio |
+| `apis-frontend-prod` | APIs, Gateway, Frontend and Domain Log-ins |
 
-No existe `infra-basic` en producción.
+No `infra-basic` in production.
 
-### 6.2 Instalación o reconstrucción controlada
+### 6.2 Controlled installation or reconstruction
 
 Orden:
 
 1. Aplicar `setup`.
-2. Crear Secrets y pull secrets.
+2. Create Secrets and pull secrets.
 3. Instalar `traefik-prod`.
-4. Desplegar `infra-prod` y ejecutar el bootstrap de MongoDB.
+4. Unfold `infra-prod` and run MongoDB bootstrap.
 5. Desplegar `blockchain-prod`.
-6. Verificar contrato y categorías.
+6. Check contract and categories.
 7. Desplegar `apis-frontend-prod`.
-8. Ejecutar la verificación completa.
+8. Run the complete check.
 
 Pipelines manuales:
 
@@ -507,11 +442,11 @@ PROFILE=blockchain-prod
 PROFILE=apis-frontend-prod
 ```
 
-No combinar perfiles en una única ventana si se está diagnosticando un fallo.
+Do not combine profiles in a single window if a failure is being diagnosed.
 
-### 6.3 Contrato
+### 6.3 Contract
 
-Si se conserva el contrato actual, verificar que existe bytecode:
+If the current contract is retained, verify that bytecode exists:
 
 ```bash
 export CONTRACT_ADDRESS=0x<direccion-trust-news>
@@ -519,11 +454,9 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- \
   geth attach --exec "eth.getCode('$CONTRACT_ADDRESS')"
 ```
 
-Si cambia el contrato, actualizar `CONTRACT_ADDRESS` en todos los overlays
-productivos consumidores antes de desplegar las APIs y regenerar el ABI cuando
-corresponda.
+If you change the contract, upgrade `CONTRACT_ADDRESS` on all consumer productive overlays before deploying APIs and regenerating the ABI when applicable.
 
-### 6.4 Actualización normal
+### 6.4 Normal update
 
 ```bash
 git checkout postTFM
@@ -533,58 +466,42 @@ git status --short
 git push gitlab postTFM
 ```
 
-En GitLab se ejecuta el pipeline sobre `postTFM` con el perfil que corresponda
-al componente cambiado. Para una actualización normal de aplicación:
+In GitLab, the pipeline is run over `postTFM` with the profile corresponding to the changed component. For a normal application update:
 
 ```dotenv
 PROFILE=apis-frontend-prod
 ```
 
-La migración inicial a `/gui` modifica también Traefik. Con el lock habilitado,
-ejecutar primero `PROFILE=traefik-prod` y después
-`PROFILE=apis-frontend-prod`. Los despliegues posteriores que no cambien
-Traefik vuelven a usar únicamente el perfil de aplicación.
+The initial migration to `/gui` also modifies Trafik. With the lock enabled, run `PROFILE=traefik-prod` first and then `PROFILE=apis-frontend-prod`. Later deployments that do not change Traefik return to only the application profile.
 
-El despliegue usa:
+The display uses:
 
 ```bash
 skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
 ```
 
-No usar `kubectl apply`, `helm upgrade` ni parches manuales como sustituto del
-pipeline salvo en un procedimiento explícito de recuperación.
+Do not use `kubectl apply`, `helm upgrade` or hand patches as a substitute for the pipeline except in an explicit recovery procedure.
 
-### 6.5 Alineación idempotente de Keycloak
+### 6.5 Keycloak idepotent alignment
 
-La reconciliación es un requisito del despliegue en Hetzner, no un paso manual
-opcional. El YAML de GitLab la ejecuta automáticamente después del rollout de
-`infra-prod` y de `apis-frontend-prod`. El script compartido:
+Reconciliation is a requirement of deployment in Hetzner, not an optional manual step. GitLab YAML automatically executes it after `infra-prod` and `apis-frontend-prod` rollout. Shared script:
 
-- actualiza y verifica `frontendUrl` del realm `TrustNews`;
-- verifica las URLs, redirects, post-logout y Web Origins de `TrustNewsWeb`;
-- crea o recrea el client scope `trustnews-gateway-audience`;
+- updates and verifies `frontendUrl` of the `TrustNews` realm;
+- verifies `TrustNewsWeb` URLs, redirects, post-logout and Web Origins;
+- create or recreate the client scope `trustnews-gateway-audience`;
 - configura el mapper de audiencia `TrustNewsGateway` en el access token;
-- asigna ese scope por defecto a `TrustNewsWeb` y `TrustNewsApi`;
-- verifica que los clientes y el mapper quedaron aplicados.
+- assigns that default scope to `TrustNewsWeb` and `TrustNewsApi`;
+- Check that the customers and the mapper were applied.
 
-`TrustNewsApi` sigue siendo el cliente backend; `TrustNewsGateway` es la
-audiencia del recurso protegido. El script no crea usuarios ni roles y no
-imprime credenciales.
+`TrustNewsApi` remains the backend client; `TrustNewsGateway` is the protected resource audience. The script does not create users or roles and does not print credentials.
 
-No ejecutar un segundo paso manual después de un pipeline correcto. Si el job
-falla o se necesita recuperar una configuración modificada fuera del pipeline,
-ejecutar desde la raíz del repositorio, con `kubectl` y `python3` disponibles:
+Do not run a second manual step after a correct pipeline. If the job fails or a modified configuration needs to be recovered outside the pipeline, run from the root of the repository, with `kubectl` and `python3` available:
 
 ```bash
 ./scripts/k8s/infra/reconcile-keycloak-web-prod.sh
 ```
 
-El script termina con `keycloak_web_alignment=PASS` únicamente tras validar el
-estado leído de Keycloak. Si `TrustNewsWeb` no existe exactamente una vez, falla
-antes de modificar el realm o el cliente. Repetirlo conserva el mismo resultado.
-El contrato productivo esperado es Root URL `https://assermetry.com/gui`, Home
-URL `https://assermetry.com/gui/`, redirects y post-logout
-`https://assermetry.com/gui/*`, y Web Origin `https://assermetry.com`.
+The script ends with `keycloak_web_alignment=PASS` only after validating the read state of Keycloak. If `TrustNewsWeb` does not exist exactly once, it fails before modifying the realm or client. Repeating it retains the same result. The expected productive contract is Root URL `https://assermetry.com/gui`, Home URL `https://assermetry.com/gui/`, redirects and post-logout `https://assermetry.com/gui/*`, and Web Origin `https://assermetry.com`.
 
 Después de una reconciliación correcta, los usuarios deben cerrar sesión y
 volver a autenticarse para obtener un access token nuevo con
@@ -593,7 +510,7 @@ la configuración de audiencia.
 
 ---
 
-## 7. Verificación vigente
+## 7. Current verification
 
 ### 7.1 Kubernetes
 
@@ -607,37 +524,34 @@ kubectl get secret trustnews-origin-tls -n kube-system
 kubectl get tlsstore default -n kube-system
 ```
 
-No deben aparecer servicios internos con Ingress, NodePort o LoadBalancer. El
-único borde web es Traefik.
+Inner services should not appear with Ingress, NodePort or LoadBalancer. The only web edge is Traefik.
 
 ### 7.2 Dominio
 
-Antes de probar se comprueba el estado del lock. Si está habilitado, el `403`
-general es el resultado esperado.
+Before testing the lock status is checked. If enabled, the general `403` is the expected result.
 
-Con el lock deshabilitado y un certificado temporal válido:
+With the lock disabled and a valid temporary certificate:
 
-- `/gui/`, sus assets y discovery responden;
-- el issuer es exactamente el canónico;
-- login, refresh y logout funcionan;
-- Gateway rechaza sin JWT y acepta un JWT válido;
-- Light y Blockchain completan sus flujos;
-- `/backend/docs`, Swagger, Redoc y OpenAPI devuelven `404` o son bloqueados en
-  el borde;
-- las rutas administrativas requieren certificado y autenticación de Keycloak.
+- `/gui/`, its assets and discovery respond;
+- the issuer is exactly the canonical;
+- login, refresh and logout work;
+- Gateway rejects without JWT and accepts a valid JWT;
+- Light and Blockchain complete their flows;
+- `/backend/docs`, Swagger, Redoc and OpenAPI return `404` or are blocked in
+the edge;
+- Administrative routes require Keycloak certificate and authentication.
 
-En la ventana de retirada del certificado temporal se añade además:
+In the temporary certificate withdrawal window, the following is added:
 
-- `/` y `/gui` devuelven `302` hacia `/gui/` desde Cloudflare;
-- `/wp-admin/`, `/.env`, `/phpmyadmin/` y una ruta aleatoria devuelven `403`;
-- `/gui-malicious`, `/backend-malicious` y `/auth-malicious` devuelven `403`;
-- `/gui/`, `/backend/*` y `/auth/*` siguen llegando a sus controles propios;
-- login, refresh, logout, Light y Blockchain funcionan sin certificado de
-  usuario;
-- las rutas administrativas siguen rechazando clientes sin certificado.
+- `/` and `/gui` return `302` to `/gui/` from Cloudflare;
+- `/wp-admin/`, `/.env`, `/phpmyadmin/` and a random path return `403`;
+- `/gui-malicious`, `/backend-malicious` and `/auth-malicious` return `403`;
+- `/gui/`, `/backend/*` and `/auth/*` continue to reach their own controls;
+- login, refresh, logout, Light and Blockchain run without certificate of
+user;
+- administrative routes continue to reject customers without a certificate.
 
-Desde una red externa debe comprobarse también que la IP directa del origen y
-los puertos `80` y `6443` no permiten acceso.
+From an external network it must also be verified that the direct IP of the source and the ports `80` and `6443` do not allow access.
 
 ### 7.3 Observabilidad
 
@@ -648,21 +562,19 @@ kubectl top nodes
 kubectl top pods -A
 ```
 
-La persistencia de Loki puede verificarse sin imprimir logs crudos:
+The persistence of Loki can be verified without printing raw logs:
 
 ```bash
 tests/operations/verify-loki-persistence.sh --execute
 ```
 
-Para Grafana se usa un port-forward transportado por SSH; no se publica el
-Service. Revisar errores y rechazos en Loki/Grafana sin exportar tokens,
-cabeceras, cuerpos, IP ni identificadores de Cloudflare.
+For Grafana, a port-forward carried by SSH is used; the Service is not published. Check errors and rejections in Loki/Grafana without exporting tokens, headers, bodies, IPs or Cloudflare identifiers.
 
 ---
 
-## 8. Operación y recuperación
+## 8. Operation and recovery
 
-Rollback de aplicación:
+Rollback Application:
 
 ```bash
 kubectl rollout undo deployment/gateway -n apis
@@ -675,59 +587,54 @@ kubectl rollout status deployment/gateway -n apis --timeout=180s
 Para un rollback TLS se reaplica el Secret con el material anterior validado y
 se repiten las comprobaciones de `TLSStore`, cadena, SNI y hostname.
 
-La eliminación de PVC solo pertenece a una reconstrucción completa,
-explícitamente autorizada y con el tratamiento de datos decidido. No se usa
-como reparación rutinaria:
+The removal of PVC belongs only to a complete reconstruction, explicitly authorized and with the processing of data decided. It is not used as routine repair:
 
 ```bash
 kubectl get pvc -n infra
 kubectl get pvc -n blockchain
 ```
 
-Las restauraciones destructivas sobre PVC activos están prohibidas. Los backups
-y la restauración aislada completa pertenecen a `v0.0.16`.
+Active PVC destructive restorations are prohibited. Backups and complete isolated restoration belong to `v0.0.16`.
 
 ---
 
-## 9. Próximos pasos
+## 9. Next steps
 
-### 9.1 Cierre de v0.0.12
+### 9.1 Closing of v0.0.12
 
-- Ejecutar `infra-prod`, obtener `keycloak_web_alignment=PASS` en la
-  reconciliación de `TrustNewsWeb` y volver a validar el issuer OIDC.
-- Confirmar la convivencia del lock, el mTLS temporal y el mTLS
+- Run `infra-prod`, get `keycloak_web_alignment=PASS` on the
+reconciliation of `TrustNewsWeb` and revalidate the IODC issuer.
+- Confirm the coexistence of the lock, the temporary mTLS and the mTLS
   administrativo.
-- Validar desde otra red con certificado temporal frontend, OIDC, Light y
+- Validate from another network with temporary certificate frontend, OIDC, Light and
   Blockchain.
-- Verificar Gateway con y sin JWT.
-- Verificar la atribución y el acceso de las rutas administrativas.
-- Probar que el lock bloquea todo el hostname y dejarlo en el estado operativo
+- Check Gateway with and without JWT.
+- Verify the attribution and access of administrative routes.
+- Prove that the lock blocks the entire hostname and leaves it in the operating state
   decidido.
-- Registrar la línea base estable.
+- Register the stable baseline.
 
 ### 9.2 v0.0.13
 
-- Ejecutar la regresión reproducible de GUI y API con datos sintéticos.
-- Mantener activa la regla mTLS general temporal durante toda la versión.
-- Validar `aud` y `azp` o `client_id` antes de admitir evaluadores externos.
-- Resolver `ISSUE-001` y superar sus pruebas de concurrencia sin refresco
-  manual de la caché de validadores LIGHT.
-- Ejecutar las demos desde ventanas controladas por el lock.
+- Run the reproducible regression of GUI and API with synthetic data.
+- Keep the mTLS rule on general temporary throughout the version.
+- Validate `aud` and `azp` or `client_id` before admitting external evaluators.
+- Solve `ISSUE-001` and pass your non-refresher competition tests
+LIGHT validator cache manual.
+- Run demos from lock controlled windows.
 
 ### 9.3 v0.0.14
 
-- Habilitar el lock durante la ventana de cambio.
-- Desplegar y validar `/gui` antes de modificar la frontera de Cloudflare.
-- Crear los redirects exactos `/` y `/gui` hacia `/gui/` con `302`.
-- Sustituir `Temporary mTLS gate - assermetry.com` por el `default deny` de
-  paths; no abrir una ventana sin el lock.
-- Mantener la asociación mTLS y la regla administrativa permanente.
-- Revocar un certificado administrativo desechable y demostrar su rechazo sin
-  afectar al certificado administrativo de respaldo.
-- Validar OIDC de usuario sin certificado, administración con certificado,
-  WAF, rate limit, logs y rollback.
-- Abrir la beta solo después de superar esas comprobaciones.
+- Enable the lock during the change window.
+- Unfold and validate `/gui` before modifying the Cloudflare border.
+- Create the exact `/` and `/gui` redirects to `/gui/` with `302`.
+- Replace `Temporary mTLS gate - assermetry.com` with `default deny`
+paths; do not open a window without the lock.
+- Maintain the mTLS association and the permanent administrative rule.
+- Revocation of a disposable administrative certificate and proof of rejection without
+affect the administrative endorsement certificate.
+- Validate uncertified user OIDC, administration with certificate,
+WAF, rate limit, logs and rollback.
+- Open beta only after you pass those checks.
 
-Los pasos posteriores se mantienen exclusivamente en
-[`next_releases.md`](../next_releases.md) hasta que su versión pase a estar en
-curso.
+Subsequent steps are maintained exclusively in [`next_releases.md`](../next_releases.md) until your version becomes ongoing.

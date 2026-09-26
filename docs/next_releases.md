@@ -1,325 +1,286 @@
-# Próximas versiones
+# Next versions
 
-Este documento contiene únicamente las versiones posteriores a la versión en
-curso. El estado de la versión en curso está en [`version.md`](version.md) y
-las versiones publicadas en [`releases.md`](releases.md).
+This document contains only versions after the current version. The status of the current version is in [`version.md`](version.md) and the versions published in [`releases.md`](releases.md).
 
-## Resumen
+## Summary
 
-| Versión | Objetivo | Criterio principal de salida |
+| Version | Objective | Main exit criterion |
 | --- | --- | --- |
-| v0.0.14 | Beta cerrada por invitación | Dos evaluaciones externas y un candidato a design partner |
-| v0.0.15 | Piloto con design partners | Un piloto con evidencia de valor y decisión explícita de continuidad |
-| v0.0.16 | Preparación de producción | Hardening y recuperación demostrados; riesgos resueltos o aceptados |
-| v0.9.0 | Release Candidate | Regresión integral y decisión formal GO/NO-GO |
-| v1.0.0 | Producción controlada | Caso repetible, compromiso contractual y operación aceptada |
+| v0.0.14 | Beta closed by invitation | Two external evaluations and one candidate for partner design |
+| v0.0.15 | Pilot with design partners | A pilot with evidence of value and explicit decision of continuity |
+| v0.0.16 | Production preparation | Hardening and recovery demonstrated; risks resolved or accepted |
+| v0.9.0 | Release Candidate | Full regression and formal decision GO/NO-GO |
+| v1.0.0 | Controlled production | Repeatable case, contractual commitment and accepted transaction |
 
-## v0.0.14 - Beta cerrada por invitación
+## v0.0.14 - Beta closed by invitation
 
-### Objetivo
+### Objective
 
-Permitir que un máximo de diez organizaciones externas evalúen la plataforma
-durante un periodo definido, con identidades pseudónimas y acceso OIDC
-provisionado manualmente. La retirada controlada de la regla mTLS general
-temporal pertenece a esta versión y es su primer paso operativo, antes de abrir
-las evaluaciones externas.
+Allow a maximum of ten external organizations to evaluate the platform for a defined period, with pseudonim identities and manually provided OIDC access. The controlled removal of the mTLS general temporary rule belongs to this version and is its first operating step, before opening external evaluations.
 
-### Primer paso: retirar mTLS temporal y conservar el gate de rutas
+### Step 1: Remove temporary mTLS and keep the route gate
 
-Antes de abrir el acceso a cualquier cliente:
+Before opening access to any customer:
 
-1. Activar el maintenance lock y conservar disponible el rollback.
-2. Editar en el mismo slot `Temporary mTLS and public path gate - assermetry.com`.
-3. Eliminar únicamente la condición mTLS (`not cf.tls_client_auth.cert_verified`)
-  de la expresión combinada.
-4. Mantener la condición de bloqueo de namespaces no permitidos y la acción
-  `Block` con código `403`.
-5. Renombrar la regla a `Default deny - public path namespaces`.
-6. Validar `/gui/`, `/backend`, `/auth` y los paths desconocidos antes de abrir
-  el acceso.
+1. Activate maintenance lock and keep rollback available.
+2. Edit in the same slot `Temporary mTLS and public path gate - assermetry.com`.
+3. Remove only the mTLS condition (`not cf.tls_client_auth.cert_verified`)
+of the combined expression.
+4. Keep namespaces lock condition not allowed and action
+`Block` with `403` code.
+5. Rename the rule to `Default deny - public path namespaces`.
+6. Validate `/gui/`, `/backend`, `/auth` and unknown paths before opening
+access.
 
-La transición conserva el mismo slot para evitar una ventana sin protección.
-El `default deny` de paths no sustituye la autenticación, autorización ni el
-aislamiento de Gateway y las APIs.
+The transition retains the same slot to avoid an unprotected window. The `default deny` of paths does not replace authentication, authorization, or the Gateway isolation and APIs.
 
-### Alcance
+### Scope
 
-- Una identidad opaca por evaluador; no se permiten usuarios compartidos ni se
-  exige nombre real o correo personal.
-- Keycloak conserva solo identificador técnico, organización y roles
+- An opaque identity per evaluator; no shared users are allowed nor are they
+requires real name or personal mail.
+- Keycloak retains only technical identifier, organization and roles
   imprescindibles.
-- Logs y métricas no incluyen nombres, correos, tokens, credenciales ni datos
+- Logs and metrics do not include names, emails, tokens, credentials or data
   personales evitables.
-- La regla mTLS general temporal se retira en una ventana controlada,
-  manteniendo activos el lock, la regla mTLS administrativa y un rollback
-  probado.
-- La interfaz queda publicada bajo `/gui/`; Cloudflare redirige únicamente `/`
-  y `/gui` a `/gui/` y bloquea por defecto cualquier path ajeno a `/gui`,
-  `/backend` y `/auth`.
-- URL Normalization, Free Managed Ruleset, rate limiting y el cierre del origen
-  a redes verificadas de Cloudflare permanecen activos: la allowlist de paths
-  no los sustituye.
-- Se valida el ciclo de revocación con un certificado administrativo
-  desechable y un certificado de respaldo ya comprobado: el desechable supera
-  mTLS antes de revocarlo y es rechazado después, sin perder el acceso de
-  recuperación.
-- Los usuarios acceden por OIDC sin certificado; mTLS queda reservado a la
-  administración.
-- Cuando se habilite API, cada organización usa su propio cliente confidencial;
-  no se comparte el secreto de `TrustNewsApi`.
-- Se validan firma, issuer, vigencia, audiencia, cliente presentador y roles.
-- La asociación identidad-organización es inmutable y se resuelve server-side.
-- El aislamiento cubre todos los recursos, búsquedas y exportaciones.
-- Se aplican cuotas por organización, auditoría mínima, soporte y offboarding.
-- Cada evaluación dispone de guía, tres tareas y recogida estructurada de
+- The mTLS rule general temporary is removed in a controlled window,
+keeping active the lock, the administrative mTLS rule and a proven rollback.
+- The interface is published under `/gui/`; Cloudflare redirects only `/`
+and `/gui` to `/gui/` and blocks by default any path outside `/gui`, `/backend` and `/auth`.
+- URL Normalization, Free Managed Rulet, rate limiting and closing of origin
+Cloudflare's verified networks remain active: the path list does not replace them.
+- The revocation cycle is validated with an administrative certificate
+disposable and a proven backup certificate: the disposable exceeds mTLS before it is revoked and is later rejected without losing recovery access.
+- Users access by OIDC without certificate; mTLS is reserved for the
+administration.
+- When API is enabled, each organization uses its own confidential client;
+the secret of `TrustNewsApi` is not shared.
+- Validate signature, issuer, validity, audience, client presenter and roles.
+- The identity-organization association is immutable and resolves to serve-side.
+- The isolation covers all resources, searches and exports.
+- Fees are applied by organization, minimum audit, support and offboarding.
+- Each evaluation has a guide, three tasks and structured collection of
   feedback.
 
-### Límite y datos
+### Limit and data
 
-- Se permiten diez organizaciones externas activas simultáneamente. Los tenants
-  sintéticos e identidades internas no consumen ese límite.
-- No hay autorregistro. Altas, roles y cuotas se aprueban manualmente.
-- El alta número once queda bloqueada y pasa a una lista de espera.
-- No se introducen credenciales, datos personales, regulados o confidenciales
-  sin necesidad, autorización y tratamiento acordados.
-- Cada evaluación define fecha final, retención y limpieza.
-- Los datos sintéticos o desechables no tienen recuperación garantizada.
-- Un dato que deba conservarse exige backup mínimo; un dato irremplazable exige
-  una restauración probada.
+- Ten external organizations active simultaneously are allowed. Tenants
+synthetics and internal identities do not consume that limit.
+- No self-registration. Highs, roles and quotas are approved manually.
+- High number eleven is locked and moved on to a waiting list.
+- No credentials, personal, regulated or confidential data are entered
+no need, authorisation and treatment agreed.
+- Each evaluation defines final date, retention and cleaning.
+- Synthetic or disposable data are not guaranteed recovery.
+- A data to be kept requires minimal backup; an irreplaceable data requires
+a proven restoration.
 
-### Criterio de salida
+### Exit criterion
 
-- Una organización no puede leer ni inferir recursos de otra, aunque manipule
-  `client_id`, parámetros o enlaces.
-- Un administrador de cliente no puede elevarse a administrador global.
-- Usuarios desactivados y tokens incorrectos o caducados pierden acceso.
-- Los límites no rompen login, refresh ni polling legítimos.
-- La regla mTLS general temporal está retirada y la administración continúa
-  protegida por su regla mTLS permanente.
-- Rutas de escáner como `/wp-admin/`, `/.env` y paths aleatorios se bloquean en
-  Cloudflare y no alcanzan Hetzner.
-- Un certificado administrativo desechable revocado es rechazado y el
-  certificado de respaldo conserva el acceso administrativo.
-- El alta número once se deriva a la lista de espera.
-- Se completan dos evaluaciones externas y se identifica un candidato a design
-  partner con problema, métrica y posible piloto.
+- One organization cannot read or infer resources from another, even if it manipulates
+`client_id`, parameters or links.
+- A client administrator cannot be elevated to a global administrator.
+- Off users and incorrect or expired tokens lose access.
+- The boundaries do not break legitimate login, refresh or chicken.
+- The mTLS general rule is withdrawn and administration continues
+protected by its permanent mTLS rule.
+- Scanner paths such as `/wp-admin/`, `/.env` and random paths are blocked in
+Cloudflare and they don't reach Hetzner.
+- A revoked disposable administrative certificate is rejected and the
+certificate of endorsement retains administrative access.
+- The high number eleven is derived from the waiting list.
+- Two external evaluations completed and one design candidate identified
+partner with problem, metric and possible pilot.
 
-## v0.0.15 - Piloto con design partners
+## v0.0.15 - Pilot with design partners
 
-### Objetivo
+### Objective
 
-Validar durante cuatro a ocho semanas uno o dos casos de uso especializados,
-con alcance, datos, soporte y métricas acordados antes de desarrollar.
+Validate for four to eight weeks one or two specialized cases of use, with scope, data, support and metrics agreed before development.
 
-### Alcance
+### Scope
 
-- Caso de uso y criterio de éxito acordados antes del piloto.
-- Datos delimitados, exportación, eliminación y seguimiento semanal definidos.
-- Pruebas de carga representativas, reinicios controlados y degradación de una
+- Use case and success criteria agreed before the pilot.
+- Delimited data, export, elimination and weekly monitoring defined.
+- Representative load tests, controlled restarts and degradation of a
   dependencia.
-- Hardening del canal CI, privilegio mínimo de Geth y artefactos reproducibles
-  en los componentes afectados.
-- Medición de latencia, coste por validación, calidad percibida, repetición y
-  carga de soporte.
+- Hardening of the IC channel, minimum privilege of Geth and reproducible artifacts
+in the components concerned.
+- Laterance measurement, cost per validation, perceived quality, repetition and
+support load.
 
-Este hardening se limita a los componentes afectados por el piloto. El cierre
-transversal del pipeline, Geth, segmentación y cadena de suministro permanece
-en `v0.0.16`.
+This hardening is limited to the components affected by the pilot. The cross-sectional closure of the pipeline, Geth, segmentation and supply chain remains at `v0.0.16`.
 
-Los datos desechables pueden aceptar riesgo de pérdida. Los datos que deban
-conservarse requieren backup mínimo antes de entrar; los irremplazables no se
-admiten hasta demostrar una restauración aislada.
+Disposable data can accept risk of loss. Data to be stored requires minimal backup before entering; irreplaceable data are not supported until a standalone restoration is demonstrated.
 
-La reputación de validadores y el LLM dedicado solo se incorporan si el piloto
-demuestra su necesidad. X/Threads permanece en backlog hasta validar un flujo o
-canal comercial concreto.
+The reputation of validators and dedicated LLM is only incorporated if the pilot demonstrates its need. X/Threads remains in backlog until a specific flow or commercial channel is validated.
 
-### Criterio de salida
+### Exit criterion
 
-Al menos un piloto termina con evidencia de valor y una decisión explícita de
-continuar, cambiar el producto o detener el caso de uso.
+At least one pilot ends up with evidence of value and an explicit decision to continue, change the product or stop the use case.
 
-## v0.0.16 - Preparación de producción
+## v0.0.16 - Production preparation
 
-### Objetivo
+### Objective
 
-Convertir la plataforma validada con clientes en un servicio operable. Es una
-versión de estabilización y no incorpora funcionalidades comerciales salvo las
-imprescindibles para cerrar un riesgo de producción.
+Converting the validated platform with customers into a service that can be operated. It is a stabilization version and does not incorporate commercial functionalities except those necessary to close a production risk.
 
-### Hardening de identidad
+### Identity Hardening
 
-- Revisar y endurecer la validación de `aud` implantada antes de la beta.
-- Conservar la validación de `azp` o `client_id` mediante una lista explícita
-  de clientes presentadores.
-- Mantener validación de firma, algoritmo, issuer, expiración y vigencia.
-- Separar permisos de usuario y service account.
-- No registrar headers, tokens ni claims sin verificar.
-- Eliminar implementaciones duplicadas de rutas administrativas.
-- Ampliar y mantener las pruebas negativas de audiencia, presentador, issuer,
+- Review and harden `aud` validation implanted before beta.
+- Keep `azp` or `client_id` validation by means of an explicit list
+of clients presenters.
+- Maintain signature validation, algorithm, issuer, expiration and validity.
+- Separate user permissions and service account.
+- Do not register unverified heads, tokens or claims.
+- Remove duplicate implementations of administrative routes.
+- Expand and maintain negative hearing evidence, presenter, issuer,
   expiración, firma y ausencia de token.
 
-### Confianza del pipeline
+### Pipeline confidence
 
-- Resolver [`ISSUE-003`](issues.md#issue-003---ci-no-autentica-el-api-de-k3s-con-su-ca):
-  autenticar el API de K3s con su CA real y eliminar saltos TLS inseguros.
-- Resolver [`ISSUE-004`](issues.md#issue-004---ci-no-fija-la-clave-ssh-del-servidor):
-  fijar y verificar la clave SSH esperada con `StrictHostKeyChecking=yes`.
-- Hacer obligatorios los controles de seguridad aplicables a cada perfil.
-- Probar que una CA, nombre TLS o clave SSH incorrectos fallan antes de ejecutar
+- Resolve [`ISSUE-003`](issues.md#issue-003---ci-no-autentica-el-api-de-k3s-con-su-ca):
+authenticate the K3s API with your real CA and remove unsafe TLS jumps.
+- Resolve [`ISSUE-004`](issues.md#issue-004---ci-no-fija-la-clave-ssh-del-servidor):
+fix and verify the expected SSH key with `StrictHostKeyChecking=yes`.
+- Make mandatory the security checks applicable to each profile.
+- Prove that an incorrect CA, TLS name or SSH key fails before running
   despliegues.
 
-### Geth y segmentación interna
+### Geth and internal segmentation
 
-- Retirar `admin`, `personal`, el desbloqueo remoto y los comodines de CORS
-  y virtual hosts de los RPC.
-- Publicar únicamente módulos y métodos consumidos por la aplicación.
-- Mantener RPC como `ClusterIP`, sin Ingress ni NodePort.
-- Comprobar que el CNI aplica `NetworkPolicy`.
-- Implantar `default-deny` progresivo con allowlists mínimas, incluido DNS.
-- Aislar Geth, MongoDB, PostgreSQL, Kafka, IPFS, paneles y servicios
+- Remove `admin`, `personal`, remote unlocking and CORS wildcards
+and virtual hosts of the PRC.
+- Only publish modules and methods consumed by the application.
+- Keep RPC as `ClusterIP`, no Ingress or NodePort.
+- Check that the CNI applies `NetworkPolicy`.
+- Implement progressive `default-deny` with minimal allowables, including DNS.
+- Aislar Geth, MongoDB, PostgreSQL, Kafka, IPFS, panels and services
   administrativos.
-- Demostrar que un pod no autorizado no puede alcanzar servicios sensibles.
+- Prove that an unauthorized pod cannot reach sensitive services.
 
-### Cadena de suministro y capacidad
+### Supply chain and capacity
 
-- Eliminar `latest`, referencias flotantes e imágenes sin versión.
-- Fijar imágenes y dependencias por digest; desplegar los digests construidos
-  por el pipeline.
-- Generar inventario o SBOM, ejecutar escaneo y añadir controles al render
+- Remove `latest`, floating references and images without version.
+- Fix images and dependencies by digest; display constructed digests
+for the pipeline.
+- Generate inventory or SBOM, run scanning and add controls to render
   productivo.
-- Completar `requests` y `limits`, medir rollouts y definir alertas de
-  memoria, disco y presión del nodo.
-- Definir SLO, RTO y RPO.
-- Decidir explícitamente si se acepta el nodo único como SPOF o se adopta
-  infraestructura multinodo; una réplica en un nodo no se presenta como HA.
-- Resolver o aceptar expresamente `DNSConfigForming`.
+- Complete `requests` and `limits`, measure rolls and set alerts for
+memory, disk and node pressure.
+- Define SLO, RTO and RPO.
+- Explicitly decide whether to accept the single node as SPOF or adopt
+multinode infrastructure; a replica in a node is not presented as HA.
+- Resolve or expressly accept `DNSConfigForming`.
 
-### Backups, restauración y operación
+### Backups, restoration and operation
 
-- Crear backups cifrados externos de MongoDB y PostgreSQL de Keycloak.
-- Respaldar genesis, keystores, credenciales Ethereum, contrato, ABI,
-  categorías, secretos Kubernetes, variables CI/CD, claves API y secretos OIDC.
-- Verificar hash, fecha, tamaño, cifrado y legibilidad fuera del clúster.
-- Restaurar MongoDB y Keycloak en un destino aislado y comprobar login y
+- Create external MongoDB and PostgreSQL encryption backups from Keycloak.
+- Support genesis, keystores, Ethereum credentials, contract, ABI,
+categories, Kubernet secrets, CI/CD variables, API keys and OIDC secrets.
+- Check hash, date, size, encryption and readability outside the cluster.
+- Restore MongoDB and Keycloak in an isolated destination and check login and
   recuentos.
-- Verificar dirección y bytecode del contrato frente a la línea base.
-- Ensayar rollback de aplicación, manifests, configuración, imágenes y datos.
-- Ejecutar carga, soak, fallos y recuperación.
-- Preparar runbooks de incidentes, credenciales, certificados, soporte y bajas.
-- Revisar privacidad, retención y condiciones de servicio.
+- Check the address and bytecode of the contract against the baseline.
+- Rehearsing application rollback, manifests, configuration, images and data.
+- Run load, soak, bugs and recovery.
+- Prepare incident runbooks, credentials, certificates, support and casualties.
+- Review privacy, retention and conditions of service.
 
-Nunca se prueba una restauración destructiva sobre los PVC activos. El resultado
-exige evidencia de restauración, no solo la existencia de ficheros de backup.
+A destructive restoration of active PVCs is never tested. The result requires evidence of restoration, not just the existence of backup files.
 
 ### Cloudflare Tunnel opcional
 
-Puede sustituirse el inbound HTTPS por un Named Tunnel iniciado desde el
-clúster, únicamente si un análisis explícito justifica el cambio. No forma parte
-de la versión en curso y se estima en 12 a 18 horas técnicas.
+The HTTPS inbound can be replaced by a Named Tunnel initiated from the cluster, only if an explicit analysis justifies the change. It is not part of the current version and is estimated at 12 to 18 technical hours.
 
-Condiciones mínimas:
+Minimum conditions:
 
-- `cloudflared` como workload restringido, con credencial externa, probes,
-  límites, dos réplicas y `--no-autoupdate`.
-- Traefik sigue siendo el único router para `/gui`, `/backend` y `/auth`.
-- El salto `cloudflared -> Traefik` valida el Origin CA y
-  `originServerName=assermetry.com`; no se usa `noTLSVerify`.
-- `forwardedHeaders.insecure` permanece desactivado y solo se confían los
-  orígenes internos definidos.
-- El lock y el mTLS administrativo permanecen activos durante el cambio.
-- El inbound `443` no se retira hasta superar las pruebas de extremo a extremo
-  y preparar el rollback.
-- Tras el periodo de observación, Traefik pasa a `ClusterIP` y no queda una
-  ruta alternativa mediante LoadBalancer, NodePort, hostPort, IP pública o DNS
-  histórico.
-- Se validan IP real, rate limits, logs, pérdida de un conector, smoke tests y
+- `cloudflared` as a restricted workload, with external credentials, tests,
+limits, two replicas and `--no-autoupdate`.
+- Traefik remains the only router for `/gui`, `/backend` and `/auth`.
+- The `cloudflared -> Traefik` jump validates the Origin CA and
+`originServerName=assermetry.com`; no `noTLSVerify` is used.
+- `forwardedHeaders.insecure` remains disabled and only the
+defined internal origins.
+- The lock and administrative mTLS remain active during the change.
+- The inbound `443` does not withdraw until the end-to-end tests are completed.
+And prepare the rollback.
+- After the observation period, Traefik passes to `ClusterIP` and there is no
+alternative route via LoadBalancer, NodePort, hostPort, public IP or historical DNS.
+- Real IP validation, rate limits, log, connector loss, smoke tests and
   rollback completo.
-- El perfil local no depende de `cloudflared`.
+- The local profile does not depend on `cloudflared`.
 
-Resultado esperado: el dominio funciona exclusivamente por el túnel, Hetzner no
-admite puertos web inbound y se conservan WAF, OIDC, mTLS administrativo,
-límites y observabilidad. La opción no aporta alta disponibilidad del host
-mientras el clúster siga en un único nodo.
+Expected result: the domain works exclusively by tunnel, Hetzner does not support inbound web ports and WAF, OIDC, mTLS administrative, limits and observability are retained. The option does not provide high host availability as long as the cluster remains in a single node.
 
-### Criterio de salida
+### Exit criterion
 
-- Todos los flujos aplican identidad y autorización estrictas.
-- CI autentica SSH y Kubernetes y no permite omitir controles.
+- All flows apply strict identity and authorization.
+- CI authenticates SSH and Kubernetes and does not allow omitting controls.
 - Geth no expone APIs administrativas ni desbloqueo inseguro.
-- Las NetworkPolicy limitan el movimiento lateral.
-- Producción usa artefactos inmutables e inventariados.
-- Capacidad y disponibilidad tienen evidencia y decisión de riesgo.
-- Backups cifrados externos y restauración aislada están demostrados.
-- Rollback, carga, soak, fallos y recuperación están probados.
-- Los riesgos restantes están resueltos o aceptados formalmente.
+- NetworkPolicy limits lateral movement.
+- Production uses immutable and inventoryable artifacts.
+- Capacity and availability have evidence and risk decision.
+- External encrypted backups and isolated restoration are proven.
+- Rollback, charging, soak, faults and recovery are proven.
+- The remaining risks are formally resolved or accepted.
 
-Cualquier incumplimiento mantiene el estado NO-GO y bloquea `v0.9.0`.
+Any non-compliance maintains the NO-GO state and blocks `v0.9.0`.
 
 ## v0.9.0 - Release Candidate
 
-- Congelación funcional.
-- Ensayo completo de despliegue, migración y rollback.
-- Restauración repetida, aislada y cronometrada.
-- Regresión funcional integral.
-- Pruebas negativas de seguridad, carga y soak.
-- Revisión de observabilidad, soporte y procedimientos operativos.
-- GO/NO-GO formal con responsables y excepciones registradas.
+- Functional freezing.
+- Full deployment, migration and rollback test.
+- Repeated, isolated and timed restoration.
+- Integral functional regression.
+- Negative security, charge and soak tests.
+- Review of observability, support and operating procedures.
+- GO/NO-GO formal with registered responsible and exceptions.
 
-Cualquier fallo crítico produce NO-GO y requiere una nueva release candidate.
+Any critical failure produces NO-GO and requires a new candidate release.
 
-## v1.0.0 - Producción controlada
+## v1.0.0 - Controlled production
 
-Producción no exige autorregistro ni acceso anónimo. El servicio puede continuar
-invite-only mediante OIDC y con mTLS exclusivamente administrativo.
+Production does not require self-registration or anonymous access. The service can continue to be invited only by OIDC and with mTLS exclusively administrative.
 
-La versión recibe GO cuando:
+The version receives GO when:
 
-- Dos organizaciones especializadas han completado una evaluación o piloto.
-- Al menos una mantiene un compromiso contractual de producción.
-- Existe un caso de uso repetible y una propuesta económica sostenible.
-- Backup, restauración, seguridad, capacidad y soporte están aceptados.
-- Se conocen responsables, horarios, escalado y límites del servicio.
-- El rollback de apertura o cierre está probado.
+- Two specialized organizations have completed an evaluation or pilot.
+- At least one maintains a contractual production commitment.
+- There is a case of repeatable use and a sustainable economic proposal.
+- Backup, restoration, security, capacity and support are accepted.
+- Responsible, timetables, scaling and service boundaries are known.
+- The opening or closing rollback is tested.
 
-WAF, mTLS administrativo, rate limits, logs y alertas permanecen activos. La
-regla de lock continúa disponible y su activación está probada.
+WAF, administrative mTLS, rate limits, logs and alerts remain active. The lock rule remains available and its activation is proven.
 
 ## Secuencia transversal
 
-1. Demo interna con datos sintéticos y operador presente.
-2. Demo externa guiada con identidad OIDC temporal y, mientras siga vigente la
-   protección temporal de la versión en curso, certificado cliente temporal.
-3. Evaluación cerrada con credenciales persistentes y fecha final.
-4. Piloto con alcance, métricas y soporte pactados.
-5. Release Candidate sin nuevas funcionalidades.
-6. Producción controlada para clientes contratados.
+1. Internal demo with synthetic data and operator present.
+2. External demo guided with temporary IODC identity and, as long as the
+temporary protection of the current version, temporary customer certificate.
+3. Closed evaluation with persistent credentials and final date.
+4. Pilot with scope, metrics and agreed support.
+5. Release Candidate without new features.
+6. Controlled production for contracted customers.
 
-Antes de cada demo o evaluación se congelan cambios durante 24 a 48 horas, se
-activa el lock para desplegar, se ejecutan preflight, regresión y smoke y se abre
-solo la ventana autorizada. Al finalizar se cierra el acceso, se revocan las
-credenciales temporales y se limpian los datos previstos.
+Before each demo or evaluation changes are frozen for 24 to 48 hours, the lock is activated to deploy, preflight, regression and smoke are executed and only the authorized window opens. At the end of the access, temporary credentials are revoked and the expected data is cleaned.
 
-Material necesario: one-pager, presentación breve, guion de demo, guía de
-evaluación, explicación de las garantías y límites de Assermetry, ficha de
-seguridad y datos, FAQ, limitaciones conocidas y propuesta de piloto.
+Material needed: one-pager, short presentation, demo script, evaluation guide, explanation of the guarantees and limits of Assermetry, safety and data sheet, FAQ, known limitations and pilot proposal.
 
-El proceso comercial previsto es:
+The planned commercial process is:
 
 ```text
 descubrimiento -> demo guiada -> evaluación -> design partner -> piloto -> producción
 ```
 
-Se medirán tiempo hasta la primera validación útil, finalización de tareas,
-utilidad percibida, repetición, coste y latencia por validación, carga de soporte
-y conversión entre etapas.
+Time to first useful validation, task completion, perceived utility, repetition, cost and latency by validation, support load and interstage conversion shall be measured.
 
 ## Invariantes
 
-- No renombrar el realm `TrustNews` ni los clientes OIDC existentes.
-- No publicar bases de datos, Kafka, IPFS API, RPC, paneles o APIs
+- Do not rename the current `TrustNews` or existing OIDC customers.
+- Do not publish databases, Kafka, IPFS API, RPC, panels or APIs
   administrativas.
-- No añadir `www.assermetry.com` sin una redirección canónica probada.
-- No usar este roadmap como sustituto de los runbooks operativos.
-- No afirmar que blockchain garantiza la verdad; el mensaje se centra en
-  trazabilidad, evidencia, diversidad de validadores y auditabilidad.
+- Do not add `www.assermetry.com` without proven canonical redirection.
+- Do not use this roadmap as a substitute for operating runbooks.
+- Not to claim that blockchain guarantees the truth; the message focuses on
+traceability, evidence, diversity of validators and auditability.

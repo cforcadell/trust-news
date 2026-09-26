@@ -1,43 +1,43 @@
 # Generate Asertions
 
-## Descripción
+## Description
 
-`api/generate-asertions` genera aserciones estructuradas a partir de un texto usando un proveedor LLM. Puede trabajar por HTTP directo o como worker Kafka dentro del flujo asíncrono de órdenes.
+`api/generate-asertions` generates structured assertions from a text using an LLM provider. You can work by HTTP direct or as a Kafka worker within the asynchronous command stream.
 
 ## Endpoints
 
-- `POST /extraer`: recibe un texto y un `client_id`, valida cuota `news_generation` en `admin`, llama al proveedor LLM seleccionado, incrementa consumo y devuelve una respuesta `assertions_generated` con documento de aserciones.
+- `POST /extraer`: Receives text and `client_id`, validates `news_generation` quota in `admin`, calls the selected LLM provider, increases consumption and returns a `assertions_generated` response with assertions document.
 
-## Contexto de validación
+## Validation context
 
-La generación de aserciones debe devolver cada aserción con contexto verificable en los campos existentes de `assertions-document-v2`: `context.locations`, `context.entities`, `context.temporal_context`, `search_hints` y `context_confidence`. El contexto que aparece literalmente en la aserción usa `origin=explicit`; el contexto deducido del texto completo de la noticia usa `origin=inferred`. No se añaden comunicaciones nuevas ni cambia el contrato blockchain.
+The generation of assertions must return each assertion with verifiable context in the existing fields of `assertions-document-v2`: `context.locations`, `context.entities`, `context.temporal_context`, `search_hints` and `context_confidence`. The context that appears literally in the assertion uses `origin=explicit`; the context deduced from the full text of the news uses `origin=inferred`. No new communications are added or the blockchain contract changes.
 
-Las `suggested_queries` deben ser autónomas e incorporar el contexto temporal, entidades y lugares necesarios para que `evidence-search` pueda consultar Tavily/Exa con precisión.
+`suggested_queries` should be autonomous and incorporate the time context, entities and locations needed for `evidence-search` to be able to consult Tavily/Exa accurately.
 
 ## Daemons
 
-- Consumidor Kafka `consume_and_process`: escucha `INPUT_TOPIC` con `group_id=generate-assertions-group`. Procesa mensajes `generate_assertions`, llama al LLM y publica `assertions_generated` o `assertions_not_generated` en `OUTPUT_TOPIC`.
-- Productor Kafka local: se crea junto al consumidor para publicar respuestas.
+- Consumer Kafka `consume_and_process`: listen `INPUT_TOPIC` with `group_id=generate-assertions-group`. Processes `generate_assertions` messages, calls LLM and publishes `assertions_generated` or `assertions_not_generated` messages in `OUTPUT_TOPIC`.
+- Local Kafka Producer: created with the consumer to publish responses.
 
-## Inicialización
+## Initialisation
 
-Al arrancar carga `.env`, configura logging JSON de una sola línea, selecciona proveedor de IA, tópicos Kafka, prompt, temperatura, límites y reintentos. Los saltos de línea de mensajes y excepciones se conservan escapados dentro del JSON para que CRI, Fluent Bit y Loki mantengan un único evento. Los prompts y cuerpos completos de las respuestas LLM no se registran en nivel `INFO`; se emiten metadatos como proveedor, modelo, duración y tamaños. En `startup` lanza el consumidor Kafka en segundo plano. Si se ejecuta como script, arranca uvicorn en `PORT`.
+When booting `.env` load, configures single-line logging JSON, selects AI provider, Kafka topics, prompt, temperature, limits and re-attempts. Message line breaks and exceptions are kept escaped within the JSON so that CRI, Fluent Bit and Loki maintain a single event. The full LLM response prompts and bodies are not recorded at `INFO` level; metadata are issued as a supplier, model, duration and sizes. At `startup`, Kafka consumer launches second-hand. If executed as a script, it starts ovicorn at `PORT`.
 
-## Variables de entorno
+## Environment variables
 
-- `LOG_LEVEL`: nivel de logging.
-- `AI_PROVIDER`: proveedor LLM (`mistral`, `gemini`, `openrouter`, según soporte del código).
-- `KAFKA_BROKER` o `KAFKA_BOOTSTRAP`: bootstrap Kafka.
-- `KAFKA_INPUT_TOPIC` o `ASSERTIONS_REQUEST_TOPIC`: tópico de entrada.
-- `KAFKA_OUTPUT_TOPIC` o `ASSERTIONS_RESPONSE_TOPIC`: tópico de salida.
-- `MISTRAL_API_URL`, `MISTRAL_API_KEY`, `MISTRAL_MODEL`: configuración Mistral.
-- `GEMINI_API_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL`: configuración Gemini.
-- `OPENROUTER_API_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`: configuración OpenRouter.
-- `ADMIN_URL`: URL del servicio admin para consultar y actualizar cuotas.
-- `PROMPT`: prompt base usado para extraer aserciones.
-- `TEMPERATURE`: temperatura del modelo.
-- `MAX_ASSERTIONS`: máximo de aserciones devueltas.
-- `HTTP_TIMEOUT`: timeout total, en segundos, de cada intento contra el proveedor. Es modificable mediante `PUT /admin/config` (`http_timeout`) y su valor predeterminado es `60`.
-- `NUM_REINTENTOS` o `MAX_RETRIES`: número de reintentos.
-- `RETRY_DELAY`: espera entre reintentos.
-- `PORT`: puerto de uvicorn si se ejecuta directamente.
+- `LOG_LEVEL`: logging level.
+- `AI_PROVIDER`: LLM supplier (`mistral`, `gemini`, `openrouter`, depending on code support).
+- `KAFKA_BROKER` or `KAFKA_BOOTSTRAP`: bootstrap Kafka.
+- `KAFKA_INPUT_TOPIC` or `ASSERTIONS_REQUEST_TOPIC`: entry topic.
+- `KAFKA_OUTPUT_TOPIC` or `ASSERTIONS_RESPONSE_TOPIC`: output topic.
+- `MISTRAL_API_URL`, `MISTRAL_API_KEY`, `MISTRAL_MODEL`: Mistral configuration.
+- `GEMINI_API_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL`: Gemini configuration.
+- `OPENROUTER_API_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`: OpenRouter configuration.
+- `ADMIN_URL`: URL of the admin service to query and update quotas.
+- `PROMPT`: prompt base used to extract assertions.
+- `TEMPERATURE`: model temperature.
+- `MAX_ASSERTIONS`: maximum of returned assertions.
+- `HTTP_TIMEOUT`: total timeout, in seconds, of each attempt against the provider. It is modifiable by `PUT /admin/config` (`http_timeout`) and its default value is `60`.
+- `NUM_REINTENTOS` or `MAX_RETRIES`: Number of retry.
+- `RETRY_DELAY`: wait between retryings.
+- `PORT`: uvicorn port if executed directly.

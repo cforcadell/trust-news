@@ -1,16 +1,13 @@
-# Regresión reproducible del frontend clásico
+# Reproducible regression of the classic frontend
 
-Este directorio contiene dos niveles de ejecución:
+This directory contains two levels of execution:
 
-- `ui-smoke-test.js` ejecuta un único escenario mediante Chrome DevTools
-  Protocol, sin Playwright, Selenium ni dependencias npm;
-- `run-regression.js` valida y ejecuta de forma secuencial los casos sintéticos
-  Light y Blockchain, agrega sus resultados y devuelve error si falla cualquier
-  comprobación.
+- `ui-smoke-test.js` runs a single stage using Chrome DevTools
+Protocol, without Playwright, Selenium or NPM dependencies;
+- `run-regression.js` validates and executes the synthetic cases sequentially
+Light and Blockchain, add your results and return error if any check fails.
 
-El runner está pensado para el entorno local/Kind servido en
-`https://localhost:7443/gui/`. Chrome acepta el certificado autofirmado dentro
-de un perfil temporal aislado.
+The runner is designed for the local/Kind environment served in `https://localhost:7443/gui/`. Chrome accepts the self-signed certificate within an isolated time profile.
 
 ## Contenido
 
@@ -28,60 +25,51 @@ tests/frontend/e2e/
         └── blockchain-news.txt
 ```
 
-Los textos son sintéticos. Los resultados esperados son invariantes
-estructurales y operativas; no se compara literalmente el texto producido por
-un LLM.
+The texts are synthetic. The expected results are structural and operational invariants; the text produced by an LLM is not literally compared.
 
-## Qué se comprueba
+## What is checked
 
-Cada escenario:
+Each scenario:
 
-1. abre el frontend y completa el login de Keycloak;
-2. publica exactamente una noticia con el modo indicado;
-3. exige un `order_id` UUID válido;
-4. sigue la orden hasta un estado terminal;
+1. opens the frontend and completes Keycloak login;
+2. publish exactly a news story in the right way;
+3. requires a valid `order_id` UUID;
+4. follows the order to a terminal state;
 5. falla ante timeout, `ERROR`, `FAILED`, `QUOTA_EXCEDED`,
-   `ASSERTIONS_NOT_AVAILABLE`, `NO_VALIDATORS_AVAILABLE` o cualquier estado no
-   permitido por el caso;
-6. comprueba modo, campos de orden, aserciones, validaciones, validadores
-   pendientes y pestañas habilitadas/deshabilitadas;
-7. falla ante respuestas HTTP o errores de consola no incluidos expresamente
-   en la lista permitida;
-8. captura vistas de escritorio y móvil.
+`ASSERTIONS_NOT_AVAILABLE`, `NO_VALIDATORS_AVAILABLE` or any state not allowed by the case;
+6. checks mode, command fields, assertions, validations, validators
+habilitadas/deshabilitadas earrings and tabs;
+7. failure to HTTP responses or console errors not expressly included
+in the permitted list;
+8. capture desktop and mobile views.
 
-El caso Blockchain exige además `cid`, `post_id`, `tx_hash` y la pestaña IPFS
-habilitada. El caso Light exige esa pestaña deshabilitada.
+The Blockchain case also requires `cid`, `post_id`, `tx_hash` and the enabled IPFS tab. The Light case requires that disabled tab.
 
-## Requisitos
+## Requirements
 
-- Node.js 22 o posterior, por el soporte nativo de `fetch`, `WebSocket` y
+- Node.js 22 or later, by native support of `fetch`, `WebSocket` and
   `AbortSignal.timeout`.
-- Google Chrome; por defecto `/usr/bin/google-chrome`.
-- El perfil `apis-frontend` desplegado y accesible.
-- Dos usuarios pseudónimos de Keycloak con cuotas suficientes: uno asociado a
-  `org-alpha` y otro a `org-beta`.
-- Validadores disponibles para las categorías generadas.
+- Google Chrome; default `/usr/bin/google-chrome`.
+- The `apis-frontend` profile deployed and accessible.
+- Two users pseudonyms of Keycloak with sufficient quotas: one associated with
+`org-alpha` and another to `org-beta`.
+- Validators available for the categories generated.
 
-`resources/identities.example.json` define los alias y los nombres de variables para
-administradores, usuarios y clientes API de las dos organizaciones. No contiene
-usuarios reales, contraseñas ni secretos.
+`resources/identities.example.json` defines aliases and variable names for administrators, users and API clients of the two organizations. It does not contain real users, passwords or secrets.
 
-## Validar el paquete sin ejecutar la aplicación
+## Validate package without running application
 
-La validación comprueba los JSON, modos, identidades y ficheros de noticias, sin
-abrir Chrome ni necesitar credenciales:
+Validation checks for JSONs, modes, identities, and news files, without opening Chrome or needing credentials:
 
 ```bash
 node tests/frontend/e2e/run-regression.js --validate
 ```
 
-Se escriben `manifest.json` y `summary.json` en `tests/frontend/e2e/artifacts/<run-id>/` y el
-proceso termina con código cero si los casos son válidos.
+`manifest.json` and `summary.json` are written in `tests/frontend/e2e/artifacts/<run-id>/` and the process ends with zero code if the cases are valid.
 
-## Ejecutar Light y Blockchain
+## Run Light and Blockchain
 
-Las contraseñas se leen de forma interactiva y se mantienen únicamente en
-variables de entorno del runner:
+Passwords are read interactively and are maintained only in runner environment variables:
 
 ```bash
 export ASSERMETRY_ORG_ALPHA_USERNAME=regression-alpha-user
@@ -99,31 +87,22 @@ node tests/frontend/e2e/run-regression.js
 unset ASSERMETRY_ORG_ALPHA_PASSWORD ASSERMETRY_ORG_BETA_PASSWORD
 ```
 
-El orquestador asigna un perfil nuevo de Chrome a cada escenario y ejecuta los
-casos secuencialmente. Las credenciales de una organización no se entregan al
-escenario de la otra y Chrome se inicia con las variables sensibles eliminadas
-de su entorno.
+The orchestrator assigns a new Chrome profile to each scenario and executes the cases sequentially. The credentials of one organization are not delivered to the other’s scenario and Chrome starts with the sensitive variables removed from its environment.
 
-La línea final es una de estas:
+The final line is one of these:
 
 ```text
 REGRESSION_RESULT PASS
 REGRESSION_RESULT FAIL
 ```
 
-Un `PASS` sin ciclo de datos configurado certifica las comprobaciones
-funcionales, pero `summary.json` mantiene `managedState: false`. Para afirmar
-que la ejecución parte de un estado reproducible debe usarse el modo estricto
-descrito a continuación.
+A `PASS` without data cycle configured certifies functional checks, but `summary.json` maintains `managedState: false`. To affirm that execution starts from a reproducible state, the strict mode described below must be used.
 
-## Inicialización y limpieza
+## Initialization and cleaning
 
-La API pública no ofrece una operación segura para borrar una orden completa y
-una ejecución Blockchain deja efectos no reversibles en IPFS y en la cadena.
-El orquestador no borra colecciones, PVC ni datos ajenos.
+The public API does not offer a secure operation to delete a complete command and a Blockchain execution leaves effects not reversible in IPFS and the string. The orchestrator does not delete collections, PVC or other data.
 
-La preparación y la limpieza se integran mediante dos ejecutables controlados
-por el operador:
+Preparation and cleaning are integrated by two operator-controlled executables:
 
 ```bash
 export ASSERMETRY_SETUP_HOOK=/ruta/segura/setup-regression
@@ -133,34 +112,30 @@ export ASSERMETRY_REQUIRE_MANAGED_STATE=true
 node tests/frontend/e2e/run-regression.js
 ```
 
-Los hooks se ejecutan directamente, sin `shell`, argumentos ni interpolación.
-Reciben estas variables:
+Hooks are executed directly, without `shell`, arguments or interpolation. They receive these variables:
 
 | Variable | Significado |
 | --- | --- |
-| `ASSERMETRY_RUN_ID` | Identificador único de la ejecución. |
-| `ASSERMETRY_ARTIFACTS_DIR` | Directorio donde leer o escribir evidencia. |
-| `ASSERMETRY_CASES` | Lista separada por comas de los casos ejecutados. |
+| `ASSERMETRY_RUN_ID` | Unique execution identifier. |
+| `ASSERMETRY_ARTIFACTS_DIR` | Directory where to read or write evidence. |
+| `ASSERMETRY_CASES` | Comma-separated list of cases executed. |
 
-Contrato recomendado:
+Recommended contract:
 
-- `setup` crea o restablece exclusivamente cuotas y datos de las identidades
-  sintéticas declaradas;
-- ambos hooks son idempotentes;
-- `cleanup` lee los `report.json`, actúa únicamente sobre los IDs incluidos en
-  `createdResources` y conserva evidencia de lo retirado;
-- no se intenta revertir una transacción Blockchain ni eliminar contenido IPFS
-  por su CID;
-- cualquier error devuelve un código distinto de cero.
+- `setup` creates or re-establishes exclusively quotas and identity data
+declared synthetics;
+- Both hooks are idepotent;
+- `cleanup` reads `report.json`, acts only on the IDs included in
+`createdResources` and retains evidence of withdrawal;
+- no attempt is made to reverse a Blockchain transaction or remove IPFS content
+by its CID;
+- any error returns a code other than zero.
 
-Con `ASSERMETRY_REQUIRE_MANAGED_STATE=true`, la ausencia o el fallo de uno de
-los hooks hace fallar la regresión. Sin esa variable, los hooks son opcionales y
-su estado queda reflejado en el informe.
+With `ASSERMETRY_REQUIRE_MANAGED_STATE=true`, the absence or failure of one of the hooks causes regression to fail. Without this variable, hooks are optional and their status is reflected in the report.
 
 ## Repetir tres veces
 
-Una vez configurados hooks idempotentes, pueden obtenerse tres ejecuciones
-comparables:
+Once idepotent hooks are configured, three comparable executions can be obtained:
 
 ```bash
 for repetition in 1 2 3; do
@@ -170,32 +145,29 @@ for repetition in 1 2 3; do
 done
 ```
 
-Cada repetición debe terminar en `PASS`, partir de las mismas cuotas/datos y
-mantener las mismas invariantes. Los IDs, timestamps, duraciones y textos LLM
-pueden variar.
+Each repeat must end in `PASS`, start from the same cuotas/datos and keep the same invariants. IDs, timestamps, durations and LLM texts may vary.
 
-## Línea base de Kubernetes
+## Kubernetes baseline
 
-El orquestador puede capturar una fotografía de nodos, pods, reinicios, consumo
-de CPU/memoria y PVC mediante operaciones de solo lectura:
+The orchestrator can capture a photo of nodes, pods, restarts, CPU/memoria consumption and PVC by reading-only operations:
 
 ```bash
 ASSERMETRY_CAPTURE_K8S_BASELINE=true \
   node tests/frontend/e2e/run-regression.js
 ```
 
-Esto crea `kubernetes-baseline.json`. Si la captura debe ser obligatoria:
+This creates `kubernetes-baseline.json`. If capture is mandatory:
 
 ```bash
 ASSERMETRY_REQUIRE_K8S_BASELINE=true \
   node tests/frontend/e2e/run-regression.js
 ```
 
-En el segundo caso, cualquier fallo de `kubectl` hace fallar la ejecución.
+In the second case, any `kubectl` failure fails execution.
 
-## Ejecutar un único caso
+## Run a single case
 
-El runner individual mantiene un modo interactivo compatible:
+The individual runner maintains a compatible interactive mode:
 
 ```bash
 export ASSERMETRY_USERNAME=regression-alpha-user
@@ -208,45 +180,40 @@ ASSERMETRY_CASE_FILE=tests/frontend/e2e/resources/cases/light.json \
 unset ASSERMETRY_PASSWORD
 ```
 
-Sin `ASSERMETRY_CASE_FILE` usa `docs/fake_news/news.txt` y modo Light, pero esa
-ejecución es un smoke manual y no sustituye el paquete sintético completo.
+Without `ASSERMETRY_CASE_FILE`, it uses `docs/fake_news/news.txt` and Light mode, but that execution is a manual smoke and does not replace the complete synthetic package.
 
-## Configuración
+## Settings
 
 | Variable | Predeterminado | Uso |
 | --- | --- | --- |
-| `ASSERMETRY_URL` | `https://localhost:7443/gui/` | URL del frontend. |
-| `ASSERMETRY_CASES` | Casos Light y Blockchain incluidos | Lista de JSON separada por comas. |
-| `ASSERMETRY_CASE_FILE` | Vacío | Caso usado por el runner individual. |
-| `ASSERMETRY_RUN_ID` | Fecha y hora | Identificador de ejecución. |
-| `ASSERMETRY_ARTIFACTS_DIR` | `tests/frontend/e2e/artifacts/<run-id>` | Evidencia agregada. |
-| `ASSERMETRY_ORG_ALPHA_USERNAME` | Obligatoria | Usuario pseudónimo del caso Light. |
-| `ASSERMETRY_ORG_ALPHA_PASSWORD` | Obligatoria | Contraseña del caso Light; nunca se informa. |
-| `ASSERMETRY_ORG_BETA_USERNAME` | Obligatoria | Usuario pseudónimo del caso Blockchain. |
-| `ASSERMETRY_ORG_BETA_PASSWORD` | Obligatoria | Contraseña del caso Blockchain; nunca se informa. |
-| `ASSERMETRY_RESULT_TIMEOUT_MS` | Valor del caso | Límite de seguimiento. |
-| `ASSERMETRY_CDP_TIMEOUT_MS` | `15000` | Timeout de cada operación CDP. |
-| `ASSERMETRY_DEBUG_PORT` | `9223` | Primer puerto CDP; se incrementa por caso. |
-| `ASSERMETRY_MOBILE_WIDTH` | `390` | Ancho móvil. |
-| `ASSERMETRY_MOBILE_HEIGHT` | `844` | Alto móvil. |
-| `CHROME_BIN` | `/usr/bin/google-chrome` | Ejecutable de Chrome. |
-| `ASSERMETRY_STOP_ON_FAILURE` | `false` | No iniciar más casos tras el primero fallido. |
-| `ASSERMETRY_SETUP_HOOK` | Vacío | Ejecutable de preparación idempotente. |
-| `ASSERMETRY_CLEANUP_HOOK` | Vacío | Ejecutable de limpieza acotada. |
-| `ASSERMETRY_REQUIRE_MANAGED_STATE` | `false` | Exigir preparación y limpieza. |
-| `ASSERMETRY_CAPTURE_K8S_BASELINE` | `false` | Capturar recursos de Kubernetes. |
-| `ASSERMETRY_REQUIRE_K8S_BASELINE` | `false` | Exigir una captura completa. |
-| `ASSERMETRY_PROVIDER` | Vacío | Metadato no secreto del proveedor. |
-| `ASSERMETRY_MODEL` | Vacío | Metadato no secreto del modelo. |
-| `ASSERMETRY_HTTP_TIMEOUT_SECONDS` | Vacío | Metadato del timeout LLM. |
+| `ASSERMETRY_URL` | `https://localhost:7443/gui/` | Frontend URL. |
+| `ASSERMETRY_CASES` | Light and Blockchain cases included | JSON list separated by commas. |
+| `ASSERMETRY_CASE_FILE` | Empty | Case used by the individual runner. |
+| `ASSERMETRY_RUN_ID` | Date and time | Execution identifier. |
+| `ASSERMETRY_ARTIFACTS_DIR` | `tests/frontend/e2e/artifacts/<run-id>` | Aggregate evidence. |
+| `ASSERMETRY_ORG_ALPHA_USERNAME` | Obligatoria | User name of Light case. |
+| `ASSERMETRY_ORG_ALPHA_PASSWORD` | Obligatoria | Light case password; never reported. |
+| `ASSERMETRY_ORG_BETA_USERNAME` | Obligatoria | Pseudonymous user of Blockchain case. |
+| `ASSERMETRY_ORG_BETA_PASSWORD` | Obligatoria | Blockchain case password; never reported. |
+| `ASSERMETRY_RESULT_TIMEOUT_MS` | Case value | Monitoring limit. |
+| `ASSERMETRY_CDP_TIMEOUT_MS` | `15000` | Timeout of each CDP operation. |
+| `ASSERMETRY_DEBUG_PORT` | `9223` | First CDP port; increases by case. |
+| `ASSERMETRY_MOBILE_WIDTH` | `390` | Mobile width. |
+| `ASSERMETRY_MOBILE_HEIGHT` | `844` | High cell phone. |
+| `CHROME_BIN` | `/usr/bin/google-chrome` | Executable from Chrome. |
+| `ASSERMETRY_STOP_ON_FAILURE` | `false` | Do not start any more cases after the first failed. |
+| `ASSERMETRY_SETUP_HOOK` | Empty | Impotent preparation executable. |
+| `ASSERMETRY_CLEANUP_HOOK` | Empty | Executable for confined cleaning. |
+| `ASSERMETRY_REQUIRE_MANAGED_STATE` | `false` | Require preparation and cleaning. |
+| `ASSERMETRY_CAPTURE_K8S_BASELINE` | `false` | Capture resources from Kubernetes. |
+| `ASSERMETRY_REQUIRE_K8S_BASELINE` | `false` | Demand a full catch. |
+| `ASSERMETRY_PROVIDER` | Empty | Non-secret metadata from the supplier. |
+| `ASSERMETRY_MODEL` | Empty | Non-secret metadata of the model. |
+| `ASSERMETRY_HTTP_TIMEOUT_SECONDS` | Empty | LLM timeout metadata. |
 
-`ASSERMETRY_NEWS`, `ASSERMETRY_NEWS_FILE` y
-`ASSERMETRY_VALIDATION_MODE` siguen disponibles para el smoke individual. El
-orquestador los elimina de cada proceso hijo para que no sobrescriban los casos
-versionados.
+`ASSERMETRY_NEWS`, `ASSERMETRY_NEWS_FILE` and `ASSERMETRY_VALIDATION_MODE` remain available for individual smoke. The orchestrator removes them from each child process so that they do not overwrite the cases versioned.
 
-El directorio de artefactos debe ser nuevo o estar vacío. El runner nunca
-mezcla ni sobrescribe evidencia de una ejecución anterior.
+The artifact directory must be new or empty. The runner never mixes or overwrites evidence of a previous execution.
 
 ## Artefactos
 
@@ -263,26 +230,18 @@ assermetry-regression-<run-id>/
     └── 01-...06-*.png
 ```
 
-`manifest.json` registra commit, estado limpio/sucio del repositorio, versiones
-de Node/Chrome, casos y metadatos no secretos. `summary.json` agrega duración,
-órdenes creadas, comprobaciones y fallos HTTP.
+`manifest.json` records commit, limpio/sucio status of the repository, Node/Chrome versions, non-secret cases and metadata. `summary.json` adds duration, created commands, HTTP checks and bugs.
 
-Los informes no guardan contraseñas, tokens, query strings, prompts, respuestas
-LLM completas, texto completo de la noticia, orden o pestañas. Los textos se
-representan mediante tamaño y SHA-256. Las capturas sí contienen datos visibles
-de las identidades pseudónimas y deben conservarse con la misma protección que
-el resto de la evidencia de prueba.
+Reports do not keep passwords, tokens, query strings, prompts, full LLM responses, full news text, command or tabs. Texts are represented by size and SHA-256. Captures do contain visible data of pseudonima identities and should be kept with the same protection as the rest of the evidence of evidence.
 
-## Resultado y código de salida
+## Result and output code
 
-El código es cero únicamente cuando:
+The code is zero only when:
 
-- se ejecutan todos los casos solicitados;
-- todos sus checks terminan en `PASS`;
-- no hay estados terminales, errores HTTP o errores de consola inesperados;
-- los hooks obligatorios terminan correctamente;
-- la línea base obligatoria se captura por completo.
+- all cases requested are executed;
+- all checks end in `PASS`;
+- no terminal states, HTTP errors or unexpected console errors;
+- the mandatory hooks end correctly;
+- the mandatory baseline is fully captured.
 
-Un fallo sigue generando `report.json` y `summary.json` siempre que haya sido
-posible inicializar sus directorios, facilitando el diagnóstico sin convertir
-el error en un falso positivo.
+A bug still generates `report.json` and `summary.json` whenever it has been possible to initialize your directories, facilitating the diagnosis without turning the error into a false positive.

@@ -1,27 +1,27 @@
 # TrustNews Kubernetes Deployment Guide v2
 
 > [!WARNING]
-> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
-> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+> **ARCHIVADO — NOT USE.** Historical reference; see
+> [`README.md`](README.md) and runbooks are in place before operation.
 
-Esta version reorganiza `skaffold.md` sin sustituirlo. Mantiene el orden operativo original:
+This version reorganizes `skaffold.md` without replacing it. It maintains the original operating order:
 
 1. Recrear cluster.
 2. Crear namespaces.
 3. Levantar blockchain.
-4. Desplegar contrato.
+4. Disclosure contract.
 5. Levantar infraestructura.
-6. Levantar APIs y frontend.
-7. Configurar Keycloak, cuotas y usuarios.
-8. Cargar configuraciones funcionales.
-9. Consultar datos, endpoints y colecciones.
-10. Operaciones de mantenimiento.
+6. Lift APIs and frontend.
+7. Configure Keycloak, quotas and users.
+8. Load functional configurations.
+9. Consult data, endpoints and collections.
+10. Maintenance operations.
 
 ---
 
 ## 1. Recrear Cluster Local
 
-Usar esta seccion cuando se quiera empezar desde cero. Es destructiva: borra el cluster `kind`, imagenes/volumenes Docker no usados y limpia espacio local.
+Use this section when you want to start from scratch. It is destructive: delete the `kind`, imagenes/volumenes Docker cluster unused and clean local space.
 
 ### 1.1 Inspeccion Previa
 
@@ -31,7 +31,7 @@ docker volume ls
 df -h /
 ```
 
-### 1.2 Borrado Del Cluster
+### 1.2 Deleted from Cluster
 
 ```bash
 kind delete cluster --name trust-news
@@ -50,7 +50,7 @@ df -h /
 docker volume ls
 ```
 
-### 1.4 Creacion Del Cluster
+### 1.4 Cluster Creation
 
 ```bash
 kind create cluster --name trust-news --config kind-config.yaml
@@ -60,7 +60,7 @@ kind create cluster --name trust-news --config kind-config.yaml
 
 ## 2. Crear Namespaces
 
-Ejecutar antes de cualquier perfil Skaffold.
+Run before any Skaffold profile.
 
 ```bash
 cd ./scripts/k8s
@@ -78,7 +78,7 @@ Perfil Skaffold:
 # ./skaffold dev -p blockchain --namespace blockchain --cleanup=false
 ```
 
-### 3.1 Ver Estado
+### 3.1 See State
 
 ```bash
 kubectl get pods -n blockchain
@@ -101,7 +101,7 @@ kubectl exec geth-rpc-endpoint-0 -n blockchain -- ps aux | grep geth
 kubectl exec geth-miner-0 -n blockchain -- ps aux | grep geth
 ```
 
-### 3.4 Diagnostico De Pods
+### 3.4 Pods Diagnostic
 
 ```bash
 kubectl describe pod geth-bootnode-0 -n blockchain
@@ -109,13 +109,13 @@ kubectl describe pod geth-rpc-endpoint-0 -n blockchain
 kubectl describe pod geth-miner-0 -n blockchain
 ```
 
-### 3.5 Conectar Al Nodo RPC
+### 3.5 Connect to the RPC Node
 
 ```bash
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
 ```
 
-Dentro de la consola:
+Inside the console:
 
 ```javascript
 admin.peers
@@ -131,20 +131,20 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "admin.
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "eth.blockNumber"
 ```
 
-### 3.6 Conectar Al Bootnode
+### 3.6 Connect to Bootnode
 
 ```bash
 kubectl exec -it geth-bootnode-0 -n blockchain -- ps aux
 kubectl exec -it geth-bootnode-0 -n blockchain -- geth --exec "admin.nodeInfo.enode" attach ipc:/root/.ethereum/geth.ipc
 ```
 
-### 3.7 Conectar Al Miner
+### 3.7 Connect Al Miner
 
 ```bash
 kubectl exec -it geth-miner-0 -n blockchain -- geth attach
 ```
 
-Dentro de la consola:
+Inside the console:
 
 ```javascript
 admin.peers
@@ -160,7 +160,7 @@ kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "admin.peers"
 kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec "eth.blockNumber"
 ```
 
-Comprobar que `net.peerCount == 1` en RPC y miner, y que `eth.blockNumber` coincide.
+Check that `net.peerCount == 1` in RPC and miner, and that `eth.blockNumber` matches.
 
 ### 3.8 Anadir Peer Manualmente
 
@@ -186,7 +186,7 @@ kubectl get pods -n blockchain
 
 ## 4. Desplegar Smart Contract
 
-Atencion: si se despliega un contrato nuevo, `postId` vuelve a `0`. Si hay datos previos, borrar o ajustar Mongo para evitar inconsistencias.
+Attention: If a new contract is deployed, `postId` returns to `0`. If there are previous data, delete or adjust Mongo to avoid inconsistencies.
 
 ```javascript
 db.events.deleteMany({})
@@ -200,7 +200,7 @@ db.validations.deleteMany({})
 kubectl port-forward svc/geth-rpc-endpoint 8555:8555 -n blockchain
 ```
 
-### 4.2 Desplegar Contrato
+### 4.2 Deploy Contract
 
 ```bash
 cd smart-contracts
@@ -213,7 +213,7 @@ npx hardhat run scripts/deployGeth.js --network privateGeth
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach http://localhost:8555
 ```
 
-Dentro de la consola:
+Inside the console:
 
 ```javascript
 eth.sendTransaction({
@@ -247,7 +247,7 @@ eth.sendTransaction({
 })
 ```
 
-### 4.4 Verificaciones Del Contrato
+### 4.4 Verifications of the Contract
 
 ```javascript
 eth.pendingTransactions
@@ -269,7 +269,7 @@ Perfiles Skaffold:
 ./skaffold dev -p infra-basic
 ```
 
-Servicios expuestos por Skaffold:
+Services displayed by Skaffold:
 
 ```text
 Kafdrop: http://localhost:9000
@@ -281,7 +281,7 @@ kubectl port-forward \
   8081:8081 si se reompe el tunel)
 ```
 
-### 5.1 Ver Estado
+### 5.1 See State
 
 ```bash
 kubectl get pods -n infra
@@ -289,16 +289,16 @@ kubectl get svc -n infra
 kubectl logs -n infra -f kafka-0
 ```
 
-### 5.2 Reiniciar StatefulSets De Infra
+### 5.2 Restart StatefulSets From Infra
 
 ```bash
 kubectl scale statefulset --all --replicas=0 -n infra
 kubectl scale statefulset --all --replicas=1 -n infra
 ```
 
-### 5.3 Borrar PVCs De Infra
+### 5.3 Delete PVCs From Infra
 
-Usar si al parar pods o eliminar StatefulSets quedan PVCs antiguos.
+Use if you stop pods or remove StatefulSets old PVCs.
 
 ```bash
 kubectl get pvc -n infra
@@ -307,19 +307,19 @@ kubectl delete pvc kafka-data-kafka-0 -n infra
 kubectl delete pvc mongodb-storage-mongodb-0 -n infra
 ```
 
-### 5.4 Grafana Y Loki
+### 5.4 Grafana and Loki
 
-Datasource en Grafana:
+Datasource in Grafana:
 
 ```text
 http://loki.infra.svc.cluster.local:3100
 ```
 
-Luego usar `Explore` y `Run query`.
+Then use `Explore` and `Run query`.
 
 ---
 
-## 6. Desplegar APIs Y Frontend
+## 6. Deploy APIs & Frontend
 
 Perfil Skaffold:
 
@@ -328,7 +328,7 @@ Perfil Skaffold:
 # ./skaffold dev -p apis-frontend --cache-artifacts=true --cleanup=false
 ```
 
-### 6.1 Ver Estado
+### 6.1 See State
 
 ```bash
 kubectl get pods -n apis
@@ -338,7 +338,7 @@ kubectl logs -n apis -f
 
 ### 6.2 Frontend
 
-Si no se levanta el port-forward:
+If the port-forward doesn't get up:
 
 ```bash
 kubectl port-forward svc/frontend-service -n frontend 7443:443
@@ -352,13 +352,13 @@ https://localhost:7443/backend/docs
 https://localhost:7443/auth/admin/master/console/
 ```
 
-Si se accede desde VM con mapeo de host:
+If accessed from VM with host mapping:
 
 ```text
 https://192.168.56.108:7443/
 ```
 
-### 6.3 Ver Nginx Del Frontend
+### 6.3 See Nginx Del Frontend
 
 ```bash
 kubectl exec -it -n frontend frontend-web-5769696f49-dljlk -- cat /etc/nginx/conf.d/default.conf
@@ -366,9 +366,9 @@ kubectl exec -it -n frontend frontend-web-5769696f49-dljlk -- cat /etc/nginx/con
 
 ---
 
-## 7. Secretos Y Configuracion Base
+## 7. Secrets and Base Configuration
 
-### 7.1 Secretos De Infra Y APIs
+### 7.1 Undercover Secrets & APIs
 
 ```bash
 kubectl get secrets -n infra
@@ -387,7 +387,7 @@ Si no lo abre Skaffold:
 kubectl port-forward svc/keycloak --address 0.0.0.0 -n infra 7443:8443
 ```
 
-Comprobacion:
+Check:
 
 ```bash
 curl -v -k https://localhost:7443/auth/admin/master/console
@@ -401,7 +401,7 @@ https://localhost:7443/auth/admin/master/console/
 
 ### 7.3 Crear Realm
 
-En Keycloak:
+In Keycloak:
 
 ```text
 Master -> Create Realm
@@ -430,7 +430,7 @@ Authentication Flow: solo Service accounts roles
 
 Despues, en `Credentials`, copiar el `Client Secret`.
 
-En `Realm settings` para `TrustNews`:
+In `Realm settings` for `TrustNews`:
 
 ```text
 Frontend URL: https://localhost:7443/auth/
@@ -448,15 +448,15 @@ curl -k -X POST https://localhost:7443/auth/realms/TrustNews/protocol/openid-con
 
 ---
 
-## 8. Usuarios, Roles Y Cuotas
+## 8. Users, Roles and Contributions
 
-### 8.1 Usuarios Frontend
+### 8.1 Frontend users
 
-1. Crear usuario en Keycloak.
-2. Usar Admin/Clients para definir cuota.
-3. Crear documento en Mongo con `client_id=user_<keycloak_user_id>`.
+1. Create user in Keycloak.
+2. Use Admin/Clients to define quota.
+3. Create document in Mongo with `client_id=user_<keycloak_user_id>`.
 
-Ejemplo:
+Example:
 
 ```json
 {
@@ -482,28 +482,28 @@ Admin API:
 http://127.0.0.1:8400/docs
 ```
 
-Para usuarios administradores, crear realm role:
+For administrators users, create realm role:
 
 ```text
 trust-admin
 ```
 
-y asignarlo al usuario.
+and assign it to the user.
 
 ### 8.2 Clientes API
 
-1. Crear cliente en Keycloak.
+1. Create customer in Keycloak.
 2. Obtener token.
 3. Decodificar token y obtener `sub`.
-4. Crear cuota con `client_id=<client-name>_<keycloak_client_hash_id>`.
+4. Create quota with `client_id=<client-name>_<keycloak_client_hash_id>`.
 
-Ejemplo:
+Example:
 
 ```text
 TrustNewsWeb_617597c5-fcc6-4ed5-9cf3-ae124ad3570c
 ```
 
-Documento ejemplo:
+Example document:
 
 ```json
 {
@@ -525,11 +525,11 @@ Documento ejemplo:
 
 ---
 
-## 9. Configuraciones Funcionales
+## 9. Functional Configurations
 
-### 9.1 Dominios Preferentes Para Evidence Search
+### 9.1 Preferred Domains for Evidence Search
 
-La configuracion contextual vive en MongoDB, coleccion `evidence_domain_profiles`.
+Contextual configuration lives in MongoDB, `evidence_domain_profiles` collection.
 
 Seed versionado:
 
@@ -544,13 +544,13 @@ Dry-run:
 python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
 ```
 
-Carga real del perfil `default` sin borrar otros perfiles de la coleccion:
+Actual loading of the `default` profile without deleting other profiles from the collection:
 
 ```bash
 python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 ```
 
-Carga de otro perfil o de otras taxonomias:
+Load of another profile or other taxonomies:
 
 ```bash
 python scripts/k8s/apis/init-evidence-search-domains.py \
@@ -559,20 +559,20 @@ python scripts/k8s/apis/init-evidence-search-domains.py \
   --refresh --confirm
 ```
 
-El loader hace `upsert` de un único documento por `profile_id` y de un documento por `config_type`. Preserva los demás perfiles. Tras cambiar perfiles o taxonomías se debe limpiar `evidence_search_cache` mediante `DELETE /admin/cache`, porque sus versiones forman parte de las claves nuevas pero los documentos anteriores permanecen hasta el TTL.
+The loader makes `upsert` of a single document by `profile_id` and a document by `config_type`. Preserves the other profiles. After changing profiles or taxonomys, `evidence_search_cache` must be cleaned by `DELETE /admin/cache`, because its versions are part of the new keys but the previous documents remain until TTL.
 
-Despues de recargar:
+After reloading:
 
 ```bash
 kubectl rollout restart deployment/evidence-search -n apis
 kubectl logs deployment/evidence-search -n apis
 ```
 
-Verificacion esperada: una asercion SOCIAL/DEMOGRAPHICS de Catalunya debe ordenar `idescat.cat`, `ine.es`, `eurostat.ec.europa.eu` y `reuters.com` cuando `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL`.
+Expected verification: a Catalan SOCIAL/DEMOGRAPHICS assertion must order `idescat.cat`, `ine.es`, `eurostat.ec.europa.eu` and `reuters.com` when `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL`.
 
 ---
 
-## 10. MongoDB: Consultas Y Limpieza De Datos
+## 10. MongoDB: Consultations and Data Cleaning
 
 ### 10.1 Entrar A Mongo
 
@@ -580,14 +580,14 @@ Verificacion esperada: una asercion SOCIAL/DEMOGRAPHICS de Catalunya debe ordena
 kubectl exec -it mongodb-0 -n infra -- mongo -u root -p <root-password> --authenticationDatabase admin
 ```
 
-Dentro de Mongo:
+Inside Mongo:
 
 ```javascript
 use newsdb
 show collections
 ```
 
-### 10.2 Consultar Y Borrar Datos Runtime
+### 10.2 Consult and Delete Runtime Data
 
 ```javascript
 db.news.countDocuments({})
@@ -598,9 +598,9 @@ db.events.deleteMany({})
 db.validations.deleteMany({})
 ```
 
-### 10.3 Reset De Desarrollo Recomendado
+### 10.3 Recommended Development Reset
 
-El schema `assertions-document-v2` no mantiene compatibilidad con documentos antiguos. Para limpiar solo datos runtime sin borrar cuotas/clientes:
+`assertions-document-v2` Schema does not maintain compatibility with old documents. To clean only runtime data without deleting cuotas/clientes:
 
 ```javascript
 use newsdb
@@ -612,48 +612,48 @@ db.clients_quotas.countDocuments()
 
 ---
 
-## 11. Resumen De Endpoints
+## 11. Summary of Endpoints
 
-| Servicio | URL | Perfil Skaffold | Descripcion |
+| Service | URL | Perfil Skaffold | Description |
 |---|---|---|---|
-| Frontend | https://localhost:7443 | `apis-frontend` | Aplicacion web principal |
-| Admin API Swagger | http://localhost:8400/docs | `apis-frontend` | API de administracion |
+| Frontend | https://localhost:7443 | `apis-frontend` | Main Web Application |
+| Admin API Swagger | http://localhost:8400/docs | `apis-frontend` | Admin API |
 | Gateway Swagger | http://localhost:8500/docs | `apis-frontend` | API Gateway |
-| Evidence Search Swagger | http://localhost:8074/docs | `apis-frontend` | Servicio de busqueda de evidencias |
-| News Handler Swagger | http://localhost:8072/docs | `apis-frontend` | Orquestador principal de noticias |
-| News Chain Swagger | http://localhost:8073/docs | `apis-frontend` | API de interaccion con blockchain/IPFS |
-| IPFS FastAPI Swagger | http://localhost:8060/docs | `apis-frontend` | API propia para IPFS |
-| Assertion Generator Swagger | http://localhost:8071/docs | `apis-frontend` | Generador de aserciones |
-| Validator Worker 1 Swagger | http://localhost:8070/docs | `apis-frontend` | Validador IA worker 1 |
-| Validator Worker 2 Swagger | http://localhost:8069/docs | `apis-frontend` | Validador IA worker 2 |
-| Validator Worker 3 Swagger | http://localhost:8068/docs | `apis-frontend` | Validador IA worker 3 |
-| Grafana | http://localhost:3000 | `infra` | Dashboards y logs |
-| Mongo Express | http://localhost:8081 | `infra` | UI para MongoDB, requiere Basic Auth |
-| Kafdrop | http://localhost:9000 | `infra` | UI para Kafka, topics y mensajes |
-| Keycloak Admin | https://localhost:7443/auth/admin/master/console/ | `apis-frontend` | Consola de administracion de Keycloak via frontend/proxy |
-| Frontend Prod | https://localhost:10443 | `apis-frontend-prod` | Frontend en perfil prod |
-| Admin API Prod Swagger | http://localhost:8400/docs | `apis-frontend-prod` | Admin API en perfil prod |
+| Evidence Search Swagger | http://localhost:8074/docs | `apis-frontend` | Evidence search service |
+| News Handler Swagger | http://localhost:8072/docs | `apis-frontend` | Main news orchestrator |
+| News Chain Swagger | http://localhost:8073/docs | `apis-frontend` | blockchain/IPFS interaction API |
+| IPFS FastAPI Swagger | http://localhost:8060/docs | `apis-frontend` | Own API for IPFS |
+| Assertion Generator Swagger | http://localhost:8071/docs | `apis-frontend` | Assertion Generator |
+| Validator Worker 1 Swagger | http://localhost:8070/docs | `apis-frontend` | Validator IA worker 1 |
+| Validator Worker 2 Swagger | http://localhost:8069/docs | `apis-frontend` | Validator IA worker 2 |
+| Validator Worker 3 Swagger | http://localhost:8068/docs | `apis-frontend` | Validator IA worker 3 |
+| Grafana | http://localhost:3000 | `infra` | Dashboards and logs |
+| Mongo Express | http://localhost:8081 | `infra` | UI for MongoDB, requires Basic Auth |
+| Kafdrop | http://localhost:9000 | `infra` | UI for Kafka, topics and messages |
+| Keycloak Admin | https://localhost:7443/auth/admin/master/console/ | `apis-frontend` | Keycloak administration console via frontend/proxy |
+| Frontend Prod | https://localhost:10443 | `apis-frontend-prod` | Frontend in prod profile |
+| Admin API Prod Swagger | http://localhost:8400/docs | `apis-frontend-prod` | Admin API in prod profile |
 
 ---
 
-## 12. Resumen De Colecciones
+## 12. Summary of Collections
 
-| Base de datos | Coleccion | Servicio principal | Variable/config | Uso |
+| Database | Coleccion | Main Service | Variable/config | Uso |
 |---|---|---|---|---|
-| `newsdb` | `news` | `news-handler` | `MONGO_COLLECTION=news` | Coleccion principal de ordenes/noticias. Guarda estado del flujo, documento, aserciones, validaciones, `postId`, hashes, CIDs, resultados y metadatos. |
-| `newsdb` | `news` | `admin` | `ORDERS_COLLECTION=news` | Consulta ordenes para resolver `client_id` y asociar consumo de cuotas a una orden o `postId`. |
-| `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Guarda eventos del flujo por `order_id`: acciones Kafka enviadas/recibidas, topic, timestamp y payload. La UI los recupera para pintar la pestana de eventos de una orden. |
-| `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | Guarda registros normalizados de validaciones por orden/asercion/validador, incluyendo resultado, `tx_hash`, evidencia usada, config del validador y tiempos de respuesta. |
-| `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Guarda clientes y cuotas disponibles/consumidas por servicio, como generacion de noticias o validaciones. |
-| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | Un documento completo por `profile_id` con pesos, política y array `domains`; LOCAL es el único modo que lo consulta. |
-| `newsdb` | `evidence_normalization_configs` | `evidence-search` | `EVIDENCE_NORMALIZATION_CONFIG_COLLECTION=evidence_normalization_configs` | Un documento por taxonomía off-chain: subcategorías, scopes de localización y source types. |
-| `newsdb` | `evidence_search_cache` | `evidence-search` | `EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache` | Cache v2 de respuestas de `/search/evidence` por asercion normalizada, politica de busqueda y version de perfiles. Expira por TTL (`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`). |
+| `newsdb` | `news` | `news-handler` | `MONGO_COLLECTION=news` | ordenes/noticias. Main Collection Saves flow status, document, assertions, validations, `postId`, hashes, CIDs, results and metadata. |
+| `newsdb` | `news` | `admin` | `ORDERS_COLLECTION=news` | Check orders to resolve `client_id` and associate quota consumption to an order or `postId`. |
+| `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Saves flow events by `order_id`: Kafka enviadas/recibidas actions, topic, timestamp and payload. The UI retrieves them to paint the event pestana of an order. |
+| `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | It keeps standardized validation records by orden/asercion/validador, including result, `tx_hash`, used evidence, validator config and response times. |
+| `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Save disponibles/consumidas customers and fees per service, such as news generation or validations. |
+| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | A complete document by `profile_id` with weights, policy and array `domains`; LOCAL is the only way you consult it. |
+| `newsdb` | `evidence_normalization_configs` | `evidence-search` | `EVIDENCE_NORMALIZATION_CONFIG_COLLECTION=evidence_normalization_configs` | A document by taxonomy off-chain: subcategories, location scopes and source types. |
+| `newsdb` | `evidence_search_cache` | `evidence-search` | `EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache` | `/search/evidence` response cache v2 for standardized assertion, search policy and profile version. Expires by TTL (`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`). |
 
 ---
 
 ## 13. Mantenimiento Local
 
-### 13.1 Limpiar Imagenes No Usadas Dentro De Nodos Kind
+### 13.1 Clear Unusual Images Inside Kind Nodes
 
 ```bash
 docker system df

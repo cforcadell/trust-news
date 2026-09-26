@@ -1,8 +1,6 @@
 # Assermetry Kubernetes - Procedimientos comunes
 
-Este documento concentra las partes compartidas por el despliegue local y el
-despliegue en servidor. Los runbooks especificos solo deben mantener lo que
-cambia por entorno:
+This document concentrates shared parts for local deployment and server deployment. Specific runbooks should only keep what changes by environment:
 
 - Local: [`skaffold-local.md`](skaffold-local.md)
 - Server/Hetzner: [`skaffold-server.md`](skaffold-server.md)
@@ -11,7 +9,7 @@ cambia por entorno:
 
 ## 1. Namespaces
 
-Los namespaces usados por Assermetry son:
+The names used by Assermetry are:
 
 ```text
 blockchain
@@ -20,7 +18,7 @@ apis
 frontend
 ```
 
-Verificacion:
+Verification:
 
 ```bash
 kubectl get ns blockchain infra apis frontend
@@ -35,16 +33,15 @@ kubectl get ns blockchain infra apis frontend
 | Namespaces/setup | script local | `setup` |
 | Infraestructura | `infra`, `infra-basic` | `infra-prod` |
 | Blockchain | `blockchain` | `blockchain-prod` |
-| APIs y frontend | `apis-frontend` | `apis-frontend-prod` |
+| APIs and frontend | `apis-frontend` | `apis-frontend-prod` |
 
-`infra` e `infra-basic` son alternativas locales. `infra-basic` omite la
-monitorización para un despliegue ligero y no tiene equivalente productivo.
+`infra` and `infra-basic` are local alternatives. `infra-basic` omits monitoring for a lightweight deployment and has no productive equivalent.
 
 ---
 
 ## 3. Verificaciones Kubernetes
 
-Estado general:
+General status:
 
 ```bash
 kubectl get pods -n blockchain
@@ -53,7 +50,7 @@ kubectl get pods -n apis
 kubectl get pods -n frontend
 ```
 
-Servicios:
+Services:
 
 ```bash
 kubectl get svc -n infra
@@ -83,7 +80,7 @@ kubectl logs -n infra -f kafka-0
 
 ## 4. Blockchain
 
-### 4.1 Estado de nodos
+### 4.1 Node State
 
 ```bash
 kubectl get pods -n blockchain -o wide
@@ -95,18 +92,16 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "eth.bl
 kubectl exec -it geth-bootnode-0 -n blockchain -- geth attach --exec "eth.blockNumber"
 ```
 
-RPC y miner deben avanzar al mismo bloque. Si una transaccion queda pendiente,
-revisar `txpool.status` en RPC y miner:
+RPC and miner must move to the same block. If a transaction is pending, check `txpool.status` in RPC and miner:
 
 ```bash
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'txpool.status'
 kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'txpool.status'
 ```
 
-### 4.2 Peers y conexion manual
+### 4.2 Peers and manual connection
 
-Consultar peers reales sin arrow functions, porque algunas consolas de geth no
-las soportan:
+Check real peer without arrow functions, because some geth consoles don't support them:
 
 ```bash
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.peers.map(function(p){ return p.name + " " + p.network.remoteAddress })'
@@ -120,15 +115,14 @@ kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'admin.nodeInf
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.nodeInfo.enode'
 ```
 
-Conectar RPC y miner si solo estan conectados al bootnode:
+Connect RPC and miner if they are only connected to the bootnode:
 
 ```bash
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'admin.addPeer("ENODE_DEL_MINER")'
 kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'admin.addPeer("ENODE_DEL_RPC")'
 ```
 
-`admin.addPeer()` es temporal. Si se reinician los pods de blockchain, puede
-perderse.
+`admin.addPeer()` is temporary. If blockchain pods are restarted, you may miss it.
 
 ### 4.3 Reinicio conservando volumenes
 
@@ -142,8 +136,7 @@ kubectl get pods -n blockchain
 
 ## 5. Smart contract
 
-Si se despliega un contrato nuevo, `postId` vuelve a `0`. Si hay datos previos,
-borrar o ajustar MongoDB para evitar inconsistencias:
+If a new contract is deployed, `postId` returns to `0`. If there are previous data, delete or adjust MongoDB to avoid inconsistencies:
 
 ```javascript
 db.events.deleteMany({})
@@ -159,8 +152,7 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- \
   geth attach --exec "eth.getCode('$CONTRACT_ADDRESS')"
 ```
 
-Inicializar o verificar categorias on-chain. Es idempotente si se usa el
-propietario del contrato:
+Initialize or verify on-chain categories. It is idempotent if the contract owner is used:
 
 ```bash
 cd smart-contracts
@@ -172,33 +164,29 @@ npx hardhat run scripts/initCategories.js --network <network>
 unset DEPLOYER_PRIVATE_KEY
 ```
 
-La segunda ejecucion debe mostrar las categorias como `unchanged`. Si hay
-`mismatch`, no continuar: el contrato no corresponde a la version esperada o las
-categorias no coinciden con `smart-contracts/config/categories.json`.
+The second execution must show categories such as `unchanged`. If there is `mismatch`, do not continue: the contract does not correspond to the expected version or the categories do not match `smart-contracts/config/categories.json`.
 
 ---
 
 ## 6. MongoDB bootstrap
 
-Despues de levantar MongoDB, ejecutar el bootstrap y comprobar el esquema:
+After lifting MongoDB, run the bootstrap and check the schema:
 
 ```bash
 scripts/k8s/init-mongodb-server.sh
 scripts/k8s/realign-source-routing-mongodb.sh --check
 ```
 
-Este paso:
+This step:
 
-- crea o actualiza el usuario de aplicacion;
-- crea índices de `news`, `clients_quotas`, `events` y `validations`;
-- realinea `source_routes_v2`, `domain_profiles_v1` y `evidence_search_cache_v2` cuando cambia el marcador de esquema;
-- elimina las colecciones incompatibles anteriores y conserva las cachés nuevas en ejecuciones repetidas.
+- creates or updates the application user;
+- creates `news`, `clients_quotas`, `events` and `validations` indexes;
+- realinea `source_routes_v2`, `domain_profiles_v1` and `evidence_search_cache_v2` when changing the schema marker;
+- eliminates previous incompatible collections and retains new caches in repeated executions.
 
-En CI, `apis-frontend-prod` ejecuta `--apply` y `--check` inmediatamente antes
-del rollout de APIs. Para `infra-prod`, el bootstrap los ejecuta después de que
-el StatefulSet de MongoDB esté listo.
+In CI, `apis-frontend-prod` runs `--apply` and `--check` immediately before the API rollout. For `infra-prod`, the bootstrap executes them after the MongoDB StatefulSet is ready.
 
-Verificacion:
+Verification:
 
 ```bash
 scripts/k8s/realign-source-routing-mongodb.sh --check
@@ -206,24 +194,24 @@ scripts/k8s/realign-source-routing-mongodb.sh --check
 
 ---
 
-## 7. Keycloak y cuotas
+## 7. Keycloak and assessed contributions
 
-Configuracion minima:
+Minima configuration:
 
 - Realm: `TrustNews`.
 - Cliente frontend: `TrustNewsWeb`.
-  - Root URL: URL base del frontend con `/gui`, sin `/` final.
-  - Home URL: URL base del frontend con `/gui/` final.
+  - Root URL: base frontend URL with `/gui`, without `/` final.
+  - Home URL: Frontend base URL with `/gui/` final.
   - Valid redirect URIs: `<origen>/gui/*`.
   - Valid post logout redirect URIs: `<origen>/gui/*`.
-  - Web Origins: solo el origen (`scheme://host[:port]`), sin path; usar `*`
-    exclusivamente en pruebas desechables.
-  - En produccion no conservar entradas localhost ni usar un comodin global.
+  - Web Origins: only source (`scheme://host[:port]`), no path; use `*`
+only in disposable tests.
+  - In production they did not keep localhost entries or use a global comodin.
 - Cliente backend: `TrustNewsApi`.
   - Client authentication: ON.
   - Service accounts roles: ON.
   - Guardar el client secret para clientes externos.
-  - No modificar ni rotar este cliente al cambiar las URLs de `TrustNewsWeb`.
+  - Do not modify or rotate this client when changing `TrustNewsWeb` URLs.
 
 El Gateway protege su API con la audiencia `TrustNewsGateway`. Configurar en
 Keycloak un client scope OIDC, por ejemplo `trustnews-gateway-audience`, con un
@@ -232,21 +220,15 @@ Asignar ese scope como **Default** a `TrustNewsWeb` y `TrustNewsApi`. La
 audiencia identifica al recurso protegido; los clientes presentadores siguen
 siendo `TrustNewsWeb` y `TrustNewsApi`.
 
-El mapper debe tener:
+The mapper must have:
 
-- Included Client Audience o Custom Audience: `TrustNewsGateway`.
+- Including Client Audience or Custom Audience: `TrustNewsGateway`.
 - Add to access token: activado.
 - Add to ID token: desactivado.
 
-El Gateway acepta solo tokens con `aud` conteniendo `TrustNewsGateway` y con
-`azp` o `client_id` igual a uno de los clientes permitidos. Después de cambiar
-Keycloak hay que solicitar tokens nuevos; los tokens existentes no se
-actualizan.
+The Gateway accepts tokens only with `aud` containing `TrustNewsGateway` and with `azp` or `client_id` equal to one of the permitted customers. After changing Keycloak you must request new tokens; existing tokens are not updated.
 
-En producción, el pipeline `infra-prod` aplica y valida estas URLs mediante el
-script idempotente documentado en
-[`skaffold-server.md`](skaffold-server.md#65-alineación-idempotente-de-keycloak).
-Usar ese mismo script, en lugar de la consola web, para una recuperación manual.
+In production, the `infra-prod` pipeline applies and validates these URLs using the idepotent script documented in [`skaffold-server.md`](skaffold-server.md#65-alineación-idempotente-de-keycloak). Use the same script, instead of the web console, for manual recovery.
 
 Para obtener un token local sin recurrir a TLS inseguro, abrir temporalmente el
 puerto HTTP interno de Keycloak solo en loopback dentro de la VM y ejecutar la
@@ -266,30 +248,23 @@ curl --fail --show-error -X POST \
 unset TRUSTNEWS_API_SECRET
 ```
 
-En produccion se usa el endpoint canonico con la cadena TLS verificada por
-`curl` y, mientras siga activa la regla temporal, `--cert <cert.pem>` y
-`--key <key.pem>`. No usar `-k` ni publicar el puerto interno de Keycloak.
+In production, the canonical endpoint is used with the TLS chain verified by `curl` and, while the time rule is still active, `--cert <cert.pem>` and `--key <key.pem>`. Do not use `-k` or publish the internal port of Keycloak.
 
-### Alta de cuotas para usuarios del frontend
+### Quotas for frontend users
 
-Las cuotas/clientes de negocio se crean mediante la API de `admin`; no deben
-formar parte del bootstrap fijo ni insertarse directamente en MongoDB. En local,
-la API y su interfaz Swagger están disponibles en:
+Business cuotas/clientes is created using the `admin` API; they must not be part of the fixed bootstrap or inserted directly into MongoDB. In local, the API and its Swagger interface are available at:
 
 ```text
 http://localhost:8400/docs
 ```
 
-Para un usuario del frontend, copiar su `ID` (el UUID del usuario, no el nombre
-de usuario) desde el realm `TrustNews` de Keycloak. El `client_id` que utiliza el
-Gateway se construye con el formato:
+For a frontend user, copy your `ID` (user UUID, not user name) from the realm `TrustNews` of Keycloak. The `client_id` that uses the Gateway is built in the format:
 
 ```text
 user_<keycloak_user_id>
 ```
 
-Crear el cliente con `POST /clients`. El siguiente ejemplo da de alta 100 usos
-para generación y 100 para validación; ajustar ambos límites según corresponda:
+Create the client with `POST /clients`. The following example gives high 100 generation and 100 validation uses; adjust both limits as appropriate:
 
 ```bash
 curl --fail --show-error -X POST \
@@ -305,29 +280,23 @@ curl --fail --show-error -X POST \
   }'
 ```
 
-`consumed` se inicializa a cero, `status` a `Active` y `active_date` a la fecha
-UTC actual cuando esos campos no se envían. La API persiste el documento en
-`newsdb.clients_quotas`.
+`consumed` is initialized to zero, `status` to `Active` and `active_date` to the current UTC date when those fields are not sent. API persists document in `newsdb.clients_quotas`.
 
-Verificar el alta:
+Check the discharge:
 
 ```bash
 curl --fail --show-error \
   http://127.0.0.1:8400/clients/user_7d6c0b75-52af-4204-8288-9055d9218d02
 ```
 
-Si `POST /clients` responde `400` con `El cliente ya existe`, consultar primero
-el registro anterior y actualizar sus límites mediante
-`PATCH /clients/{client_id}` en Swagger, en lugar de crear un duplicado.
+If `POST /clients` responds `400` with `El cliente ya existe`, first consult the previous record and update its limits using `PATCH /clients/{client_id}` in Swagger, instead of creating a duplicate.
 
-- Display name: nombre visible de la aplicacion, por ejemplo `Assermetry`.
-  Keycloak usa este valor en la pantalla de autenticacion (por ejemplo,
-  `Sign in to Assermetry`). Mantener `TrustNews` como nombre tecnico del realm
-  evita cambiar las URLs OIDC, el issuer y la configuracion de los clientes.
+- Display name: visible application name, for example `Assermetry`.
+Keycloak uses this value on the authentication screen (e.g. `Sign in to Assermetry`). Keeping `TrustNews` as the technical name of the realm prevents changing OIDC URLs, the issuer and client settings.
 
 ---
 
-## 8. Source Router y Evidence Search
+## 8. Source Router and Evidence Search
 
 `source-router` mantiene rutas dinámicas en `source_routes_v2` y propiedades
 estables en `domain_profiles_v1`. En MISS/STALE usa el proveedor de búsqueda y
@@ -341,10 +310,9 @@ kubectl create secret generic source-router-llm-secret -n apis \
   --from-env-file=source-router.env
 ```
 
-La caché de Evidence Search se limpia mediante `DELETE /admin/cache`; las
-rutas no usan TTL destructivo y se refrescan según `refresh_after`.
+The Evidence Search cache is cleaned using `DELETE /admin/cache`; routes do not use destructive TTL and are refreshed according to `refresh_after`.
 
-Reiniciar el servicio:
+Restart service:
 
 ```bash
 kubectl rollout restart deployment/evidence-search -n apis
@@ -355,7 +323,7 @@ kubectl logs deployment/source-router -n apis
 
 ---
 
-## 9. MongoDB: consultas y limpieza
+## 9. MongoDB: consultations and cleaning
 
 Entrar a MongoDB:
 
@@ -363,14 +331,14 @@ Entrar a MongoDB:
 kubectl exec -it mongodb-0 -n infra -- mongo -u <root-user> -p <root-password> --authenticationDatabase admin
 ```
 
-Dentro de MongoDB:
+Inside MongoDB:
 
 ```javascript
 use newsdb
 show collections
 ```
 
-Limpiar datos runtime sin borrar cuotas/clientes:
+Clear Runtime Data Without Erasing cuotas/clientes:
 
 ```javascript
 db.news.deleteMany({})
@@ -381,15 +349,15 @@ db.clients_quotas.countDocuments()
 
 Colecciones principales:
 
-| Coleccion | Servicio principal | Uso |
+| Coleccion | Main Service | Uso |
 |---|---|---|
-| `news` | `news-handler`, `admin` | Ordenes/noticias, estado del flujo, `postId`, hashes, CIDs y consulta de cuotas. |
-| `events` | `news-handler` | Eventos del flujo por `order_id`. |
-| `validations` | `news-handler` | Validaciones por orden/asercion/validador. |
-| `clients_quotas` | `admin` | Clientes y cuotas disponibles/consumidas. |
-| `source_routes_v2` | `source-router` | Referencias dinámicas FRESH/STALE de rutas normalizadas. |
-| `domain_profiles_v1` | `source-router` | Perfil estable y normalizado de cada dominio clasificado. |
-| `evidence_search_cache_v2` | `evidence-search` | Respuestas cacheadas por asercion, origen, politica y backend. |
+| `news` | `news-handler`, `admin` | Ordenes/noticias, flow status, `postId`, hashes, CIDs and quota query. |
+| `events` | `news-handler` | Flow events by `order_id`. |
+| `validations` | `news-handler` | Validations by orden/asercion/validador. |
+| `clients_quotas` | `admin` | disponibles/consumidas. Customers and Quotas |
+| `source_routes_v2` | `source-router` | Dynamic references FRESH/STALE of standard routes. |
+| `domain_profiles_v1` | `source-router` | Stable and standardised profile of each classified domain. |
+| `evidence_search_cache_v2` | `evidence-search` | Answers cached by assertion, origin, politics and backend. |
 
 ---
 
@@ -415,11 +383,7 @@ Grafana/Loki:
 kubectl port-forward service/grafana -n infra 3300:3000
 ```
 
-Los servicios Python desplegados escriben JSON de una sola línea en `stdout`.
-Los saltos de línea incluidos en mensajes y tracebacks se escapan dentro del
-JSON, de modo que CRI, Fluent Bit y Loki conservan un evento por registro. Las
-utilidades CLI de estadísticas mantienen su salida tabular para uso interactivo
-y no forman parte de la ingestión normal de Kubernetes.
+The Python services deployed write JSON on a single line at `stdout`. Line breaks included in messages and tracebacks escape within the JSON, so that CRI, Fluent Bit and Loki retain an event per record. CLI utilities for statistics keep their tabular output for interactive use and are not part of the normal ingestion of Kubernetes.
 
 Datasource Loki:
 
@@ -433,7 +397,4 @@ Mongo Express:
 kubectl port-forward --address 127.0.0.1 -n infra svc/mongo-express 8081:8081
 ```
 
-Este procedimiento compartido liga el listener a loopback. La excepción para
-acceder desde el host de la VM local está delimitada en
-[`skaffold-local.md`](skaffold-local.md#11-acceso-desde-el-host-de-la-vm); no
-aplica a producción.
+This shared procedure links the listener to loopback. The exception for accessing from the host of the local VM is defined in [`skaffold-local.md`](skaffold-local.md#11-acceso-desde-el-host-de-la-vm); it does not apply to production.

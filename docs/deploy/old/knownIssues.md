@@ -1,18 +1,18 @@
-# Known Issues & Troubleshooting - Guía de Operaciones
+# Know Issues & Troubleshooting - Operations Guide
 
 > [!WARNING]
-> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
-> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+> **ARCHIVADO — NOT USE.** Historical reference; see
+> [`README.md`](README.md) and runbooks are in place before operation.
 
 
 ---
 
 ## 2. Blockchain (Geth)  Nodos aislados (peerCount == 0)
-Los nodos no se encuentran automáticamente.
+Nodes are not automatically found.
 
-Solución:
+Solution:
 
-Verificar estado:
+Check status:
 ```bash
 
 kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec "net.peerCount"
@@ -32,11 +32,11 @@ Configuración en hardhat.config.js: url: "http://localhost:8565"
 ```
 
 
-## 3. Despliegue y Registro (GitLab) Problema: ImagePullBackOff El clúster no puede descargar imágenes privadas de GitLab.
+## 3. Deployment and Registration (GitLab) Problem: ImagePullBackOff The cluster cannot download private images from GitLab.
 
-Solución:
+Solution:
 
-Crear secreto de registro en el namespace correspondiente:
+Create registration secret in the corresponding namespace:
 
 ```bash
 kubectl create secret docker-registry gitlab-pull-secret \
@@ -53,8 +53,8 @@ kubectl patch serviceaccount default \
   --namespace=<NS>
 ```
 
-## 4. Networking y Acceso Externo (Port-Forwarding)
-Si los servicios no son accesibles, utiliza siempre port-forward con --address 0.0.0.0 para permitir conexiones externas si estás en una VM:
+## 4. Networking and External Access (Port-Forwarding)
+If services are not accessible, always use port-forward with --address 0.0.0.0 to allow external connections if you are in a VM:
 ```bash
 Frontend: kubectl port-forward svc/frontend-service -n frontend 7443:443 --address 0.0.0.0
 
@@ -63,11 +63,10 @@ Grafana: kubectl port-forward pod/grafana-xxxxx -n infra 3000:3000 --address 0.0
 Keycloak: kubectl port-forward svc/keycloak -n infra 7443:8443 --address 0.0.0.0
 ```
 
-## 5. Secretos y Variables
-Problema: Verificar contenido de secretos
-Si las APIs fallan al leer secretos, verifica que tengan los datos correctos.
+## 5. Secrets and Variables
+Problem: Verify Secret Content If APIs fail to read secrets, check that they have the correct data.
 
-Solución:
+Solution:
 
 ```bash
 # Ver secretos en un namespace
@@ -80,8 +79,8 @@ kubectl get mongodb-secret -n infra -o jsonpath='{.data}'
 echo "<VALOR_BASE64>" | base64 --decode
 ```
 
-6. Procedimiento de Reinicio General
-Si el sistema presenta comportamientos erráticos, escala todos los StatefulSets a 0 y luego a 1 para forzar una reconexión ordenada:
+6. Restart procedure
+If the system presents erratic behaviors, scale all StatefulSets to 0 and then to 1 to force an orderly reconnection:
 
 ```bash
 # Parar todo
@@ -91,7 +90,7 @@ kubectl scale statefulset --all --replicas=0 -n <namespace>
 kubectl scale statefulset --all --replicas=1 -n <namespace>
 ```
 
-## 7. COnectividad entre contenedores
+## 7. Container connectivity
  ```bash
  kubectl exec -it ipfs-fastapi-7fd856fd48-4ksft -n apis -- bash
 
@@ -100,7 +99,7 @@ Connection Successful
 
  ```
 
- ## 8. Reiniciar cluster por problemas de mirrors en local al descargar imagenes 
+ ## 8. Restart cluster due to local mirror problems when downloading images
 
 ```bash
 docker stop $(docker ps -q --filter "label=io.x-k8s.kind.cluster")
@@ -113,7 +112,7 @@ docker start $(docker ps -a -q --filter "label=io.x-k8s.kind.cluster")
 
  ```
 
-## 9. Reiniciar cluster por problemas de espacio
+## 9. Restart cluster due to space problems
 ```bash 
  # Ver clusters Kind existentes
 kind get clusters
@@ -129,7 +128,7 @@ kind create cluster --name trust-news --config kind-config.yaml
 
 ```
 
-## 9. si han caido los nodos de blockchain y se han desincronizados.
+## 9. if the blockchain nodes have fallen and have been desync.
 ```bash 
 
 sysadmin@trust-news-prod:~/trust-news/scripts$ kubectl exec -it geth-miner-0 -n blockchain -- /bin/sh

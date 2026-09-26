@@ -1,14 +1,12 @@
-# Assermetry - Flujo GitLab, GitHub y release
+# Assermetry - GitLab flow, GitHub and release
 
-Este documento describe el flujo operativo cuando el desarrollo se hace en la
-rama `postTFM`, el despliegue se lanza manualmente desde GitLab CI y despues se
-promociona el cambio a `main` en GitHub y GitLab.
+This document describes the operating flow when the development is done in the `postTFM` branch, the deployment is manually launched from GitLab CI and then the switch to `main` is promoted in GitHub and GitLab.
 
 ---
 
 ## 1. Remotos Git configurados
 
-Estado actual de `git remote -v`:
+Current status of `git remote -v`:
 
 ```text
 gitlab  git@gitlab.com:cforcadell/tfm.git (fetch)
@@ -20,21 +18,19 @@ origin  git@gitlab.com:cforcadell/tfm.git (push)
 
 Interpretacion:
 
-- `origin` hace `fetch` desde GitHub.
-- `origin` tiene dos destinos de `push`: GitHub y GitLab.
-- `gitlab` apunta explicitamente a GitLab para `fetch` y `push`.
-- GitHub funciona como repositorio principal visible/espejo de codigo.
-- GitLab ejecuta el pipeline de build/deploy contra Hetzner.
+- `origin` makes `fetch` from GitHub.
+- `origin` has two destinations for `push`: GitHub and GitLab.
+- `gitlab` explicitly points to GitLab for `fetch` and `push`.
+- GitHub functions as the main visible/espejo code repository.
+- GitLab runs the build/deploy pipeline against Hetzner.
 
-Para evitar dudas durante despliegues, usar `git push gitlab postTFM` cuando se
-quiera activar o preparar el pipeline de GitLab. Usar `git push origin postTFM`
-solo cuando se quiera empujar a todos los destinos configurados en `origin`.
+To avoid any doubts during deployments, use `git push gitlab postTFM` when you want to activate or prepare the GitLab Pipeline. Use `git push origin postTFM` only when you want to push all destinations configured in `origin`.
 
 ---
 
-## 2. Desarrollo en `postTFM`
+## 2. Development at `postTFM`
 
-Antes de empezar, actualizar la rama de trabajo con la base estable:
+Before starting, update the work branch with the stable base:
 
 ```bash
 git fetch origin main
@@ -42,27 +38,27 @@ git checkout postTFM
 git merge origin/main
 ```
 
-Revisar cambios:
+Review changes:
 
 ```bash
 git status --short
 git diff --stat
 ```
 
-Crear el commit:
+Create commit:
 
 ```bash
 git add <ficheros>
 git commit -m "<mensaje>"
 ```
 
-Subir a GitLab para que el commit este disponible en el pipeline:
+Upload to GitLab so that the commit is available in the pipeline:
 
 ```bash
 git push gitlab postTFM
 ```
 
-Si tambien se quiere actualizar GitHub en ese momento:
+If you also want to upgrade GitHub at that time:
 
 ```bash
 git push origin postTFM
@@ -70,30 +66,29 @@ git push origin postTFM
 
 ---
 
-## 3. Pipeline manual de despliegue en GitLab
+## 3. Pipeline manual deployment in GitLab
 
-El pipeline esta definido en `.gitlab-ci.yml` y usa la variable `PROFILE`.
+The pipeline is defined in `.gitlab-ci.yml` and uses the `PROFILE` variable.
 
 Perfiles productivos habituales:
 
 | PROFILE | Uso |
 |---|---|
-| `infra-prod` | Despliega MongoDB, Kafka, IPFS, Keycloak, mongo-express y logs. |
-| `blockchain-prod` | Despliega la red privada geth. |
-| `apis-frontend-prod` | Despliega APIs y frontend. Es el valor por defecto. |
+| `infra-prod` | Dispatch MongoDB, Kafka, IPFS, Keycloak, Mongo-Express and log. |
+| `blockchain-prod` | Deploy the private geth network. |
+| `apis-frontend-prod` | Deploy APIs and frontend. It is the default value. |
 
-Procedimiento normal para actualizar APIs/frontend:
+Normal procedure for updating APIs/frontend:
 
 1. Abrir GitLab.
 2. Ir a `Build > Pipelines > Run pipeline`.
 3. Seleccionar branch `postTFM`.
 4. Definir `PROFILE=apis-frontend-prod`.
-5. Ejecutar el pipeline.
-6. Ejecutar primero el job `build` si queda manual.
-7. Ejecutar despues el job `deploy`.
+5. Run the pipeline.
+6. Run the job `build` first if manual is left.
+7. Run the job `deploy` later.
 
-El job `build` genera `build.json` con las imagenes exactas construidas y
-publicadas en el GitLab Registry. El job `deploy` ejecuta:
+The `build` job generates `build.json` with the exact images built and published in the GitLab Registry. The `deploy` job runs:
 
 ```bash
 skaffold deploy --build-artifacts=build.json --profile=$PROFILE
@@ -108,16 +103,13 @@ por comandos manuales ni añadirse un client secret al YAML; el script usa la
 configuración administrativa del pod de Keycloak y el pipeline solo debe
 tener las variables protegidas de acceso al clúster.
 
-Antes de `apis-frontend-prod`, el job `check_mongodb_bootstrap` valida que
-MongoDB tenga el perfil `default` de dominios y las taxonomias de normalizacion.
-Si falla, desplegar `infra-prod` o ejecutar el bootstrap documentado en
-[`k8s-common.md`](k8s-common.md).
+Before `apis-frontend-prod`, the job `check_mongodb_bootstrap` validates that MongoDB has the `default` profile of domains and the normalization taxonomies. If it fails, deploy `infra-prod` or run the bootstrap documented in [`k8s-common.md`](k8s-common.md).
 
 ---
 
-## 4. Verificacion despues del deploy
+## 4. Verification after the deploy
 
-Comprobar pods y logs:
+Check pods and logs:
 
 ```bash
 kubectl get pods -n apis -o wide
@@ -127,31 +119,23 @@ kubectl logs deployment/news-handler -n apis --tail=80
 kubectl logs deployment/evidence-search -n apis --tail=80
 ```
 
-La comprobacion principal se realiza contra el borde real, no contra
-`frontend-service`: el acceso directo al Service omite Traefik, Gateway,
-Keycloak y el enrutamiento canonico. Antes de probar, decidir y registrar el
-estado del lock; para la matriz funcional debe estar deshabilitado.
+The main check is done against the real edge, not against `frontend-service`: direct access to the Service omite Traefik, Gateway, Keycloak and canonical routing. Before testing, deciding and registering the status of the lock; for the functional matrix it must be disabled.
 
-Desde un cliente autorizado con un certificado mTLS temporal valido, verificar
-`https://assermetry.com` con la cadena TLS del servidor validada:
+From an authorized client with a valid temporary mTLS certificate, verify `https://assermetry.com` with the validated server TLS string:
 
-- el frontend responde y los recursos se cargan;
+- the frontend responds and the resources are charged;
 - discovery publica exactamente
-  `https://assermetry.com/auth/realms/TrustNews` como issuer;
-- una ruta protegida del Gateway rechaza sin JWT y funciona con un JWT valido;
-- `/backend/docs`, Swagger, Redoc y OpenAPI devuelven `403` o `404`;
-- las rutas administrativas requieren mTLS y la autenticacion de Keycloak;
-- Light y Blockchain completan sus recorridos cuando la release los afecta.
+`https://assermetry.com/auth/realms/TrustNews` as issuer;
+- a secure Gateway route rejects without JWT and works with a valid JWT;
+- `/backend/docs`, Swagger, Redoc and OpenAPI return `403` or `404`;
+- administrative routes require mTLS and Keycloak authentication;
+- Light and Blockchain complete their journeys when they are released.
 
-No desactivar la validacion TLS. Mientras la regla temporal siga activa, las
-peticiones de verificacion incluyen `--cert <cert.pem>` y `--key <key.pem>`.
+Do not disable TLS validation. As long as the time rule is still active, verification requests include `--cert <cert.pem>` and `--key <key.pem>`.
 
-Si hace falta aislar Cloudflare durante un diagnostico, usar el tunel a
-Traefik de [`skaffold-server.md`](skaffold-server.md#43-diagnostico-por-tunel),
-preservando hostname, SNI y validacion de la CA de origen. Esa comprobacion es
-complementaria y no sustituye la prueba del borde publico.
+If Cloudflare needs to be isolated during a diagnosis, use the Tráfik tunnel of [`skaffold-server.md`](skaffold-server.md#43-diagnostico-por-tunel), preserving hostname, SNI and validation of the source CA. That check is complementary and does not replace the public border test.
 
-Ver tambien:
+See also:
 
 - [`skaffold-server.md`](skaffold-server.md)
 - [`k8s-common.md`](k8s-common.md)
@@ -160,14 +144,13 @@ Ver tambien:
 
 ## 5. Promocion a `main`
 
-Cuando el despliegue de `postTFM` ya esta validado, promocionar el cambio a
-`main` en los dos repositorios.
+When the deployment of `postTFM` is already validated, promote the switch to `main` in both repositories.
 
 ### 5.1 GitHub
 
 1. Abrir GitHub: `cforcadell/trust-news`.
-2. Crear Pull Request de `postTFM` hacia `main`.
-3. Revisar diff, checks y descripcion.
+2. Create Pull Request from `postTFM` to `main`.
+3. Check diff, checks and description.
 4. Hacer merge a `main`.
 5. Actualizar localmente:
 
@@ -180,16 +163,16 @@ git pull origin main
 ### 5.2 GitLab
 
 1. Abrir GitLab: `cforcadell/tfm`.
-2. Crear Merge Request de `postTFM` hacia `main`.
+2. Create Merge Request from `postTFM` to `main`.
 3. Revisar pipeline/checks si aplica.
 4. Hacer merge a `main`.
-5. Actualizar localmente si se necesita trabajar contra GitLab:
+5. Update locally if you need to work against GitLab:
 
 ```bash
 git fetch gitlab main
 ```
 
-Si GitHub y GitLab deben quedar exactamente alineados, verificar ambos `main`:
+If GitHub and GitLab must be exactly aligned, check both `main`:
 
 ```bash
 git fetch origin main
@@ -202,14 +185,14 @@ git log --oneline --decorate --max-count=5 gitlab/main
 
 ## 6. Release
 
-Crear la release despues de que `main` este actualizado en GitHub y GitLab.
+Create the release after `main` is updated in GitHub and GitLab.
 
 Checklist previo:
 
-- El commit de `postTFM` esta desplegado y verificado en Hetzner.
-- La PR GitHub `postTFM -> main` esta mergeada.
-- La MR GitLab `postTFM -> main` esta mergeada.
-- Los remotos `origin/main` y `gitlab/main` apuntan al commit esperado.
+- The `postTFM` commit is deployed and verified in Hetzner.
+- The PR GitHub `postTFM -> main` is being looted.
+- MR GitLab `postTFM -> main` is being looted.
+- The `origin/main` and `gitlab/main` remotes point to the expected commit.
 - No hay secretos ni `.env` versionados.
 
 Procedimiento recomendado:
@@ -223,10 +206,9 @@ git push origin v<version>
 git push gitlab v<version>
 ```
 
-Despues, crear la release en GitHub y, si se usa tambien como registro formal,
-crear la release equivalente en GitLab con el mismo tag.
+Then create the release in GitHub and, if used as a formal record, create the equivalent release in GitLab with the same tag.
 
-Formato sugerido de notas:
+Suggested note format:
 
 ```md
 ## Cambios
@@ -246,7 +228,7 @@ Formato sugerido de notas:
 
 ---
 
-## 7. Resumen rapido
+## 7. Quick summary
 
 ```bash
 git checkout postTFM
@@ -257,13 +239,13 @@ git commit -m "<mensaje>"
 git push gitlab postTFM
 ```
 
-En GitLab:
+In GitLab:
 
 ```text
 Run pipeline -> branch postTFM -> PROFILE=apis-frontend-prod -> build -> deploy
 ```
 
-Si el despliegue es correcto:
+If the deployment is correct:
 
 ```text
 GitHub PR: postTFM -> main

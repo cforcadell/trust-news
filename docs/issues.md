@@ -1,436 +1,288 @@
-# Incidencias de Assermetry
+# Incidences of Assermetry
 
-Revisión: **2026-09-20**. Inventario acumulativo de hallazgos y criterios de
-cierre de [v0.0.13](version.md). La revisión contrasta el código en
-`d7b4308`, las pruebas focalizadas y una ejecución LIGHT local; no equivale a
-validación completa en el entorno objetivo.
-011, 012 y 018 están solucionadas y desplegadas en Hetzner. Evidencia de código
-local no implica comportamiento demostrado en el despliegue.
+Review: **2026-09-20**. Cumulative inventory of findings and closure criteria of [v0.0.13](version.md). The review contrasts the code in `d7b4308`, focused testing and local LIGHT execution; it does not amount to complete validation in the target environment. 011, 012 and 018 are solved and deployed in Hetzner. Evidence of local code does not imply demonstrated behavior in deployment.
 
-## Gestión
+## Management
 
-Estados: **Abierto → En curso → Pendiente de validación → Resuelto**.
-**Mitigado** conserva la causa; una validación fallida reabre la incidencia.
-**Descartado** requiere justificación. Cada cambio registra commit, caso,
-entorno y evidencia; no se guardan credenciales ni datos personales.
+States: **Open → In progress → Pending validation → Solved**. **Mitigated** retains the cause; a failed validation reopens the incidence. **Discarded** requires justification. Each change records commit, case, environment and evidence; no credentials or personal data are saved.
 
-Gravedad: **P0** compromiso crítico/pérdida de datos/indisponibilidad;
-**P1** seguridad, flujo o resultado esencial incorrecto; **P2** degradación con
-alternativa; **P3** cosmética. Orden de trabajo y bloqueo se deciden aparte.
-005–008 pasan de P0 histórico a P1 por impacto funcional: siguen bloqueando el
-cierre de 13, salvo la validación pendiente de 008. No se reduce su urgencia.
+Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safety, flow or incorrect essential result; **P2** Degradation with alternative; **P3** Cosmetics. Work order and blocking are decided separately. 005–008 move from historical P0 to P1 by functional impact: continuing blocking the cloud of 13, except for validating 008. Its urgency is not reduced.
 
-| ID | Gravedad | Estado / evidencia actual | Objetivo |
+| ID | Gravedad | Current status/evidence | Objective |
 | --- | --- | --- | --- |
 | 001 | P1 | Mitigado; concurrencia pendiente | 13 |
-| 002 | — | Resuelto el 2026-08-19 | Histórico |
-| 003–004 | P1 | Abiertos; configuración confirmada | 16; decisión de aplazamiento pendiente para cerrar 13 |
-| 005 | P1 | Abierto; reproducido en GUI y funciones | 13 |
-| 006 | P1 | Abierto; contradicción confirmada en renderizado | 13 |
-| 007 | P1 | Solucionada y validada localmente el 2026-09-07; pendiente de despliegue | 13 |
-| 008 | P1 | Pendiente de validación; exclusión de errores ya implementada | 13 |
-| 009 | P1 | Abierto; edición opcional ya existe | 14 |
-| 010 | P1 | Abierto; evidencia detallada ya existe | 14 |
-| 011 | P1 | Solucionada y desplegada en Hetzner | 13 |
-| 012 | P1 | Solucionada y desplegada en Hetzner | 13 |
-| 013 | P1 | Solución reforzada; E2E Blockchain local correcto el 2026-09-20, objetivo pendiente | 13 |
-| 014 | P1 | Abierta; confirmada en código/sondas locales | 13 |
-| 015 | P1 | Solucionada localmente; E2E LIGHT con proveedor externo correcto, despliegue objetivo pendiente | 13 |
-| 016 | P1 | Abierto; falsos positivos y diagnóstico incompleto | 13 |
-| 017 | P1 | Abierto; carencia de evaluación factual | 13, ampliar en 14 |
-| 018 | P1 | Solucionada y desplegada en Hetzner | 13 |
-| 019 | P1 | Solución local de polling/contadores; falta validar parciales, duplicados y ambos modos | 13 |
-| 020 | P2 | Abierto; desbordamiento y mezcla de idiomas | 13 |
-| 021 | P1 | Parcialmente resuelta; grounding canónico y filtro oficial aplicados, PDF/independencia pendiente | 13 |
-| 022 | P2 | Abierto; taxonomía libre fragmenta y contamina rutas cacheadas | 13 |
-| 023 | P1 | Solucionada y validada localmente con E2E GUI BLOCKCHAIN el 2026-09-20 | 13 |
+| 002 | — | Solved 2026-08-19 | History |
+| 003–004 | P1 | Open; confirmed configuration | 16; decision to defer pending closure 13 |
+| 005 | P1 | Open; reproduced in GUI and functions | 13 |
+| 006 | P1 | Open; confirmed contradiction in rendering | 13 |
+| 007 | P1 | Solved and locally validated on 2026-09-07; pending deployment | 13 |
+| 008 | P1 | Pending validation; exclusion of errors already implemented | 13 |
+| 009 | P1 | Open; optional edition already exists | 14 |
+| 010 | P1 | Open; detailed evidence already exists | 14 |
+| 011 | P1 | Solved and deployed in Hetzner | 13 |
+| 012 | P1 | Solved and deployed in Hetzner | 13 |
+| 013 | P1 | Reinforced solution; E2E Blockchain local correct 2026-09-20, target pending | 13 |
+| 014 | P1 | Open; confirmed in local code/probes | 13 |
+| 015 | P1 | Locally Solved; E2E LIGHT with correct external supplier, target deployment pending | 13 |
+| 016 | P1 | Open; false positives and incomplete diagnosis | 13 |
+| 017 | P1 | Open; lack of factual evaluation | 13, expand by 14 |
+| 018 | P1 | Solved and deployed in Hetzner | 13 |
+| 019 | P1 | Local polling/contadores solution; partial, duplicate and both modes missing | 13 |
+| 020 | P2 | Open; overflow and language mix | 13 |
+| 021 | P1 | Partially resolved; canonical grounding and official filter applied, PDF/independencia pending | 13 |
+| 022 | P2 | Open; free taxonomy fragments and pollutes searched routes | 13 |
+| 023 | P1 | Solved and locally validated with E2E GUI BLOCKCHAIN on 2026-09-20 | 13 |
 
-Los P1 de objetivo 13 bloquean su cierre. 009–010 bloquean la experiencia de
-revisión/evidencia de 14. 020 debe corregirse antes de acreditar móvil. 022 debe
-cerrarse antes de considerar estable la caché de rutas; cualquier aceptación
-temporal debe limitar explícitamente el alcance de demo.
+Target P1 13 blocks its closure. 009–010 block the review/evidence experience of 14. 020 must be corrected before mobile accreditation. 022 must be closed before the route cache is considered stable; any temporary acceptance must explicitly limit the demo scope.
 
 ## Incidencias previas, revisadas
 
-### ISSUE-001 - Carrera de inicializacion en la cache de validadores LIGHT
+### ISSUE-001 - Initialization career in the LIGHT validator cache
 
-- **Hallazgo:** un arranque conjunto seleccionó uno de tres validadores. El
-  refresco manual recuperó nueve validaciones para tres aserciones.
-- **Revisión:** `load_validators_cache_from_chain` sustituye la caché incluso
-  por una lista vacía; no acredita frescura acotada ni coordinación con eventos.
-  El LIGHT actual 3×3 pasa, pero no prueba un reinicio concurrente.
-- **Cierre:** refresco compartido, conservación de última caché válida, eventos
-  concurrentes sin pérdidas y arranque escalonado 3×3 sin intervención en Kind
-  y Hetzner. Fuente: `api/news-handler/main.py`.
+- **Falazgo:** a set boot selected one of three validators.
+manual soda recovered nine validations for three assertions.
+- **Review:** `load_validators_cache_from_chain` replaces cache even
+for an empty list; it does not credit limited freshness or coordination with events. The current LIGHT 3×3 passes, but does not prove a concurrent restart.
+- **Close:** shared soda, last valid cache conservation, events
+Concurrent lossless and step-up 3×3 without intervention in Kind and Hetzner. Source: `api/news-handler/main.py`.
 
 ### ISSUE-002 - Secret OIDC no vacio como valor por defecto en tests
 
-- **Resuelto:** eliminado el valor por defecto; el operador confirmó que no era
-  el secreto productivo. No se requiere rotación productiva por este hallazgo.
-- **Seguimiento:** comprobar por vía segura si la credencial histórica de test
-  sigue activa; la fixture aún debe fallar pronto si falta configuración (016).
+- **Resolved:** deleted default value; operator confirmed that it was not
+productive secrecy. No productive rotation is required for this finding.
+- **Follow-up:** check by secure means if the historical test card
+remains active; the fixture must still fail soon if configuration is missing (016).
 
-### ISSUE-003 - CI no autentica el API de K3s con su CA
+### ISSUE-003 - IC does not authenticate the K3s API with its CA
 
 - **Confirmado:** `.gitlab-ci.yml` conserva `--insecure-skip-tls-verify=true`.
-- **Cierre:** CA y nombre TLS verificados; pruebas negativas con CA/nombre
-  incorrectos. Objetivo 16 no equivale a aceptación del riesgo para cerrar 13.
+- **Close:** verified CA and TLS name; negative tests with CA/nombre
+Objective 16 does not amount to acceptance of the risk to close 13.
 
-### ISSUE-004 - CI no fija la clave SSH del servidor
+### ISSUE-004 - CI does not set the server SSH key
 
-- **Confirmado:** `.gitlab-ci.yml` alimenta `known_hosts` desde `ssh-keyscan`.
-- **Cierre:** clave aprobada por canal independiente, verificación estricta y
-  rechazo de clave ausente/cambiada; procedimiento de rotación documentado.
+- ** Confirmed:** `.gitlab-ci.yml` feeds `known_hosts` from `ssh-keyscan`.
+- **Close:** key approved by independent channel, strict verification and
+ausente/cambiada key rejection; documented rotation procedure.
 
-### ISSUE-005 - Fechas, zonas horarias y estados temporales inconsistentes en la GUI de resultados
+### ISSUE-005 - Dates, time zones and time states inconsistent with the results GUI
 
-- **Reproducido:** actividad de Blockchain a las 19:16 y última actualización a
-  las 21:16. `parseEventTimestamp` interpreta `04/09` como abril; el parser de
-  órdenes lo interpreta como septiembre.
-- **Cierre:** API UTC ISO 8601 con zona; un único parser y presentación local
-  ES/EN, con pruebas de zona, cambio horario y eventos. La decisión va en 006.
+- **Reproduced:** Blockchain activity at 19:16 and last update to
+21:16. `parseEventTimestamp` interprets `04/09` as April; the command parser interprets it as September.
+- **Close:** API UTC ISO 8601 with area; single parser and local presentation
+ES/EN, with zone tests, time change and events. Decision goes to 006.
 
-### ISSUE-006 - Estado provisional/final mezclado en la pantalla de proceso
+### ISSUE-006 - provisional/final status mixed in process screen
 
-- **Confirmado:** `renderOrderProcess` mantiene la tarjeta provisional sin
-  condición de finalización; otras partes muestran resultado definitivo para
-  cualquier estado que empiece por `VALIDATED`, incluidos errores.
-- **Cierre:** distinguir proceso, suficiencia de evidencia y decisión; mensajes
-  coherentes al finalizar, con errores, sin evidencia y sin consenso.
+- ** Confirmed:** `renderOrderProcess` keeps the provisional card without
+completion condition; other parts show definitive result for any state starting with `VALIDATED`, including errors.
+- **Close:** distinguish process, sufficiency of evidence and decision; messages
+At the end, with errors, without evidence and without consensus.
 
-### ISSUE-007 - Veredicto global y calculo de consenso no explican empates ni decisiones
+### ISSUE-007 - Global verification and consensus calculation do not explain draws or decisions
 
-- **Estado:** solucionada y validada localmente (2026-09-07). Pendiente de
-  desplegar y comprobar con recorridos reales LIGHT/BLOCKCHAIN en navegador.
-- **Causa:** `calculate_assertion_result` normalizaba el acumulado por número de
-  respuestas y seleccionaba con `max` entre TRUE/FALSE/UNKNOWN. Los empates se
-  resolvían por orden de claves, UNKNOWN competía como afirmación factual y la
-  GUI reutilizaba los scores como porcentajes sin explicar la decisión.
-- **Política implementada:** `consensus-v2`, centralizada en
-  `api/common/utils/scoring.py`, con cobertura decisiva mínima `0.5` (se exige
-  que sea estrictamente superior) y `tie_epsilon=1e-9`. Distingue `CONSENSUS`,
-  `WEIGHTED_MAJORITY`, `NO_CONSENSUS`, `INSUFFICIENT_EVIDENCE` y
-  `NO_VALID_RESPONSES`; UNKNOWN es abstención y ERROR queda excluido.
-- **Contrato:** añade `verdict`, `decision_status`, `reason_code`, pesos brutos,
-  cuota de peso decisivo, cobertura, abstención, margen, conteos y versión de
-  política. `winner` y `scores` se conservan como aliases legacy: `winner` es
-  nulo sin decisión factual y `scores` representa ahora pesos brutos, no
-  probabilidades ni el promedio anterior.
-- **Reproducibilidad:** las nuevas respuestas LIGHT y BLOCKCHAIN guardan tipo,
-  peso de tipo, reputación, peso efectivo y `validator-weights-v1`. Los registros
-  anteriores mantienen el fallback a caché/configuración actual y se identifican
-  mediante `legacy_dynamic_weight=true`; no se reescribe Blockchain ni MongoDB.
-- **GUI:** presenta motivo, votos decisivos, abstenciones, errores y peso
-  TRUE/FALSE/UNKNOWN en ES/EN. Los porcentajes se etiquetan como cuota de peso
-  decisivo/completado. El estado documental es conservador (`SUPPORTED`,
-  `CONTRADICTED`, `MIXED`, `PARTIALLY_VERIFIED`, `INCONCLUSIVE`); FALSE+UNKNOWN
-  es parcial y no «Desmentida».
-- **Pruebas:** 38 pruebas focalizadas Python y las suites Node de consenso,
-  estado y evidencias pasan. Regresión Python: **181 PASS, 2 FAIL**; permanecen
-  exactamente los fallos conocidos de 015 y 016. Sintaxis JS correcta.
-- **Pendiente para ISSUE-017:** calibración con corpus de evaluación,
-  `min_winner_share` u otros umbrales estadísticos, y revisión del peso
-  `HUMAN=0.1`. Ese valor no expresa autoridad epistemológica automática.
+- ** Status:** locally resolved and validated (2026-09-07).
+display and check with real LIGHT/BLOCKCHAIN paths in browser.
+- **Cause:** `calculate_assertion_result` normalized the accumulated by number of
+answers and selected with `max` between TRUE/FALSE/UNKNOWN. The tie was resolved in order of keys, UNKNOWN competed as factual statement and the GUI reused the scores as percentages without explaining the decision.
+- ** Implemented policy:** `consensus-v2`, centralized in
+`api/common/utils/scoring.py`, with minimal decisive coverage `0.5` (required to be strictly superior) and `tie_epsilon=1e-9`. Distinguish `CONSENSUS`, `WEIGHTED_MAJORITY`, `NO_CONSENSUS`, `INSUFFICIENT_EVIDENCE` and `NO_VALID_RESPONSES`; UNKNOWN is abstaining and ERROR is excluded.
+- **Contract:** adds `verdict`, `decision_status`, `reason_code`, gross weights,
+decisive weight quota, coverage, abstention, margin, counting and policy version. `winner` and `scores` are preserved as legacy aliases: `winner` is null and void without factual decision and `scores` now represents gross weights, not probabilities or the previous average.
+- **Reproducibility:** the new LIGHT and BLOCKCHAIN responses keep type,
+Type weight, reputation, effective weight and `validator-weights-v1`. Previous records maintain the fallback to current cache/configuration and are identified by `legacy_dynamic_weight=true`; do not rewrite Blockchain or MongoDB.
+- **GUI:** presents motive, decisive votes, abstentions, errors and weight
+TRUE/FALSE/UNKNOWN in ES/EN. Percents are labeled as weight quota decisivo/completado. The documentary and state is conservative (`SUPPORTED`, `CONTRADICTED`, `MIXED`, `PARTIALLY_VERIFIED`, `INCONCLUSIVE`); FALSE+UNKNOWN is partial and not "Demented".
+- **Exams:** 38 Python focused tests and Node consensus suites,
+Status and evidence pass. Python regression: **181 PASS, 2 FAIL**; the known bugs of 015 and 016 remain exactly. JS syntax correct.
+- **Pending for ISSUE-017:** calibration with evaluation corpus,
+`min_winner_share` or other statistical thresholds, and `HUMAN=0.1` weight review. That value does not express automatic epistemological authority.
 
-### ISSUE-008 - Validadores con timeout tratados como resultado valido
+### ISSUE-008 - Timeout Validators treated as a valid result
 
-- **Avance confirmado:** backend, modelos y GUI distinguen `ERROR`; los tests
-  de scoring excluyen errores y no asignan ganador cuando todas las respuestas
-  fallan. El diagnóstico original ya no describe todo el código actual.
-- **Pendiente:** inducir timeout real en LIGHT/BLOCKCHAIN y validar mensaje,
-  conteo, estado final y ausencia de voto/evidencia; probar reintento individual
-  sin duplicados. La presentación final se coordina con 006 y 019.
+- **Delivered advance:**backend, models and GUI distinguish `ERROR`; tests
+The original diagnosis no longer describes the entire current code.
+- **Pending:** induce real timeout in LIGHT/BLOCKCHAIN and validate message,
+count, final status and absence of voto/evidencia; try individual retry without duplicates. The final presentation is coordinated with 006 and 019.
 
-### ISSUE-009 - Flujo de extraccion y clasificacion de afirmaciones no revisable
+### ISSUE-009 - Extraction flow and unrevisable statement classification
 
-- **Avance:** `renderEditableAssertionsTable` permite editar texto/categoría,
-  añadir y eliminar. Sigue disponible publicar directamente; el recorrido de
-  revisión humana no está garantizado ni cubierto por la regresión.
-- **Cierre en 14:** recorrido humano texto → extracción → revisión → confirmación
-  → validación; API automática explícita. Probar unidades, fechas, negación,
-  afirmaciones compuestas y contexto; no confundir categoría con veracidad.
+- **Advance:** `renderEditableAssertionsTable` allows editing texto/categoria,
+add and delete. It remains available to publish directly; the human revision path is not guaranteed or covered by regression.
+- **Close at 14:** human path text → extraction → revision → confirmation
+→ validation; explicit automatic API. Test units, dates, denial, composite statements and context; do not confuse category with truthfulness.
 
-### ISSUE-010 - Resultado no presenta evidencia principal ni informe reutilizable
+### ISSUE-010 - Result does not present main evidence or reusable report
 
-- **Avance:** existen pestaña Evidencias, fragmentos y enlaces por validador.
-  Falta acreditar el resumen principal por afirmación y el informe reutilizable.
-- **Cierre en 14:** texto original, veredicto, fuente, fecha, fragmento y
-  limitaciones visibles y exportables. Diferenciar trazabilidad Blockchain de
-  evidencia factual; usar «Verificar contenido» de forma consistente.
+- **Advance:**There are Evidences, Fragments and Link-by-Validator tabs.
+The main summary by statement and the reusable report are missing.
+- **Close on 14:** original text, verdict, source, date, fragment and
+Visible and exportable limitations. Differentiate Blockchain traceability from factual evidence; use "Check Content" consistently.
 
 ## Hallazgos nuevos — 2026-09-05
 
-### ISSUE-011 - Consulta de validaciones sin aislamiento efectivo
+### ISSUE-011 - Consultation of validations without effective isolation
 
-- **Estado:** solucionada y desplegada en Hetzner (2026-09-06).
+- ** Status:** resolved and deployed in Hetzner (2026-09-06).
 
-- **Causa:** Gateway omitía identidad en `/validators/cache/{hash}/validations`;
-  News Handler asumía `admin=True` y podía devolver órdenes ajenas.
+- **Cause:** Gateway omitted identity in `/validators/cache/{hash}/validations`;
+News Handler assumed `admin=True` and could return orders from others.
 - **Implementado:** Gateway deriva el propietario del token y codifica los
-  filtros; News Handler exige identidad y filtra validaciones, textos, enlaces
-  y estadísticas. El parámetro `admin` no amplía acceso, tampoco `trust-admin`.
-- **Validación local:** 15 pruebas HTTP Gateway → News Handler con dos
-  propietarios y colecciones simuladas; incluyen suplantación por parámetros,
-  identidad ausente, ámbito vacío y órdenes huérfanas.
-- **Pendiente:** desplegar Gateway y News Handler en Hetzner y repetir con dos identidades
-  reales. Este endpoint interno confía en la identidad transmitida por Gateway;
-  no debe exponerse directamente. Las organizaciones son uniusuarias; no se acredita aislamiento de todas las rutas.
+filters; News Handler requires identity and filters validations, texts, links and statistics. The `admin` parameter does not expand access, nor does `trust-admin`.
+- **Local validation:**15 HTTP Gateway tests → News Handler with two
+owners and simulated collections; include subpoenas by parameters, missing identity, empty scope and orphan orders.
+- **Pending:** deploy Gateway and News Handler to Hetzner and repeat with two identities
+This internal endpoint relies on the identity transmitted by Gateway; it should not be exposed directly. Organizations are unisuary; not all routes are isolated.
 
-### ISSUE-012 - JWT sin validación de audiencia ni cliente presentador
+### ISSUE-012 - JWT without audience validation or client presenter
 
-- **Estado:** solucionada y desplegada en Hetzner (2026-09-06).
+- ** Status:** resolved and deployed in Hetzner (2026-09-06).
 
-- **Causa original:** `get_current_user` desactivaba la validación de `aud` y
-  no exigía una lista de `azp/client_id`. Fuente: `api/gateway/main.py`.
-- **Implementado:** audiencia obligatoria `TrustNewsGateway` y lista de clientes
-  permitidos. Verificación local: 6 pruebas de helpers y 11 sondas con JWT
-  firmados correctas; estas últimas aún no están incorporadas a la suite.
-- **Despliegue:** configurar Keycloak y comprobar tokens nuevos de ambos clientes
-  en Hetzner. Revisar la compatibilidad de `sh` con `<<<` en el script de
-  reconciliación; la comprobación local con `sh -n` falla.
+- **Original cause:** `get_current_user` disabled `aud` validation and
+did not require a list of `azp/client_id`. Source: `api/gateway/main.py`.
+- **Implemented:** mandatory `TrustNewsGateway` audience and client list
+Local verification: 6 helpers tests and 11 JWT probes signed correctly; the latter are not yet incorporated into the suite.
+- **Deploy:** Set up Keycloak and check new tokens from both customers
+in Hetzner. Check `sh` compatibility with `<<<` in reconciliation script; local `sh -n` check fails.
 - **Cierre:** audiencia `TrustNewsGateway`, presentadores permitidos
   (`TrustNewsWeb` y `TrustNewsApi`) y pruebas negativas de token válido para
   otra API/cliente. Las organizaciones son uniusuarias; no se introduce un
   modelo adicional de roles organizativos.
 
-### ISSUE-013 - Veredictos sin evidencia comprobada y atribución automática
+### ISSUE-013 - Verdicts without proven evidence and automatic attribution
 
-- **Validada localmente (2026-09-06):** RAG exige URL, fragmento y pertenencia
-  al corpus recuperado por el servidor. Un veredicto documental TRUE/FALSE sin
-  soporte se degrada a UNKNOWN; las citas inventadas, vacías o ajenas al corpus
-  se rechazan. Se distinguen evidencia recuperada, `evidence_used` y
-  `sources_declared`.
-- **Tipos:** memoria y búsqueda delegada pueden emitir una señal sin fuentes,
-  identificada respectivamente como `MODEL_KNOWLEDGE` y
-  `PROVIDER_SEARCH_UNVERIFIED`; no se presentan como evidencia documental. RAG
-  conserva únicamente evidencia comprobada.
-- **Evidencia:** pruebas de grounding, contratos y UI; orden LIGHT
-  `943346a6-1071-45f2-b97c-f10d746c150a` ejecutada con tres validadores RAG y
-  persistencia de evidencias verificadas/rechazadas en MongoDB.
-- **Refuerzo implementado (2026-09-19, `d7b4308`):** la referencia del modelo
-  debe incluir un `context_id` único, citable y creado por el servidor. URL,
-  título, texto, hash y chunk público se reconstruyen exclusivamente desde ese
-  contexto canónico. Se rechazan identificadores ambiguos/no recuperados, texto
-  no citable y fuentes que sean el documento original; los snippets del
-  proveedor quedan como diagnóstico, nunca como cita.
-- **Validación local nueva:** 27 pruebas de grounding y Evidence Search pasan;
-  cubren contexto inventado, ambiguo, no citable, URL/texto inyectados y fuente
-  original. La caché incorpora `citation_contract=retrieved-context-id-v1` para
-  no reutilizar respuestas incompatibles.
-- **Pendiente de cierre formal:** E2E de los tres tipos y de los recorridos
-  Kafka/IPFS/MongoDB/navegador, especialmente BLOCKCHAIN y el entorno objetivo.
-  La comprobación de implicación semántica entre afirmación y cita se mantiene
-  como alcance de ISSUE-017.
-- **Límite descubierto:** comprobar que una cita pertenece al corpus no acredita
-  independencia ni calidad de la fuente. La autoconfirmación y la elegibilidad
-  documental se separan en ISSUE-021 para no reabrir el alcance ya implementado.
+- **Locally valid (2026-09-06):**RAG requires URL, fragment and membership
+A documentary verdict TRUE/FALSE without support is degraded to UNKNOWN; invented, empty or foreign to the corpus is rejected. Retrieved evidence, `evidence_used` and `sources_declared` are distinguished.
+- **Types:** memory and delegated search can emit a signal without sources,
+identified respectively as `MODEL_KNOWLEDGE` and `PROVIDER_SEARCH_UNVERIFIED`; not presented as documentary evidence. RAG retains only proven evidence.
+- **Evidence:** Grounding tests, contracts and UI; LIGHT order
+`943346a6-1071-45f2-b97c-f10d746c150a` executed with three RAG validators and persistence of verificadas/rechazadas evidence in MongoDB.
+- **Reinforcement implemented (2026-09-19, `d7b4308`):** the model reference
+must include a unique, citationable, and server-created `context_id`. URL, title, text, hash and public chunk are reconstructed exclusively from that canonical context. Recovered ambiguos/no identifiers, non-citationable text and sources that are the original document are rejected; the supplier snippets are left as a diagnosis, never as an citation.
+- **New local validation:**27 grounding and Evidence Search tests pass;
+cover invented, ambiguous, non-quota context, injected URL/texto and original source. The cache incorporates `citation_contract=retrieved-context-id-v1` to prevent the reuse of incompatible responses.
+- **Formal closure:**E of the three types and routes
+Kafka/IPFS/MongoDB/navegador, especially BLOCKCHAIN and the target environment. The semantic implication check between affirmation and quote is maintained as scope of ISSUE-017.
+- **Limit discovered:** check that an appointment belongs to the corpus does not prove
+Independency and quality of the source. Self-confirmation and documentary eligibility are separated in ISSUE-021 so as not to reopen the scope already implemented.
 
-### ISSUE-014 - Resumen rompe al faltar resultados ponderados
+### ISSUE-014 - Summary breaks with missing weighted results
 
-- **Reproducido:** `buildVerificationSummary` declara el número
-  `completedValidations` y después intenta llamarlo como función; una orden con
-  validaciones sin resultado ponderado lanza `TypeError`.
-- **Cierre:** corregir la colisión y renderizar órdenes antiguas, parciales y con
-  solo errores sin excepción. Fuente: `web_classic/app/js/app.js`.
+- **Reproduced:** `buildVerificationSummary` declares the number
+`completedValidations` and then try calling it a function; an unweighted validation command releases `TypeError`.
+- **Close:**correct collision and render old, partial and with orders
+only errors without exception. Source: `web_classic/app/js/app.js`.
 
-### ISSUE-015 - Selección local de fuentes sin pertinencia regional acreditada
+### ISSUE-015 - Local selection of sources without accredited regional relevance
 
-- **Estado:** solucionada y validada localmente; MongoDB se realineó en
-  `kind-trust-news`. Pendiente de desplegar y ejecutar con proveedores externos.
-- **Causa eliminada:** `LOCAL` usaba una allowlist masiva estática sin
-  pertinencia regional acreditada. Evidence Search mezclaba selección de
-  dominios y recuperación, y podía fabricar placeholders sin proveedor.
-- **Implementado:** microservicio interno `source-router`; discovery real por
-  `common/search`, una clasificación batch por `common/llm`, rechazo de
-  dominios inventados, eligibility geográfica estricta, ranking determinista y
-  memoria `source_routes_v2` FRESH/STALE/MISSING. Los validators orquestan
-  `source-router → evidence-search(preferred_sources)` solo para RAG+LOCAL.
-- **Eliminado:** perfiles/seeds/generadores estáticos y colecciones
-  `evidence_domain_profiles`/`evidence_normalization_configs`. El bootstrap las
-  elimina explícitamente. Las estrategias RAG externas se mantienen como
-  `EXT_OFFICIAL_FIRST` y `EXT_ONLY_OFFICIAL`; `NONE` se elimina.
-- **Validación:** tests unitarios cubren rutas regionales, nacionales y UE,
-  firma normalizada, caché FRESH, stale fallback, rechazo de dominios inventados
-  y orden `router -> evidence-search`. El script se aplicó y verificó dos veces
-  sobre MongoDB local. El E2E LIGHT del 2026-09-19 resolvió cuatro rutas `FRESH`
-  y restringió la búsqueda a sus dominios antes de llamar a Evidence Search; los
-  12 validadores terminaron y la orden quedó `VALIDATED`. Falta repetirlo en
-  BLOCKCHAIN y en el entorno objetivo.
-- **Hallazgo de seguimiento:** la ruta italiana clasificó
-  `gazzettaufficiale.biz` como `OFFICIAL_GAZETTE/NATIONAL_PRIMARY` al nivel de
-  `gazzettaufficiale.it`. Debe corregirse el perfil o introducir una denegación
-  de mirrors antes de considerar la elegibilidad documental estable.
-- **Límite restante:** la extracción PDF y la clasificación documental fina se
-  tratan en ISSUE-021; la estabilidad de la firma queda resuelta en ISSUE-022.
+- ** Status:** locally resolved and validated; MongoDB was re-established in
+`kind-trust-news`. Pending deployment and execution with external suppliers.
+- **Deleted cause:** `LOCAL` used a massive static allowlist without
+Proven regional relevance. Evidence Search mixed domain selection and recovery, and could manufacture placeholders without supplier.
+- **Implyd:** internal microservice `source-router`; current discovery by
+`common/search`, a batch classification by `common/llm`, rejection of invented domains, strict geographical eligibility, deterministic ranking and `source_routes_v2` FRESH/STALE/MISSING. memory Validators orchestrate `source-router → evidence-search(preferred_sources)` only for RAG+LOCAL.
+- **Deleted:**Static perfiles/seeds/generadores and collections
+`evidence_domain_profiles`/`evidence_normalization_configs`. Bootstrap explicitly removes them. External RAG strategies are maintained as `EXT_OFFICIAL_FIRST` and `EXT_ONLY_OFFICIAL`; `NONE` is removed.
+- **Validation:** unit tests cover regional, national and EU routes,
+standard signature, FRESH cache, stale failback, rejection of invented domains and `router -> evidence-search` order. The script was applied and double-checked on local MongoDB. The E2E LIGHT of 2026-09-19 resolved four `FRESH` routes and restricted search to their domains before calling Evidence Search; all 12 validators ended and the order was left `VALIDATED`. It was not repeated in BLOCKCHAIN and the target environment.
+- **Follow-up:** Italian route classified
+`gazzettaufficiale.biz` as `OFFICIAL_GAZETTE/NATIONAL_PRIMARY` at `gazzettaufficiale.it` level. You must correct the profile or enter a denial of mirror before considering stable documentary eligibility.
+- **Limit remaining:** PDF extraction and fine documentary classification is
+they are dealt with in ISSUE-021; the stability of the signature is resolved in ISSUE-022.
 
-### ISSUE-016 - Regresión con falsos positivos y diagnóstico incompleto
+### ISSUE-016 - Regression with false positives and incomplete diagnosis
 
-- **Confirmado:** móvil solo comprueba viewport, aunque documento=847 y
-  viewport=390; tests Blockchain antiguos aceptan HTTP 500. Una salida temprana
-  evita agregar errores de red/consola: la ejecución interrumpida registra 400
-  de autenticación y dos errores de consola, pero el resumen cuenta cero.
-- **Además:** el test de logs se corrigió para usar `caplog` y vuelve a comprobar
-  `search_request`. `tests/api/requirements.txt` no reúne las
-  dependencias de la suite y la fixture no exige credenciales antes de conectar.
-- **Comprobación 2026-09-19:** las pruebas aisladas de grounding/búsqueda (27),
-  scoring (29) y GUI de polling (3) pasan, pero las 12 pruebas de
-  `test_validator_source_orchestration.py` ni siquiera cargan porque
-  el entorno virtual de pruebas no contiene `hexbytes`. Esto confirma el defecto de entorno
-  reproducible; no se debe publicar una línea base global verde.
-- **Cierre:** entorno de tests reproducible, `caplog`, fallos HTTP estrictos,
-  comprobaciones de contenido/overflow y diagnóstico en `finally`; registrar
-  identidad efectiva, revisión desplegada y metadatos, sin inferirlos del caso.
+- ** Confirmed:** mobile only checks viewport, although document=847 and
+viewport=390; old Blockchain tests accept HTTP 500. An early output avoids adding red/consola: errors the interrupted execution records 400 authentication and two console errors, but the summary counts zero.
+- **In addition:** the log test was corrected to use `caplog` and rechecked
+`search_request`. `tests/api/requirements.txt` does not assemble the suite dependencies and fixture does not require credentials before connecting.
+- **Test 2026-09-19:** isolated tests of grounding/busqueda (27),
+scoring (29) and polling GUI (3) pass, but the 12 `test_validator_source_orchestration.py` tests do not even load scholarship the virtual testing environment does not contain `hexbytes`. This confirms the reproducible environment defective; a green global baseline should not be published.
+- **Close:** reproducible test environment, `caplog`, strict HTTP faults,
+contenido/overflow checks and diagnosis in `finally`; record effective identity, deployed review and metadata, without inferring them from the case.
 
-### ISSUE-017 - Falta evaluación de calidad factual y contenido adversarial
+### ISSUE-017 - Lack of evaluation of factual quality and adverse content
 
-- **Carencia confirmada:** los dos casos sintéticos comprueban estados y mínimos
-  de entidades; no evalúan si la afirmación, la evidencia y el veredicto son
-  correctos. Ningún PASS actual demuestra calidad para noticias reales.
-- **Cierre:** corpus versionado con referencia humana y fuentes congeladas:
-  verdadero/falso/no verificable, contenido humano y generado, fechas/unidades,
-  negación, citas inventadas y órdenes maliciosas dentro del texto o las fuentes.
-  Medir extracción, soporte de citas, errores de veredicto y abstención; acordar
-  umbrales antes de evaluar. No se afirma un ataque al LLM demostrado.
+- **Reconfirmed lack:** both synthetic cases check states and minimums
+They do not assess whether the statement, evidence and verdict are correct. No current PASS demonstrates quality for real news.
+- **Closing:** versioned corpus with human reference and frozen sources:
+Verifiable verdadero/falso/no, human and generated content, fechas/unidades, denial, invented quotes and malicious commands within the text or sources. Measure extraction, citation support, verdict errors and abstention; agree thresholds before evaluating. No attack on the proven LLM is claimed.
 
-### ISSUE-018 - Enlaces de evidencia sin validar el esquema
+### ISSUE-018 - Evidence links without validating the schema
 
-- **Estado:** solucionada y desplegada en Hetzner (2026-09-06).
+- ** Status:** resolved and deployed in Hetzner (2026-09-06).
 
-- **Reproducido en renderizado aislado:** `renderEvidenceLinks` conserva
-  `href="javascript:void(0)"`; `safeText` escapa HTML, pero no valida protocolos.
-  El modelo acepta fuentes como diccionarios libres. No se ha ejecutado un
-  payload en el navegador ni probado explotación con la CSP desplegada.
-- **Cierre:** aceptar solo HTTP(S) en servidor y cliente; texto inerte para URLs
-  inválidas; pruebas con esquemas peligrosos y enlaces malformados.
-- **Implementado (2026-09-06):** saneamiento en los modelos de evidencia y
-  validación de enlaces en el renderizado. URLs malformadas no invalidan el
-  objeto completo; se conservan en `url_text`/`source_url_text`, solo para
-  mostrar texto escapado. Se rechazan hosts ausentes o inválidos, puertos
-  inválidos, esquemas peligrosos y caracteres ambiguos.
-- **Validación local:** 38 pruebas Python de URLs/modelos y 15 pruebas de las
-  funciones reales de renderizado correctas. Regresión: 134 PASS y los dos
-  fallos conocidos de 015/016. El despliegue en Hetzner está realizado; queda
-  registrar la comprobación funcional en navegador si se requiere para el cierre.
+- **Reproduced in isolated rendering:** `renderEvidenceLinks` conserves
+`href="javascript:void(0)"`; `safeText` escapes HTML, but does not validate protocols. The model accepts fonts as free dictionaries. A payload has not been executed in the browser nor tested exploitation with the deployed CSP.
+- **Close:** accept HTTP(S) only on server and client; inert text for URLs
+invalid; tests with dangerous schemes and malformed links.
+- **Impplemented (2026-09-06):** sanitation in evidence models and
+Link validation in rendering. Malformed URLs do not invalidate the entire object; they are preserved in `url_text`/`source_url_text`, only to display escaped text. Absent or invalid hosts, invalid ports, dangerous schemas and ambiguous characters are rejected.
+- **Local validation:**38 URLs/modelos Python tests and 15 tests of the
+Real rendering functions are correct. Regression: 134 PASS and the two known 015/016. bugs Deployment in Hetzner is performed; it remains to record the functional check in browser if required for closing.
 
-### ISSUE-019 - Total de validaciones contradictorio durante el proceso
+### ISSUE-019 - Total of contradictory validations during the process
 
-- **Observado en Blockchain:** dos afirmaciones, seis pendientes y tarjeta
-  «0/4». `buildVerificationSummary` prioriza solicitudes parciales sobre otros
-  recuentos. Puede producir porcentajes o mensajes prematuros.
-- **Cierre:** una fuente autoritativa para esperadas/recibidas/error/pendientes;
-  siempre total=recibidas+pendientes, sin superar 100 %. Probar llegada parcial,
-  duplicados y reintentos en ambos modos.
-- **Implementado localmente (2026-09-19, `d7b4308`):** el resumen prioriza las
-  solicitudes de validación completas, calcula pendientes como el máximo entre
-  el campo persistido y la diferencia contra las completadas, y el polling
-  conserva la pestaña Proceso hasta tener un render terminal limpio. Las tres
-  pruebas Node de estado/polling pasan. Falta la matriz de cierre: llegada
-  parcial, duplicados, reintentos, error inducido y ambos modos.
+- **Noted in Blockchain:** two statements, six pending and card
+‘0/4’. `buildVerificationSummary` prioritizes partial requests over other counts. It can produce premature percentages or messages.
+- **Close:** an authoritative source for esperadas/recibidas/error/pendientes;
+always total=received+pending, not exceeding 100 %. Prove partial arrival, duplicates and retrying in both modes.
+- **Locally implemented (2026-09-19, `d7b4308`):** the summary prioritizes the
+Complete validation requests, calculates pending as the maximum between the persistent field and the difference against the completed ones, and the polling tab retains the Process until you have a clean terminal render. The three estado/polling Node tests pass. The closing matrix is missing: partial arrival, duplicates, retrying, induced error and both modes.
 
-### ISSUE-020 - Desbordamiento móvil y lenguaje de interfaz inconsistente
+### ISSUE-020 - Mobile overflow and inconsistent interface language
 
-- **Reproducido:** documento de 847 px con viewport de 390 px en LIGHT y
-  BLOCKCHAIN; navegación ocupa gran parte de la pantalla y el aviso sale del
-  ancho visible. En castellano aparecen «valid», «errors» y «Publicar Noticia».
-- **Cierre:** sin scroll horizontal de página a 390 px, navegación compacta,
-  avisos contenidos y resultado accesible; ES/EN completos y acciones coherentes.
-  Validar teclado y foco, no solo tamaño del viewport.
+- **Reproduced:** 847 px document with 390 px viewport in LIGHT and
+BLOCKCHAIN; navigation occupies much of the screen and the warning comes out of the visible width. In Spanish, "valid", "errors" and "Publish News" appear.
+- **Close:** without horizontal page scroll at 390 px, compact navigation,
+Content warnings and accessible result; ES/EN complete and consistent actions. Validate keyboard and focus, not just viewport size.
 
 ## Hallazgos nuevos — 2026-09-11
 
-### ISSUE-021 - Una fuente recuperada puede autoconfirmar la noticia y eludir la política documental
+### ISSUE-021 - A recovered source can self-confirm the news and circumvent documentary policy
 
-- **Estado:** parcialmente solucionada. Reproducida en la orden LIGHT
-  `355f6090-cec0-4ed3-a29a-46763fe66cc6`, primera aserción.
-- **Impacto:** los tres validadores RAG emitieron TRUE usando como evidencia la
-  noticia de Libertad Digital que originó el texto. La cita es literal y supera
-  el grounding de ISSUE-013, pero no es corroboración independiente.
-- **Causas originales:** la URL original se pierde tras importar el texto; Source Router
-  permite medios si cumplen jurisdicción; `EXT_ONLY_OFFICIAL` orienta al
-  proveedor pero no filtra su respuesta; el validator pasa solo dominios a
-  Evidence Search y pierde metadatos; el recuperador rechaza PDF, por lo que el
-  informe primario de IEA localizado no aportó contexto utilizable.
-- **Cierre:** propagar URL/dominio de origen; clasificar fuente primaria,
-  secundaria, copia y relación con el documento sometido; aplicar la política
-  tras recuperar resultados; conservar metadatos del router; extraer PDF con
-  página y error auditable. Una fuente sometida o copia no puede ser la única
-  evidencia decisiva. Para una afirmación atribuible a un estudio se exige el
-  documento primario recuperado o el veredicto efectivo es UNKNOWN.
-- **Implementado:** URL/dominio de origen viajan en los contratos `v2`; Evidence
-  Search conserva tipo, autoridad, puntuación, versión de perfil y relación con
-  el origen; `EXT_ONLY_OFFICIAL` filtra después de recuperar; el grounding
-  rechaza `relationship_to_origin=ORIGINAL`. Desde `d7b4308` esa exclusión se
-  aplica contra el `context_id` canónico y no puede ser eludida aportando una
-  URL, texto o hash libres desde el modelo. Sigue pendiente la extracción PDF,
-  una clasificación documental más fina que `UNKNOWN` y la garantía de que una
-  fuente secundaria no sea la única base decisiva de una afirmación atribuida.
-- **Regresión:** la orden indicada debe priorizar y citar el informe de IEA. Si
-  este no puede recuperarse, Libertad Digital puede conservarse como contexto o
-  pista, sin producir por sí sola TRUE/FALSE documental.
-- **Relación:** amplía la calidad factual de 017; no invalida el grounding
-  sintáctico de 013 ni la elegibilidad geográfica resuelta por 015.
+- ** Status:** partially resolved. Reproduced in the LIGHT order
+`355f6090-cec0-4ed3-a29a-46763fe66cc6`, first assertion.
+- **Impact:** all three RAG validators issued TRUE using the
+The quotation is literal and surpasses the ISSUE-013 grounding, but it is not independent corroboration.
+- **Original causes:** the original URL is lost after importing the text; Source Router
+allows media if they comply with jurisdiction; `EXT_ONLY_OFFICIAL` guides the provider but does not filter its response; the validator passes only domains to Evidence Search and loses metadata; the recoverer rejects PDF, so the primary localized IEA report did not provide usable context.
+- **Close:** propagate source URL/dominio; classify primary source,
+secondary, copy and relationship to the document submitted; apply the policy after recovering results; keep metadata from the router; extract PDF with page and auditable error. A submitted source or copy cannot be the only decisive evidence. For a claim attributable to a study, the primary document recovered or the actual verdict is UNKNOWN.
+- **Implemented:** URL/dominio of origin travel in `v2` contracts; Evidence
+Search retains type, authority, score, profile version and relation to origin; `EXT_ONLY_OFFICIAL` filters after recovering; grounding rejects `relationship_to_origin=ORIGINAL`. From `d7b4308` that exclusion applies against the canonical `context_id` and cannot be circumvented by providing a free URL, text or hash from the model. PDF extraction, a finer documentary classification than `UNKNOWN`, and ensuring that a secondary source is not the only decisive basis for an attributed statement, remain outstanding.
+- **Return:** the order indicated should prioritize and quote the IEA report.
+This cannot be recovered, Freedom Digital can be preserved as context or track, without producing TRUE/FALSE documentary alone.
+- **Relationship:** expands the factual quality of 017; does not invalidate grounding
+Syntactic of 013 nor the geographical eligibility resolved by 015.
 
-### ISSUE-022 - Subcategorías y tipos libres generan rutas duplicadas o demasiado amplias
+### ISSUE-022 - Subcategories and free types generate duplicate or too wide routes
 
-- **Estado:** solucionada en código y realineada en el clúster local
-  `kind-trust-news`; pendiente de despliegue en producción.
-  Mongo contenía rutas distintas para combinaciones próximas y la generación
-  permitía `subcategory` libre.
-- **Impacto:** sinónimos, tildes, traducciones o elecciones variables crean
-  nuevas entradas; a la vez, una ruta temática amplia puede reutilizar fuentes
-  descubiertas para un estudio concreto. Aumenta coste y puede degradar la
-  pertinencia sin producir un fallo explícito.
-- **Causas:** la firma solo normaliza espacios y mayúsculas; no hay catálogo ni
-  aliases de subcategorías; `claim_type_for_assertion` puede elegir el primer
-  `preferred_source_type` por orden alfabético; autores y título influyen en el
-  descubrimiento, pero no se separan de la memoria temática.
-- **Implementado:** se elimina `subcategory` y se sustituyen los valores libres
-  por `topic_code`, `evidence_kind`, `source_type`, `authority_level` y
-  jurisdicción de `routing-taxonomy-v1`. Pydantic y el JSON Schema rechazan
-  valores inventados y combinaciones tema/categoría incompatibles. La firma es
-  `route-v2|taxonomy|topic|evidence|jurisdiction`; texto, entidad y fecha quedan
-  fuera de la caché temática y se usan en la búsqueda documental concreta.
+- ** Status:** coded and re-initiated in the local cluster
+`kind-trust-news`; pending deployment in production. Mongo contained different routes for nearby combinations and the generation allowed `subcategory` free.
+- **Impact:** synonyms, tildes, translations or variable choices create
+new entries; at the same time, a broad thematic route can reuse sources discovered for a particular study. It increases cost and can degrade relevance without producing an explicit failure.
+- **Causes:** the signature only normalizes spaces and capitals; there is no catalogue or
+subcategories alias; `claim_type_for_assertion` can choose the first `preferred_source_type` in alphabetical order; authors and title influence discovery, but do not separate from thematic memory.
+- **Implemented:** `subcategory` is removed and free values replaced
+by `topic_code`, `evidence_kind`, `source_type`, `authority_level` and jurisdiction of `routing-taxonomy-v1`. Pydantic and JSON Schema reject invented values and combinations tema/categoria incompatible. The signature is `route-v2|taxonomy|topic|evidence|jurisdiction`; text, entity and date are left out of the thematic cache and used in the specific documentary search.
 - **Realineamiento:** colecciones nuevas `source_routes_v2`,
-  `domain_profiles_v1` y `evidence_search_cache_v2`. El script idempotente
-  `scripts/k8s/realign-source-routing-mongodb.sh` elimina datos obsoletos,
-  asegura índices y registra la versión; CI ejecuta `--apply` y `--check`.
-- **Regresión y métricas:** aliases equivalentes producen la misma clave;
-  conceptos relacionados pero distintos permanecen separados. Registrar tasa
-  de rutas nuevas, reutilización, colisiones y candidatos `OTHER` para revisar y
-  repriorizar la taxonomía.
+`domain_profiles_v1` and `evidence_search_cache_v2`. The `scripts/k8s/realign-source-routing-mongodb.sh` idepotent script removes obsolete data, secures indexes and records the version; CI runs `--apply` and `--check`.
+- **Renewal and metrics:** equivalent aliases produce the same key;
+Related but distinct concepts remain separate. Register new route rate, reuse, collisions and `OTHER` candidates to review and repriorize taxonomy.
 
-### ISSUE-023 - El registro BLOCKCHAIN pierde los campos del contrato de aserciones v2
+### ISSUE-023 - The BLOCKCHAIN registry loses the fields of the v2 assertions contract
 
-- **Reproducido (2026-09-19):** el E2E GUI Blockchain publicó la orden
-  `11ea41f6-c315-4c13-9ab8-00fbbcc686f0`, generó cuatro aserciones y subió el
-  documento a IPFS (`QmQrPwqsPZafEvCuZ1xvoTk5XwNk2Z4bQJ3QkoAd4eedBo`). La orden
-  quedó en `BLOCKCHAIN_PENDING`, sin `post_id` ni `tx_hash`.
-- **Causa:** tras `ipfs_uploaded`, `news-handler` convierte el documento v2 con
-  `to_chain_assertion()` y lo entrega a `RegisterBlockchainRequest`. Esa
-  conversión conserva solo `idAssertion`, `text` y `categoryId`, mientras que
-  el modelo `RegisterBlockchainPayload` exige además `topic_code`,
-  `evidence_kind` y `context`. La validación Pydantic rechaza las cuatro
-  aserciones y `handle_blockchain_request` captura el error; el flujo continúa
-  marcando la orden como pendiente aunque nunca publica `register_blockchain`.
-- **Impacto:** no se crea el post ni la transacción y no se solicitan ni reciben
-  validaciones Blockchain. El caso GUI no puede satisfacer CID/post/tx/IPFS ni
-  alcanzar `VALIDATED`.
-- **Solución (2026-09-20):** `register_blockchain` usa ahora
-  `register-blockchain-v2` y transporta solo CID y publicador. `news-chain`
-  recupera y valida el `AssertionsDocumentV2` de IPFS, deriva sus categorías y
-  envía únicamente estas al contrato existente. La respuesta usa asignaciones
-  compactas y `news-handler` las combina con el documento canónico MongoDB.
-  Los fallos de petición o registro se persisten como `BLOCKCHAIN_ERROR` con
-  etapa, código y capacidad de reintento; no se anuncia un pendiente ficticio.
-- **Corrección asociada:** los listeners de `news-chain` y
-  `validate-asertions` desempaquetan la respuesta `{cid, content}` de IPFS antes
-  de validar V2; un evento inválido ya no termina el listener de un validador.
-- **Validación de cierre:** 28 pruebas focalizadas pasan. El E2E GUI Blockchain
-  `synthetic-blockchain-01` creó la orden
-  `a237441b-f1aa-4c32-8468-fe79163f865c`, CID
-  `QmNaWX2Ra7SKUzoswZERE7GGHwFpRxT3WZVwHaaWCbpXR3`, post `36` y transacción
-  `0x019cff71a2bf46fea9a5840f7b1426ad1b0fa44eb740b779caea2e64861a051b`.
-  Alcanzó `VALIDATED` con cuatro aserciones, doce validaciones y cero pendientes;
-  comprobó pestaña IPFS, escritorio/móvil y ausencia de errores HTTP/consola
-  inesperados. Artefactos: `/tmp/assermetry-e2e-blockchain-v2-retry-20260920`.
-- **Límite:** esta evidencia es del clúster local, no del entorno objetivo.
+- **Reproduced (2026-09-19):** the E2E GUI Blockchain published the order
+`11ea41f6-c315-4c13-9ab8-00fbbcc686f0`, generated four assertions and uploaded the document to IPFS (`QmQrPwqsPZafEvCuZ1xvoTk5XwNk2Z4bQJ3QkoAd4eedBo`). The order was left in `BLOCKCHAIN_PENDING`, without `post_id` or `tx_hash`.
+- **Cause:** after `ipfs_uploaded`, `news-handler` converts the v2 document with
+`to_chain_assertion()` and delivers it to `RegisterBlockchainRequest`. That conversion retains only `idAssertion`, `text` and `categoryId`, while the `RegisterBlockchainPayload` model also requires `topic_code`, `evidence_kind` and `context`. The Pydatic validation rejects the four assertions and `handle_blockchain_request` captures the error; the flow continues to mark the order as pending although it never publishes `register_blockchain`.
+- **Impact:** no post or transaction created and no request or receipt
+Blockchain validations. GUI case cannot satisfy CID/post/tx/IPFS or reach `VALIDATED`.
+- **Solution (2026-09-20):** `register_blockchain` uses now
+`register-blockchain-v2` and transports only CID and publisher. `news-chain` recovers and validates IPFS `AssertionsDocumentV2`, derives its categories and sends only these to the existing contract. The response uses compact mappings and `news-handler` combines them with MongoDB canonical document. Request or registration failures persist as `BLOCKCHAIN_ERROR` with stage, code and retry capacity; no fictitious slope is announced.
+- **Associated correction:** the listers of `news-chain` and
+`validate-asertions` unpack IPFS `{cid, content}` response before validating V2; an invalid event no longer ends the lister of a validator.
+- **Closing validation:**28 focused tests pass.
+`synthetic-blockchain-01` creó la orden `a237441b-f1aa-4c32-8468-fe79163f865c`, CID `QmNaWX2Ra7SKUzoswZERE7GGHwFpRxT3WZVwHaaWCbpXR3`, post `36` y transacción `0x019cff71a2bf46fea9a5840f7b1426ad1b0fa44eb740b779caea2e64861a051b`. Alcanzó `VALIDATED` con cuatro aserciones, doce validaciones y cero pendientes; comprobó pestaña IPFS, escritorio/móvil y ausencia de errores HTTP/consola inesperados. Artefactos: `/tmp/assermetry-e2e-blockchain-v2-retry-20260920`.
+- **Limit:** This evidence is from the local cluster, not from the target environment.

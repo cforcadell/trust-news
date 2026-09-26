@@ -1,25 +1,23 @@
-# Ejemplo: optimizar configuraciones LLM con un máximo de 0,05 USD
+# Example: Optimizing LLM configurations with a maximum of 0.05 USD
 
-Este procedimiento genera y ejecuta perfiles LLM bajo un coste máximo estimado
-de 0,05 USD por noticia usando el benchmark histórico.
+This procedure generates and executes LLM profiles at an estimated maximum cost of 0.05 USD per news item using the historical benchmark.
 
-No ejecutar contra producción. El runner modifica temporalmente la configuración
-LLM, consume cuota y restaura la configuración al finalizar.
+Do not run against production. The runner temporarily modifies LLM configuration, consumes quota and restores configuration at completion.
 
-## 1. Variables de entorno
+## 1. Environment variables
 
-Desde la raíz del repositorio:
+From the root of the repository:
 
     cd /home/adminu/blockchain/tfm
 
-Configura el Gateway local y el cliente de servicio de Keycloak:
+Set up the local Gateway and Keycloak service client:
 
     export ASSERMETRY_API_URL='https://localhost:7443/backend'
     export ASSERMETRY_TLS_VERIFY=false
     export ASSERMETRY_KEYCLOAK_REALM='TrustNews'
     export ASSERMETRY_KEYCLOAK_CLIENT_ID='TrustNewsApi'
 
-Introduce el secreto sin escribirlo en el historial del shell:
+Enter the secret without writing it in the shell history:
 
     read -rsp 'TrustNewsApi client secret: ' ASSERMETRY_KEYCLOAK_CLIENT_SECRET
     export ASSERMETRY_KEYCLOAK_CLIENT_SECRET
@@ -37,36 +35,35 @@ El script solicita el token en el endpoint OpenID Connect con:
     grant_type=client_credentials
     client_id=TrustNewsApi
 
-El secreto no se guarda en los artefactos del benchmark.
+The secret is not kept in the artifacts of the benchmark.
 
-## 2. Generar perfiles bajo presupuesto
+## 2. Generate profiles under budget
 
-Genera un plan con un máximo solicitado de 0,05 USD y un margen del 5 %:
+It generates a plan with a maximum requested of 0.05 USD and a margin of 5%:
 
     python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
       --max-news-cost-usd 0.05 \
       --budget-headroom-percent 5 \
       --output-root tests/llm-benchmark/artifacts/generated
 
-El máximo efectivo será 0,0475 USD. El comando imprime una ruta como:
+The maximum effective amount will be $0.0475. The command prints a path as:
 
     LLM_PROFILE_PLAN tests/llm-benchmark/artifacts/generated/openrouter-plan-.../plan.json
 
-Guarda esa ruta en una variable:
+Save that path to a variable:
 
     export PLAN_PATH='tests/llm-benchmark/artifacts/generated/openrouter-plan-.../plan.json'
     export PLAN_DIR="$(dirname "$PLAN_PATH")"
 
-Revisa los perfiles aceptados y descartados:
+Check the accepted and discarded profiles:
 
     sed -n '1,260p' "$PLAN_PATH"
 
-El plan conserva la configuración efectiva, el snapshot de precios, los hashes
-y los motivos por los que un nivel fue descartado.
+The plan retains the effective configuration, price snapshots, hashes and reasons why a level was discarded.
 
-## 3. Validar caso y perfiles
+## 3. Validate case and profiles
 
-La validación no modifica configuración ni crea órdenes:
+Validation does not modify configuration or create commands:
 
     for profile in "$PLAN_DIR"/profiles/*.json; do
       python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
@@ -74,10 +71,9 @@ La validación no modifica configuración ni crea órdenes:
         --profile "$profile"
     done
 
-## 4. Ejecutar cinco repeticiones
+## 4. Execute five repetitions
 
-Para comparar calidad, conserva la caché de Evidence Search durante esta
-primera ejecución:
+To compare quality, keep the Evidence Search cache during this first run:
 
     python3 tests/llm-benchmark/llm-benchmark.py run \
       --profile-plan "$PLAN_PATH" \
@@ -86,13 +82,11 @@ primera ejecución:
       --artifacts-root tests/llm-benchmark/artifacts \
       --database tests/llm-benchmark/artifacts/history.sqlite
 
-El runner captura la configuración, aplica cada perfil, comprueba el coste,
-ejecuta las órdenes en modo `LIGHT` y restaura la configuración inicial.
+The runner captures the configuration, applies each profile, checks the cost, executes commands in `LIGHT` mode and restores the initial configuration.
 
-## 5. Ejecución opcional en frío
+## 5. Optional cold execution
 
-Para medir el comportamiento sin respuestas cacheadas, indica la URL directa de
-Evidence Search y limpia la caché antes de cada repetición:
+To measure behavior without any cached responses, indicate the direct URL of Evidence Search and clear the cache before each repeat:
 
     export ASSERMETRY_EVIDENCE_SEARCH_URL='http://localhost:8074'
 
@@ -102,18 +96,17 @@ Evidence Search y limpia la caché antes de cada repetición:
       --require-costs \
       --clear-evidence-cache
 
-Esta opción solo limpia `evidence_search_cache_v2`. No elimina los perfiles de
-dominio ni modifica `source_routes_v2`.
+This option only cleans `evidence_search_cache_v2`. It does not remove domain profiles or modify `source_routes_v2`.
 
 ## 6. Analizar resultados
 
-Lista las ejecuciones guardadas:
+List of saved executions:
 
     python3 tests/llm-benchmark/llm-benchmark.py list-runs \
       --database tests/llm-benchmark/artifacts/history.sqlite \
       --limit 30
 
-Los informes se guardan en:
+The reports are kept in:
 
     tests/llm-benchmark/artifacts/<batch-id>/report.md
     tests/llm-benchmark/artifacts/<batch-id>/summary.json
@@ -125,15 +118,12 @@ Compara dos ejecuciones concretas:
       --baseline <run-id-base> \
       --candidate <run-id-candidato>
 
-La configuración ganadora debe cumplir estas condiciones:
+The winning configuration must meet these conditions:
 
-1. Todas sus repeticiones relevantes terminan en `PASS`.
-2. El coste normalizado a cinco aserciones no supera 0,05 USD.
-3. Tiene la mayor calidad media y buena exactitud de veredictos.
-4. Mantiene validaciones completadas y evidencia suficientes.
-5. Si la calidad es prácticamente igual, se elige la más barata.
+1. All relevant repetitions end in `PASS`.
+2. The standard cost of five assertions does not exceed USD 0.05.
+3. It has the highest medium quality and good accuracy of verdicts.
+4. It maintains complete validations and sufficient evidence.
+5. If quality is practically the same, the cheapest is chosen.
 
-El generador actual compara los niveles globales `premium-safe`, `balanced-safe`
-y `budget-safe`. No enumera todavía todas las combinaciones híbridas posibles
-entre módulos; si solo aparece un perfil bajo 0,05 USD, el benchmark confirma
-su viabilidad, pero no prueba que sea la mejor combinación híbrida posible.
+The current generator compares the global levels `premium-safe`, `balanced-safe` and `budget-safe`. It does not yet list all possible hybrid combinations between modules; if only one profile under USD 0.05 appears, the benchmark confirms its viability, but does not prove that it is the best hybrid combination possible.

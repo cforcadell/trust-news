@@ -1,35 +1,35 @@
 # Admin
 
-## Descripción
+## Description
 
-`api/admin` gestiona clientes, cuotas y recomendaciones de modelos de OpenRouter. Además consume eventos Kafka de respuestas para imputar consumo a clientes según los servicios facturables ejecutados.
+`api/admin` manages OpenRouter customers, quotas and model recommendations. It also consumes Kafka events of responses to charge consumption to customers according to the invoiced services executed.
 
 ## Endpoints
 
-- `GET /ai/openrouter/recommendations`: consulta el catálogo de OpenRouter y devuelve tanto el ranking general como tres alternativas por componente/validator LLM desplegado: mejora premium, opción de coste/capacidad comparable y opción de ahorro. Para cada una calcula su diferencia frente al modelo efectivo sobre una muestra de tokens explícita. El parámetro opcional `max_news_cost_usd` limita el coste LLM combinado de cada escenario para una noticia estimada de cinco aserciones; las combinaciones que no pueden cumplirlo se omiten, incluida la premium.
-- `POST /clients`: crea un cliente de cuotas.
-- `GET /clients`: lista clientes, con filtros opcionales por `status` y búsqueda parcial por `name`.
-- `GET /clients/{client_id}`: recupera cuotas, consumo y estado de un cliente.
-- `PATCH /clients/{client_id}`: actualiza datos, límites, estado o consumo de un cliente.
-- `DELETE /clients/{client_id}`: elimina un cliente de la colección de cuotas.
+- `GET /ai/openrouter/recommendations`: consult the OpenRouter catalog and return both the general ranking and three alternatives by componente/validator LLM deployed: premium improvement, coste/capacidad comparable option and savings option. For each one calculates its difference against the effective model on an explicit token sample. The optional `max_news_cost_usd` parameter limits the combined LLM cost of each scenario for an estimated five-assertion news; combinations that cannot be met are omitted, including the premium.
+- `POST /clients`: creates a quota client.
+- `GET /clients`: client list, with optional filters by `status` and partial search by `name`.
+- `GET /clients/{client_id}`: recovers quotas, consumption and customer status.
+- `PATCH /clients/{client_id}`: Updates data, limits, status or consumption of a client.
+- `DELETE /clients/{client_id}`: removes a customer from the quota collection.
 
 ## Daemons
 
-- Consumidor Kafka `consume_responses_for_quotas`: escucha `TOPIC_RESPONSES` con `group_id=gateway-quota-billing-group`. Procesa eventos de respuesta, resuelve el `client_id` asociado a una orden o post, y actualiza contadores de consumo en MongoDB para los servicios facturables.
+- Consumer Kafka `consume_responses_for_quotas`: listen to `TOPIC_RESPONSES` with `group_id=gateway-quota-billing-group`. Processes response events, resolves the `client_id` associated with an order or post, and updates consumption counters in MongoDB for billable services.
 
-## Inicialización
+## Initialisation
 
-En `startup` abre conexión a MongoDB, inicializa las colecciones de órdenes y cuotas, crea índices sobre `client_id`, `order_id` y `postId`, y lanza el consumidor Kafka de cuotas en segundo plano. En `shutdown` detiene el consumidor y cierra MongoDB.
+In `startup` opens connection to MongoDB, initializes collections of commands and quotas, creates indexes on `client_id`, `order_id` and `postId`, and launches Kafka consumer quotas in the background. In `shutdown` stops the consumer and closes MongoDB.
 
-## Variables de entorno
+## Environment variables
 
-- `MONGO_URI`: URI completa de MongoDB. Si no existe, se construye con variables `MONGO_APP_*`.
-- `MONGO_DBNAME`: base de datos MongoDB.
-- `ORDERS_COLLECTION`: colección de órdenes usada para resolver clientes.
-- `QUOTAS_COLLECTION_NAME`: colección de cuotas/clientes.
-- `KAFKA_BROKER`: bootstrap server de Kafka.
-- `TOPIC_RESPONSES`: tópico con eventos de respuesta del flujo.
-- `OPENROUTER_MODELS_URL`: endpoint de modelos de OpenRouter.
-- `OPENROUTER_CHAT_COMPLETIONS_URL`: URL de completions recomendada para configurar validadores.
+- `MONGO_URI`: MongoDB complete URI. If it does not exist, it is built with `MONGO_APP_*` variables.
+- `MONGO_DBNAME`: MongoDB database.
+- `ORDERS_COLLECTION`: command collection used to solve customers.
+- `QUOTAS_COLLECTION_NAME`: cuotas/clientes. collection
+- `KAFKA_BROKER`: Kafka bootstrap server.
+- `TOPIC_RESPONSES`: Topic with flow response events.
+- `OPENROUTER_MODELS_URL`: OpenRouter model endpoint.
+- `OPENROUTER_CHAT_COMPLETIONS_URL`: recommended plugin URL for setting up validators.
 - `OPENROUTER_SITE_URL`: referer opcional enviado a OpenRouter.
-- `OPENROUTER_APP_TITLE`: título opcional enviado a OpenRouter.
+- `OPENROUTER_APP_TITLE`: Optional title sent to OpenRouter.

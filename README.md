@@ -347,7 +347,8 @@ flowchart TD
     R --> V2[LLM search validator]
     R --> V3[RAG validator]
 
-    V3 --> E[evidence-search]
+    V3 --> SR[source-router\nLOCAL only]
+    SR --> E[evidence-search]
     E --> V3
 
     V1 --> C
@@ -402,7 +403,8 @@ Assermetry.
 - Dedicated `evidence-search` microservice.
 - Search-query generation.
 - Temporal, geographical and entity context.
-- MongoDB-backed preferred-domain profiles.
+- Dynamic domain routing through `source-router` for the RAG `LOCAL` strategy.
+- MongoDB-backed route and domain-profile memory.
 - Official-source prioritization strategies.
 - Evidence normalization and caching.
 - Provider-independent internal evidence contracts.
@@ -456,7 +458,8 @@ flowchart TD
     VR -. future .-> V4[Specialized or deterministic validator]
     VR -. future .-> V5[Human-review integration]
 
-    V3 --> E[evidence-search]
+    V3 --> SR[source-router\nLOCAL only]
+    SR --> E[evidence-search]
     E --> V3
     E --> DB
 
@@ -488,6 +491,8 @@ Additional architecture documents:
 - [TrustNews detailed architecture](docs/architecture/TrustNews_detailed.md)
 - [Kafka messaging and use cases](docs/architecture/kafka-messaging-and-use-cases.md)
 - [Validator architecture](docs/architecture/validator-summary.md)
+- [Source Router API and domain-routing design](docs/architecture/apis/source-router.md)
+- [Evidence Search API](docs/architecture/apis/evidence-search.md)
 
 ---
 
@@ -499,7 +504,7 @@ Additional architecture documents:
 | `api/admin` | Clients, quotas and administrative operations |
 | `api/news-handler` | Main workflow orchestration |
 | `api/generate-asertions` | Atomic assertion extraction |
-| `api/source-router` | Dynamic LOCAL source discovery and routing |
+| `api/source-router` | Domain router for RAG `LOCAL`: discovers, classifies, ranks and caches eligible sources |
 | `api/evidence-search` | Evidence retrieval, chunking, ranking and cache |
 | `api/validate-asertions` | Validator workers |
 | `api/news-chain` | Blockchain integration layer |
@@ -523,31 +528,37 @@ The `evidence-search` service exposes:
 POST /search/evidence
 ```
 
-For `RAG + LOCAL`, validators first call:
+For `RAG + LOCAL`, `validate-asertions` first resolves a route, then passes its
+eligible domains and routing metadata to Evidence Search:
 
 ```text
-source-router → source_routes → selected domains → evidence-search(include_domains)
+validate-asertions → source-router → source_routes_v2 + domain_profiles_v1
+                     → preferred_sources → evidence-search(include_domains)
 ```
 
-Preferred-domain behavior is controlled through:
+Routing is selected per RAG validator through:
 
 ```env
-EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+EVIDENCE_SEARCH_STRATEGY
 ```
 
 Supported modes:
 
 | Mode | Behavior |
 |---|---|
-| `NONE` | Use the generated or fallback query without preferred domains |
-| `LOCAL` | Validator resolves dynamic domains through source-router, then passes them to evidence-search |
+| `LOCAL` | Validator resolves dynamic domains through Source Router, then passes the eligible sources to Evidence Search |
 | `EXT_OFFICIAL_FIRST` | Ask the provider to prioritize official sources |
 | `EXT_ONLY_OFFICIAL` | Restrict retrieval to official sources where supported |
 
-`source-router` uses Exa/Tavily discovery, one batch LLM classification,
-deterministic jurisdiction eligibility/ranking and non-destructive Mongo route
-memory. Evidence Search never calls Source Router. The bootstrap removes the
-obsolete static profile collections and creates `source_routes` indexes:
+`source-router` uses Exa/Tavily discovery, a bounded LLM classification batch,
+deterministic eligibility and ranking, and two non-destructive MongoDB
+collections: `domain_profiles_v1` for stable domain properties and
+`source_routes_v2` for reusable routing decisions. Evidence Search never calls
+Source Router; the connection is one-way from the RAG validator. See the
+[Source Router API](docs/architecture/apis/source-router.md) for the route
+contract, cache states and metadata.
+
+The MongoDB bootstrap realigns the routing collections and indexes:
 
 ```bash
 scripts/k8s/init-mongodb-server.sh --dry-run
@@ -746,6 +757,7 @@ The required Kubernetes secrets and variables are documented in the
 |-- keycloak/               Keycloak customization
 |-- scripts/                deployment and maintenance helpers
 |-- smart-contracts/        Solidity contracts, Hardhat config and scripts
+|-- tests/                  centralized test suites, resources and test artifacts
 |-- web_classic/            current frontend
 |-- skaffold.yaml           local and server Skaffold profiles
 |-- .gitlab-ci.yml          GitLab CI pipeline
@@ -760,6 +772,8 @@ Available documentation:
 
 - [Test notes](docs/tests/tests.md)
 - [Stats notes](docs/tests/stats.md)
+- [LLM benchmark](docs/tests/llm-benchmark.md)
+- [Frontend E2E guide](tests/frontend/e2e/README.md)
 
 Useful static checks for focused changes:
 

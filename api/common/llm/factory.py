@@ -1,8 +1,9 @@
 import asyncio
 import os
 import time
+from collections.abc import Callable
 
-from .errors import LLMConfigurationError, LLMProviderError
+from .errors import LLMConfigurationError, LLMProviderError, LLMResponseError
 from .gemini import GeminiProvider
 from .models import LLMRequest, LLMResponse
 from .openrouter import OpenAICompatibleProvider
@@ -89,3 +90,32 @@ def complete_structured(provider_name: str, request: LLMRequest):
 
 async def acomplete_structured(provider_name: str, request: LLMRequest):
     return parse_response(request, await acomplete(provider_name, request))
+
+
+async def acomplete_structured_with_repair(
+    provider_name: str,
+    request: LLMRequest,
+    repair_prompt_builder: Callable[[str, str], str],
+):
+    """Parse a structured response and make one guided repair when it is invalid.
+
+    Transport failures and malformed JSON keep the regular retry policy. A JSON
+    document that fails the Pydantic contract is different: resending the same
+    prompt usually repeats the same error, so the second request includes the
+    validation error and the original response for the model to correct.
+    """
+    unvalidated_request = request.model_copy(
+        update={"strict_response_validation": False}
+    )
+    response = await acomplete(provider_name, unvalidated_request)
+    try:
+        return parse_response(request, response)
+    except LLMResponseError as exc:
+        repaired_request = request.model_copy(
+            update={"prompt": repair_prompt_builder(response.content, str(exc))}
+        )
+        repaired_response = await acomplete(
+            provider_name,
+            repaired_request.model_copy(update={"strict_response_validation": False}),
+        )
+        return parse_response(repaired_request, repaired_response)

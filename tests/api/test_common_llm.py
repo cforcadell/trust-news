@@ -1,9 +1,9 @@
 import json
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
-from common.llm import LLMRequest, LLMResponse, acomplete, parse_structured_json
+from common.llm import LLMRequest, LLMResponse, acomplete, acomplete_structured_with_repair, parse_structured_json
 from common.llm.errors import LLMConfigurationError, LLMProviderError
 from common.llm.factory import get_llm_provider
 from common.llm.openrouter import OpenAICompatibleProvider, _strict_openrouter_schema
@@ -12,6 +12,17 @@ from common.llm.provider import LLMProvider
 
 class Payload(BaseModel):
     value: int
+
+
+class CountryPayload(BaseModel):
+    scope: str
+    country_code: str | None = None
+
+    @model_validator(mode="after")
+    def country_scope_requires_code(self):
+        if self.scope == "COUNTRY" and not self.country_code:
+            raise ValueError("COUNTRY jurisdiction requires country_code")
+        return self
 
 
 class FlakyProvider(LLMProvider):
@@ -45,6 +56,19 @@ class WrongShapeThenValidProvider(FlakyProvider):
     async def acomplete(self, request):
         self.calls += 1
         content = '[]' if self.calls == 1 else '{"value": 8}'
+        return LLMResponse(content=content, provider=self.name, model=request.model)
+
+
+class RepairingProvider(FlakyProvider):
+    name = "repairing"
+
+    async def acomplete(self, request):
+        self.calls += 1
+        content = (
+            '{"scope":"COUNTRY","country_code":null}'
+            if self.calls == 1
+            else '{"scope":"COUNTRY","country_code":"ES"}'
+        )
         return LLMResponse(content=content, provider=self.name, model=request.model)
 
 
@@ -102,6 +126,31 @@ async def test_response_model_retries_valid_json_with_wrong_shape(monkeypatch):
     )
     assert parse_structured_json(response.content, Payload) == Payload(value=8)
     assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_structured_repair_receives_invalid_response_and_validation_error(monkeypatch):
+    import common.llm.factory as factory
+
+    provider = RepairingProvider()
+    monkeypatch.setitem(factory._providers, provider.name, provider)
+    monkeypatch.setenv("LLM_MAX_RETRIES", "1")
+    repair_inputs = []
+
+    def build_repair_prompt(invalid_response, validation_error):
+        repair_inputs.append((invalid_response, validation_error))
+        return "repair the JSON"
+
+    result = await acomplete_structured_with_repair(
+        provider.name,
+        LLMRequest(prompt="original", model="test", response_model=CountryPayload),
+        build_repair_prompt,
+    )
+
+    assert result == CountryPayload(scope="COUNTRY", country_code="ES")
+    assert provider.calls == 2
+    assert repair_inputs[0][0] == '{"scope":"COUNTRY","country_code":null}'
+    assert "COUNTRY jurisdiction requires country_code" in repair_inputs[0][1]
 
 
 def test_openrouter_payload_requires_strict_json_schema_support():

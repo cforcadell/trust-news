@@ -50,7 +50,7 @@ from common.routing_taxonomy import (
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
 from common.utils.llm_json import parse_model_list
-from common.llm import LLMConfigurationError, LLMRequest, acomplete_structured
+from common.llm import LLMConfigurationError, LLMRequest, acomplete_structured_with_repair
 from common.utils.llm_runtime import fetch_llm_runtime_override
 
 # ============================================================
@@ -94,6 +94,8 @@ PROMPT = os.getenv(
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.1"))
 MAX_ASSERTIONS = int(os.getenv("MAX_ASSERTIONS", "20"))
 LLM_CONFIG_VERSION = int(os.getenv("LLM_CONFIG_VERSION", "0"))
+MAX_REPAIR_RESPONSE_CHARS = 12_000
+MAX_REPAIR_ERROR_CHARS = 4_000
 
 def build_assertions_prompt(text: str) -> str:
     return (
@@ -120,6 +122,8 @@ def build_assertions_prompt(text: str) -> str:
         f"- EntityRole: {', '.join(item.value for item in EntityRole)}\n"
         f"- JurisdictionScope: {', '.join(item.value for item in JurisdictionScope)}\n"
         f"- TemporalType: {', '.join(item.value for item in TemporalType)}\n"
+        "- CONTRATO OBLIGATORIO COUNTRY -> country_code: si jurisdiction.scope es COUNTRY, country_code ISO 3166-1 alpha-2 es obligatorio; region_code y jurisdiction_code deben ser null y applicable_country_codes debe ser [].\n"
+        '- Ejemplo COUNTRY (España): {"scope":"COUNTRY","country_code":"ES","region_code":null,"jurisdiction_code":null,"applicable_country_codes":[]}.\n'
         "- region_code debe usar el código ISO 3166-2 completo (por ejemplo, ES-CT para Catalunya).\n"
         "- Si jurisdiction contiene region_code, su scope debe ser REGION; COUNTRY no puede contener region_code.\n"
         "- No uses valores fuera de estas listas ni códigos territoriales abreviados no canónicos.\n\n"
@@ -245,6 +249,18 @@ def build_assertions_llm_request(text: str, model: str) -> LLMRequest:
     )
 
 
+def build_assertions_repair_prompt(invalid_response: str, validation_error: str) -> str:
+    """Ask the same model to repair one schema-invalid assertions response."""
+    return (
+        "La respuesta JSON anterior incumple el contrato Pydantic. Corrígela.\n"
+        "Devuelve SOLAMENTE el JSON completo corregido, sin Markdown ni explicación. "
+        "No cambies el contenido de las aserciones salvo lo necesario para cumplir el esquema.\n\n"
+        f"Error de validación:\n{validation_error[:MAX_REPAIR_ERROR_CHARS]}\n\n"
+        "Respuesta JSON inválida a corregir:\n"
+        f"{invalid_response[:MAX_REPAIR_RESPONSE_CHARS]}"
+    )
+
+
 async def _call_configured_llm(text: str) -> List[Assertion]:
     model = {
         "mistral": MISTRAL_MODEL,
@@ -255,9 +271,10 @@ async def _call_configured_llm(text: str) -> List[Assertion]:
         return []
     try:
         request = build_assertions_llm_request(text, model)
-        batch = await acomplete_structured(
+        batch = await acomplete_structured_with_repair(
             AI_PROVIDER,
             request,
+            build_assertions_repair_prompt,
         )
         return parse_assertions_content(batch.model_dump(mode="json"))
     except LLMConfigurationError as exc:

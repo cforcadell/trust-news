@@ -38,5 +38,18 @@ def test_prompt_lists_context_contract_and_iso_region_example():
 
     assert "EntityRole: SUBJECT, OBJECT, SOURCE, AUTHORITY, OTHER, UNKNOWN" in prompt
     assert "TemporalType: DATE, DATE_RANGE, YEAR, PERIOD, OTHER, UNKNOWN" in prompt
+    assert "COUNTRY -> country_code" in prompt
+    assert '"country_code":"ES"' in prompt
     assert "ES-CT para Catalunya" in prompt
     assert "COUNTRY no puede contener region_code" in prompt
+
+
+def test_repair_prompt_contains_validation_error_and_invalid_json():
+    repair_prompt = generate.build_assertions_repair_prompt(
+        '{"scope":"COUNTRY","country_code":null}',
+        "COUNTRY jurisdiction requires country_code",
+    )
+
+    assert "COUNTRY jurisdiction requires country_code" in repair_prompt
+    assert '{"scope":"COUNTRY","country_code":null}' in repair_prompt
+    assert "SOLAMENTE el JSON completo corregido" in repair_prompt

@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "eu-official-statistics-2025-v1",
+  "title": "Three European statistical claims from 2025",
+  "language": "es",
+  "description": "Synthetic benchmark case. Do not publish as factual information.",
+  "news": "En 2025, España superó los 49 millones de habitantes según las estadísticas demográficas oficiales. Alemania cerró 2025 con una inflación anual negativa, inferior al 0 %. Francia generó el 100 % de su electricidad mediante fuentes renovables durante 2025.",
+  "match_threshold": 0.5,
+  "assertions": [
+    {
+      "id": "ES_POPULATION_2025",
+      "text": "España superó los 49 millones de habitantes en 2025 según las estadísticas demográficas oficiales.",
+      "expected_verdict": "TRUE",
+      "category_ids": [
+        10
+      ],
+      "required_terms": [
+        "España",
+        "49",
+        "millones",
+        "habitantes",
+        "2025"
+      ]
+    },
+    {
+      "id": "DE_NEGATIVE_INFLATION_2025",
+      "text": "Alemania cerró 2025 con una inflación anual negativa, inferior al 0 %.",
+      "expected_verdict": "FALSE",
+      "category_ids": [
+        1
+      ],
+      "required_terms": [
+        "Alemania",
+        "2025",
+        "inflación",
+        "negativa"
+      ]
+    },
+    {
+      "id": "FR_RENEWABLE_ELECTRICITY_2025",
+      "text": "Francia generó el 100 % de su electricidad mediante fuentes renovables durante 2025.",
+      "expected_verdict": "FALSE",
+      "category_ids": [
+        9
+      ],
+      "required_terms": [
+        "Francia",
+        "100",
+        "electricidad",
+        "renovables",
+        "2025"
+      ]
+    }
+  ]
+}

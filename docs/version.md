@@ -1,8 +1,8 @@
 # v0.0.13 — Iterative functional stabilization
 
-**In progress. Revision: 2026-09-20.** LIGHT and BLOCKCHAIN complete the local basic route; the second records the CID, creates the post and receives on-chain validations after correcting their contracts and the IPFS unpacking (ISSUE-023). Security defects, factual quality, presentation and operation remain open. **The version does not yet prove a stable factual verification.** The inventory and criteria for each finding are in [issues.md](issues.md).
+**In progress. Revision: 2026-09-29 (`d051f18`).** LIGHT and BLOCKCHAIN complete the local basic route; BLOCKCHAIN records the CID, creates the post and receives on-chain validations after the contract and IPFS fixes (ISSUE-023). Validator configuration, benchmark runners and offline campaign analysis have advanced since the previous review. Security defects, factual quality, presentation and reproducible operation remain open. **The version does not yet prove stable factual verification.** The inventory and closure criteria are in [issues.md](issues.md).
 
-Released versions: [releases.md](releases.md). Later evolution: [next_releases.md](next_releases.md).
+Released versions: [releases.md](releases.md). Later evolution: [next_releases.md](next_releases.md). Incremental execution plan: [working.md](working.md).
 
 ## Objective and limits
 
@@ -43,54 +43,53 @@ Identities and cases are considered implemented for LIGHT/BLOCKCHAIN, idepotent 
 
 ### Iteration 13.2 — GUI, states and consensus
 
-**In progress.** Login and basic routes pass. ISSUE-007 has a local solution and validation. Polling retains navigation and expects a final render before opening the summary; counters with partial arrivals, duplicates and errors induced in both modes remain to be credited. Dates, final status, summary legacy, mobile and languages are still open: 005, 006, 008, 014, 019 and 020.
+**In progress.** Login and basic routes pass. ISSUE-007 has a local solution; target deployment evidence remains pending. Polling retains navigation and expects a final render, but the partial-arrival, duplicate, timeout, retry and error matrix in LIGHT and BLOCKCHAIN remains open (008, 019). The current GUI still has conflicting date parsers (005), a provisional card on terminal orders (006) and a legacy-summary crash when weighted results are absent (014). Mobile overflow and language checks remain open (020).
 
 It must cover login, session, navigation, creation and tracking of commands, evidence and links, filters, pagination, quotas, empty/error/timeout states, ES/EN, escritorio/móvil, keyboard and focus. LIGHT and BLOCKCHAIN must present the same semantic decision.
 
 ### Iteration 13.3 — API, identity and isolation
 
-**Ending pen.** 011, 012 and 018 are solved and deployed in Hetzner, but there is a need to complete validation with real identities and preserve evidence of execution. Valid and negative tokens, server-derived organization, roles and isolation of commands, validations, evidences, searches, exports and indirect links must be covered.
+**Pending target evidence.** 011, 012 and 018 are implemented and recorded as deployed in Hetzner; complete two-identity and negative-token checks there and preserve their execution artifacts. Cover server-derived ownership, roles and isolation of orders, validations, evidence, searches, exports and indirect links.
 
-ISSUE-001 still requires joint assembly and booting. ISSUE-003/004 must be corrected or postponed by explicit decision before closing the version. ISSUE-023 is locally resolved: the E2E GUI Blockchain of 2026-09-20 reached `VALIDATED` with CID, post, transaction and twelve validations.
+ISSUE-001 still permits an empty news-chain response to replace a valid validator cache; a concurrent startup/event check and 3×3 LIGHT execution are required. ISSUE-003/004 are proposed for v0.0.16, but their deferral from the v0.0.13 gate still needs an explicit risk decision, owner and demo restriction; no acceptance is inferred here. ISSUE-023 is locally resolved: the 2026-09-20 BLOCKCHAIN GUI run reached `VALIDATED` with CID, post, transaction and twelve validations; target validation remains pending.
 
 ### Iteration 13.4 — Quality of evidence and stability of the routing
 
-**New; priority before final trials.**The appointment contract was hardened on 2026-09-19: RAG can only select canonical, citationable and downloaded `context_id` from the server; the supplier snippets are no longer evidence. Real cases continue to show limits that do not cover corrections 013, 015 and 021 by themselves:
+**In progress; highest factual-quality priority.** The canonical `context_id` citation contract rejects fabricated or non-citable model references (013). Origin URL and router metadata now reach Evidence Search, and `EXT_ONLY_OFFICIAL` filters retrieved results (021). Closed `routing-taxonomy-v1`, `route-v2` and new cache collections are implemented in the local cluster (022); deployment and cache measurements in Hetzner remain pending. These advances do not establish documentary independence:
 
-- A quotation may belong to the corpus and even proceed from the same news that is
-tries to verify; that proves textual coincidence, not independent corroboration (ISSUE-021).
-- `EXT_ONLY_OFFICIAL` expresses an intent in the search, but does not filter from
-deterministic form of results received (ISSUE-021).
-- The primary report can be located and lost to a medium because the
-Recoverer does not extract PDF and the `source-router → evidence-search` step loses authority metadata and source type (ISSUE-021).
-- The free subcategory and unstable `claim_type` fragmented paths
-equivalents; replaced by closed taxonomy and a `route-v2` signature (ISSUE-022).
+- A source on another domain is currently labelled `INDEPENDENT`; this does not detect copies or two outlets repeating the same underlying report (021).
+- `document_type` remains `UNKNOWN`, and the retriever does not provide auditable PDF page/fragment extraction for the primary report in the original regression case (021).
+- Canonical citation identity proves that a model cited a delivered context; it does not prove that the context supports the claim or is independent (017, 021).
+- The benchmark and offline `--analyze` runner now record stages, verdicts, errors and cited contexts. The two current v1 case files contain seven synthetic assertions and lack reviewed acceptable domains and reference sources; they cannot certify factual quality or routing correctness (017).
 
-Iteration should propagate the source URL, classify provenance and independence, retrieve primary documents in PDF, apply the source policy after search and preserve router metadata. It also introduces themes and types of canonical evidence and route keys. As a deliberate break, realignment eliminates incompatible historical cache and retains new collections in subsequent executions.
-
-ISSUE-017 provides the corpus and metrics to check the result. The `355f6090-cec0-4ed3-a29a-46763fe66cc6` command remains as a case of regression: the news of origin cannot be the only decisive evidence; the primary report must be cited or `UNKNOWN` issued.
+Complete PDF recovery, provenance/copy classification and the rule for claims attributed to a primary document before treating secondary evidence as decisive. Keep order `355f6090-cec0-4ed3-a29a-46763fe66cc6` as regression evidence: the submitted news cannot be its own decisive corroboration. Then validate route taxonomy and cache behavior on the deployed system. Add reviewed TRUE/FALSE/UNKNOWN cases with sources and pre-agreed thresholds before claiming benchmark quality.
 
 ### Iteration 13.5 — Convergence and demo tests
 
-**Pending.** It will be executed when previous iterations do not have P1 open without explicit decision. Each arrangement must overcome its original case; the complete suite and the deployed tours are repeated at the end of each cycle.
+**Pending.** Run this iteration after the P1 work above is closed or explicitly deferred. Each fix must pass its original case; repeat the full suite and deployed flows at the end of each cycle.
 
-Initial order, reviewable when new evidence appears:
+Current order, revisable with new evidence:
 
-| Orden | Result sought | Incidencias principales |
+| Order | Result sought | Main issues |
 | --- | --- | --- |
-| 1 | Safe identity and isolation | 001, 003, 004, 011, 012, 018 |
-| 2 | Independent evidence and stable routing | 013, 015, 017, 021, 022 |
-| 3 | comprehensible status and outcome | 005, 006, 007, 008, 014, 019 |
-| 4 | Usable GUI and reliable regression | 016, 020 |
-| 5 | Full regression and consecutive demos | All 13 blockers |
+| 1 | Remove deterministic GUI failures | 014, 005, 006 |
+| 2 | Make regression reproducible and restore validator-cache safety | 016, 001 |
+| 3 | Establish independent primary evidence and representative quality measures | 021, 017 |
+| 4 | Complete error/polling matrix in both modes | 008, 019 |
+| 5 | Deploy and accredit implemented work in Hetzner | 007, 011, 012, 013, 015, 018, 022, 023 |
+| 6 | Accredit mobile usability and full consecutive demos | 020 and all v0.0.13 blockers |
+
+For 003/004, record the owner, risk, mitigation and v0.0.16 destination in the explicit deferral decision before closing v0.0.13.
 
 ## Cumulative baseline
 
-The last local baseline recorded on 2026-09-08 was **199 correct Python tests**, without the six historical external integrations. The targeted routing tests were correct and the associated sintaxis/configuracion was validated. This attests local code behavior, no factual quality or deployment.
+The last recorded broad local baseline on 2026-09-08 was **199 passing Python tests**, excluding six historical external integrations. Targeted routing tests and configuration syntax were checked. This attests local code behavior, not factual quality or deployment. There is no newer documented clean full-suite baseline.
 
 The smokes of September 4–5 completed LIGHT (23/23) and a BLOCKCHAIN repeat (26/26). There was no complete joint execution in green. The inspection found mobile overflow, counters and inconsistent dates. Subsequent insulation corrections, JWT and links are deployed; consensus, grounding and Source Router require completion of their end-to-end checks according to `issues.md`.
 
-The 2026-09-19 passed 27 focused tests of grounding/busqueda, 29 consensus and 3 polling GUI tests. The same execution could not load the 12 orchestration tests of validators because the virtual testing environment lacks `hexbytes`; it is not considered a green regression nor substitutes the E2E in both modes.
+On 2026-09-19, 27 focused grounding/search tests, 29 consensus tests and three GUI polling tests passed. Twelve validator-orchestration tests could not load because the test environment lacked `hexbytes`; this is not a green full regression. `tests/api/requirements.txt` still does not assemble the API test dependencies. The mobile E2E captures document width but only asserts viewport size, so overflow is not accredited.
+
+A local three-repetition `eu-official-statistics-2025-v1` evaluation on 2026-09-29 saved 27 validator results and five upstream HTTP 429 errors. Its recovered pipeline report counts 2 of 9 assertion/repetition units as end-to-end correct under the strict rule that any validator error or extraction failure fails the unit. The case has three synthetic assertions with no reviewed acceptable domains or reference sources; this result diagnoses the runner and current configuration, not population factual accuracy. The local artifacts remain under `tests/evaluation/artifacts/` and need durable retention before serving as release evidence.
 
 Limitations of accumulated evidence:
 
@@ -106,8 +105,7 @@ Limitations of accumulated evidence:
 cause, impact, responsible, mitigation and destination version.
 - No isolation bypass, privilege elevation, data loss,
 self-confirmation of documents and decisive results without eligible support.
-- Full contract and regression suite without faults; GUI/API and corpus factual
-within agreed thresholds before the implementation of the evaluation.
+- Full contract and regression suite without faults; GUI/API and a representative, human-reviewed factual corpus within thresholds agreed before the evaluation.
 - Two consecutive full cycles without new P1 and without reopening corrections by
 the same case; any new finding restarts this counter.
 - Three consecutive demos with login, LIGHT and BLOCKCHAIN; at least one from another
@@ -119,4 +117,4 @@ postponement available for review.
 
 ## Subsequent scope
 
-v0.0.14 maintains the human guided review (009), the reusable report (010) and the controlled withdrawal of the general gate. v0.0.15 maintains pilot and quality monitoring. The independence of sources, abstention and the stability of the routing are requirements of v0.0.13 and are not postponed by these subsequent improvements.
+v0.0.14 retains human-guided review (009), the reusable report (010) and controlled withdrawal of the general mTLS gate. v0.0.15 retains pilot and quality monitoring. v0.0.16 is the proposed destination for CI CA/SSH hardening (003/004), subject to an explicit v0.0.13 deferral decision. Source independence, abstention and stable routing remain v0.0.13 requirements.

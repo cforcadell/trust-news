@@ -1,6 +1,8 @@
 # Incidences of Assermetry
 
-Review: **2026-09-20**. Cumulative inventory of findings and closure criteria of [v0.0.13](version.md). The review contrasts the code in `d7b4308`, focused testing and local LIGHT execution; it does not amount to complete validation in the target environment. 011, 012 and 018 are solved and deployed in Hetzner. Evidence of local code does not imply demonstrated behavior in deployment.
+Review: **2026-09-29 (`d051f18`)**. Cumulative inventory of findings and closure criteria for [v0.0.13](version.md). This revision checks the current repository, the external review supplied with this update, focused local evidence and the saved evaluation campaign. It is not a complete regression or a target-environment acceptance. 011, 012 and 018 are recorded as deployed in Hetzner; local implementation and deployment alone do not establish every closure check.
+
+Execution order and benchmark protocol: [working.md](working.md).
 
 ## Management
 
@@ -12,28 +14,28 @@ Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safet
 | --- | --- | --- | --- |
 | 001 | P1 | Mitigado; concurrencia pendiente | 13 |
 | 002 | — | Solved 2026-08-19 | History |
-| 003–004 | P1 | Open; confirmed configuration | 16; decision to defer pending closure 13 |
+| 003–004 | P1 | Open; CI configuration confirmed, formal deferral from 13 pending | 16 proposed |
 | 005 | P1 | Open; reproduced in GUI and functions | 13 |
 | 006 | P1 | Open; confirmed contradiction in rendering | 13 |
-| 007 | P1 | Solved and locally validated on 2026-09-07; pending deployment | 13 |
+| 007 | P1 | Pending validation; local solution, target deployment evidence pending | 13 |
 | 008 | P1 | Pending validation; exclusion of errors already implemented | 13 |
 | 009 | P1 | Open; optional edition already exists | 14 |
 | 010 | P1 | Open; detailed evidence already exists | 14 |
-| 011 | P1 | Solved and deployed in Hetzner | 13 |
-| 012 | P1 | Solved and deployed in Hetzner | 13 |
-| 013 | P1 | Reinforced solution; E2E Blockchain local correct 2026-09-20, target pending | 13 |
+| 011 | P1 | Pending validation; deployed, two-identity target evidence pending | 13 |
+| 012 | P1 | Pending validation; deployed, negative-token target evidence pending | 13 |
+| 013 | P1 | Pending validation; canonical grounding local, target pending | 13 |
 | 014 | P1 | Open; confirmed in local code/probes | 13 |
-| 015 | P1 | Locally Solved; E2E LIGHT with correct external supplier, target deployment pending | 13 |
-| 016 | P1 | Open; false positives and incomplete diagnosis | 13 |
-| 017 | P1 | Open; lack of factual evaluation | 13, expand by 14 |
-| 018 | P1 | Solved and deployed in Hetzner | 13 |
-| 019 | P1 | Local polling/contadores solution; partial, duplicate and both modes missing | 13 |
-| 020 | P2 | Open; overflow and language mix | 13 |
-| 021 | P1 | Partially resolved; canonical grounding and official filter applied, PDF/independencia pending | 13 |
-| 022 | P2 | Open; free taxonomy fragments and pollutes searched routes | 13 |
-| 023 | P1 | Solved and locally validated with E2E GUI BLOCKCHAIN on 2026-09-20 | 13 |
+| 015 | P1 | Pending validation; local LIGHT route checked, target pending | 13 |
+| 016 | P1 | Open; incomplete dependencies and mobile/HTTP assertions | 13 |
+| 017 | P1 | In progress; benchmark infrastructure exists, representative corpus and thresholds pending | 13, expand by 14 |
+| 018 | P1 | Pending validation; deployed, browser link check pending | 13 |
+| 019 | P1 | Pending validation; local polling fix, partial/duplicate matrix missing | 13 |
+| 020 | P2 | Open; document width captured but overflow is not asserted | 13 |
+| 021 | P1 | In progress; canonical grounding and official filter applied, PDF and independence pending | 13 |
+| 022 | P2 | Pending validation; taxonomy/route-v2 local, Hetzner and cache measurements pending | 13 |
+| 023 | P1 | Pending validation; local BLOCKCHAIN E2E passed, target pending | 13 |
 
-Target P1 13 blocks its closure. 009–010 block the review/evidence experience of 14. 020 must be corrected before mobile accreditation. 022 must be closed before the route cache is considered stable; any temporary acceptance must explicitly limit the demo scope.
+Unclosed P1 findings targeted at 13 block its closure. 003/004 are proposed for 16 but still require a recorded owner, mitigation and explicit deferral decision for 13; private-demo scope is not automatic risk acceptance. 009–010 block the review/evidence experience of 14. 020 must pass an actual overflow check before mobile accreditation. 022 must complete target deployment and route/cache measurements before the route cache is considered stable.
 
 ## Incidencias previas, revisadas
 
@@ -56,14 +58,12 @@ remains active; the fixture must still fail soon if configuration is missing (01
 ### ISSUE-003 - IC does not authenticate the K3s API with its CA
 
 - **Confirmado:** `.gitlab-ci.yml` conserva `--insecure-skip-tls-verify=true`.
-- **Close:** verified CA and TLS name; negative tests with CA/nombre
-Objective 16 does not amount to acceptance of the risk to close 13.
+- **Close:** verify the K3s API CA and TLS name and reject a wrong CA or server name before deployment. v0.0.16 is the proposed implementation target; v0.0.13 still needs an explicit owner, mitigation, private-demo scope and risk decision before deferral.
 
 ### ISSUE-004 - CI does not set the server SSH key
 
 - ** Confirmed:** `.gitlab-ci.yml` feeds `known_hosts` from `ssh-keyscan`.
-- **Close:** key approved by independent channel, strict verification and
-ausente/cambiada key rejection; documented rotation procedure.
+- **Close:** pin the independently verified host key, reject a missing or changed key and document rotation. v0.0.16 is the proposed implementation target; record the v0.0.13 risk decision and demo restriction before deferral.
 
 ### ISSUE-005 - Dates, time zones and time states inconsistent with the results GUI
 
@@ -131,8 +131,7 @@ News Handler assumed `admin=True` and could return orders from others.
 filters; News Handler requires identity and filters validations, texts, links and statistics. The `admin` parameter does not expand access, nor does `trust-admin`.
 - **Local validation:**15 HTTP Gateway tests → News Handler with two
 owners and simulated collections; include subpoenas by parameters, missing identity, empty scope and orphan orders.
-- **Pending:** deploy Gateway and News Handler to Hetzner and repeat with two identities
-This internal endpoint relies on the identity transmitted by Gateway; it should not be exposed directly. Organizations are unisuary; not all routes are isolated.
+- **Pending evidence:** repeat the deployed Gateway → News Handler flow with two real identities and preserve results for indirect links and exports. This internal endpoint relies on identity transmitted by Gateway and must remain internal. Organizations are single-user in the current model; do not infer isolation of routes not exercised.
 
 ### ISSUE-012 - JWT without audience validation or client presenter
 
@@ -142,8 +141,7 @@ This internal endpoint relies on the identity transmitted by Gateway; it should 
 did not require a list of `azp/client_id`. Source: `api/gateway/main.py`.
 - **Implemented:** mandatory `TrustNewsGateway` audience and client list
 Local verification: 6 helpers tests and 11 JWT probes signed correctly; the latter are not yet incorporated into the suite.
-- **Deploy:** Set up Keycloak and check new tokens from both customers
-in Hetzner. Check `sh` compatibility with `<<<` in reconciliation script; local `sh -n` check fails.
+- **Target validation:** confirm Keycloak configuration and negative tokens for both client presenters in Hetzner. The reconciliation script also needs a portable `sh` check because local `sh -n` rejects its `<<<` syntax.
 - **Cierre:** audiencia `TrustNewsGateway`, presentadores permitidos
   (`TrustNewsWeb` y `TrustNewsApi`) y pruebas negativas de token válido para
   otra API/cliente. Las organizaciones son uniusuarias; no se introduce un
@@ -192,21 +190,18 @@ they are dealt with in ISSUE-021; the stability of the signature is resolved in 
 
 ### ISSUE-016 - Regression with false positives and incomplete diagnosis
 
-- ** Confirmed:** mobile only checks viewport, although document=847 and
-viewport=390; old Blockchain tests accept HTTP 500. An early output avoids adding red/consola: errors the interrupted execution records 400 authentication and two console errors, but the summary counts zero.
-- **In addition:** the log test was corrected to use `caplog` and rechecked
-`search_request`. `tests/api/requirements.txt` does not assemble the suite dependencies and fixture does not require credentials before connecting.
+- **Confirmed:** the mobile E2E now captures `documentSize.width` and viewport size, but its `mobile-viewport` check only asserts the viewport dimensions; it does not fail on `scrollWidth > innerWidth`. The historical 847 px document in a 390 px viewport remains unaccredited. Earlier Blockchain checks could accept HTTP 500, and early exits could miss HTTP/console failures in the summary.
+- **In addition:** the log test uses `caplog` and the search request was rechecked. `tests/api/requirements.txt` contains only `aiokafka`, `pytest` and `pytest-asyncio`; it does not assemble the full API test dependency set. The fixture still needs a fail-fast credential check.
 - **Test 2026-09-19:** isolated tests of grounding/busqueda (27),
 scoring (29) and polling GUI (3) pass, but the 12 `test_validator_source_orchestration.py` tests do not even load scholarship the virtual testing environment does not contain `hexbytes`. This confirms the reproducible environment defective; a green global baseline should not be published.
-- **Close:** reproducible test environment, `caplog`, strict HTTP faults,
-contenido/overflow checks and diagnosis in `finally`; record effective identity, deployed review and metadata, without inferring them from the case.
+- **Close:** one reproducible command from a clean environment for API, frontend and contract checks; fail on HTTP/console errors and on `document.documentElement.scrollWidth > window.innerWidth` at 390 px; collect diagnostics in `finally`. Record effective identity, deployed revision and metadata. Prove the LIGHT and BLOCKCHAIN paths separately.
 
-### ISSUE-017 - Lack of evaluation of factual quality and adverse content
+### ISSUE-017 - Representative evaluation of factual quality and adverse content
 
-- **Reconfirmed lack:** both synthetic cases check states and minimums
-They do not assess whether the statement, evidence and verdict are correct. No current PASS demonstrates quality for real news.
-- **Closing:** versioned corpus with human reference and frozen sources:
-Verifiable verdadero/falso/no, human and generated content, fechas/unidades, denial, invented quotes and malicious commands within the text or sources. Measure extraction, citation support, verdict errors and abstention; agree thresholds before evaluating. No attack on the proven LLM is claimed.
+- **Current state:** benchmark infrastructure now exists: the historical OpenRouter CLI records profiles, repeated LIGHT orders, SQLite history, cost/latency estimates and comparisons; shared evaluation runners provide full, gold-domain, gold-evidence and replay modes, versioned artifacts and offline `--analyze` per validation. See [evaluation.md](tests/evaluation.md) and [llm-benchmark.md](tests/llm-benchmark.md). This is implementation progress, not factual-quality certification.
+- **Coverage gap:** the current `eu-news-2025-v1` and `eu-official-statistics-2025-v1` cases contain four and three synthetic assertions respectively. They lack a representative human-reviewed TRUE/FALSE/UNKNOWN corpus, reviewed source/domain annotations, adversarial content and thresholds agreed before scoring. The synthetic population fixture checks arithmetic and abstention only.
+- **Observed evaluation:** the 2026-09-29 three-repetition official-statistics run saved 27 validator records and five upstream HTTP 429 failures. The recovered pipeline report marks 2/9 assertion/repetition units end-to-end correct under its strict technical/error criteria. It cannot establish product quality or routing correctness: the case has no reviewed acceptable domains or reference sources. The artifacts are local and Git-ignored until retained durably.
+- **Close:** create a versioned, human-reviewed corpus with TRUE/FALSE/UNKNOWN, dates, quantities, negation, attribution, primary and secondary evidence, PDFs, insufficient evidence and adversarial instructions. Measure extraction, domain selection, retrieval, citation eligibility and semantic support, verdict errors, abstention, latency and cost. Define acceptance thresholds and a simple LLM plus web-search comparison before measuring; run repeated frozen-evidence and full-pipeline evaluations. Extend coverage through v0.0.14 without postponing the minimum v0.0.13 quality gate.
 
 ### ISSUE-018 - Evidence links without validating the schema
 
@@ -218,8 +213,7 @@ Verifiable verdadero/falso/no, human and generated content, fechas/unidades, den
 invalid; tests with dangerous schemes and malformed links.
 - **Impplemented (2026-09-06):** sanitation in evidence models and
 Link validation in rendering. Malformed URLs do not invalidate the entire object; they are preserved in `url_text`/`source_url_text`, only to display escaped text. Absent or invalid hosts, invalid ports, dangerous schemas and ambiguous characters are rejected.
-- **Local validation:**38 URLs/modelos Python tests and 15 tests of the
-Real rendering functions are correct. Regression: 134 PASS and the two known 015/016. bugs Deployment in Hetzner is performed; it remains to record the functional check in browser if required for closing.
+- **Local validation:** 38 URL/model Python tests and 15 rendering tests passed in the recorded run. The fix is recorded as deployed in Hetzner; preserve a browser check of invalid and valid links before marking target validation complete.
 
 ### ISSUE-019 - Total of contradictory validations during the process
 
@@ -249,8 +243,8 @@ The quotation is literal and surpasses the ISSUE-013 grounding, but it is not in
 allows media if they comply with jurisdiction; `EXT_ONLY_OFFICIAL` guides the provider but does not filter its response; the validator passes only domains to Evidence Search and loses metadata; the recoverer rejects PDF, so the primary localized IEA report did not provide usable context.
 - **Close:** propagate source URL/dominio; classify primary source,
 secondary, copy and relationship to the document submitted; apply the policy after recovering results; keep metadata from the router; extract PDF with page and auditable error. A submitted source or copy cannot be the only decisive evidence. For a claim attributable to a study, the primary document recovered or the actual verdict is UNKNOWN.
-- **Implemented:** URL/dominio of origin travel in `v2` contracts; Evidence
-Search retains type, authority, score, profile version and relation to origin; `EXT_ONLY_OFFICIAL` filters after recovering; grounding rejects `relationship_to_origin=ORIGINAL`. From `d7b4308` that exclusion applies against the canonical `context_id` and cannot be circumvented by providing a free URL, text or hash from the model. PDF extraction, a finer documentary classification than `UNKNOWN`, and ensuring that a secondary source is not the only decisive basis for an attributed statement, remain outstanding.
+- **Implemented:** origin URL/domain travel in `v2` contracts; Evidence Search retains source type, authority, score, profile version and relation to origin; `EXT_ONLY_OFFICIAL` filters after retrieval. Grounding rejects `relationship_to_origin=ORIGINAL` against the canonical `context_id`, so a free model URL/text/hash cannot bypass that check.
+- **Remaining mechanism:** `document_type` is still `UNKNOWN`; same URL becomes `ORIGINAL`, same domain `UNKNOWN`, and another domain `INDEPENDENT`. Different domains can repeat the same wire story or study, so this classification is not proof of independence. PDF extraction with page and auditable fragment, copy/derived-source detection and a primary-source rule for attributed claims remain open.
 - **Return:** the order indicated should prioritize and quote the IEA report.
 This cannot be recovered, Freedom Digital can be preserved as context or track, without producing TRUE/FALSE documentary alone.
 - **Relationship:** expands the factual quality of 017; does not invalidate grounding
@@ -258,8 +252,7 @@ Syntactic of 013 nor the geographical eligibility resolved by 015.
 
 ### ISSUE-022 - Subcategories and free types generate duplicate or too wide routes
 
-- ** Status:** coded and re-initiated in the local cluster
-`kind-trust-news`; pending deployment in production. Mongo contained different routes for nearby combinations and the generation allowed `subcategory` free.
+- **Status:** pending validation. Closed taxonomy and `route-v2` are coded and the local `kind-trust-news` collections were realigned; Hetzner deployment, indexes and route/cache behavior still need evidence. Before the change, nearby combinations created different routes and free `subcategory` values fragmented the cache.
 - **Impact:** synonyms, tildes, translations or variable choices create
 new entries; at the same time, a broad thematic route can reuse sources discovered for a particular study. It increases cost and can degrade relevance without producing an explicit failure.
 - **Causes:** the signature only normalizes spaces and capitals; there is no catalogue or
@@ -268,8 +261,7 @@ subcategories alias; `claim_type_for_assertion` can choose the first `preferred_
 by `topic_code`, `evidence_kind`, `source_type`, `authority_level` and jurisdiction of `routing-taxonomy-v1`. Pydantic and JSON Schema reject invented values and combinations tema/categoria incompatible. The signature is `route-v2|taxonomy|topic|evidence|jurisdiction`; text, entity and date are left out of the thematic cache and used in the specific documentary search.
 - **Realineamiento:** colecciones nuevas `source_routes_v2`,
 `domain_profiles_v1` and `evidence_search_cache_v2`. The `scripts/k8s/realign-source-routing-mongodb.sh` idepotent script removes obsolete data, secures indexes and records the version; CI runs `--apply` and `--check`.
-- **Renewal and metrics:** equivalent aliases produce the same key;
-Related but distinct concepts remain separate. Register new route rate, reuse, collisions and `OTHER` candidates to review and repriorize taxonomy.
+- **Close:** deploy the same revision and run MongoDB realignment in Hetzner; check indexes and prove that equivalent aliases share a key while distinct topics do not. Record new-route rate, reuse, collisions and `OTHER` candidates. Reopen design only if these checks expose an actual defect.
 
 ### ISSUE-023 - The BLOCKCHAIN registry loses the fields of the v2 assertions contract
 

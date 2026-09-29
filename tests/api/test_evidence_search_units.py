@@ -261,3 +261,31 @@ def test_evidence_search_does_not_call_source_router():
     source = Path(evidence.__file__).read_text()
     assert "SOURCE_ROUTER_URL" not in source
     assert "/routes/resolve" not in source
+
+
+@pytest.mark.asyncio
+async def test_evaluation_cold_bypasses_cache_without_deleting_it(monkeypatch):
+    from unittest.mock import AsyncMock
+    from starlette.requests import Request
+    from common.utils.evidence_bundle import evidence_bundle_hash
+
+    cache = SimpleNamespace(find_one=AsyncMock(return_value={"response": {"evidences": [], "cached": False}}),
+                            update_one=AsyncMock())
+    search = AsyncMock(return_value={"results": []})
+    monkeypatch.setattr(evidence, "cache_collection", cache)
+    monkeypatch.setattr(evidence, "search_with_provider", search)
+    warm = await evidence.search_evidence(request())
+    assert warm["cached"] is True
+    assert warm["evidence_bundle_hash"] == evidence_bundle_hash([])
+    search.assert_not_called()
+    cold_request = Request({"type": "http", "headers": [(b"x-evaluation-cache", b"COLD")]})
+    monkeypatch.delenv("EVALUATION_ALLOW_COLD", raising=False)
+    with pytest.raises(evidence.HTTPException) as denied:
+        await evidence.search_evidence(request(), cold_request)
+    assert denied.value.status_code == 403
+    monkeypatch.setenv("EVALUATION_ALLOW_COLD", "true")
+    response = await evidence.search_evidence(request(), cold_request)
+    assert response["cached"] is False
+    assert response["evidence_bundle_hash"] == evidence_bundle_hash([])
+    assert search.await_count > 0
+    assert cache.find_one.await_count == 1

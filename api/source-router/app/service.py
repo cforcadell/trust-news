@@ -182,11 +182,11 @@ class SourceRouterService:
             ))
         return profiles
 
-    async def resolve(self, request: ResolveRouteRequest) -> ResolveRouteResponse:
+    async def resolve(self, request: ResolveRouteRequest, *, force_refresh: bool = False) -> ResolveRouteResponse:
         signature = build_route_signature(request)
         key = route_key(signature)
         now = utc_now()
-        previous = await self.repository.get(key)
+        previous = None if force_refresh else await self.repository.get(key)
         if previous and previous.refresh_after > now:
             sources = await self._rank_route(previous, request)
             return ResolveRouteResponse(
@@ -213,7 +213,7 @@ class SourceRouterService:
             profiles = await self._profiles_from_classifications(classifications, now)
             await self.repository.save_profiles(profiles)
 
-            fallback = await self._profile_fallback(signature, diagnostics.failed_domains, now)
+            fallback = [] if force_refresh else await self._profile_fallback(signature, diagnostics.failed_domains, now)
             diagnostics.fallback_domains = [item.domain for item in fallback]
             classifications.extend(fallback)
             # Fallback profiles are deliberately not re-saved: their verification date

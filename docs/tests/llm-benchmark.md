@@ -1,226 +1,135 @@
-# Benchmark LLM configurations historical
+# Historical LLM Configuration Benchmark
+
+`tests/llm-benchmark/llm-benchmark.py` compares complete OpenRouter LLM configurations through the existing LIGHT order flow. It temporarily applies a profile, publishes a news item, stores immutable JSON artifacts, indexes results in SQLite, and restores the initial configuration. Do not run it against production: it changes the effective local configuration and consumes generation and validation quota.
+
+The default case is `tests/llm-benchmark/resources/cases/eu-news-2025-v1.json`. It measures assertion extraction and matching, category accuracy, aggregate and per-validator verdicts, RAG evidence use, completed responses, latency, and estimated module and total cost. The sample has four assertions; it is useful for regression checks, not for statistical conclusions. Run at least three repetitions, preferably five, and version a case rather than changing historical expectations.
+
+## Requirements and authentication
+
+Python 3.11 or newer is required; SQLite is part of Python. The default endpoint is `https://localhost:7443/backend`. All selected components and validators must use OpenRouter, and no other administrator or automation should change configuration during a batch.
+
+Use the `TrustNewsApi` service client where possible:
+
+```bash
+export ASSERMETRY_KEYCLOAK_CLIENT_ID='TrustNewsApi'
+read -rsp 'TrustNewsApi client secret: ' ASSERMETRY_KEYCLOAK_CLIENT_SECRET
+export ASSERMETRY_KEYCLOAK_CLIENT_SECRET
+```
 
-tests/llm-benchmark/llm-benchmark.py compares complete configurations of LLM modules using OpenRouter exclusively. It executes LIGHT commands, retains immutable JSON artifacts and indesulates metrics in SQLite to compare them with time.
+The runner obtains and refreshes its token. `ASSERMETRY_ACCESS_TOKEN` is also supported, as are `ASSERMETRY_USERNAME` and `ASSERMETRY_PASSWORD` when Direct Access Grants are enabled. Credentials, tokens, and provider keys are never written to profiles, SQLite, or artifacts. Local TLS verification is disabled by default because the local deployment commonly uses a self-signed certificate; set `ASSERMETRY_TLS_VERIFY=true` or pass `--verify-tls` for a trusted certificate.
 
-It should not be run against production. The runner temporarily changes the effective configuration and consumes generation and validation quota.
+## Commands
 
-## Scope
+### `validate-profiles`
 
-The initial case tests/llm-benchmark/resources/cases/eu-news-2025-v1.json contains the synthetic news about Sweden, Germany, Italy and Spain and four expected results. The runner measures separately:
+Validates the case and profile schemas without network access, credentials, configuration changes, or orders:
 
-- extraction and correspondence of assertions;
-- category;
-- veredicto agregado;
-- a validator verdict;
-- evidence used by RAG validators;
-- completed responses and latency of validators;
-- cost estimated per module and global.
+```bash
+python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
+  --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
+  --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json
+```
 
-The sample has four assertions. Two costs are saved:
+| Flag | Meaning and accepted values |
+|---|---|
+| `--case PATH` | Case JSON to validate. Defaults to the EU news v1 case. |
+| `--profile PATH` | Profile JSON to validate. Repeat it to validate several profiles. If omitted, the current OpenRouter profile is used. |
 
-- sample_total_usd: estimation for the actually generated assertions;
-- normalized_5_assertions_total_usd: estimate standardized to five assertions,
-compatible with the administrative hearing of recommendations.
+### `generate-profiles`
 
-The current cost is an estimate based on the prices of the OpenRouter catalog and token samples configured in api/admin. Although the LLM adapter reads use from the supplier, the orders still do not persist these tokens; therefore the report does not present the cost as actual billing.
+Reads the effective configuration and OpenRouter prices to generate complete profiles below a news-level cost cap. It does not change configuration or publish orders. It fails if a needed price is missing, a component is not OpenRouter, or configuration changes during planning.
 
-## Requirements
+```bash
+python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
+  --max-news-cost-usd 0.25 --budget-headroom-percent 10
+```
 
-- Python 3.11 or later. sqlite3 is part of Python and does not require installation
-  SQLite ni paquetes adicionales.
-- Local deployment accessible, default in https://localhost:7443/backend.
-- User with sufficient administrative role and quotas.
-- All LLM components and validators included must use OpenRouter.
-- No other person or automation should change settings during
-The batch.
+The default 5% headroom means a `0.25` cap accepts estimates up to `0.2375`. Plans are written below `tests/llm-benchmark/artifacts/generated/<plan-id>/` and include pricing, effective configuration, hashes, and deduplicated profiles.
 
-Password is never written in artifacts.
+| Flag | Meaning and accepted values |
+|---|---|
+| `--max-news-cost-usd NUMBER` | Required positive USD cap for one news item. |
+| `--budget-headroom-percent NUMBER` | Non-negative percentage reserved below the cap; default `5.0`. |
+| `--output-root PATH` | Parent directory for generated plans; default is the benchmark generated-plans directory. |
+| `--plan-id STRING` | Optional stable plan directory name. If omitted, the runner creates one. |
+| `--base-url URL` | Admin/API base URL; default `ASSERMETRY_API_URL` or the local backend URL. |
+| `--http-timeout SECONDS` | Positive HTTP request timeout; default `30`. |
+| `--verify-tls` / `--no-verify-tls` | Enable or disable TLS certificate verification. The default follows `ASSERMETRY_TLS_VERIFY`, otherwise false. |
 
-`TrustNewsApi` service client recommends `client_credentials`:
+### `run`
 
-    export ASSERMETRY_KEYCLOAK_CLIENT_ID='TrustNewsApi'
-    read -rsp 'TrustNewsApi client secret: ' ASSERMETRY_KEYCLOAK_CLIENT_SECRET
-    export ASSERMETRY_KEYCLOAK_CLIENT_SECRET
+Runs one or more profiles sequentially in LIGHT mode. It locks the local host, captures and verifies configuration, estimates cost, runs every repetition, writes artifacts even when a repetition fails, and restores configuration in a `finally` block. `SIGKILL`, host loss, or network loss during restoration can still leave configuration changed.
 
-El script obtiene y renueva el token cuando sea necesario. El secreto nunca se
-escribe en los artefactos.
+```bash
+python3 tests/llm-benchmark/llm-benchmark.py run \
+  --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
+  --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json \
+  --repetitions 5 --max-news-cost-usd 0.25 --require-costs
+```
 
-    export ASSERMETRY_ACCESS_TOKEN='...'
+`--profile-plan` validates plan hashes and inherits its effective cost cap. It cannot be combined with `--profile`; a stricter `--max-news-cost-usd` is allowed, but a looser cap is not.
 
-or, if the Keycloak client allows Direct Access Grants:
+| Flag | Meaning and accepted values |
+|---|---|
+| `--case PATH` | Case JSON to publish; defaults to the EU news v1 case. |
+| `--profile PATH` | Profile JSON. Repeat for multiple profiles. Mutually exclusive with `--profile-plan`. Defaults to the current OpenRouter profile when neither selector is supplied. |
+| `--profile-plan PATH` | `plan.json` produced by `generate-profiles`; mutually exclusive with `--profile`. |
+| `--repetitions INTEGER` | Positive number of runs per profile; default `3`. |
+| `--base-url URL` | Backend URL; default `ASSERMETRY_API_URL` or `https://localhost:7443/backend`. |
+| `--artifacts-root PATH` | Parent directory for JSON artifacts and SQLite history. |
+| `--database PATH` | SQLite history file; defaults to `history.sqlite` under the artifacts root. |
+| `--batch-id STRING` | Optional stable batch identifier. It must not overwrite an existing batch directory. |
+| `--result-timeout SECONDS` | Positive maximum wait for a terminal order; default `600`. |
+| `--poll-interval SECONDS` | Non-negative delay between order polls; default `2`. |
+| `--http-timeout SECONDS` | Positive HTTP request timeout; default `30`. |
+| `--max-news-cost-usd NUMBER` | Optional positive per-news USD cap. With a plan it can only make the plan cap stricter. |
+| `--require-costs` | Fail a run when cost inputs or estimates are unavailable. |
+| `--stop-on-failure` | Stop remaining repetitions/profiles after the first failed repetition. |
+| `--lock-file PATH` | Local-host lock path; default `/tmp/assermetry-llm-benchmark.lock`. It is not a distributed lock. |
+| `--clear-evidence-cache` | Deletes `evidence_search_cache_v2` before each repetition. It does not delete domain profiles or routes, so it is not equivalent to a fully cold Source Router run. |
+| `--evidence-search-url URL` | Direct Evidence Search URL used only with `--clear-evidence-cache`; default `ASSERMETRY_EVIDENCE_SEARCH_URL` or `http://localhost:8074`. |
+| `--verify-tls` / `--no-verify-tls` | Enable or disable certificate verification as described above. |
 
-    export ASSERMETRY_USERNAME='benchmark-admin'
-    read -rsp 'Password: ' ASSERMETRY_PASSWORD
-    export ASSERMETRY_PASSWORD
+### `list-runs` and `compare`
 
-The local environment normally uses a self-signed certificate. The TLS verification is disabled by default for this local runner. For a trust certificate:
+```bash
+python3 tests/llm-benchmark/llm-benchmark.py list-runs --limit 20
+python3 tests/llm-benchmark/llm-benchmark.py compare \
+  --baseline <baseline-run-id> --candidate <candidate-run-id>
+```
 
-    export ASSERMETRY_TLS_VERIFY=true
+| Command | Flag | Meaning and accepted values |
+|---|---|---|
+| `list-runs` | `--database PATH` | SQLite history file to read. |
+| `list-runs` | `--limit INTEGER` | Maximum number of latest records to print; default `20`. |
+| `compare` | `--database PATH` | SQLite history file to read. |
+| `compare` | `--baseline RUN_ID` | Required historical run identifier used as the comparison baseline. |
+| `compare` | `--candidate RUN_ID` | Required historical run identifier compared with the baseline. |
 
-## Networkless validation
+A comparison reports deltas for quality, accuracy, sample cost, standardized cost, and duration. Lower cost is represented by a negative delta.
 
-This command validates the case and profile schema and checks that everyone declares OpenRouter:
+## Evidence cache and reproducibility
 
-    python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
-      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
-      --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json
+The runner normally preserves `evidence_search_cache_v2`, which is useful when comparing configurations against already recovered evidence. `--clear-evidence-cache` measures fresh Evidence Search responses but does not force Source Router discovery/classification. For identical, frozen evidence across validators, use the shared evaluation runners described below.
 
-It does not modify settings, does not use credentials, and does not create commands.
+## Profiles, scoring, and artifacts
 
-## Generation of profiles by budget
+A profile has `schema_version: 1`, a stable `id`, component settings, and validator rules. Every discovered LLM validator must be covered. Selectors may use `id`, `types`, and `strategies`; matching rules are evaluated in order and the last match wins. `$current` retains the currently effective model but still requires an OpenRouter provider. Change one module at a time for causal comparison; reserve full profiles for already filtered candidates.
 
-`generate-profiles` consults the effective configuration and OpenRouter catalog, but does not change models or create commands. This example requests a maximum of USD 0.25 for a news of five average assertions:
+The 0–100 quality score weights extraction (25%), aggregate verdict (45%), RAG evidence use (20%), and completed validations (10%). Inapplicable metrics redistribute their weight. Costs are estimates based on the OpenRouter catalog and configured token samples, not invoice amounts, because orders do not persist provider token usage.
 
-    python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
-      --max-news-cost-usd 0.25
+Artifacts are immutable JSON evidence. Each batch contains its manifest, starting configuration, summary, Markdown report, resolved profile, configuration changes, pricing snapshot, preflight costs, restoration result, and one `order.json`, `score.json`, `costs.json`, and `run.json` per repetition. SQLite is an append-only historical index. Artifacts are ignored by Git.
 
-By default, it reserves a margin of 5%. Therefore, with a maximum requested of 0.25 USD, it only generates configurations whose estimated cost does not exceed 0.2375 USD. The margin can be changed explicitly:
+If `restore.json` reports failure, restore the saved initial values through LLM administration and confirm the effective configuration before another batch.
 
-    python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
-      --max-news-cost-usd 0.25 \
-      --budget-headroom-percent 10
+## Shared evaluation and frozen evidence
 
-The output is saved in `tests/llm-benchmark/artifacts/generated/<plan-id>/` and includes:
+The historical CLI and SQLite reports remain supported. New historical repetitions additionally write `repetition-NN/evaluation/<run_id>.json` in the common evaluation-result schema. Dataset loading, artifact writing, assertion matching, and LIGHT publish/poll execution are shared with `tests/evaluation`.
 
-    plan.json
-    effective-configuration.json
-    pricing-snapshot.json
-    profiles/premium-safe.json
-    profiles/balanced-safe.json
-    profiles/budget-safe.json
+Use `PYTHONPATH=tests python -m evaluation.llm_benchmark --mode gold-evidence` to compare validators on identical evidence, `--mode replay` to rerun a saved validator input, and `PYTHONPATH=tests python -m evaluation.pipeline` for stage diagnostics and controlled counterfactuals. Analyze a saved campaign from either runner without network calls or credentials:
 
-Only the profiles that the endpoint can verify under the maximum effective level appear. The levels with the same configuration are deduplicated and recorded in `plan.json` as discarded. Each validator uses an exact ID selector so that the plan does not change meaning if later validators of the same type are added. The plan retains date, budget, margin, prices, hash of the effective configuration and hash of each profile.
+```bash
+PYTHONPATH=tests python3 -m evaluation.pipeline --analyze tests/evaluation/artifacts/CAMPAIGN_ID
+```
 
-The generation fails safely if the price of any component or LLM validation is missing, if any does not use OpenRouter or if the configuration changes between capture and recommendation. Prices may change after generating the plan; therefore the execution always checks the cost.
-
-To execute all the profiles of a plan:
-
-    python3 tests/llm-benchmark/llm-benchmark.py run \
-      --profile-plan tests/llm-benchmark/artifacts/generated/<plan-id>/plan.json \
-      --repetitions 5 \
-      --require-costs
-
-`run --profile-plan` checks the hashes, inherits the maximum effective plan and does not allow you to relax using `--max-news-cost-usd`. A lower maximum can be indicated. `--profile` and `--profile-plan` are mutually exclusive.
-
-## Implementation
-
-Current baseline, three repetitions:
-
-    python3 tests/llm-benchmark/llm-benchmark.py run \
-      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
-      --repetitions 3
-
-Compare two profiles and require a maximum standard of 0.25 USD per news:
-
-    python3 tests/llm-benchmark/llm-benchmark.py run \
-      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
-      --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json \
-      --repetitions 5 \
-      --max-news-cost-usd 0.25 \
-      --require-costs
-
-### Evidence Search Cache
-
-By default, the runner retains `evidence_search_cache_v2`. This is the right option to compare models with evidence already recovered, although for a reproducible quality comparison a frozen corpus is recommended.
-
-To measure each cold repeat, you can empty the Evidence Search response cache immediately before publishing the order:
-
-    python3 tests/llm-benchmark/llm-benchmark.py run \
-      --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
-      --repetitions 3 \
-      --clear-evidence-cache
-
-The local display publishes Evidence Search in `http://localhost:8074`. If it is not accessible at that address, you can indicate your direct URL:
-
-    export ASSERMETRY_EVIDENCE_SEARCH_URL='http://localhost:8074'
-
-or use `--evidence-search-url`. Cleaning is recorded in `manifest.json` and in each `run.json`, including the collection and number of deleted documents. If cleaning fails, that repetition fails without publishing the command.
-
-The flag does not remove `domain_profiles_v1` or modify `source_routes_v2`. Domain profiles are stable data, not a cache. Furthermore, a `FRESH` path can prevent the execution of `source-router` LLM; therefore, this flag alone is not enough to compare Cold Source Router models.
-
-The example-balanced-openrouter profile is a template. You need to review the availability and price of your models before using it.
-
-The runner:
-
-1. adquiere /tmp/assermetry-llm-benchmark.lock;
-2. captures the complete effective configuration;
-3. resolves $current and applies the profile;
-4. confirms the effective configuration;
-5. capture recommendations and prices;
-6. rejects the configuration if it fails to comply with the requested budget;
-7. executes repetitions in LIGHT mode;
-8. keeps order, score and costs even when a repeat fails;
-9. restores the initial configuration in a finally block;
-10. returns code other than zero for faults or incomplete restoration.
-
-The lock prevents two simultaneous runners in the same host. It is not a block distributed between machines.
-
-## Perfiles
-
-A profile has schema_version 1, a stable id, components and rules for validators. Concept example:
-
-{ "schema_version": 1, "id": "candidate-a", "components": { "generate-assertions": { "provider": "openrouter", "model": "modelo/generador", "temperature": 0 }, "source-router": { "provider": "openrouter", "model": "modelo/router", "temperature": 0 } }, "validators": [{ "selector": {types": ["RAG_EVIDENCE_VALIDATION"], "strategies": ["LOCAL"] }, "provider": "openrouter", "model": "modelo/rag", "temperature": 0 }}}}
-
-Selectors support id, types and strategies. Rules are processed in order; if several match, the latter prevails. Each discovered LLM validator must be covered. $current retains the effective model, but continues to require its provider to be OpenRouter.
-
-To attribute causes it is recommended to change a module each time. Full profiles should be reserved for already filtered candidates.
-
-## Score
-
-The quality score is from 0 to 100:
-
-| Area | Peso |
-|---|---:|
-| Extraction, coverage, accuracy, quantity and category | 25 % |
-| Added Verdict versus Expected | 45 % |
-| Evidence used by RAG validators | 20 % |
-| Validaciones completadas | 10 % |
-
-If a metric does not apply, its weights are normalized between the remaining ones. The pairing of assertions is deterministic and uses the required_terms of the case. Each change of case or criterion must create a new version, not alter historical results.
-
-Four assertions are not enough for strong statistical conclusions. At least three repetitions and preferably five are recommended. A frozen corpus must also be used to evaluate RAG; external searches are current, not reproducibility.
-
-## Artefactos
-
-By default they are created:
-
-    tests/llm-benchmark/artifacts/
-    ├── history.sqlite
-    └── <batch-id>/
-        ├── manifest.json
-        ├── initial-configuration.json
-        ├── summary.json
-        ├── report.md
-        └── <profile-id>/
-            ├── resolved-profile.json
-            ├── configuration-changes.json
-            ├── pricing-snapshot.json
-            ├── preflight-costs.json
-            ├── restore.json
-            └── repetition-01/
-                ├── order.json
-                ├── score.json
-                ├── costs.json
-                └── run.json
-
-JSONs are canonical evidence. SQLite is a historical index append-only with batches, executions, costs per module, results by assertion and metrics. Artifacts are excluded from Git.
-
-## History and comparison
-
-List the latest executions:
-
-    python3 tests/llm-benchmark/llm-benchmark.py list-runs --limit 20
-
-Comparar dos run_id:
-
-    python3 tests/llm-benchmark/llm-benchmark.py compare \
-      --baseline <run-id-base> \
-      --candidate <run-id-candidato>
-
-The comparison shows differences in quality, accuracy, sample cost, standard cost and duration. A lower cost produces a negative delta.
-
-## Recovery
-
-If the process receives a normal exception, try to restore the configuration. SIGKILL, machine loss or network failure during restoration may prevent it. Before running it saves initial-configuring.json. If restare.json indicates FAIL, it is necessary to restore those values from the LLM administration and verify the effective configuration before starting another batch.
-
-Passwords, tokens, and provider keys are never included in profiles, SQLite, or artifacts.
+The command writes `analysis/analysis.json` and `analysis/analysis.md` in the campaign directory. It reports observations for each validation, including selected and retrieved sources, citation IDs, evidence handoff, verdicts, and technical errors. It marks routing or source relevance as `NOT_EVALUATED` when the dataset has no acceptable domain or reference annotations. See [Shared evaluation](evaluation.md) for output details, flags, v2 datasets, cache modes, hashes, and root-cause rules.

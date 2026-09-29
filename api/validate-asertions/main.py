@@ -5,6 +5,7 @@ import logging
 import asyncio
 import time
 import math
+import hashlib
 
 from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -40,6 +41,8 @@ from common.utils.llm_runtime import fetch_llm_runtime_override
 from common.llm import LLMRequest, complete_structured
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.evidence import evaluate_evidence_grounding
+from common.utils.evidence_bundle import evidence_bundle_hash
+from common.utils.validation_prompt import DEFAULT_RAG_PROMPT, format_evidences_for_prompt
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -115,35 +118,6 @@ Devuelve exclusivamente JSON válido:
   "descripcion": "Justificación breve y objetiva"
 }"""
 
-DEFAULT_RAG_PROMPT = """Actúa como validador factual estricto.
-Debes validar la aserción usando exclusivamente las evidencias y contextos proporcionados en el prompt.
-Usa origin=explicit como contexto principal de la aserción. Usa origin=inferred solo cuando falte contexto explícito equivalente.
-No uses el contexto inferido como evidencia factual suficiente: el veredicto debe apoyarse en evidencias recuperadas o en contradicción directa de esas evidencias.
-No uses conocimiento interno salvo razonamiento lógico básico sobre el texto aportado.
-No accedas a URLs externas ni supongas que una URL contiene información no incluida en los contextos.
-No inventes fuentes, datos ni citas.
-Si los contextos/evidencias no contienen soporte directo ni contradicción directa para la aserción, responde UNKNOWN.
-Explica porque has tomado su decision de forma breve y objetiva usando URLs y fragmentos concretos.
-No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las evidencias" ni referencias genéricas en descripcion, reason ni evidence_text.
-Si devuelves TRUE o FALSE, evidence_used debe contener al menos una referencia a un context_id proporcionado.
-En descripcion menciona el dominio o título concreto usado, no su índice interno.
-supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
-Sólo puedes seleccionar context_id incluidos literalmente en el prompt. No devuelvas URL, source_id,
-chunk_id ni evidence_text: el servidor reconstruye esos campos desde el contexto recuperado.
-Si ninguna evidencia contiene un fragmento directo que apoye o contradiga la aserción, devuelve UNKNOWN.
-Devuelve exclusivamente JSON válido:
-{
-  "resultado": "TRUE | FALSE | UNKNOWN",
-  "descripcion": "Justificación breve basada en URLs y fragmentos concretos",
-  "confidence": "HIGH | MEDIUM | LOW",
-  "evidence_used": [
-    {
-      "context_id": "string",
-      "supports": true,
-      "reason": "string"
-    }
-  ]
-}"""
 
 
 LLM_MEMORY_VALIDATION_PROMPT = os.getenv("LLM_MEMORY_VALIDATION_PROMPT", "")
@@ -334,39 +308,6 @@ def normalize_assertion_input(texto: Any, contexto: Optional[str] = None) -> Tup
     return str(texto or ""), contexto
 
 
-def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> str:
-    if not evidences:
-        return "No hay evidencias disponibles."
-    blocks = []
-    for idx, source in enumerate(evidences, start=1):
-        source_id = source.get("source_id") or f"source-{idx}"
-        source_lines = [
-            f"FUENTE {idx}",
-            f"source_id: {source_id}",
-            f"title: {source.get('title', '')}",
-            f"url: {source.get('url', '')}",
-            f"domain: {source.get('domain', '')}",
-            f"source_type: {source.get('source_type', '')}",
-            f"trust_score: {source.get('trust_score', '')}",
-            f"why_selected: {source.get('why_selected', '')}",
-        ]
-
-        contexts = [
-            context for context in source.get("contexts") or []
-            if isinstance(context, dict) and context.get("citation_eligible") is True
-        ]
-        if not contexts:
-            continue
-        for context_idx, context in enumerate(contexts, start=1):
-            source_lines.extend([
-                f"CONTEXTO CITABLE {context_idx}",
-                f"context_id: {context.get('context_id', '')}",
-                f"text_sha256: {context.get('text_sha256', '')}",
-                f"text: {context.get('text', '')}",
-            ])
-        blocks.append("\n".join(source_lines))
-    return "\n\n".join(blocks) if blocks else "No hay contextos documentales citables disponibles."
-
 
 def build_prompt_content(texto: Any, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
     assertion_text, context_text = normalize_assertion_input(texto, contexto)
@@ -447,6 +388,18 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         raise ValidationExecutionFailure("SOURCE_ROUTER", exc, [], None) from exc
     except Exception as exc:
         raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], None) from exc
+    if evidence_response is not None:
+        evidence_response["validator_input_evidence_bundle_hash"] = evidence_bundle_hash(evidences)
+        prompt_context = payload_context_for_prompt(payload_v2)
+        evidence_response["validator_input"] = {
+            "context": prompt_context,
+            "response_schema_hash": hashlib.sha256(json.dumps(RAGValidatorAPIResponse.model_json_schema(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "prompt_hash": hashlib.sha256(build_prompt_content(payload_v2.assertion.text, prompt_context, evidences).encode("utf-8")).hexdigest(),
+            "prompt_template_hash": hashlib.sha256(selected_validation_prompt().encode("utf-8")).hexdigest(),
+        }
+        logger.info("evidence_handoff assertion_id=%s retrieval_hash=%s validator_input_hash=%s",
+                    payload_v2.assertion.assertion_id, evidence_response.get("evidence_bundle_hash"),
+                    evidence_response["validator_input_evidence_bundle_hash"])
     try:
         result_text = ai_validator.verificar_asercion(
             payload_v2.assertion.text,

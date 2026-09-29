@@ -355,5 +355,23 @@ class LLMBenchmarkTests(unittest.TestCase):
         self.assertEqual(progress, [("VALIDATED", "unavailable:BenchmarkError")])
 
 
+class SharedEvaluationCompatibilityTests(unittest.TestCase):
+    def test_order_export_remains_available_without_third_party_dependencies(self):
+        import subprocess
+        import sys
+
+        code = '''
+import sys
+sys.path.insert(0, "tests")
+from evaluation.core.orders import results_from_order
+case = {"id": "old", "assertions": [{"id": "a", "expected_verdict": "TRUE", "required_terms": ["population"]}]}
+row = results_from_order(case, {"assertions": []})[0].to_dict()
+assert row["root_cause"]["code"] == "EXTRACTION_ERROR"
+assert row["metrics"]["extraction"]["status"] == "EXTRACTION_ERROR"
+'''
+        result = subprocess.run([sys.executable, "-S", "-c", code], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

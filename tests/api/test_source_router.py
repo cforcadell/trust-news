@@ -466,3 +466,55 @@ async def test_route_listing_uses_normalized_filters():
         "route_signature.evidence_kind": "STATISTICAL_DATA",
         "route_signature.jurisdiction_key": "REGION:ES:ES-CT",
     }
+
+
+@pytest.mark.asyncio
+async def test_evaluation_cold_recomputes_a_fresh_route(monkeypatch):
+    source = classified()
+    repo = MemoryRepository(route_document(source), {source.domain: profile(source)})
+    router = service_module.SourceRouterService(repo, settings())
+    calls = []
+
+    async def search(*args, **kwargs):
+        calls.append("search")
+        return {"results": [{"url": "https://idescat.cat/data"}]}
+
+    async def classify(*args, **kwargs):
+        calls.append("llm")
+        return [classified()]
+
+    monkeypatch.setattr(service_module, "search_with_provider", search)
+    monkeypatch.setattr(service_module, "classify_candidates", classify)
+    warm = await router.resolve(request())
+    assert warm.route_state == "FRESH"
+    assert calls == []
+    cold = await router.resolve(request(), force_refresh=True)
+    assert cold.route_state == "MISSING"
+    assert calls == ["search", "llm"]
+    assert cold.sources
+
+
+@pytest.mark.asyncio
+async def test_cold_header_is_gated_and_forwarded_by_http_route(monkeypatch):
+    import httpx
+    from fastapi import FastAPI
+    from unittest.mock import AsyncMock
+
+    app = FastAPI()
+    app.include_router(routes_module.router)
+    service = SimpleNamespace(resolve=AsyncMock(return_value=models.ResolveRouteResponse(
+        route_key="test", route_state="MISSING", sources=[], router_version="test")))
+    app.state.source_router_service = service
+    monkeypatch.delenv("EVALUATION_ALLOW_COLD", raising=False)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://internal") as client:
+        payload = request().model_dump(mode="json")
+        response = await client.post("/routes/resolve", json=payload, headers={"X-Evaluation-Cache": "COLD"})
+        assert response.status_code == 403
+        service.resolve.assert_not_called()
+        monkeypatch.setenv("EVALUATION_ALLOW_COLD", "true")
+        response = await client.post("/routes/resolve", json=payload, headers={"X-Evaluation-Cache": "COLD"})
+        assert response.status_code == 200
+        assert service.resolve.call_args.kwargs == {"force_refresh": True}
+        response = await client.post("/routes/resolve", json=payload, headers={"X-Evaluation-Run-ID": "invalid"})
+        assert response.status_code == 400
+        assert service.resolve.await_count == 1

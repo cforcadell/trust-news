@@ -26,6 +26,14 @@ import uuid
 from typing import Any, Callable
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tests"))
+from evaluation.core.artifacts import EvaluationError, canonical_json, sha256_text, read_json, write_json
+from evaluation.core.datasets import validate_case
+from evaluation.core.common_metrics import (
+    normalize_verdict, collect_assertions, normalized_words, assertion_identifier,
+    match_assertions, result_for_assertion, validation_records,
+)
+
 TEST_ROOT = ROOT / "tests" / "llm-benchmark"
 DEFAULT_CASE = TEST_ROOT / "resources/cases/eu-news-2025-v1.json"
 DEFAULT_PROFILE = TEST_ROOT / "resources/profiles/current-openrouter.json"
@@ -49,8 +57,7 @@ QUALITY_WEIGHTS = {
 }
 
 
-class BenchmarkError(RuntimeError):
-    pass
+BenchmarkError = EvaluationError
 
 
 def trace(phase: str, **fields: Any) -> None:
@@ -78,28 +85,6 @@ def slug_timestamp() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def read_json(path: pathlib.Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise BenchmarkError(f"No se pudo leer JSON {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise BenchmarkError(f"{path} debe contener un objeto JSON")
-    return value
-
-
-def write_json(path: pathlib.Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
 
 def finite_number(value: Any) -> float | None:
     try:
@@ -113,18 +98,6 @@ def mean(values: list[float | None]) -> float | None:
     usable = [float(value) for value in values if value is not None and math.isfinite(float(value))]
     return round(statistics.fmean(usable), 8) if usable else None
 
-
-def normalize_verdict(value: Any) -> str:
-    if isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    if isinstance(value, int) and value in VERDICTS:
-        return VERDICTS[value]
-    text = str(value or "").strip().upper()
-    aliases = {
-        "0": "UNKNOWN", "1": "TRUE", "2": "FALSE",
-        "VERDADERO": "TRUE", "FALSO": "FALSE", "DESCONOCIDO": "UNKNOWN",
-    }
-    return aliases.get(text, text if text in {"TRUE", "FALSE", "UNKNOWN"} else "UNKNOWN")
 
 
 def git_metadata() -> dict[str, Any]:
@@ -477,25 +450,6 @@ class ConfigurationManager:
                     raise BenchmarkError(f"Configuración efectiva inesperada para {section}:{target}")
 
 
-def validate_case(case: dict[str, Any]) -> None:
-    if int(case.get("schema_version") or 0) != 1:
-        raise BenchmarkError("schema_version del caso debe ser 1")
-    if not str(case.get("id") or "").strip() or not str(case.get("news") or "").strip():
-        raise BenchmarkError("El caso necesita id y news")
-    assertions = case.get("assertions")
-    if not isinstance(assertions, list) or not assertions:
-        raise BenchmarkError("El caso necesita assertions[]")
-    ids: set[str] = set()
-    for item in assertions:
-        assertion_id = str(item.get("id") or "")
-        if not assertion_id or assertion_id in ids:
-            raise BenchmarkError("Cada aserción esperada necesita un id único")
-        ids.add(assertion_id)
-        if normalize_verdict(item.get("expected_verdict")) == "UNKNOWN":
-            raise BenchmarkError(f"{assertion_id}: expected_verdict debe ser TRUE o FALSE")
-        if not item.get("required_terms"):
-            raise BenchmarkError(f"{assertion_id}: required_terms no puede estar vacío")
-
 
 def validate_profile(profile: dict[str, Any]) -> None:
     if int(profile.get("schema_version") or 0) != 1:
@@ -512,96 +466,6 @@ def validate_profile(profile: dict[str, Any]) -> None:
         if not isinstance(model, str) or not model.strip():
             raise BenchmarkError(f"El perfil {profile['id']} contiene un modelo vacío")
 
-
-def collect_assertions(order: dict[str, Any]) -> list[dict[str, Any]]:
-    for candidate in (
-        order.get("assertions"),
-        (order.get("document") or {}).get("assertions"),
-        (order.get("assertions_document") or {}).get("assertions"),
-    ):
-        if isinstance(candidate, list):
-            return [item for item in candidate if isinstance(item, dict)]
-    return []
-
-
-def normalized_words(text: str) -> set[str]:
-    normalized = text.lower()
-    substitutions = str.maketrans("áéíóúüñ", "aeiouun")
-    normalized = normalized.translate(substitutions)
-    return set(re.findall(r"[a-z0-9]+", normalized))
-
-
-def assertion_identifier(assertion: dict[str, Any], index: int) -> str:
-    return str(
-        assertion.get("idAssertion")
-        or assertion.get("assertion_id")
-        or assertion.get("id")
-        or index + 1
-    )
-
-
-def match_assertions(case: dict[str, Any], generated: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    threshold = float(case.get("match_threshold") or 0.5)
-    candidates: list[tuple[float, int, int]] = []
-    for expected_index, expected in enumerate(case["assertions"]):
-        required = normalized_words(" ".join(expected["required_terms"]))
-        for generated_index, actual in enumerate(generated):
-            words = normalized_words(str(actual.get("text") or actual.get("assertion") or ""))
-            score = len(required & words) / len(required) if required else 0.0
-            candidates.append((score, expected_index, generated_index))
-    used_expected: set[int] = set()
-    used_generated: set[int] = set()
-    matches: list[dict[str, Any]] = []
-    for score, expected_index, generated_index in sorted(candidates, reverse=True):
-        if score < threshold or expected_index in used_expected or generated_index in used_generated:
-            continue
-        used_expected.add(expected_index)
-        used_generated.add(generated_index)
-        expected = case["assertions"][expected_index]
-        actual = generated[generated_index]
-        expected_categories = {int(value) for value in expected.get("category_ids") or []}
-        actual_category = actual.get("categoryId") or actual.get("category_id")
-        matches.append({
-            "expected_id": expected["id"],
-            "expected_verdict": normalize_verdict(expected["expected_verdict"]),
-            "expected_category_ids": sorted(expected_categories),
-            "generated_index": generated_index,
-            "generated_id": assertion_identifier(actual, generated_index),
-            "generated_text": actual.get("text") or actual.get("assertion"),
-            "generated_category_id": actual_category,
-            "match_score": round(score, 6),
-            "category_match": (
-                int(actual_category) in expected_categories
-                if actual_category is not None and expected_categories else None
-            ),
-        })
-    return sorted(matches, key=lambda item: item["expected_id"])
-
-
-def result_for_assertion(order: dict[str, Any], assertion_id: str) -> dict[str, Any] | None:
-    results = order.get("assertion_results") or {}
-    if isinstance(results, dict):
-        value = results.get(assertion_id)
-        if isinstance(value, dict):
-            return value
-    if isinstance(results, list):
-        for value in results:
-            if isinstance(value, dict) and str(value.get("assertion_id")) == assertion_id:
-                return value
-    return None
-
-
-def validation_records(order: dict[str, Any], assertion_id: str) -> list[tuple[str, dict[str, Any]]]:
-    validations = order.get("validations") or {}
-    rows = validations.get(assertion_id) if isinstance(validations, dict) else None
-    if isinstance(rows, dict):
-        return [(str(key), value) for key, value in rows.items() if isinstance(value, dict)]
-    if isinstance(rows, list):
-        return [
-            (str(value.get("idValidator") or value.get("validator_id") or index), value)
-            for index, value in enumerate(rows) if isinstance(value, dict)
-        ]
-    return []
 
 
 def score_order(case: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]:
@@ -1400,25 +1264,26 @@ def run_benchmark(args: argparse.Namespace) -> int:
                                 trace("evidence_cache.clear.complete", run_id=run_id, deleted_count=run["evidence_cache_clear"].get("deleted_count"))
                                 monotonic_start = time.monotonic()
                             trace("order.publish.start", run_id=run_id)
-                            published = client.post(
-                                "/orders/publishNew",
-                                {"text": case["news"], "validation_mode": "LIGHT"},
-                            )
-                            order_id = str(published.get("order_id") or "")
-                            if not order_id:
-                                raise BenchmarkError("publishNew no devolvió order_id")
-                            run["order_id"] = order_id
-                            trace("order.publish.complete", run_id=run_id, order_id=order_id)
-                            trace("order.poll.start", run_id=run_id, order_id=order_id, timeout_seconds=args.result_timeout, interval_seconds=args.poll_interval)
-                            order = wait_for_order(
-                                client, order_id, args.result_timeout, args.poll_interval,
+                            from evaluation.core.order_execution import publish_and_wait
+                            def published_order(order_id):
+                                run["order_id"] = order_id
+                                trace("order.publish.complete", run_id=run_id, order_id=order_id)
+                                trace("order.poll.start", run_id=run_id, order_id=order_id,
+                                      timeout_seconds=args.result_timeout, interval_seconds=args.poll_interval)
+                            order = publish_and_wait(
+                                client, case, wait_for_order, timeout_seconds=args.result_timeout,
+                                poll_seconds=args.poll_interval, on_publish=published_order,
                                 progress=lambda current, status, event: trace(
-                                    "order.poll", run_id=run_id, order_id=order_id,
+                                    "order.poll", run_id=run_id, order_id=run.get("order_id"),
                                     status=status or "UNKNOWN", last_event=event,
                                 ),
                             )
+                            order_id = run["order_id"]
                             trace("order.terminal", run_id=run_id, order_id=order_id, status=order.get("status"))
                             write_json(run_dir / "order.json", order)
+                            from evaluation.core.orders import results_from_order
+                            for evaluation_result in results_from_order(case, order, run_id):
+                                write_json(run_dir / "evaluation" / f"{evaluation_result.run_id}.json", evaluation_result.to_dict())
                             trace("score.start", run_id=run_id, order_id=order_id)
                             score = score_order(case, order)
                             costs = collect_costs(

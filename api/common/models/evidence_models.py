@@ -77,3 +77,4 @@ class EvidenceSearchResponseV2(BaseModel):
     evidences: List[dict] = Field(default_factory=list)
     cached: bool
     cache_key: str
+    evidence_bundle_hash: str | None = None

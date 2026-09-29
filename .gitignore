@@ -67,3 +67,5 @@ tests/llm-benchmark/artifacts/
 /tests/frontend/e2e/artifacts/
 /tests/llm-benchmark/artifacts/
 /tests/resources/historical-stats/
+
+/tests/evaluation/artifacts/

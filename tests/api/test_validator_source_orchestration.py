@@ -203,3 +203,34 @@ def test_rag_external_strategy_skips_router(validator, monkeypatch, strategy):
     assert len(calls) == 1 and "evidence-search" in calls[0][0]
     assert calls[0][1]["search_policy"]["strategy"] == strategy
     assert calls[0][1]["search_policy"]["preferred_sources"] == []
+
+
+def test_production_handoff_can_be_replayed_with_identical_prompt(validator, monkeypatch):
+    from common.utils.evidence_bundle import evidence_bundle_hash
+    from evaluation.core.execution import execute, validator_config
+    from evaluation.core.orders import results_from_order
+    from evaluation.test_execution import case, gold_bundle, answer
+
+    dataset = case()
+    expected = dataset["assertions"][0]
+    bundle = gold_bundle(expected)
+    context = validator.json.dumps({"assertion": expected["pipeline_assertion"]})
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setattr(validator, "RAG_EVIDENCE_VALIDATION_PROMPT", validator.DEFAULT_RAG_PROMPT)
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (
+        bundle, {"evidences": bundle, "evidence_bundle_hash": evidence_bundle_hash(bundle)}))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: context)
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(verificar_asercion=lambda *args:
+        '{"resultado":"TRUE","descripcion":"example.org","confidence":"HIGH",'
+        '"evidence_used":[{"context_id":"gold-context-1","supports":true,"reason":"120 > 100"}]}'))
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="1", text=expected["text"]))
+    verdict, description, extras, response = validator.validate_payload_v2(payload)
+    order = {"assertions": [{"idAssertion": "1", "text": expected["text"]}],
+        "validations": {"1": {"v": {"execution_status": "COMPLETED", "approval": int(verdict),
+            "evidence_search_response": response, "evidence_validation": extras["evidence_validation"]}}}}
+    artifact = results_from_order(dataset, order)[0].to_dict()
+    result = execute(dataset, expected, validator_config("openrouter", "test"), "VALIDATOR_REPLAY",
+                     replay=artifact, template=validator.selected_validation_prompt(), complete_fn=answer)
+    assert not result.errors
+    assert result.validator_input["prompt_hash"] == response["validator_input"]["prompt_hash"]
+    assert result.validator_input["response_schema_hash"] == response["validator_input"]["response_schema_hash"]

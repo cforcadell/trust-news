@@ -1,4 +1,6 @@
 from typing import Annotated
+import logging
+from common.utils.evaluation_context import evaluation_context
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -13,8 +15,13 @@ def service(request: Request):
 
 
 @router.post("/resolve", response_model=ResolveRouteResponse)
-async def resolve_route(payload: ResolveRouteRequest, source_router=Depends(service)):
-    return await source_router.resolve(payload)
+async def resolve_route(payload: ResolveRouteRequest, source_router=Depends(service), request: Request = None):
+    cold, run_id = evaluation_context(request)
+    response = await source_router.resolve(payload, force_refresh=True) if cold else await source_router.resolve(payload)
+    if run_id:
+        logging.getLogger(__name__).info({"event": "evaluation.route", "run_id": run_id,
+                                         "route_key": response.route_key, "route_state": response.route_state, "cold": cold})
+    return response
 
 
 def stored_response(route) -> StoredRouteResponse:

@@ -9,12 +9,14 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from common.utils.evaluation_context import evaluation_context
 from motor.motor_asyncio import AsyncIOMotorClient
 from common.models.async_models import EvidenceSearchStrategy
 from common.models.evidence_models import EvidenceSearchRequestV2, EvidenceSearchResponseV2
 from common.routing_taxonomy import SourceType
 from common.search.normalization import normalize_domain, normalize_url
+from common.utils.evidence_bundle import evidence_bundle_hash
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
 
@@ -658,8 +660,11 @@ async def clear_cache():
 
 
 @app.post("/search/evidence", response_model=EvidenceSearchResponseV2)
-async def search_evidence(req: EvidenceSearchRequestV2):
+async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None):
     """Search for evidence supporting a validated assertion payload."""
+    cold, run_id = evaluation_context(request)
+    if run_id:
+        logger.info({"event": "evaluation.retrieval", "run_id": run_id, "assertion_id": str(req.assertion.assertion_id), "cold": cold})
     # Validate the minimum assertion text required to build any useful query.
     assertion = req.assertion.model_dump(mode="json")
     text = str(assertion.get("text") or "").strip()
@@ -688,10 +693,11 @@ async def search_evidence(req: EvidenceSearchRequestV2):
     now = utc_now()
 
     # Return a fresh cached response when one exists and has not expired.
-    if cache_collection is not None:
+    if cache_collection is not None and not cold:
         cached = await cache_collection.find_one({"cache_key": cache_key, "expires_at": {"$gt": now}}, {"_id": 0})
         if cached and cached.get("response"):
             response = dict(cached["response"])
+            response["evidence_bundle_hash"] = evidence_bundle_hash(response.get("evidences", []))
             response["cached"] = True
             response["cache_key"] = cache_key
             logger.info(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
@@ -799,6 +805,7 @@ async def search_evidence(req: EvidenceSearchRequestV2):
         "search_policy": effective_search_policy,
         "queries_executed": search_requests,
         "evidences": evidences,
+        "evidence_bundle_hash": evidence_bundle_hash(evidences),
         "cached": False,
         "cache_key": cache_key,
     }

@@ -67,5 +67,11 @@
         "secundaria"
       ]
     }
+  ],
+  "tags": [
+    "lang:es",
+    "jurisdiction:EU",
+    "temporal:historical",
+    "expected:decisive"
   ]
 }

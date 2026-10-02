@@ -75,6 +75,26 @@ def _fold_query_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def _query_tokens(value: Any) -> set[str]:
+    """Return lexical tokens used to avoid overweighting repeated query context."""
+    return set(re.findall(r"\w+|%", _fold_query_text(value), flags=re.UNICODE))
+
+
+def _dedupe_similar_queries(queries: List[str], similarity_threshold: float = 0.8) -> List[str]:
+    """Preserve query diversity while dropping exact and near-identical variants."""
+    selected: List[str] = []
+    selected_tokens: List[set[str]] = []
+    for query in queries:
+        tokens = _query_tokens(query)
+        if not tokens:
+            continue
+        if any(len(tokens & prior) / len(tokens | prior) >= similarity_threshold for prior in selected_tokens):
+            continue
+        selected.append(query)
+        selected_tokens.append(tokens)
+    return selected
+
+
 def _origin_rank(item: Dict[str, Any]) -> int:
     origin = str(item.get("origin") or "unknown").strip().lower()
     if origin == "explicit":
@@ -127,10 +147,18 @@ def contextual_query_terms(assertion: Dict[str, Any]) -> List[str]:
 
 
 def enrich_query_with_context(query: str, assertion: Dict[str, Any], max_terms: int = 8) -> str:
-    """Append missing assertion context to a provider query without replacing model suggestions."""
+    """Append only contextual words absent from a provider query."""
     query = str(query or "").strip()
-    folded_query = _fold_query_text(query)
-    missing = [term for term in contextual_query_terms(assertion) if _fold_query_text(term) not in folded_query]
+    query_tokens = _query_tokens(query)
+    missing: List[str] = []
+    for term in contextual_query_terms(assertion):
+        # A phrase such as "población España 2025" is already represented when
+        # its individual terms are in the suggestion, even if word order differs.
+        for token in re.findall(r"\w+|%", term, flags=re.UNICODE):
+            folded_token = _fold_query_text(token)
+            if folded_token and folded_token not in query_tokens:
+                missing.append(token)
+                query_tokens.add(folded_token)
     if not missing:
         return query
     suffix = " ".join(missing[:max_terms])
@@ -151,8 +179,8 @@ def base_queries_for_assertion(assertion: Dict[str, Any]) -> List[str]:
         base = " ".join(str(t).strip() for t in terms if str(t).strip())
         base_queries = [base] if base else [assertion.get("text", "")]
 
-    # Drop empty values so later planning only works with executable query strings.
-    return [q for q in base_queries if q]
+    # Keep paraphrases only when they carry materially different retrieval terms.
+    return _dedupe_similar_queries(base_queries)
 
 
 def _policy_value(policy: Any, name: str, default: Any = None) -> Any:

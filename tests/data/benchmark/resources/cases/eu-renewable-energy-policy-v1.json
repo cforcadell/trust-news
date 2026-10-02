@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "id": "eu-renewable-energy-policy-v1",
+  "title": "Energía renovable y objetivos de la Unión Europea",
+  "language": "es",
+  "description": "Recurso de benchmark con referencias oficiales de Eurostat y del Diario Oficial de la Unión Europea.",
+  "news": "En 2023, las renovables representaron aproximadamente una cuarta parte del consumo final bruto de energía de la Unión Europea. La directiva renovada fijó para 2030 un objetivo vinculante de al menos el 42,5 %, por lo que no existe un objetivo legal de alcanzar el 100 % en esa fecha.",
+  "tags": [
+    "lang:es",
+    "jurisdiction:EU",
+    "topic:energy",
+    "temporal:historical",
+    "evidence:official",
+    "expected:decisive"
+  ],
+  "assertions": [
+    {
+      "id": "EU_RENEWABLE_SHARE_2023",
+      "text": "En 2023, las energías renovables representaron el 24,5 % del consumo final bruto de energía de la Unión Europea.",
+      "expected_verdict": "TRUE",
+      "expected_topic_code": "ENERGY",
+      "expected_evidence_kind": "STATISTICAL_DATA",
+      "required_terms": ["2023", "renovables", "24,5", "consumo final", "Unión Europea"],
+      "acceptable_domains": ["ec.europa.eu"],
+      "reference_sources": [
+        {"id": "eurostat-renewables", "url": "https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Renewable_energy_statistics", "title": "Renewable energy statistics - Eurostat"}
+      ],
+      "reference_evidence": [
+        {"source": "eurostat-renewables", "relation": "SUPPORTS", "text": "In 2023, the share of energy from renewable sources in gross final energy consumption in the EU was 24.5%."}
+      ]
+    },
+    {
+      "id": "EU_RENEWABLE_TARGET_2030",
+      "text": "La Directiva de Energías Renovables revisada fija para 2030 un objetivo vinculante de al menos el 42,5 % de renovables en la Unión Europea.",
+      "expected_verdict": "TRUE",
+      "expected_topic_code": "ENERGY",
+      "expected_evidence_kind": "LEGAL_DOCUMENT",
+      "required_terms": ["Directiva", "renovables", "2030", "42,5", "vinculante"],
+      "acceptable_domains": ["eur-lex.europa.eu"],
+      "reference_sources": [
+        {"id": "red-iii", "url": "https://eur-lex.europa.eu/eli/dir/2023/2413/oj", "title": "Directive (EU) 2023/2413"}
+      ],
+      "reference_evidence": [
+        {"source": "red-iii", "relation": "SUPPORTS", "text": "Member States shall collectively ensure that the share of energy from renewable sources in the Union's gross final consumption of energy in 2030 is at least 42.5%."}
+      ]
+    },
+    {
+      "id": "EU_RENEWABLE_TARGET_100_2030",
+      "text": "La legislación de la Unión Europea obliga a que el 100 % del consumo energético sea renovable en 2030.",
+      "expected_verdict": "FALSE",
+      "expected_topic_code": "ENERGY",
+      "expected_evidence_kind": "LEGAL_DOCUMENT",
+      "required_terms": ["legislación", "100", "consumo energético", "renovable", "2030"],
+      "acceptable_domains": ["eur-lex.europa.eu"],
+      "reference_sources": [
+        {"id": "red-iii", "url": "https://eur-lex.europa.eu/eli/dir/2023/2413/oj", "title": "Directive (EU) 2023/2413"}
+      ],
+      "reference_evidence": [
+        {"source": "red-iii", "relation": "CONTRADICTS", "text": "Member States shall collectively ensure that the share of energy from renewable sources in the Union's gross final consumption of energy in 2030 is at least 42.5%."}
+      ]
+    }
+  ]
+}

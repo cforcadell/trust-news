@@ -12,11 +12,11 @@
 | [Guía de evaluación](tests/evaluation.md) y [benchmark LLM](tests/llm-benchmark.md) | Comandos, esquemas y significado de las métricas | Al cambiar el runner o su contrato |
 | Artefactos fechados | Entradas, revisión, configuración, órdenes, diagnósticos y resultados | En cada ejecución; no se sustituyen por un relato en estos tres documentos |
 
-No hace falta mover ni duplicar los ficheros históricos: las tres páginas de control tienen responsabilidades distintas. Los artefactos de `tests/evaluation/artifacts/` y `tests/frontend/e2e/artifacts/` están ignorados por Git; antes de usarlos para cerrar una incidencia hay que conservar una copia privada, íntegra y fechada, sin credenciales ni datos personales, con commit, dataset/hash y entorno.
+Los recursos y artefactos de pruebas se agrupan por tipo bajo `tests/data/`. Los artefactos de `tests/data/evaluation/artifacts/` y `tests/data/frontend-e2e/artifacts/` están ignorados por Git; antes de usarlos para cerrar una incidencia hay que conservar una copia privada, íntegra y fechada, sin credenciales ni datos personales, con commit, dataset/hash y entorno.
 
 ## Línea base: comportamiento observado
 
-La evaluación local `eu-official-statistics-2025-v1` del 2026-09-29 publicó tres órdenes LIGHT y guardó 27 registros de validador: tres afirmaciones, tres repeticiones y tres validadores. El manifiesto quedó en `RUNNING` por un fallo local al calcular el informe (`pydantic` ausente); se recuperaron `report.json` y `analysis/analysis.md` desde los resultados persistidos de la campaña `a205b295-d243-44c1-b3a8-ea0183bd8733` bajo `tests/evaluation/artifacts/`. Son artefactos locales ignorados por Git, no una campaña cerrada de aceptación.
+La evaluación local `eu-official-statistics-2025-v1` del 2026-09-29 publicó tres órdenes LIGHT y guardó 27 registros de validador: tres afirmaciones, tres repeticiones y tres validadores. El manifiesto quedó en `RUNNING` por un fallo local al calcular el informe (`pydantic` ausente); se recuperaron `report.json` y `analysis/analysis.md` desde los resultados persistidos de la campaña `a205b295-d243-44c1-b3a8-ea0183bd8733` bajo `tests/data/evaluation/artifacts/`. Son artefactos locales ignorados por Git, no una campaña cerrada de aceptación.
 
 | Observación | Lectura operativa |
 | --- | --- |
@@ -48,7 +48,7 @@ PYTHONPATH=tests python3 -m evaluation.pipeline --dataset RUTA_DATASET_V2 \
 PYTHONPATH=tests python3 -m evaluation.pipeline --dataset RUTA_DATASET_V2 \
   --mode full --publish --repetitions 3
 PYTHONPATH=tests python3 -m evaluation.pipeline \
-  --analyze tests/evaluation/artifacts/CAMPAIGN_ID
+  --analyze tests/data/evaluation/artifacts/CAMPAIGN_ID
 ```
 
 `--publish` crea órdenes y consume cuota. La campaña reproducible requiere servicios, credenciales, revisión efectiva del despliegue y proveedor disponibles; la ejecución offline de `--analyze` no. Véase la [guía de evaluación](tests/evaluation.md) para caché WARM/COLD, GOLD, autenticación, artefactos y límites de causalidad.

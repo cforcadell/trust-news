@@ -89,8 +89,8 @@ def load_datasets(paths: list[str], tags: list[str] | None = None) -> list[dict]
     for value in paths:
         path = Path(value)
         if not path.exists():
-            candidates = [ROOT / "tests/evaluation/datasets" / f"{value}.json",
-                          ROOT / "tests/llm-benchmark/resources/cases" / f"{value}.json"]
+            candidates = [ROOT / "tests/data/evaluation/resources/datasets" / f"{value}.json",
+                          ROOT / "tests/data/benchmark/resources/cases" / f"{value}.json"]
             path = next((p for p in candidates if p.is_file()), path)
         files = sorted(path.glob("*.json")) if path.is_dir() else [path]
         for file in files:

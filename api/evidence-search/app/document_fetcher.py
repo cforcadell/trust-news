@@ -1,4 +1,5 @@
 import re
+from io import BytesIO
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
@@ -10,9 +11,16 @@ try:
 except Exception:  # pragma: no cover - service image installs beautifulsoup4.
     BeautifulSoup = None
 
+try:
+    from pypdf import PdfReader
+except Exception:  # pragma: no cover - dependency is installed in the service image.
+    PdfReader = None
+
 
 HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
+PDF_CONTENT_TYPES = ("application/pdf", "application/x-pdf")
 REMOVE_SELECTORS = ("script", "style", "noscript", "svg", "form", "nav", "footer", "header")
+PDF_MAX_BYTES = 15 * 1024 * 1024
 
 
 @dataclass
@@ -69,8 +77,17 @@ def _fallback_extract_text(html: str) -> str:
     return _clean_text(text)
 
 
+def extract_pdf_text(content: bytes) -> str:
+    """Extract text from a PDF payload without invoking external binaries."""
+    if PdfReader is None:
+        raise RuntimeError("pdf_parser_unavailable")
+
+    reader = PdfReader(BytesIO(content))
+    return _clean_text(" ".join(page.extract_text() or "" for page in reader.pages))
+
+
 async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "TrustNewsEvidenceBot/1.0") -> FetchResult:
-    """Download HTML and return extracted text without raising endpoint-level errors."""
+    """Download HTML or PDF and return extracted text without raising endpoint-level errors."""
     parsed = urlparse(url or "")
     if parsed.scheme not in {"http", "https"}:
         return FetchResult(status="failed", error="unsupported_url_scheme")
@@ -88,10 +105,19 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
     content_type = (response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     if response.status_code >= 400:
         return FetchResult(status="failed", error=f"http_{response.status_code}", content_type=content_type)
-    if content_type not in HTML_CONTENT_TYPES:
+    if content_type in PDF_CONTENT_TYPES:
+        if len(response.content) > PDF_MAX_BYTES:
+            return FetchResult(status="failed", error="pdf_too_large", content_type=content_type)
+        try:
+            text = extract_pdf_text(response.content)
+        except RuntimeError as exc:
+            return FetchResult(status="failed", error=str(exc), content_type=content_type)
+        except Exception:
+            return FetchResult(status="failed", error="pdf_text_extraction_failed", content_type=content_type)
+    elif content_type in HTML_CONTENT_TYPES:
+        text = extract_main_text(response.text)
+    else:
         return FetchResult(status="failed", error="non_html_content_type", content_type=content_type)
-
-    text = extract_main_text(response.text)
     if not text:
         return FetchResult(status="empty_text", content_type=content_type)
     return FetchResult(status="ok", text=text, content_type=content_type)

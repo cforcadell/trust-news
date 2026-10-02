@@ -65,7 +65,7 @@ Validation checks for JSONs, modes, identities, and news files, without opening 
 node tests/frontend/e2e/run-regression.js --validate
 ```
 
-`manifest.json` and `summary.json` are written in `tests/frontend/e2e/artifacts/<run-id>/` and the process ends with zero code if the cases are valid.
+`manifest.json` and `summary.json` are written in `tests/data/frontend-e2e/artifacts/<run-id>/` and the process ends with zero code if the cases are valid.
 
 ## Run Light and Blockchain
 
@@ -140,7 +140,7 @@ Once idepotent hooks are configured, three comparable executions can be obtained
 ```bash
 for repetition in 1 2 3; do
   ASSERMETRY_RUN_ID="regression-${repetition}" \
-    ASSERMETRY_ARTIFACTS_DIR="tests/frontend/e2e/artifacts/regression-${repetition}" \
+    ASSERMETRY_ARTIFACTS_DIR="tests/data/frontend-e2e/artifacts/regression-${repetition}" \
     node tests/frontend/e2e/run-regression.js || break
 done
 ```
@@ -174,7 +174,7 @@ export ASSERMETRY_USERNAME=regression-alpha-user
 read -rsp "Password: " ASSERMETRY_PASSWORD
 export ASSERMETRY_PASSWORD
 
-ASSERMETRY_CASE_FILE=tests/frontend/e2e/resources/cases/light.json \
+ASSERMETRY_CASE_FILE=tests/data/frontend-e2e/resources/cases/light.json \
   node tests/frontend/e2e/ui-smoke-test.js
 
 unset ASSERMETRY_PASSWORD
@@ -190,7 +190,7 @@ Without `ASSERMETRY_CASE_FILE`, it uses `docs/fake_news/news.txt` and Light mode
 | `ASSERMETRY_CASES` | Light and Blockchain cases included | JSON list separated by commas. |
 | `ASSERMETRY_CASE_FILE` | Empty | Case used by the individual runner. |
 | `ASSERMETRY_RUN_ID` | Date and time | Execution identifier. |
-| `ASSERMETRY_ARTIFACTS_DIR` | `tests/frontend/e2e/artifacts/<run-id>` | Aggregate evidence. |
+| `ASSERMETRY_ARTIFACTS_DIR` | `tests/data/frontend-e2e/artifacts/<run-id>` | Aggregate evidence. |
 | `ASSERMETRY_ORG_ALPHA_USERNAME` | Obligatoria | User name of Light case. |
 | `ASSERMETRY_ORG_ALPHA_PASSWORD` | Obligatoria | Light case password; never reported. |
 | `ASSERMETRY_ORG_BETA_USERNAME` | Obligatoria | Pseudonymous user of Blockchain case. |

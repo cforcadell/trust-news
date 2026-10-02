@@ -13,12 +13,12 @@ The runner does not automatically discover or execute these files. To use them, 
 Before running a version:
 
     python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
-      --profile tests/llm-benchmark/resources/profiles/homologated/prod-openrouter-2026-09-24.json
+      --profile tests/data/benchmark/resources/profiles/homologated/prod-openrouter-2026-09-24.json
 
 To use it in the local benchmark:
 
     python3 tests/llm-benchmark/llm-benchmark.py run \
-      --profile tests/llm-benchmark/resources/profiles/homologated/prod-openrouter-2026-09-24.json \
+      --profile tests/data/benchmark/resources/profiles/homologated/prod-openrouter-2026-09-24.json \
       --repetitions 3 \
       --require-costs
 

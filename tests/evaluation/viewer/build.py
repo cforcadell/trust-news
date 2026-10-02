@@ -167,7 +167,12 @@ def _validation_stages(row):
     bundle = retrieval.get("evidences") or []
     fetch_failures = sum(s.get("fetch_status") in {"failed", "empty_text"} for s in bundle)
     citable = sum(c.get("citation_eligible") is True for s in bundle for c in s.get("contexts") or [])
-    if retrieval.get("status") == "COMPLETED":
+    if retrieval.get("search_skipped") == "no_eligible_local_sources":
+        evidence = _stage("SKIPPED", "SKIPPED", deepcopy(retrieval),
+                          [_check("ROUTER_NO_SOURCE", "SKIPPED",
+                                  "No se llamó a Evidence Search porque Router no entregó dominios elegibles.")],
+                          missing_reason="Router no entregó dominios elegibles; Evidence Search no se ejecutó.")
+    elif retrieval.get("status") == "COMPLETED":
         evidence_status = "FAIL" if not citable else "PARTIAL" if fetch_failures else "PASS"
         evidence_obs = deepcopy(retrieval)
         evidence_obs["reference_evidence"] = deepcopy(expected.get("reference_evidence") or [])
@@ -202,6 +207,14 @@ def _validation_stages(row):
                "usage": deepcopy(output.get("usage"))}
     if errors:
         llm = _stage("FAILED", "FAIL", llm_obs, [_check("TECHNICAL_ERROR", "FAIL", "La validación terminó con error.")])
+    elif audit.get("basis") == "ROUTER_NO_SOURCE":
+        llm = _stage("SKIPPED", "NOT_EVALUATED", llm_obs,
+                     [_check("ROUTER_NO_SOURCE", "NOT_EVALUATED",
+                             "No se llamó al LLM porque Router no entregó dominios elegibles.")])
+    elif audit.get("basis") == "NO_CITABLE_EVIDENCE":
+        llm = _stage("SKIPPED", "NOT_EVALUATED", llm_obs,
+                     [_check("NO_CITABLE_EVIDENCE", "NOT_EVALUATED",
+                             "No se llamó al LLM porque no había contextos citables.")])
     elif not verdict:
         llm = _stage("NOT_RECORDED", "NOT_EVALUATED", llm_obs, missing_reason="No hay veredicto guardado.")
     else:

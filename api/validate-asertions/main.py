@@ -339,6 +339,77 @@ class ValidationExecutionFailure(Exception):
         self.evidence_response = evidence_response
 
 
+def has_citable_evidence(evidences: List[Dict[str, Any]]) -> bool:
+    """A RAG verdict can only be requested when a citable context was delivered."""
+    return any(
+        context.get("citation_eligible") is True
+        for evidence in evidences if isinstance(evidence, dict)
+        for context in evidence.get("contexts") or [] if isinstance(context, dict)
+    )
+
+
+def no_citable_evidence_result(payload_v2: AssertionValidationPayloadV2) -> tuple[Validacion, str, Dict[str, Any]]:
+    """Create the deterministic abstention used when retrieval produced no citable context."""
+    issue = {
+        "code": "NO_CITABLE_EVIDENCE",
+        "message": "Evidence Search no entregó contextos citables al validador RAG.",
+    }
+    extras: Dict[str, Any] = {
+        "confidence": "LOW",
+        "sources": [],
+        "sources_declared": [],
+        "evidence_used": [],
+        "evidence_validation": {
+            "status": "NOT_REQUIRED",
+            "basis": "NO_CITABLE_EVIDENCE",
+            "original_verdict": "UNKNOWN",
+            "effective_verdict": "UNKNOWN",
+            "claimed_count": 0,
+            "verified_count": 0,
+            "rejected_count": 0,
+            "issues": [issue],
+        },
+    }
+    if evaluation_headers_for_payload(payload_v2):
+        extras["evaluation_citation_trace"] = {"claims": [], "issues": [issue]}
+    return (
+        Validacion.UNKNOWN,
+        "No se llamó al LLM: Evidence Search no entregó contextos citables para validar la afirmación.",
+        extras,
+    )
+
+
+def router_no_source_result(payload_v2: AssertionValidationPayloadV2) -> tuple[Validacion, str, Dict[str, Any]]:
+    """Create the deterministic abstention used when required local routing has no result."""
+    issue = {
+        "code": "ROUTER_NO_SOURCE",
+        "message": "Source Router no entregó dominios elegibles para la búsqueda local.",
+    }
+    extras: Dict[str, Any] = {
+        "confidence": "LOW",
+        "sources": [],
+        "sources_declared": [],
+        "evidence_used": [],
+        "evidence_validation": {
+            "status": "NOT_REQUIRED",
+            "basis": "ROUTER_NO_SOURCE",
+            "original_verdict": "UNKNOWN",
+            "effective_verdict": "UNKNOWN",
+            "claimed_count": 0,
+            "verified_count": 0,
+            "rejected_count": 0,
+            "issues": [issue],
+        },
+    }
+    if evaluation_headers_for_payload(payload_v2):
+        extras["evaluation_citation_trace"] = {"claims": [], "issues": [issue]}
+    return (
+        Validacion.UNKNOWN,
+        "No se llamó a Evidence Search ni al LLM: Source Router no entregó dominios elegibles.",
+        extras,
+    )
+
+
 def validation_error_details(failure: ValidationExecutionFailure) -> ValidationErrorDetails:
     cause = failure.cause
     response = getattr(cause, "response", None)
@@ -400,6 +471,22 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         logger.info("evidence_handoff assertion_id=%s retrieval_hash=%s validator_input_hash=%s",
                     payload_v2.assertion.assertion_id, evidence_response.get("evidence_bundle_hash"),
                     evidence_response["validator_input_evidence_bundle_hash"])
+    if (uses_evidence_search()
+            and evidence_response is not None
+            and evidence_response.get("search_skipped") == "no_eligible_local_sources"):
+        logger.info(
+            "[validate-asertions] downstream_skipped=true reason=ROUTER_NO_SOURCE assertion_id=%s",
+            payload_v2.assertion.assertion_id,
+        )
+        verdict, description, extras = router_no_source_result(payload_v2)
+        return verdict, description, extras, evidence_response
+    if uses_evidence_search() and not has_citable_evidence(evidences):
+        logger.info(
+            "[validate-asertions] llm_skipped=true reason=NO_CITABLE_EVIDENCE assertion_id=%s",
+            payload_v2.assertion.assertion_id,
+        )
+        verdict, description, extras = no_citable_evidence_result(payload_v2)
+        return verdict, description, extras, evidence_response
     try:
         result_text = ai_validator.verificar_asercion(
             payload_v2.assertion.text,

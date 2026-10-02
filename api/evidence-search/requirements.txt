@@ -8,4 +8,5 @@ pymongo<4.9
 PyYAML==6.0.2
 beautifulsoup4
 lxml
+pypdf==5.1.0
 rank-bm25

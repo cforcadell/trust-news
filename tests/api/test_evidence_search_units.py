@@ -18,6 +18,54 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 
 
+def test_pdf_text_extraction_uses_each_page_and_normalizes_whitespace(monkeypatch):
+    from app import document_fetcher
+
+    class Page:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self):
+            return self.text
+
+    class Reader:
+        def __init__(self, content):
+            assert content.read() == b"pdf bytes"
+            self.pages = [Page("  Primera\n página "), Page("Segunda   página")]
+
+    monkeypatch.setattr(document_fetcher, "PdfReader", Reader)
+    assert document_fetcher.extract_pdf_text(b"pdf bytes") == "Primera página Segunda página"
+
+
+@pytest.mark.asyncio
+async def test_pdf_content_is_extracted_and_non_pdf_behavior_is_unchanged(monkeypatch):
+    from app import document_fetcher
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "application/pdf"}
+        content = b"pdf bytes"
+        text = "not used"
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    monkeypatch.setattr(document_fetcher, "extract_pdf_text", lambda content: "Texto del PDF")
+    result = await document_fetcher.fetch_main_text("https://example.test/report.pdf")
+
+    assert result.status == "ok"
+    assert result.text == "Texto del PDF"
+    assert result.content_type == "application/pdf"
+
+
 def assertion():
     return {
         "assertion_id": 1,
@@ -74,6 +122,48 @@ def test_query_context_orders_explicit_before_inferred():
     query = evidence.base_queries_for_assertion(assertion())[0]
     assert query.index("2024") < query.index("INE")
     assert "estadistica oficial" in query
+
+
+def test_query_enrichment_does_not_repeat_context_words_in_different_order():
+    population = {
+        "context": {
+            "temporal_context": [{"value": "2025", "origin": "explicit"}],
+            "locations": [{"name": "España", "origin": "explicit"}],
+        },
+        "search_hints": {
+            "search_keywords": ["población España 2025 49 millones"],
+            "suggested_queries": ["población de España 2025 49 millones"],
+        },
+    }
+    assert evidence.enrich_query_with_context(
+        "Alemania inflación 2025 0%", {
+            "context": {
+                "temporal_context": [{"value": "2025", "origin": "explicit"}],
+                "locations": [{"name": "Alemania", "origin": "explicit"}],
+            },
+            "search_hints": {"search_keywords": ["inflación Alemania 2025 negativa"]},
+        },
+    ) == "Alemania inflación 2025 0% negativa"
+    assert evidence.enrich_query_with_context(
+        "población de España 2025 49 millones", population
+    ) == "población de España 2025 49 millones"
+
+
+def test_base_queries_drop_near_duplicate_suggestions():
+    population = {
+        "context": {
+            "temporal_context": [{"value": "2025", "origin": "explicit"}],
+            "locations": [{"name": "España", "origin": "explicit"}],
+        },
+        "search_hints": {
+            "search_keywords": ["población España 2025 49 millones"],
+            "suggested_queries": [
+                "población de España 2025 49 millones",
+                "España población 2025 49 millones",
+            ],
+        },
+    }
+    assert evidence.base_queries_for_assertion(population) == ["población de España 2025 49 millones"]
 
 
 def test_strategy_plans_are_explicit_and_have_no_local_fallback():

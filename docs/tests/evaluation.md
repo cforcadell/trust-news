@@ -1,5 +1,9 @@
 # Shared Assermetry Evaluation
 
+## Test data layout
+
+All test inputs and generated outputs live under `tests/data/<type>/`. Evaluation datasets are in `tests/data/evaluation/resources/datasets`; viewer fixtures are in `tests/data/evaluation/resources/viewer-fixtures`; campaigns and viewer-readable order diagnostics are in `tests/data/evaluation/artifacts`. Benchmark, frontend E2E, and historical statistics follow the same `resources` / `artifacts` split. Resources are versioned fixtures; artifacts are local, ignored output retained by run ID and must not be overwritten.
+
 LLM Benchmark answers which validator model or configuration performs best. Pipeline Evaluation answers where Assermetry fails and which recorded observations support that attribution. Both use `tests/evaluation/core` for datasets, execution, evidence bundles, deterministic matching, artifacts, and LIGHT order publishing/polling.
 
 The historical `tests/llm-benchmark/llm-benchmark.py` remains available for OpenRouter profile changes, SQLite history, estimated budgets, authentication, and restoration. Its new repetitions also export `repetition-NN/evaluation/<run_id>.json`. Public functions remain available in that script. Historical export works with the Python standard library only; URL and domain normalization is shared without loading search providers. V1 verdict aliases are normalized to `TRUE` or `FALSE` in evaluation artifacts.
@@ -15,7 +19,7 @@ python -m evaluation.pipeline --dataset eu-official-statistics-2025-v1 --mode fu
 
 | Flag | Meaning and accepted values |
 |---|---|
-| `--dataset ID_OR_PATH` | Dataset ID, JSON file, or directory. Repeat it to combine datasets. Required unless `--mode replay` supplies an artifact. Dataset IDs resolve in `tests/evaluation/datasets` and historical case resources. |
+| `--dataset ID_OR_PATH` | Dataset ID, JSON file, or directory. Repeat it to combine datasets. Required unless `--mode replay` supplies an artifact. Dataset IDs resolve in `tests/data/evaluation/resources/datasets` and benchmark case resources. |
 | `--tag FAMILY:VALUE` | Repeatable AND filter. A selected assertion must match every tag across its case and assertion tags. Tags are non-empty `family:value` strings. |
 | `--mode VALUE` | Execution mode: `full`, `gold-domains`, `gold-evidence`, or `replay`. Defaults to `gold-evidence` for LLM Benchmark and `full` for Pipeline Evaluation. |
 | `--model PROVIDER:MODEL` | Repeatable direct validator configuration. Providers are `openrouter`, `gemini`, `mistral`, or `grok`; model must be non-empty. Required for direct execution, forbidden with `--publish` or `--order`. |
@@ -32,7 +36,7 @@ python -m evaluation.pipeline --dataset eu-official-statistics-2025-v1 --mode fu
 | `--router-url URL` | Source Router URL for direct live modes; default `http://localhost:8075`. |
 | `--evidence-search-url URL` | Evidence Search URL for direct live modes; default `http://localhost:8074`. |
 | `--prompt-file PATH` | Specific RAG prompt template. Only its hash is persisted; replay rejects a different template before an LLM call. |
-| `--output PATH` | New artifact directory. It must not already exist. Defaults to a UUID directory below `tests/evaluation/artifacts`; with `--analyze`, it selects a new analysis directory. |
+| `--output PATH` | New artifact directory. It must not already exist. Defaults to a UUID directory below `tests/data/evaluation/artifacts`; with `--analyze`, it selects a new analysis directory. |
 | `--analyze CAMPAIGN_DIR` | Analyze saved run and order artifacts offline, without publishing orders or calling services or models. Writes `analysis.json` and `analysis.md` below `CAMPAIGN_DIR/analysis` unless `--output` is supplied. |
 | `--validate-only` | Validates datasets and tag selection without calling services or LLMs. |
 
@@ -53,7 +57,7 @@ python -m evaluation.llm_benchmark \
   --repetitions 3 --tag lang:es
 
 python -m evaluation.llm_benchmark --mode replay \
-  --replay-artifact tests/evaluation/artifacts/BATCH/RUN_ID.json \
+  --replay-artifact tests/data/evaluation/artifacts/BATCH/RUN_ID.json \
   --model gemini:MODEL_C
 
 python -m evaluation.pipeline --dataset /path/to/case-v2.json \
@@ -64,6 +68,8 @@ python -m evaluation.pipeline --dataset /path/to/case-v2.json \
 ```
 
 The synthetic fixture checks arithmetic and abstention only. Its URLs are not factual sources and it must not be used to certify factual quality. `--publish` uses the existing `ASSERMETRY_*` credentials and quota handling. It evaluates deployed validators with their actual reputation; use the historical CLI to compare complete configuration profiles.
+
+A RAG evidence validator is not sent to its LLM provider when Evidence Search completes without a citable context. It returns a deterministic `UNKNOWN` with `NO_CITABLE_EVIDENCE`; the viewer records the LLM stage as skipped, while preserving the retrieval response for diagnosis. In `LOCAL` mode Router is a required predecessor: if it returns no eligible domains, neither Evidence Search nor the LLM is called; the abstention is recorded as `ROUTER_NO_SOURCE`.
 
 A direct pipeline case may include `pipeline_assertion`, which must validate as the existing `EnrichedAssertion` model, commonly copied from an order. Extraction is then `NOT_EVALUATED`. With several directly selected Pipeline validators, the existing consensus algorithm uses explicit reputation `1` and current RAG weights; artifacts identify it as `evaluation_models_equal_reputation`.
 
@@ -153,7 +159,7 @@ Analyze an existing campaign, including a campaign left `RUNNING` by a reporting
 
 ```bash
 PYTHONPATH=tests python3 -m evaluation.pipeline \
-  --analyze tests/evaluation/artifacts/CAMPAIGN_ID
+  --analyze tests/data/evaluation/artifacts/CAMPAIGN_ID
 ```
 
 This creates `analysis/analysis.json` and `analysis/analysis.md` without changing the original manifest, run artifacts, orders, or reports. The analysis directory must be new; use `--output PATH` to select another new directory. The same flag is available from `evaluation.llm_benchmark`. It reads only recorded observations, so it needs no credentials, services, provider access, or `pydantic`.
@@ -180,7 +186,7 @@ El visor independiente de `web_classic` lee campañas nuevas con archivos `<pare
 
 ```bash
 PYTHONPATH=tests:api .venv/bin/python -m evaluation.viewer.server \
-  --artifacts-root tests/evaluation/artifacts --host 127.0.0.1 --port 8765
+  --artifacts-root tests/data/evaluation/artifacts --host 127.0.0.1 --port 8765
 ```
 
 Abrir `http://127.0.0.1:8765/`. Para crear el diagnóstico desde una orden guardada, usar `--order RUTA_A_LA_ORDEN --mode full --dataset ID_DEL_DATASET --output CARPETA_NUEVA` con `evaluation.pipeline`; `--publish` también emite el diagnóstico al guardar una orden nueva. Los artefactos anteriores no se migran. El contrato, rutas y límites están en [benchmark-viewer-contract.md](benchmark-viewer-contract.md); el avance por fases está en [benchmark-viewer-plan.md](benchmark-viewer-plan.md).

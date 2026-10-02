@@ -6,7 +6,7 @@ Archivos de la fase 0:
 
 - Esquema: `tests/evaluation/viewer/order-diagnostic-v1.schema.json`.
 - Validación de identidades y referencias: `tests/evaluation/viewer_contract.py`.
-- Muestra autocontenida: `tests/evaluation/viewer/fixtures/order-diagnostic-v1.json`.
+- Muestra autocontenida: `tests/data/evaluation/resources/viewer-fixtures/order-diagnostic-v1.json`.
 
 Las ejecuciones `--publish` y las importaciones `--order` publican `<parent_run_id>-viewer.json` junto a `<parent_run_id>-order.json` y los `<run_id>.json` existentes. La ruta se resolverá **dentro de la carpeta de campaña**; `artifact_refs` contiene rutas relativas a esa carpeta. El builder `tests/evaluation/viewer/build.py` escribe el JSON mediante la utilidad atómica de artefactos. La fixture ilustra el contrato: sus rutas relativas son ejemplos y no corresponden a archivos de orden reales.
 

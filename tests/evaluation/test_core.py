@@ -15,7 +15,7 @@ def resource():
 
 
 def test_old_datasets_load():
-    cases = load_datasets([str(ROOT / "tests/llm-benchmark/resources/cases")])
+    cases = load_datasets([str(ROOT / "tests/data/benchmark/resources/cases")])
     assert len(cases) == 2
 
 

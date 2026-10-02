@@ -44,15 +44,15 @@ It generates a plan with a maximum requested of 0.05 USD and a margin of 5%:
     python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
       --max-news-cost-usd 0.05 \
       --budget-headroom-percent 5 \
-      --output-root tests/llm-benchmark/artifacts/generated
+      --output-root tests/data/benchmark/artifacts/generated
 
 The maximum effective amount will be $0.0475. The command prints a path as:
 
-    LLM_PROFILE_PLAN tests/llm-benchmark/artifacts/generated/openrouter-plan-.../plan.json
+    LLM_PROFILE_PLAN tests/data/benchmark/artifacts/generated/openrouter-plan-.../plan.json
 
 Save that path to a variable:
 
-    export PLAN_PATH='tests/llm-benchmark/artifacts/generated/openrouter-plan-.../plan.json'
+    export PLAN_PATH='tests/data/benchmark/artifacts/generated/openrouter-plan-.../plan.json'
     export PLAN_DIR="$(dirname "$PLAN_PATH")"
 
 Check the accepted and discarded profiles:
@@ -67,7 +67,7 @@ Validation does not modify configuration or create commands:
 
     for profile in "$PLAN_DIR"/profiles/*.json; do
       python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
-        --case tests/llm-benchmark/resources/cases/eu-news-2025-v1.json \
+        --case tests/data/benchmark/resources/cases/eu-news-2025-v1.json \
         --profile "$profile"
     done
 
@@ -79,8 +79,8 @@ To compare quality, keep the Evidence Search cache during this first run:
       --profile-plan "$PLAN_PATH" \
       --repetitions 5 \
       --require-costs \
-      --artifacts-root tests/llm-benchmark/artifacts \
-      --database tests/llm-benchmark/artifacts/history.sqlite
+      --artifacts-root tests/data/benchmark/artifacts \
+      --database tests/data/benchmark/artifacts/history.sqlite
 
 The runner captures the configuration, applies each profile, checks the cost, executes commands in `LIGHT` mode and restores the initial configuration.
 
@@ -103,18 +103,18 @@ This option only cleans `evidence_search_cache_v2`. It does not remove domain pr
 List of saved executions:
 
     python3 tests/llm-benchmark/llm-benchmark.py list-runs \
-      --database tests/llm-benchmark/artifacts/history.sqlite \
+      --database tests/data/benchmark/artifacts/history.sqlite \
       --limit 30
 
 The reports are kept in:
 
-    tests/llm-benchmark/artifacts/<batch-id>/report.md
-    tests/llm-benchmark/artifacts/<batch-id>/summary.json
+    tests/data/benchmark/artifacts/<batch-id>/report.md
+    tests/data/benchmark/artifacts/<batch-id>/summary.json
 
 Compara dos ejecuciones concretas:
 
     python3 tests/llm-benchmark/llm-benchmark.py compare \
-      --database tests/llm-benchmark/artifacts/history.sqlite \
+      --database tests/data/benchmark/artifacts/history.sqlite \
       --baseline <run-id-base> \
       --candidate <run-id-candidato>
 

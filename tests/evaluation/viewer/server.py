@@ -135,7 +135,7 @@ def make_handler(root: Path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Browse saved evaluation orders locally")
-    parser.add_argument("--artifacts-root", type=Path, default=Path("tests/evaluation/artifacts"))
+    parser.add_argument("--artifacts-root", type=Path, default=Path("tests/data/evaluation/artifacts"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args(argv)

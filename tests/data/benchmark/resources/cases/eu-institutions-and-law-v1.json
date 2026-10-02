@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "id": "eu-institutions-and-law-v1",
+  "title": "Instituciones y legislación de la Unión Europea",
+  "language": "es",
+  "description": "Recurso de benchmark con referencias oficiales. Las afirmaciones se usan únicamente para evaluar el pipeline.",
+  "news": "La Unión Europea está formada por 27 países. Tras las elecciones europeas de 2024, el Parlamento Europeo cuenta con 720 diputados. Además, el Reglamento General de Protección de Datos se aplica desde 2018, no desde 2020.",
+  "tags": [
+    "lang:es",
+    "jurisdiction:EU",
+    "topic:institutions",
+    "temporal:historical",
+    "evidence:official",
+    "expected:decisive"
+  ],
+  "assertions": [
+    {
+      "id": "EU_MEMBER_STATES_27",
+      "text": "La Unión Europea está formada por 27 países miembros.",
+      "expected_verdict": "TRUE",
+      "expected_topic_code": "POLITICS",
+      "expected_evidence_kind": "OFFICIAL_STATEMENT",
+      "required_terms": ["Unión Europea", "27", "países", "miembros"],
+      "acceptable_domains": ["european-union.europa.eu"],
+      "reference_sources": [
+        {"id": "eu-countries", "url": "https://european-union.europa.eu/principles-countries-history/country-profiles_en", "title": "Country profiles - European Union"}
+      ],
+      "reference_evidence": [
+        {"source": "eu-countries", "relation": "SUPPORTS", "text": "The European Union is made up of 27 countries."}
+      ]
+    },
+    {
+      "id": "EU_PARLIAMENT_720_MEPS",
+      "text": "El Parlamento Europeo cuenta con 720 diputados tras las elecciones europeas de 2024.",
+      "expected_verdict": "TRUE",
+      "expected_topic_code": "POLITICS",
+      "expected_evidence_kind": "OFFICIAL_STATEMENT",
+      "required_terms": ["Parlamento Europeo", "720", "diputados", "2024"],
+      "acceptable_domains": ["europarl.europa.eu"],
+      "reference_sources": [
+        {"id": "ep-composition", "url": "https://www.europarl.europa.eu/about-parliament/en/organisation-and-rules/organisation/members", "title": "Members - European Parliament"}
+      ],
+      "reference_evidence": [
+        {"source": "ep-composition", "relation": "SUPPORTS", "text": "The European Parliament has 720 Members elected in the 27 Member States of the European Union."}
+      ]
+    },
+    {
+      "id": "GDPR_APPLIED_2020",
+      "text": "El Reglamento General de Protección de Datos comenzó a aplicarse en 2020.",
+      "expected_verdict": "FALSE",
+      "expected_topic_code": "LAW",
+      "expected_evidence_kind": "LEGAL_DOCUMENT",
+      "required_terms": ["Reglamento General de Protección de Datos", "aplicarse", "2020"],
+      "acceptable_domains": ["commission.europa.eu"],
+      "reference_sources": [
+        {"id": "gdpr-commission", "url": "https://commission.europa.eu/law/law-topic/data-protection/data-protection-eu_en", "title": "Data protection in the EU - European Commission"}
+      ],
+      "reference_evidence": [
+        {"source": "gdpr-commission", "relation": "CONTRADICTS", "text": "The General Data Protection Regulation applies since 25 May 2018."}
+      ]
+    }
+  ]
+}

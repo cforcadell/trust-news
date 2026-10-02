@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 from evaluation.viewer.server import index_campaign, list_campaigns, make_handler
 
 
-FIXTURE = Path(__file__).parent / "viewer/fixtures/order-diagnostic-v1.json"
+FIXTURE = Path(__file__).resolve().parents[1] / "data/evaluation/resources/viewer-fixtures/order-diagnostic-v1.json"
 
 
 def _campaign(tmp_path):

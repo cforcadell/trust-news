@@ -41,7 +41,8 @@ def answer(provider, request):
 
 def run(mode="GOLD_EVIDENCE", **kwargs):
     dataset = case()
-    return execute(dataset, dataset["assertions"][0], CONFIG, mode, complete_fn=answer, **kwargs)
+    kwargs.setdefault("complete_fn", answer)
+    return execute(dataset, dataset["assertions"][0], CONFIG, mode, **kwargs)
 
 
 def test_gold_does_not_call_services_and_replays_identical_prompt():
@@ -111,10 +112,13 @@ def test_counterfactual_attribution_with_same_assertion_and_configuration():
     services.route.return_value = {"sources": [], "route_state": "MISSING"}
     bundle = gold_bundle(case()["assertions"][0])
     services.retrieve.return_value = {"evidences": bundle, "cached": False, "evidence_bundle_hash": evidence_bundle_hash(bundle)}
-    rows = [run(mode, services=services).to_dict() for mode in ("FULL_PIPELINE", "GOLD_DOMAINS", "GOLD_EVIDENCE")]
+    llm = Mock(side_effect=answer)
+    rows = [run(mode, services=services, complete_fn=llm).to_dict() for mode in ("FULL_PIPELINE", "GOLD_DOMAINS", "GOLD_EVIDENCE")]
     for row in rows:
         row["metrics"] = evaluate(row)
     assert rows[0]["metrics"]["validation"]["verdict"] == "UNKNOWN"
+    assert rows[0]["grounding"]["validation"]["basis"] == "ROUTER_NO_SOURCE"
+    assert llm.call_count == 2
     assert rows[1]["metrics"]["validation"]["correct"]
     assert diagnose(rows[0], rows)["code"] == "ROUTER_NO_SOURCE"
     assert rows[0]["assertion"] == rows[2]["assertion"]

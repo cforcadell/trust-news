@@ -2,7 +2,7 @@
 
 `tests/llm-benchmark/llm-benchmark.py` compares complete OpenRouter LLM configurations through the existing LIGHT order flow. It temporarily applies a profile, publishes a news item, stores immutable JSON artifacts, indexes results in SQLite, and restores the initial configuration. Do not run it against production: it changes the effective local configuration and consumes generation and validation quota.
 
-The default case is `tests/llm-benchmark/resources/cases/eu-news-2025-v1.json`. It measures assertion extraction and matching, category accuracy, aggregate and per-validator verdicts, RAG evidence use, completed responses, latency, and estimated module and total cost. The sample has four assertions; it is useful for regression checks, not for statistical conclusions. Run at least three repetitions, preferably five, and version a case rather than changing historical expectations.
+The default case is `tests/data/benchmark/resources/cases/eu-news-2025-v1.json`. It measures assertion extraction and matching, category accuracy, aggregate and per-validator verdicts, RAG evidence use, completed responses, latency, and estimated module and total cost. The sample has four assertions; it is useful for regression checks, not for statistical conclusions. Run at least three repetitions, preferably five, and version a case rather than changing historical expectations.
 
 ## Requirements and authentication
 
@@ -26,8 +26,8 @@ Validates the case and profile schemas without network access, credentials, conf
 
 ```bash
 python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
-  --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
-  --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json
+  --profile tests/data/benchmark/resources/profiles/current-openrouter.json \
+  --profile tests/data/benchmark/resources/profiles/example-balanced-openrouter.json
 ```
 
 | Flag | Meaning and accepted values |
@@ -44,7 +44,7 @@ python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
   --max-news-cost-usd 0.25 --budget-headroom-percent 10
 ```
 
-The default 5% headroom means a `0.25` cap accepts estimates up to `0.2375`. Plans are written below `tests/llm-benchmark/artifacts/generated/<plan-id>/` and include pricing, effective configuration, hashes, and deduplicated profiles.
+The default 5% headroom means a `0.25` cap accepts estimates up to `0.2375`. Plans are written below `tests/data/benchmark/artifacts/generated/<plan-id>/` and include pricing, effective configuration, hashes, and deduplicated profiles.
 
 | Flag | Meaning and accepted values |
 |---|---|
@@ -62,8 +62,8 @@ Runs one or more profiles sequentially in LIGHT mode. It locks the local host, c
 
 ```bash
 python3 tests/llm-benchmark/llm-benchmark.py run \
-  --profile tests/llm-benchmark/resources/profiles/current-openrouter.json \
-  --profile tests/llm-benchmark/resources/profiles/example-balanced-openrouter.json \
+  --profile tests/data/benchmark/resources/profiles/current-openrouter.json \
+  --profile tests/data/benchmark/resources/profiles/example-balanced-openrouter.json \
   --repetitions 5 --max-news-cost-usd 0.25 --require-costs
 ```
 
@@ -129,7 +129,7 @@ The historical CLI and SQLite reports remain supported. New historical repetitio
 Use `PYTHONPATH=tests python -m evaluation.llm_benchmark --mode gold-evidence` to compare validators on identical evidence, `--mode replay` to rerun a saved validator input, and `PYTHONPATH=tests python -m evaluation.pipeline` for stage diagnostics and controlled counterfactuals. Analyze a saved campaign from either runner without network calls or credentials:
 
 ```bash
-PYTHONPATH=tests python3 -m evaluation.pipeline --analyze tests/evaluation/artifacts/CAMPAIGN_ID
+PYTHONPATH=tests python3 -m evaluation.pipeline --analyze tests/data/evaluation/artifacts/CAMPAIGN_ID
 ```
 
 The command writes `analysis/analysis.json` and `analysis/analysis.md` in the campaign directory. It reports observations for each validation, including selected and retrieved sources, citation IDs, evidence handoff, verdicts, and technical errors. It marks routing or source relevance as `NOT_EVALUATED` when the dataset has no acceptable domain or reference annotations. See [Shared evaluation](evaluation.md) for output details, flags, v2 datasets, cache modes, hashes, and root-cause rules.

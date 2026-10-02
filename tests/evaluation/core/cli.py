@@ -114,7 +114,7 @@ def main(kind, argv=None):
             raise EvaluationError("Duplicate model; use --repetitions for stability runs")
         template = args.prompt_file.read_text(encoding="utf-8") if args.prompt_file else DEFAULT_RAG_PROMPT
         services = HttpServices(args.router_url, args.evidence_search_url)
-        output = args.output or ROOT / "tests/evaluation/artifacts" / str(uuid.uuid4())
+        output = args.output or ROOT / "tests/data/evaluation/artifacts" / str(uuid.uuid4())
         output.mkdir(parents=True, exist_ok=False)
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=False).stdout.strip()
         dirty = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, text=True, capture_output=True, check=False).stdout.strip()

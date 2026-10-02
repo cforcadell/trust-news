@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const state = {campaigns: [], campaign: null, orderList: null, diagnostic: null,
-  assertionId: null, runId: null, stage: "generation",
+  assertionId: null, runId: null, stage: "generation", view: "detail",
   filters: {caseId: "", validator: "", repetition: "", stage: "", code: ""}};
 const STAGES = [["generation", "Generate Assertions"], ["router", "Source Router"],
   ["evidence_search", "Evidence Search"], ["handoff", "Entrega"],
@@ -83,10 +83,15 @@ async function openOrder(file) {
     state.diagnostic = await api(`/api/campaigns/${enc(state.campaign)}/orders/${enc(file)}`);
     state.assertionId = state.diagnostic.order.assertions[0]?.assertion_id ?? null;
     state.runId = state.diagnostic.validations.find(v => v.assertion_id === state.assertionId)?.run_id ?? null;
-    state.stage = "generation"; renderOrders(); renderDetail();
+    state.stage = "generation"; state.view = "detail"; renderOrders(); renderDetail();
   } catch (error) { showError(error.message); }
 }
 function metric(value, label) { return add(el("div", "metric"), el("strong", "", value), el("span", "", label)); }
+function metricButton(value, label, onClick) {
+  const node = button("", onClick, "metric metric-button");
+  node.setAttribute("aria-label", `${value} ${label}`);
+  return add(node, el("strong", "", value), el("span", "", label));
+}
 function currentValidation() { return state.diagnostic?.validations.find(v => v.run_id === state.runId) ?? null; }
 function stageData() { return state.stage === "generation" ? state.diagnostic.order.generation : currentValidation()?.stages[state.stage]; }
 function selectAssertion(id) {
@@ -96,17 +101,98 @@ function selectAssertion(id) {
 }
 function selectRun(id) { state.runId = id; state.stage = "router"; renderDetail(); }
 
+function failureRows(diagnostic) {
+  const rows = [];
+  const assertions = new Map(diagnostic.order.assertions.map(item => [item.assertion_id, item]));
+  const generated = diagnostic.order.generation.observations?.generated_assertions || [];
+  function addStage(stage, stageKey, assertionId = null, validation = null) {
+    if (!stage || stage.assessment !== "FAIL") return;
+    const failedChecks = (stage.checks || []).filter(check => check.status === "FAIL");
+    const checks = failedChecks.length ? failedChecks : [{code: "MODULE_FAILED", detail: stage.missing_reason || "El módulo terminó con fallo."}];
+    for (const check of checks) {
+      let resolvedAssertionId = assertionId;
+      if (!resolvedAssertionId && stageKey === "generation") {
+        const ref = (check.observation_refs || []).find(value => /generated_assertions\/\d+$/.test(value));
+        const match = ref && ref.match(/(\d+)$/);
+        resolvedAssertionId = match ? generated[Number(match[1])]?.assertion_id : null;
+      }
+      const assertion = assertions.get(resolvedAssertionId);
+      rows.push({stageKey, assertionId: resolvedAssertionId,
+        assertionText: assertion?.text || generated.find(item => item.assertion_id === resolvedAssertionId)?.text || "—",
+        caseId: assertion?.expected_case_id || "—", validatorId: validation?.validator_id || "—",
+        runId: validation?.run_id || null, executionStatus: stage.execution_status,
+        assessment: stage.assessment, code: check.code || "—", detail: check.detail || "—"});
+    }
+  }
+  addStage(diagnostic.order.generation, "generation");
+  for (const validation of diagnostic.validations)
+    for (const [stageKey, stage] of Object.entries(validation.stages))
+      addStage(stage, stageKey, validation.assertion_id, validation);
+  return rows;
+}
+
+function renderViewTabs() {
+  const tabs = el("div", "view-tabs");
+  const detail = button("Detalle", () => { state.view = "detail"; renderDetail(); }, state.view === "detail" ? "active" : "");
+  const failures = button("Resumen de fallos", () => { state.view = "failures"; renderDetail(); }, state.view === "failures" ? "active" : "");
+  for (const [node, selected] of [[detail, state.view === "detail"], [failures, state.view === "failures"]]) {
+    node.setAttribute("role", "tab"); node.setAttribute("aria-selected", String(selected));
+  }
+  return add(tabs, detail, failures);
+}
+
+function openFailure(row) {
+  state.view = "detail";
+  if (row.assertionId) state.assertionId = row.assertionId;
+  state.runId = row.runId || (row.assertionId ? state.diagnostic.validations.find(item => item.assertion_id === row.assertionId)?.run_id : null);
+  state.stage = row.stageKey;
+  renderDetail();
+}
+
+function renderFailureSummary(diagnostic) {
+  const rows = failureRows(diagnostic).filter(row =>
+    (!state.filters.caseId || row.caseId === state.filters.caseId) &&
+    (!state.filters.validator || row.validatorId === state.filters.validator) &&
+    (!state.filters.stage || row.stageKey === state.filters.stage) &&
+    (!state.filters.code || row.code === state.filters.code));
+  const modules = new Set(rows.map(row => row.stageKey === "generation" ? "generation/order" :
+    `${row.stageKey}/${row.assertionId || "order"}/${row.runId || "order"}`));
+  const card = add(el("section", "card"), el("h2", "", "Resumen de fallos"),
+    el("p", "muted", `${modules.size} módulos con fallo · ${rows.length} comprobaciones fallidas. Selecciona una fila para abrir su contexto.`));
+  if (!rows.length) return add(card, el("p", "muted", "No hay fallos que coincidan con los filtros actuales."));
+  const wrap = el("div", "table-wrap"), table = el("table", "failure-table"), head = el("tr"), body = el("tbody");
+  for (const label of ["Módulo", "Aserción", "Caso", "Validador", "Estado", "Código", "Detalle"])
+    add(head, el("th", "", label));
+  for (const row of rows) {
+    const module = STAGES.find(([key]) => key === row.stageKey)?.[1] || row.stageKey;
+    const tableRow = add(el("tr", "clickable-row"), el("td", "", module), el("td", "", row.assertionText),
+      el("td", "", row.caseId), el("td", "mono", row.validatorId), add(el("td"), pill(row.assessment)),
+      el("td", "mono", row.code), el("td", "", row.detail));
+    tableRow.tabIndex = 0;
+    tableRow.title = "Abrir el contexto de este fallo";
+    tableRow.addEventListener("click", () => openFailure(row));
+    tableRow.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openFailure(row); }
+    });
+    add(body, tableRow);
+  }
+  add(table, add(el("thead"), head), body); add(wrap, table); return add(card, wrap);
+}
+
 function renderDetail() {
   const d = state.diagnostic; const main = clear($("main"));
   add(main, el("div", "eyebrow", `${d.identity.campaign_id} / ${d.identity.dataset_id}`),
     el("h1", "", `Orden ${d.identity.order_id}`),
     el("p", "muted", `Repetición ${d.identity.repetition} · ${d.order.status}`));
   const metrics = el("div", "summary");
+  const failedModules = (d.order.generation.assessment === "FAIL" ? 1 : 0) + d.validations.reduce((n, validation) =>
+    n + Object.values(validation.stages).filter(stage => stage.assessment === "FAIL").length, 0);
   add(metrics, metric(d.order.assertions.length, "afirmaciones"),
     metric(d.validations.length, "validaciones"),
-    metric(d.validations.reduce((n, v) => n + Object.values(v.stages).filter(s => s.assessment === "FAIL").length, 0), "módulos con fallos"));
-  add(main, metrics, renderFilters());
+    metricButton(failedModules, "módulos con fallos", () => { state.view = "failures"; renderDetail(); }));
+  add(main, metrics, renderViewTabs(), renderFilters());
   const problems = errorBlock(state.orderList?.errors); if (problems) add(main, problems);
+  if (state.view === "failures") { add(main, renderFailureSummary(d)); return; }
   const layout = el("div", "grid"); const left = el("div", "stack");
   const originals = add(el("section", "card"), el("h2", "", "Texto original"), el("p", "", d.order.original_text));
   const choices = add(el("section", "card"), el("h2", "", "Afirmaciones"));

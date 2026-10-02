@@ -35,9 +35,9 @@ from evaluation.core.common_metrics import (
 )
 
 TEST_ROOT = ROOT / "tests" / "llm-benchmark"
-DEFAULT_CASE = TEST_ROOT / "resources/cases/eu-news-2025-v1.json"
-DEFAULT_PROFILE = TEST_ROOT / "resources/profiles/current-openrouter.json"
-DEFAULT_ARTIFACTS = TEST_ROOT / "artifacts"
+DEFAULT_CASE = ROOT / "tests/data/benchmark/resources/cases/eu-news-2025-v1.json"
+DEFAULT_PROFILE = ROOT / "tests/data/benchmark/resources/profiles/current-openrouter.json"
+DEFAULT_ARTIFACTS = ROOT / "tests/data/benchmark/artifacts"
 DEFAULT_DATABASE = DEFAULT_ARTIFACTS / "history.sqlite"
 DEFAULT_GENERATED_PLANS = DEFAULT_ARTIFACTS / "generated"
 TERMINAL_OK = {"VALIDATED", "VALIDATED_WITH_ERRORS"}

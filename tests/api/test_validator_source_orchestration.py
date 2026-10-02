@@ -74,6 +74,27 @@ def test_unverified_opinion_preserves_audit_without_decisive_vote(validator, mon
     assert response["evidences"] == sources
 
 
+def test_rag_skips_llm_when_retrieval_has_no_citable_context(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    sources = [{"source_id": "source-1", "url": "https://example.test/report", "contexts": [],
+                "fetch_status": "failed"}]
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (sources, {"evidences": sources}))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(
+        verificar_asercion=lambda *args: pytest.fail("the LLM must not be called without citable evidence")
+    ))
+
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmacion"))
+    verdict, description, extras, response = validator.validate_payload_v2(payload)
+
+    assert verdict == validator.Validacion.UNKNOWN
+    assert "No se llamó al LLM" in description
+    assert extras["evidence_used"] == []
+    assert extras["evidence_validation"]["basis"] == "NO_CITABLE_EVIDENCE"
+    assert extras["evidence_validation"]["issues"][0]["code"] == "NO_CITABLE_EVIDENCE"
+    assert response["evidences"] == sources
+
+
 @pytest.mark.parametrize("validator_type", [1, 2, 4])
 def test_non_rag_calls_neither_dependency(validator, monkeypatch, validator_type):
     monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType(validator_type))
@@ -163,6 +184,50 @@ def test_rag_local_calls_router_then_evidence(validator, monkeypatch, diagnostic
     assert evidences == [{"url": "https://idescat.cat/data"}]
     assert response["route"]["diagnostic_code"] == diagnostic
     assert response["route"]["diagnostics"]["failed_domains"] == (["bad.example"] if diagnostic else [])
+
+
+def test_rag_local_stops_when_router_returns_no_sources(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
+    calls = []
+
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"route_key": "k", "route_state": "MISSING", "sources": []}
+
+    def post(url, json, timeout):
+        calls.append(url)
+        assert "source-router" in url
+        return Response()
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    evidences, response = validator.fetch_evidences_for_payload(minimal_payload())
+
+    assert evidences == []
+    assert len(calls) == 1
+    assert response["search_skipped"] == "no_eligible_local_sources"
+    assert response["route"]["sources"] == []
+
+
+def test_rag_local_returns_router_no_source_without_calling_llm(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
+    response = {"route": {"sources": []}, "evidences": [],
+                "search_skipped": "no_eligible_local_sources"}
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: ([], response))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(
+        verificar_asercion=lambda *args: pytest.fail("the LLM must not be called without routed sources")
+    ))
+
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmacion"))
+    verdict, description, extras, saved_response = validator.validate_payload_v2(payload)
+
+    assert verdict == validator.Validacion.UNKNOWN
+    assert "Evidence Search ni al LLM" in description
+    assert extras["evidence_validation"]["basis"] == "ROUTER_NO_SOURCE"
+    assert extras["evidence_validation"]["issues"][0]["code"] == "ROUTER_NO_SOURCE"
+    assert saved_response is response
 
 
 def test_source_router_http_status_is_preserved_as_retryable(validator, monkeypatch):

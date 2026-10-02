@@ -50,7 +50,7 @@ Una búsqueda servida desde caché mostrará el plan y el resultado cacheado con
 
 **Implementado:** `tests/evaluation/viewer/server.py` indexa carpetas de campaña y sirve diagnósticos y artefactos bajo demanda; `static/index.html`, `app.js` y `style.css` permiten seleccionar campaña, orden, afirmación, validador y etapa, ver estados, comprobaciones y JSON. Un archivo de diagnóstico mal formado aparece como error sin ocultar las demás órdenes. Una referencia a un artefacto ausente muestra error al abrirla.
 
-**Verificado:** 9 pruebas de contrato/servidor pasan; `node --check` y compilación sintáctica Python pasan. Limitación actual: la interfaz no se ha probado aún en navegador real y el runner todavía no emite diagnósticos `order-diagnostic-v1`; la fase 2 empezará esa integración. Comando local: `PYTHONPATH=tests python3 -m evaluation.viewer.server --artifacts-root tests/evaluation/artifacts`.
+**Verificado:** 9 pruebas de contrato/servidor pasan; `node --check` y compilación sintáctica Python pasan. Limitación actual: la interfaz no se ha probado aún en navegador real y el runner todavía no emite diagnósticos `order-diagnostic-v1`; la fase 2 empezará esa integración. Comando local: `PYTHONPATH=tests python3 -m evaluation.viewer.server --artifacts-root tests/data/evaluation/artifacts`.
 
 ### Fase 2 — Diagnóstico de Generate Assertions · Completada
 

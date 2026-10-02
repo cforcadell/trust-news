@@ -137,36 +137,52 @@ def execute(dataset, expected, config, mode="GOLD_EVIDENCE", *, services=None,
             raise EvaluationError("Replay prompt differs; provide the original template and context")
         notify("validator_input.prepared", evidence_count=len(bundle),
                evidence_bundle_hash=input_hash)
-        stage = "VALIDATION"
-        notify("validation.start")
-        from common.llm import LLMRequest, complete, parse_response
-        from common.models.async_models import RAGValidatorAPIResponse
-        from common.utils.evidence import evaluate_evidence_grounding
-        request = LLMRequest(prompt=prompt, model=config["model"], temperature=config["temperature"],
-                             response_model=RAGValidatorAPIResponse)
-        result.validator_input["response_schema_hash"] = sha256_text(canonical_json(request.response_schema))
-        if replay and replay["validator_input"].get("response_schema_hash") not in (None, result.validator_input["response_schema_hash"]):
-            raise EvaluationError("Replay response contract differs")
-        t = time.monotonic()
-        try:
-            response = (complete_fn or complete)(config["provider"], request)
-            # Persist only a safe, structured response; never raw provider metadata.
-            parsed = parse_response(request, response)
-        finally:
-            result.timings["validation_seconds"] = time.monotonic() - t
-        result.validator_output = parsed.model_dump(mode="json")
-        result.validator_output["resolved_provider"] = response.provider
-        result.validator_output["resolved_model"] = response.model
-        result.validator_output["usage"] = response.usage.model_dump() if response.usage else None
-        notify("validation.complete", provider=response.provider, model=response.model,
-               seconds=round(result.timings["validation_seconds"], 6))
-        stage = "GROUNDING"
-        notify("grounding.start")
-        result.grounding = evaluate_evidence_grounding(parsed.resultado, result.validator_output["evidence_used"],
-                                                      bundle, require_grounding=True)
-        result.validator_output["effective_verdict"] = result.grounding["effective_verdict"]
-        notify("grounding.complete", effective_verdict=result.validator_output["effective_verdict"],
-               status=result.grounding.get("validation", {}).get("basis"))
+        if (mode == "FULL_PIPELINE"
+                and result.retrieval.get("search_skipped") == "no_eligible_local_sources"):
+            # LOCAL routing is a required dependency.  Do not turn an empty route
+            # into an unsupported LLM request: retain the abstention and its cause.
+            issue = {"code": "ROUTER_NO_SOURCE",
+                     "message": "Source Router no entregó dominios elegibles para la búsqueda local."}
+            result.validator_output = {"resultado": "UNKNOWN", "effective_verdict": "UNKNOWN",
+                                       "evidence_used": []}
+            result.grounding = {"validation": {
+                "status": "NOT_REQUIRED", "basis": "ROUTER_NO_SOURCE",
+                "original_verdict": "UNKNOWN", "effective_verdict": "UNKNOWN",
+                "claimed_count": 0, "verified_count": 0, "rejected_count": 0,
+                "issues": [issue],
+            }}
+            notify("validation.skipped", reason="ROUTER_NO_SOURCE")
+        else:
+            stage = "VALIDATION"
+            notify("validation.start")
+            from common.llm import LLMRequest, complete, parse_response
+            from common.models.async_models import RAGValidatorAPIResponse
+            from common.utils.evidence import evaluate_evidence_grounding
+            request = LLMRequest(prompt=prompt, model=config["model"], temperature=config["temperature"],
+                                 response_model=RAGValidatorAPIResponse)
+            result.validator_input["response_schema_hash"] = sha256_text(canonical_json(request.response_schema))
+            if replay and replay["validator_input"].get("response_schema_hash") not in (None, result.validator_input["response_schema_hash"]):
+                raise EvaluationError("Replay response contract differs")
+            t = time.monotonic()
+            try:
+                response = (complete_fn or complete)(config["provider"], request)
+                # Persist only a safe, structured response; never raw provider metadata.
+                parsed = parse_response(request, response)
+            finally:
+                result.timings["validation_seconds"] = time.monotonic() - t
+            result.validator_output = parsed.model_dump(mode="json")
+            result.validator_output["resolved_provider"] = response.provider
+            result.validator_output["resolved_model"] = response.model
+            result.validator_output["usage"] = response.usage.model_dump() if response.usage else None
+            notify("validation.complete", provider=response.provider, model=response.model,
+                   seconds=round(result.timings["validation_seconds"], 6))
+            stage = "GROUNDING"
+            notify("grounding.start")
+            result.grounding = evaluate_evidence_grounding(parsed.resultado, result.validator_output["evidence_used"],
+                                                          bundle, require_grounding=True)
+            result.validator_output["effective_verdict"] = result.grounding["effective_verdict"]
+            notify("grounding.complete", effective_verdict=result.validator_output["effective_verdict"],
+                   status=result.grounding.get("validation", {}).get("basis"))
     except Exception as exc:
         # Provider exception bodies can contain request credentials. Store type/stage only.
         code = "INVALID_RESPONSE" if type(exc).__name__ in {"LLMResponseError", "ValidationError"} and stage == "VALIDATION" else "TECHNICAL_ERROR"

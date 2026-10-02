@@ -54,12 +54,12 @@ Unlike the E2E regression, this batch does score the extraction quality and verd
 
 [`tests/frontend/e2e/run-regression.js`](../../tests/frontend/e2e/run-regression.js) executes two scenarios sequentially through Chrome DevTools Protocol:
 
-- [`light.json`](../../tests/frontend/e2e/resources/cases/light.json): Requires a LIGHT command
+- [`light.json`](../../tests/data/frontend-e2e/resources/cases/light.json): Requires a LIGHT command
 terminal, assertions, validations and the disabled IPFS tab.
-- [`blockchain.json`](../../tests/frontend/e2e/resources/cases/blockchain.json): requires a
+- [`blockchain.json`](../../tests/data/frontend-e2e/resources/cases/blockchain.json): requires a
 BLOCKCHAIN terminal command, `cid`, `post_id`, `tx_hash` and IPFS tab.
 
-The two scenarios currently use the same synthetic multi-affirmation text ([`light-news.txt`](../../tests/frontend/e2e/resources/cases/light-news.txt) and [`blockchain-news.txt`](../../tests/frontend/e2e/resources/cases/blockchain-news.txt)). It is a news story with four independent statements, concerning vaccination in Sweden, energy transition in Germany, tourism access in Italy and teaching foreign languages in Spain. These files are the source of truth of the entry; the currently documented text is:
+The two scenarios currently use the same synthetic multi-affirmation text ([`light-news.txt`](../../tests/data/frontend-e2e/resources/cases/light-news.txt) and [`blockchain-news.txt`](../../tests/data/frontend-e2e/resources/cases/blockchain-news.txt)). It is a news story with four independent statements, concerning vaccination in Sweden, energy transition in Germany, tourism access in Italy and teaching foreign languages in Spain. These files are the source of truth of the entry; the currently documented text is:
 
 ```text
 En 2025, Suecia reforzó sus programas públicos de vacunación infantil tras una

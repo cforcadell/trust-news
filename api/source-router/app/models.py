@@ -203,6 +203,7 @@ class ResolveRouteResponse(BaseModel):
     degraded: bool = False
     diagnostic_code: RouteDiagnosticCode | None = None
     diagnostics: RouteDiagnostics = Field(default_factory=RouteDiagnostics)
+    evaluation_trace: dict[str, Any] | None = None
 
 
 class StoredRouteResponse(RouteDocument):

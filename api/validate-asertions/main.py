@@ -425,6 +425,13 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         claimed_evidence = declared_sources
     elif not documentary_validator:
         claimed_evidence = claimed_evidence or declared_sources
+    if evaluation_headers_for_payload(payload_v2):
+        extras["evaluation_citation_trace"] = {"claims": [
+            {"source_id": item.get("source_id"), "context_id": item.get("context_id"),
+             "supports": item.get("supports")}
+            if isinstance(item, dict) else {"invalid_item_type": type(item).__name__}
+            for item in claimed_evidence
+        ] if isinstance(claimed_evidence, list) else []}
     grounding = evaluate_evidence_grounding(
         verdict,
         claimed_evidence,
@@ -438,6 +445,8 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
     extras["sources_declared"] = declared_sources if uses_online_search() else []
     extras["evidence_used"] = grounding["evidence_used"]
     extras["evidence_validation"] = grounding["validation"]
+    if "evaluation_citation_trace" in extras:
+        extras["evaluation_citation_trace"]["issues"] = grounding["validation"].get("issues", [])
     effective_verdict = Validacion[grounding["effective_verdict"]]
     if effective_verdict == Validacion.UNKNOWN and verdict in {Validacion.TRUE, Validacion.FALSE}:
         extras["evidence_validation"].update({
@@ -490,13 +499,33 @@ def source_route_payload(payload_v2: AssertionValidationPayloadV2) -> Dict[str, 
     }
 
 
+def evaluation_headers_for_payload(payload_v2: AssertionValidationPayloadV2) -> Dict[str, str]:
+    if (getattr(payload_v2, "mode", None) != ValidationMode.LIGHT
+            or os.getenv("EVALUATION_CAPTURE_PIPELINE", "false").lower() != "true"):
+        return {}
+    order_id = getattr(getattr(payload_v2, "correlation", None), "order_id", None)
+    try:
+        if not order_id:
+            return {}
+        headers = {"X-Evaluation-Run-ID": str(uuid.UUID(str(order_id)))}
+        if os.getenv("EVALUATION_CAPTURE_COLD", "false").lower() == "true":
+            headers["X-Evaluation-Cache"] = "COLD"
+        return headers
+    except (TypeError, ValueError):
+        return {}
+
+
 def resolve_local_sources(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     logger.info("[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling source-router before evidence-search")
     try:
+        request_options = {"timeout": 30.0}
+        headers = evaluation_headers_for_payload(payload_v2)
+        if headers:
+            request_options["headers"] = headers
         response = httpx.post(
             f"{SOURCE_ROUTER_URL.rstrip('/')}/routes/resolve",
             json=source_route_payload(payload_v2),
-            timeout=30.0,
+            **request_options,
         )
         response.raise_for_status()
         route = response.json()
@@ -523,7 +552,11 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
     }
     try:
         logger.info(f"[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling evidence-search")
-        resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, timeout=30.0)
+        request_options = {"timeout": 30.0}
+        headers = evaluation_headers_for_payload(payload_v2)
+        if headers:
+            request_options["headers"] = headers
+        resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, **request_options)
         resp.raise_for_status()
         response = resp.json()
         response.setdefault("search_policy", search_policy)
@@ -731,6 +764,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "sources_declared": extras.get("sources_declared", []),
             "evidence_used": extras.get("evidence_used", []),
             "evidence_validation": extras.get("evidence_validation"),
+            "evaluation_citation_trace": extras.get("evaluation_citation_trace"),
             "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
             "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,

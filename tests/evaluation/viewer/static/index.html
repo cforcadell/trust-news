@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Benchmark Viewer</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><strong>Benchmark Viewer</strong><span>Diagnóstico de órdenes guardadas</span></div>
+    <span class="local-label">Visor local · solo lectura</span>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Campañas y órdenes">
+      <h2>Campañas</h2>
+      <div id="campaigns" aria-live="polite"></div>
+      <h2>Órdenes</h2>
+      <div id="orders" aria-live="polite"></div>
+    </aside>
+    <main id="main">
+      <section class="empty"><h1>Selecciona una campaña</h1><p>Las órdenes de evaluación guardadas aparecerán aquí.</p></section>
+    </main>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

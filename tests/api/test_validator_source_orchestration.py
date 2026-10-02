@@ -234,3 +234,44 @@ def test_production_handoff_can_be_replayed_with_identical_prompt(validator, mon
     assert not result.errors
     assert result.validator_input["prompt_hash"] == response["validator_input"]["prompt_hash"]
     assert result.validator_input["response_schema_hash"] == response["validator_input"]["response_schema_hash"]
+
+
+def test_evaluation_headers_apply_only_to_light_orders(validator, monkeypatch):
+    order_id = "123e4567-e89b-12d3-a456-426614174000"
+    payload = SimpleNamespace(mode=validator.ValidationMode.LIGHT,
+                              correlation=SimpleNamespace(order_id=order_id))
+    monkeypatch.setenv("EVALUATION_CAPTURE_PIPELINE", "true")
+    monkeypatch.setenv("EVALUATION_CAPTURE_COLD", "true")
+    assert validator.evaluation_headers_for_payload(payload) == {
+        "X-Evaluation-Run-ID": order_id, "X-Evaluation-Cache": "COLD"}
+    payload.mode = validator.ValidationMode.BLOCKCHAIN
+    assert validator.evaluation_headers_for_payload(payload) == {}
+    payload.mode = validator.ValidationMode.LIGHT
+    monkeypatch.delenv("EVALUATION_CAPTURE_PIPELINE")
+    assert validator.evaluation_headers_for_payload(payload) == {}
+
+
+def test_evaluation_headers_reach_router_and_evidence_search(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
+    monkeypatch.setenv("EVALUATION_CAPTURE_PIPELINE", "true")
+    monkeypatch.setenv("EVALUATION_CAPTURE_COLD", "true")
+    payload = minimal_payload()
+    payload.mode = validator.ValidationMode.LIGHT
+    payload.correlation = SimpleNamespace(order_id="123e4567-e89b-12d3-a456-426614174000")
+    calls = []
+
+    class Response:
+        def __init__(self, body): self.body = body
+        def raise_for_status(self): return None
+        def json(self): return self.body
+
+    def post(url, json, **kwargs):
+        calls.append((url, kwargs.get("headers")))
+        return Response({"sources": [routed_source()]}) if "source-router" in url else Response({"evidences": []})
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    validator.fetch_evidences_for_payload(payload)
+    assert len(calls) == 2
+    assert calls[0][1] == calls[1][1] == {
+        "X-Evaluation-Run-ID": payload.correlation.order_id, "X-Evaluation-Cache": "COLD"}

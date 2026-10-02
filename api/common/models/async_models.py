@@ -297,10 +297,27 @@ class GenerateAssertionsRequest(BaseModel):
     payload: GenerateAssertionsPayload
 
 
+class GenerationEvaluationTrace(BaseModel):
+    """Operational diagnostics; never embedded in the published assertions document."""
+
+    model_config = ConfigDict(extra="forbid")
+    provider: str
+    model: Optional[str] = None
+    temperature: float
+    config_version: int = 0
+    structured_attempts: int = 0
+    repair_used: bool = False
+    duration_seconds: float = 0.0
+    status: Literal["COMPLETED", "FAILED"]
+    error_type: Optional[str] = None
+    assertion_count: int = 0
+
+
 class AssertionGeneratedPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assertions_document: AssertionsDocumentV2
+    evaluation_trace: Optional[GenerationEvaluationTrace] = None
 
 
 class AssertionsGeneratedResponse(BaseModel):
@@ -314,6 +331,7 @@ class AssertionsNotGeneratedPayload(BaseModel):
     publisher: str
     error: str
     attempts: int
+    evaluation_trace: Optional[GenerationEvaluationTrace] = None
 
 
 class AssertionsNotGeneratedResponse(BaseModel):
@@ -532,6 +550,7 @@ class LightValidationResponsePayload(BaseModel):
     sources_declared: Optional[List[EvidenceItem]] = None
     evidence_used: Optional[List[EvidenceItem]] = None
     evidence_validation: Optional[Dict[str, Any]] = None
+    evaluation_citation_trace: Optional[Dict[str, Any]] = None
     assertion_validation_payload: Optional[Dict[str, Any]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
     search_policy: Optional[Dict[str, Any]] = None

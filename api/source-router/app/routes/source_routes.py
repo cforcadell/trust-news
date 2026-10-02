@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..models import ResolveRouteRequest, ResolveRouteResponse, StoredRouteResponse
 from ..repository import utc_now
+from ..query_builder import build_discovery_queries
+from ..signatures import build_route_signature
 
 router = APIRouter(prefix="/routes", tags=["source-routes"])
 
@@ -14,11 +16,39 @@ def service(request: Request):
     return request.app.state.source_router_service
 
 
-@router.post("/resolve", response_model=ResolveRouteResponse)
+@router.post("/resolve", response_model=ResolveRouteResponse, response_model_exclude_none=True)
 async def resolve_route(payload: ResolveRouteRequest, source_router=Depends(service), request: Request = None):
     cold, run_id = evaluation_context(request)
-    response = await source_router.resolve(payload, force_refresh=True) if cold else await source_router.resolve(payload)
+    trace = {} if run_id else None
     if run_id:
+        response = await source_router.resolve(payload, force_refresh=cold, evaluation_trace=trace)
+    else:
+        response = await source_router.resolve(payload, force_refresh=True) if cold else await source_router.resolve(payload)
+    if run_id:
+        planned = build_discovery_queries(build_route_signature(payload), payload)
+        executed = {item["query"]: item for item in trace.get("query_execution", [])}
+        response.evaluation_trace = {
+            **trace,
+            "run_id": run_id,
+            "decision_source": "cached_route" if response.route_state == "FRESH" else
+                               "stale_route" if response.stale_route_used else "recomputed_or_missing",
+            "cache_hit": response.route_state == "FRESH" or response.stale_route_used,
+            "planned_queries": [{"query": query, "executed": query in executed,
+                                 "status": executed[query]["status"] if query in executed else "NOT_EXECUTED"}
+                                for query in planned],
+            "execution_detail": "CAPTURED" if trace.get("query_execution") else "NOT_EXECUTED_CACHE"
+                                if response.route_state == "FRESH" else "NOT_EXECUTED",
+            "diagnostics_origin": trace.get("diagnostics_origin") or
+                                  ("stored_route" if response.route_state == "FRESH" else "current_resolution"),
+            "discovered_domains": response.diagnostics.discovered_domains,
+            "classified_domains": response.diagnostics.classified_domains,
+            "rejected_domains": trace.get("rejected_domains", []),
+            "failed_domains": trace.get("failed_domains", response.diagnostics.failed_domains),
+            "fallback_domains": trace.get("fallback_domains", response.diagnostics.fallback_domains),
+            "selection": [{"domain": source.domain, "rank": source.rank,
+                           "route_score": source.route_score, "reason": source.reason}
+                          for source in response.sources],
+        }
         logging.getLogger(__name__).info({"event": "evaluation.route", "run_id": run_id,
                                          "route_key": response.route_key, "route_state": response.route_state, "cold": cold})
     return response

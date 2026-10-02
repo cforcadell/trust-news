@@ -78,3 +78,4 @@ class EvidenceSearchResponseV2(BaseModel):
     cached: bool
     cache_key: str
     evidence_bundle_hash: str | None = None
+    evaluation_trace: dict | None = None

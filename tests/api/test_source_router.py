@@ -518,3 +518,173 @@ async def test_cold_header_is_gated_and_forwarded_by_http_route(monkeypatch):
         response = await client.post("/routes/resolve", json=payload, headers={"X-Evaluation-Run-ID": "invalid"})
         assert response.status_code == 400
         assert service.resolve.await_count == 1
+
+@pytest.mark.asyncio
+async def test_evaluation_trace_records_discovery_decisions_rejections_and_score_terms(monkeypatch):
+    repo = MemoryRepository()
+    router = service_module.SourceRouterService(repo, settings())
+    wrong = classified("wrong.example", {"scope": "COUNTRY", "country_code": "NZ"})
+
+    async def search(*args, **kwargs):
+        return {"results": [
+            {"url": "https://idescat.cat/first", "score": 0.8},
+            {"url": "https://idescat.cat/duplicate"},
+            {"url": ""},
+            {"url": "https://wrong.example/report"},
+        ]}
+
+    async def classify(*args, **kwargs):
+        return [classified(), wrong]
+
+    monkeypatch.setattr(service_module, "search_with_provider", search)
+    monkeypatch.setattr(service_module, "classify_candidates", classify)
+    trace = {}
+    result = await router.resolve(request(), evaluation_trace=trace)
+
+    assert result.route_state == "MISSING"
+    assert [source.domain for source in result.sources] == ["idescat.cat"]
+    query = trace["query_execution"][0]
+    assert query["status"] == "EXECUTED"
+    assert query["provider"] == "exa"
+    assert query["returned_urls"][0] == "https://idescat.cat/first"
+    assert [item["decision"] for item in query["result_decisions"]] == [
+        "RETAINED", "DUPLICATE_DOMAIN", "EMPTY_URL", "RETAINED"]
+    assert trace["rejected_domains"] == [{"domain": "wrong.example", "reasons": ["JURISDICTION_MISMATCH"]}]
+    good = next(item for item in trace["classification"] if item["domain"] == "idescat.cat")
+    assert good["eligible"] is True
+    assert abs(sum(good["score_components"].values()) - repo.route.candidates[0].base_score) < 0.00001
+    assert good["classification_score"] == repo.route.candidates[0].base_score
+    assert trace["ranking"][0]["decision"] == "SELECTED"
+    assert trace["ranking"][0]["route_score"] == result.sources[0].route_score
+
+    fresh_trace = {}
+    fresh = await router.resolve(request(), evaluation_trace=fresh_trace)
+    assert fresh.route_state == "FRESH"
+    assert fresh_trace["cache_lookup"] == "FRESH"
+    assert fresh_trace["query_execution"] == []
+    assert fresh_trace["ranking"][0]["classification_components"] == "NOT_STORED_IN_ROUTE"
+
+
+@pytest.mark.asyncio
+async def test_evaluation_trace_reports_stale_fallback_after_provider_failure(monkeypatch):
+    source = classified()
+    repo = MemoryRepository(route_document(source, stale=True), {source.domain: profile(source)})
+    router = service_module.SourceRouterService(repo, settings())
+
+    async def fail(*args, **kwargs):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(service_module, "search_with_provider", fail)
+    trace = {}
+    response = await router.resolve(request(), evaluation_trace=trace)
+    assert response.route_state == "STALE"
+    assert response.stale_route_used is True
+    assert trace["cache_lookup"] == "STALE"
+    assert trace["query_execution"][0]["status"] == "FAILED"
+    assert trace["query_execution"][0]["error_type"] == "RuntimeError"
+    assert trace["refresh_error_type"] == "RuntimeError"
+    assert trace["diagnostics_origin"] == "stored_route"
+    assert trace["ranking"][0]["decision"] == "SELECTED"
+
+
+@pytest.mark.asyncio
+async def test_evaluation_http_route_exposes_actual_trace_only_with_run_id(monkeypatch):
+    import httpx
+    from fastapi import FastAPI
+
+    repo = MemoryRepository()
+    router_service = service_module.SourceRouterService(repo, settings())
+
+    async def search(*args, **kwargs):
+        return {"results": [{"url": "https://idescat.cat/data"}]}
+
+    async def classify(*args, **kwargs):
+        return [classified()]
+
+    monkeypatch.setattr(service_module, "search_with_provider", search)
+    monkeypatch.setattr(service_module, "classify_candidates", classify)
+    app = FastAPI()
+    app.include_router(routes_module.router)
+    app.state.source_router_service = router_service
+    run_id = "123e4567-e89b-12d3-a456-426614174000"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://internal") as client:
+        result = await client.post("/routes/resolve", json=request().model_dump(mode="json"),
+                                   headers={"X-Evaluation-Run-ID": run_id})
+        assert result.status_code == 200
+        trace = result.json()["evaluation_trace"]
+        assert trace["execution_detail"] == "CAPTURED"
+        assert trace["planned_queries"][0]["executed"] is True
+        assert trace["query_execution"][0]["returned_urls"] == ["https://idescat.cat/data"]
+        warm = await client.post("/routes/resolve", json=request().model_dump(mode="json"),
+                                 headers={"X-Evaluation-Run-ID": run_id})
+        assert warm.status_code == 200
+        warm_trace = warm.json()["evaluation_trace"]
+        assert warm_trace["execution_detail"] == "NOT_EXECUTED_CACHE"
+        assert warm_trace["planned_queries"][0]["executed"] is False
+        plain = await client.post("/routes/resolve", json=request().model_dump(mode="json"))
+        assert plain.status_code == 200
+        assert "evaluation_trace" not in plain.json()
+
+
+@pytest.mark.asyncio
+async def test_evaluation_observer_failure_does_not_change_selected_sources(monkeypatch):
+    source = classified()
+    repo = MemoryRepository(route_document(source), {source.domain: profile(source)})
+    router = service_module.SourceRouterService(repo, settings())
+
+    def broken_trace(*args, **kwargs):
+        raise RuntimeError("trace renderer failed")
+
+    monkeypatch.setattr(service_module, "ranking_rows", broken_trace)
+    trace = {}
+    response = await router.resolve(request(), evaluation_trace=trace)
+    assert response.route_state == "FRESH"
+    assert [item.domain for item in response.sources] == ["idescat.cat"]
+    assert trace["trace_error_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_evaluation_trace_explains_rank_limit_and_missing_profile():
+    top = classified()
+    lower = classified("ine.es", {"scope": "COUNTRY", "country_code": "ES"}, "NATIONAL_PRIMARY")
+    missing = classified("missing.example")
+    route = route_document(top, lower, missing)
+    config = settings()
+    config.max_sources = 1
+    repo = MemoryRepository(route, {top.domain: profile(top), lower.domain: profile(lower)})
+    trace = {}
+    result = await service_module.SourceRouterService(repo, config).resolve(request(), evaluation_trace=trace)
+    assert result.route_state == "FRESH"
+    assert len(result.sources) == 1
+    assert sorted(item["decision"] for item in trace["ranking"]) == [
+        "PROFILE_MISSING", "RANK_LIMIT", "SELECTED"]
+    assert trace["query_execution"] == []
+
+
+@pytest.mark.asyncio
+async def test_evaluation_trace_explains_profile_fallback_candidates(monkeypatch):
+    eligible = classified()
+    expired = classified("expired.example")
+    now = repository_module.utc_now()
+    profiles = {item.domain: profile(item, now) for item in (eligible, expired)}
+    profiles["expired.example"].last_verified_at -= timedelta(days=40)
+    repo = MemoryRepository(profiles=profiles)
+    router = service_module.SourceRouterService(repo, settings())
+
+    async def search(*args, **kwargs):
+        return {"results": [{"url": f"https://{domain}/"} for domain in
+                            ("idescat.cat", "expired.example", "missing.example")]}
+
+    async def fail(*args, **kwargs):
+        raise LLMResponseError("classification failed")
+
+    monkeypatch.setattr(service_module, "search_with_provider", search)
+    monkeypatch.setattr(service_module, "classify_candidates", fail)
+    trace = {}
+    result = await router.resolve(request(), evaluation_trace=trace)
+    assert result.diagnostic_code == "PROFILE_FALLBACK"
+    decisions = {item["domain"]: item for item in trace["profile_fallback_candidates"]}
+    assert decisions["idescat.cat"]["decision"] == "REUSED"
+    assert "PROFILE_EXPIRED" in decisions["expired.example"]["precheck_reasons"]
+    assert "PROFILE_NOT_FOUND" in decisions["missing.example"]["precheck_reasons"]
+    assert {item["domain"] for item in trace["unclassified_domains"]} == set(decisions)

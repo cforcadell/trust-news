@@ -173,3 +173,20 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests:api python -m pytest \
 ```
 
 The tests use mocked providers, HTTP, and repositories. They require no API keys, Kafka, MongoDB, blockchain, or external evaluation framework.
+
+## Visor local de órdenes guardadas
+
+El visor independiente de `web_classic` lee campañas nuevas con archivos `<parent_run_id>-viewer.json`, `<parent_run_id>-order.json` y `<run_id>.json`. No realiza búsquedas ni llamadas al LLM. Se inicia desde la raíz del repositorio:
+
+```bash
+PYTHONPATH=tests:api .venv/bin/python -m evaluation.viewer.server \
+  --artifacts-root tests/evaluation/artifacts --host 127.0.0.1 --port 8765
+```
+
+Abrir `http://127.0.0.1:8765/`. Para crear el diagnóstico desde una orden guardada, usar `--order RUTA_A_LA_ORDEN --mode full --dataset ID_DEL_DATASET --output CARPETA_NUEVA` con `evaluation.pipeline`; `--publish` también emite el diagnóstico al guardar una orden nueva. Los artefactos anteriores no se migran. El contrato, rutas y límites están en [benchmark-viewer-contract.md](benchmark-viewer-contract.md); el avance por fases está en [benchmark-viewer-plan.md](benchmark-viewer-plan.md).
+
+Para capturar modelo, intentos y reparación de Generate Assertions en órdenes publicadas, configurar `EVALUATION_CAPTURE_GENERATION=true` en `generate-asertions`. Para Router, Evidence Search y citas originales, configurar `EVALUATION_CAPTURE_PIPELINE=true` en `validate-asertions`. Para obligar a recalcular Router y Evidence Search durante esa captura, añadir `EVALUATION_CAPTURE_COLD=true` en el validador y `EVALUATION_ALLOW_COLD=true` en **ambos** servicios. La captura fría es necesaria para ver los chunks descartados cuando la respuesta ya existía en caché. El texto completo de todos los chunks extraídos se guarda en el artefacto de evaluación; no se añade a la caché compartida. Las páginas cuya descarga falla no producen chunks.
+
+La corrección semántica de una afirmación, el apoyo real de una evidencia y la idoneidad de un dominio sin anotación revisada siguen siendo juicios humanos. El visor distingue esos huecos como `NOT_EVALUATED`; una cita con ID válido solo acredita identidad y elegibilidad. La tabla de consenso resume votos, pesos y motivos que ya constan en la orden. No modifica ni anota los artefactos originales.
+
+En Router, la traza de evaluación diferencia consultas previstas y ejecutadas, URLs devueltas, deduplicación, rechazo por elegibilidad y ranking por candidato. Una ruta `FRESH` reutilizada no contiene búsqueda nueva: el visor muestra las listas históricas como tales y deja sin reconstruir URLs o motivos individuales que no se guardaron en el documento de ruta. La captura detallada de Router se activa con el mismo `EVALUATION_CAPTURE_PIPELINE=true` del validador LIGHT; las peticiones normales mantienen su respuesta sin `evaluation_trace`.

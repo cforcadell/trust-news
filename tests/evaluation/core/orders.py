@@ -57,7 +57,8 @@ def results_from_order(dataset, order, run_id=None):
             if validation.get("execution_status") == "COMPLETED":
                 row.validator_output = {"resultado": audit.get("original_verdict"),
                     "effective_verdict": normalize_verdict(validation.get("approval")),
-                    "evidence_used": validation.get("evidence_used", [])}
+                    "evidence_used": validation.get("evidence_used", []),
+                    "evaluation_citation_trace": validation.get("evaluation_citation_trace")}
             if validation.get("execution_status") == "ERROR":
                 details = validation.get("error_details") or {}
                 row.errors = [{"stage": details.get("stage", "UNKNOWN"),

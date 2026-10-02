@@ -289,3 +289,58 @@ async def test_evaluation_cold_bypasses_cache_without_deleting_it(monkeypatch):
     assert response["evidence_bundle_hash"] == evidence_bundle_hash([])
     assert search.await_count > 0
     assert cache.find_one.await_count == 1
+
+@pytest.mark.asyncio
+async def test_evaluation_trace_keeps_all_chunks_out_of_shared_cache(monkeypatch):
+    from unittest.mock import AsyncMock
+    from starlette.requests import Request
+
+    document = ("Barcelona 2024 paro oficial. " * 24) + ("Otra noticia sin relación. " * 24)
+
+    async def fake_fetch(*args, **kwargs):
+        return SimpleNamespace(status="ok", error=None, text=document, document_length_chars=len(document))
+
+    async def fake_search(*args, **kwargs):
+        return {"results": [{"url": "https://ec.europa.eu/eurostat/report", "title": "Informe"}]}
+
+    cache = SimpleNamespace(find_one=AsyncMock(return_value=None), update_one=AsyncMock())
+    monkeypatch.setattr(evidence, "cache_collection", cache)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_CHUNK_SIZE_CHARS", 160)
+    monkeypatch.setattr(evidence, "EVIDENCE_CONTEXT_WINDOW_BEFORE", 0)
+    monkeypatch.setattr(evidence, "EVIDENCE_CONTEXT_WINDOW_AFTER", 0)
+    run_id = "123e4567-e89b-12d3-a456-426614174000"
+    http_request = Request({"type": "http", "headers": [(b"x-evaluation-run-id", run_id.encode())]})
+    response = await evidence.search_evidence(request("EXT_ONLY_OFFICIAL"), http_request)
+    EvidenceSearchResponseV2(**response)
+    source = response["evidences"][0]
+    chunks = source["evaluation_chunks"]
+    assert len(chunks) == source["chunks_total"] > 1
+    assert all(chunk["text"] and "lexical_score" in chunk and "boost_components" in chunk for chunk in chunks)
+    assert any(chunk["selected"] for chunk in chunks)
+    assert any(not chunk["selected"] for chunk in chunks)
+    assert all(chunk["context_ids"] for chunk in chunks if chunk["included_in_context"])
+    assert response["evaluation_trace"]["query_execution"][0]["status"] == "EXECUTED"
+    assert response["evaluation_trace"]["query_execution"][0]["returned_urls"] == ["https://ec.europa.eu/eurostat/report"]
+    stored = cache.update_one.call_args.args[1]["$set"]["response"]
+    assert "evaluation_chunks" not in stored["evidences"][0]
+    assert "evaluation_trace" not in stored
+
+
+@pytest.mark.asyncio
+async def test_evaluation_cache_hit_does_not_claim_queries_or_chunks(monkeypatch):
+    from unittest.mock import AsyncMock
+    from starlette.requests import Request
+
+    cache = SimpleNamespace(find_one=AsyncMock(return_value={"response": {"evidences": [], "cached": False}}))
+    search = AsyncMock()
+    monkeypatch.setattr(evidence, "cache_collection", cache)
+    monkeypatch.setattr(evidence, "search_with_provider", search)
+    http_request = Request({"type": "http", "headers": [(b"x-evaluation-run-id", b"123e4567-e89b-12d3-a456-426614174000")]})
+    response = await evidence.search_evidence(request(), http_request)
+    assert response["cached"] is True
+    assert response["evaluation_trace"]["query_execution"] == []
+    assert response["evaluation_trace"]["chunk_detail"] == "NOT_RECORDED_ON_CACHE_HIT"
+    search.assert_not_called()

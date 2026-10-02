@@ -3,6 +3,7 @@ import json
 import asyncio
 import logging
 import math
+import time
 import uuid
 from typing import Any, List, Optional
 
@@ -261,34 +262,53 @@ def build_assertions_repair_prompt(invalid_response: str, validation_error: str)
     )
 
 
-async def _call_configured_llm(text: str) -> List[Assertion]:
+async def _call_configured_llm(text: str, trace: Optional[dict] = None) -> List[Assertion]:
     model = {
         "mistral": MISTRAL_MODEL,
         "gemini": GEMINI_MODEL,
         "openrouter": OPENROUTER_MODEL,
     }.get(AI_PROVIDER)
+    started = time.monotonic()
+    if trace is not None:
+        trace.update(provider=AI_PROVIDER, model=model, temperature=TEMPERATURE,
+                     config_version=LLM_CONFIG_VERSION, structured_attempts=0,
+                     repair_used=False, duration_seconds=0.0, assertion_count=0)
     if not model:
+        if trace is not None:
+            trace.update(status="FAILED", error_type="LLMConfigurationError")
         return []
+    def repair_prompt(invalid_response, validation_error):
+        if trace is not None:
+            trace.update(structured_attempts=2, repair_used=True)
+        return build_assertions_repair_prompt(invalid_response, validation_error)
     try:
         request = build_assertions_llm_request(text, model)
-        batch = await acomplete_structured_with_repair(
-            AI_PROVIDER,
-            request,
-            build_assertions_repair_prompt,
-        )
-        return parse_assertions_content(batch.model_dump(mode="json"))
+        if trace is not None:
+            trace["structured_attempts"] = 1
+        batch = await acomplete_structured_with_repair(AI_PROVIDER, request, repair_prompt)
+        assertions = parse_assertions_content(batch.model_dump(mode="json"))
+        if trace is not None:
+            trace.update(status="COMPLETED", assertion_count=len(assertions))
+        return assertions
     except LLMConfigurationError as exc:
+        if trace is not None:
+            trace.update(status="FAILED", error_type=type(exc).__name__)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
+        if trace is not None:
+            trace.update(status="FAILED", error_type=type(exc).__name__)
         raise HTTPException(status_code=503, detail=exception_message(exc)) from exc
+    finally:
+        if trace is not None:
+            trace["duration_seconds"] = round(time.monotonic() - started, 6)
 
 
 # ============================================================
 # Dispatch a proveedor elegido
 # ============================================================
 # El tipo de retorno ahora es List[Assertion]
-async def extract_assertions_from_text(text: str) -> List[Assertion]:
-    return await _call_configured_llm(text)
+async def extract_assertions_from_text(text: str, trace: Optional[dict] = None) -> List[Assertion]:
+    return await _call_configured_llm(text, trace)
 
 
 async def publish_assertions_not_generated(
@@ -296,12 +316,14 @@ async def publish_assertions_not_generated(
     order_id: str,
     text: str,
     error: str,
+    trace: Optional[dict] = None,
 ):
     payload = AssertionsNotGeneratedPayload(
         text=text,
         publisher=AI_PROVIDER,
         error=error,
         attempts=NUM_REINTENTOS,
+        evaluation_trace=trace if trace and trace.get("status") else None,
     )
     response = AssertionsNotGeneratedResponse(
         action="assertions_not_generated",
@@ -355,21 +377,22 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
         return
 
     logger.info(f"[{req.order_id}] Generando aserciones (provider={AI_PROVIDER})")
+    trace = {} if os.getenv("EVALUATION_CAPTURE_GENERATION", "false").lower() == "true" else None
     
     # Llamada al LLM: ahora devuelve directamente objetos Assertion
     try:
-        assertion_objs = await extract_assertions_from_text(req.payload.text)
+        assertion_objs = await extract_assertions_from_text(req.payload.text, trace=trace) if trace is not None else await extract_assertions_from_text(req.payload.text)
     except HTTPException as he:
         logger.error(f"[{req.order_id}] Error LLM: {he.detail}")
         try:
-            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(he.detail))
+            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(he.detail), trace)
         except Exception as e:
             logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {e}")
         return
     except Exception as e:
         logger.exception(f"[{req.order_id}] Error inesperado extrayendo aserciones: {e}")
         try:
-            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(e))
+            await publish_assertions_not_generated(producer, req.order_id, req.payload.text, str(e), trace)
         except Exception as publish_error:
             logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {publish_error}")
         return
@@ -383,6 +406,7 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
                 req.order_id,
                 req.payload.text,
                 "No se extrajeron aserciones.",
+                trace,
             )
         except Exception as e:
             logger.exception(f"[{req.order_id}] Error publicando assertions_not_generated: {e}")
@@ -423,6 +447,7 @@ async def process_message_bytes(message: bytes, producer: AIOKafkaProducer):
             )
         payload = AssertionGeneratedPayload(
             assertions_document=assertions_document,
+            evaluation_trace=trace if trace and trace.get("status") else None,
         )
         response = AssertionsGeneratedResponse(action="assertions_generated", order_id=req.order_id, payload=payload)
     except ValidationError as e:

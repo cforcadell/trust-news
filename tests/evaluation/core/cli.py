@@ -139,6 +139,7 @@ def main(kind, argv=None):
                 for repetition in range(1, args.repetitions + 1):
                     parent_id = str(uuid.uuid4())
                     published = {}
+                    order = None
                     try:
                         trace("repetition.start", parent_run_id=parent_id, dataset_id=dataset["id"],
                               repetition=repetition, mode="FULL_PIPELINE")
@@ -176,13 +177,26 @@ def main(kind, argv=None):
                         row = result.to_dict()
                         row["provenance"]["repetition"] = repetition
                         record(row)
+                    if order is not None and (output / (parent_id + "-order.json")).exists():
+                        from evaluation.viewer.build import build_order_diagnostic
+                        snapshot = build_order_diagnostic(dataset, order, [r.to_dict() for r in imported],
+                            campaign_id=output.name, repetition=repetition, parent_run_id=parent_id)
+                        write_json(output / (parent_id + "-viewer.json"), snapshot)
                 continue
             if args.order:
                 trace("order.import.start", dataset_id=dataset["id"], order=args.order)
-                imported = results_from_order(dataset, read_json(args.order))
+                order = read_json(args.order)
+                imported = results_from_order(dataset, order)
                 trace("order.import.complete", dataset_id=dataset["id"], results=len(imported))
                 for r in imported:
                     record(r.to_dict())
+                parent_id = str(uuid.uuid4())
+                order_name = parent_id + "-order.json"
+                write_json(output / order_name, order)
+                from evaluation.viewer.build import build_order_diagnostic
+                snapshot = build_order_diagnostic(dataset, order, [r.to_dict() for r in imported],
+                    campaign_id=output.name, repetition=1, parent_run_id=parent_id, order_artifact=order_name)
+                write_json(output / (parent_id + "-viewer.json"), snapshot)
                 continue
             for expected in dataset["assertions"]:
                 for repetition in range(1, args.repetitions + 1):

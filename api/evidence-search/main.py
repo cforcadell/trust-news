@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -495,6 +496,7 @@ async def build_evidences_with_optional_contexts(
     domain_resolution: Dict[str, Any],
     max_results: int,
     origin_document: Optional[Dict[str, Any]] = None,
+    capture_chunks: bool = False,
 ) -> List[Dict[str, Any]]:
     """Normalize search results and optionally enrich them with selected document contexts."""
     evidences: List[Dict[str, Any]] = []
@@ -521,6 +523,8 @@ async def build_evidences_with_optional_contexts(
         logger.info(f"[evidence-search] downloading_url source_id={source_id} url={url}")
         fetch_result = await fetch_main_text(url, timeout=EVIDENCE_HTTP_TIMEOUT, user_agent=EVIDENCE_USER_AGENT)
         evidence["fetch_status"] = fetch_result.status
+        evidence["content_type"] = getattr(fetch_result, "content_type", None)
+        evidence["fetch_error"] = fetch_result.error
         logger.info(f"[evidence-search] fetch_status source_id={source_id} status={fetch_result.status} error={fetch_result.error}")
 
         if fetch_result.status != "ok":
@@ -533,6 +537,7 @@ async def build_evidences_with_optional_contexts(
         chunks = chunk_text(source_id, fetch_result.text, EVIDENCE_CHUNK_SIZE_CHARS, EVIDENCE_CHUNK_OVERLAP_CHARS)
         ranked = rank_chunks(assertion, chunks)
         remaining_contexts = max(0, EVIDENCE_MAX_CONTEXTS_TOTAL - total_contexts)
+        selection_decisions = {} if capture_chunks else None
         contexts = build_context_windows(
             source_id,
             chunks,
@@ -541,6 +546,7 @@ async def build_evidences_with_optional_contexts(
             before=EVIDENCE_CONTEXT_WINDOW_BEFORE,
             after=EVIDENCE_CONTEXT_WINDOW_AFTER,
             min_context_chars=EVIDENCE_MIN_CONTEXT_CHARS,
+            selection_decisions=selection_decisions,
         )
 
         evidence["document_length_chars"] = document_length
@@ -549,6 +555,26 @@ async def build_evidences_with_optional_contexts(
         logger.info(f"[evidence-search] document_length_chars source_id={source_id} value={document_length}")
         logger.info(f"[evidence-search] chunks_total source_id={source_id} value={len(chunks)}")
         logger.info(f"[evidence-search] contexts_selected source_id={source_id} value={len(contexts)}")
+
+        if capture_chunks:
+            ranked_by_id = {item["chunk_id"]: (rank, item) for rank, item in enumerate(ranked, 1)}
+            selected_ids = {context.get("selected_chunk_id") for context in contexts}
+            included_ids = {chunk_id for context in contexts for chunk_id in context.get("included_chunk_ids", [])}
+            evidence["evaluation_chunks"] = [{
+                "chunk_id": chunk["chunk_id"], "text": chunk["text"],
+                "char_length": chunk["char_length"], "chunk_index": chunk["chunk_index"],
+                "rank": ranked_by_id[chunk["chunk_id"]][0] if chunk["chunk_id"] in ranked_by_id else None,
+                "score": ranked_by_id[chunk["chunk_id"]][1].get("score") if chunk["chunk_id"] in ranked_by_id else 0.0,
+                "lexical_score": ranked_by_id[chunk["chunk_id"]][1].get("lexical_score") if chunk["chunk_id"] in ranked_by_id else 0.0,
+                "boost_components": ranked_by_id[chunk["chunk_id"]][1].get("boost_components", {}) if chunk["chunk_id"] in ranked_by_id else {},
+                "matched_signals": ranked_by_id[chunk["chunk_id"]][1].get("matched_signals", []) if chunk["chunk_id"] in ranked_by_id else [],
+                "ranking_reason": ranked_by_id[chunk["chunk_id"]][1].get("ranking_reason") if chunk["chunk_id"] in ranked_by_id else "low lexical coverage",
+                "context_ids": [context["context_id"] for context in contexts if chunk["chunk_id"] in context.get("included_chunk_ids", [])],
+                "selected": chunk["chunk_id"] in selected_ids,
+                "included_in_context": chunk["chunk_id"] in included_ids,
+                "selection_reason": selection_decisions.get(chunk["chunk_id"], "LOW_COVERAGE_FALLBACK_TRUNCATED")
+                                    if selection_decisions is not None else "NOT_RECORDED",
+            } for chunk in chunks]
 
         if not chunks or not contexts:
             mark_evidence_uncitable(evidence, "no_ranked_chunks")
@@ -700,6 +726,10 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             response["evidence_bundle_hash"] = evidence_bundle_hash(response.get("evidences", []))
             response["cached"] = True
             response["cache_key"] = cache_key
+            if run_id:
+                response["evaluation_trace"] = {"run_id": run_id, "cache_hit": True,
+                                                "query_execution": [],
+                                                "chunk_detail": "NOT_RECORDED_ON_CACHE_HIT"}
             logger.info(f"[evidence-search] cache_hit=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
             return response
 
@@ -732,6 +762,9 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
 
     # Build provider-ready requests and log their domain filters.
     search_requests = build_search_requests(assertion, domain_resolution, effective_search_policy)
+    trace_requests = ([{**item, "provider": SEARCH_PROVIDER, "status": "NOT_EXECUTED",
+                        "returned_urls": [], "result_decisions": []} for item in search_requests]
+                      if run_id else None)
     for search_request in search_requests:
         logger.info(
             "[evidence-search] search_request "
@@ -747,8 +780,11 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
     successful_searches = 0
     provider_errors: List[Dict[str, str]] = []
     provider_name = SEARCH_PROVIDER
-    for search_request in search_requests:
+    for request_index, search_request in enumerate(search_requests):
         query = search_request["query"]
+        trace_request = trace_requests[request_index] if trace_requests is not None else None
+        if trace_request is not None:
+            trace_request["status"] = "EXECUTED"
         include_domains = search_request.get("include_domains")
         external_source_policy = search_request.get("external_source_policy") or "none"
         try:
@@ -761,14 +797,37 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                 external_source_policy=external_source_policy,
             )
             successful_searches += 1
+            returned = search_results.get("results", []) or []
+            if trace_request is not None:
+                trace_request["returned_urls"] = [str(item.get("url") or "") for item in returned]
+                trace_request["result_count"] = len(returned)
+                trace_request["outcome"] = "RESULTS" if returned else "EMPTY"
+                seen = {item.get("url") or f"{item.get('title', '')}:{item.get('content', '')}" for item in raw_results}
+                retained = len(raw_results)
+                for item in returned:
+                    url = str(item.get("url") or "")
+                    key = url or f"{item.get('title', '')}:{item.get('content', '')}"
+                    if retained >= effective_search_policy["max_results"]:
+                        decision = "NOT_CONSIDERED_LIMIT"
+                    elif key in seen:
+                        decision = "DUPLICATE"
+                    else:
+                        decision = "RETAINED"
+                        seen.add(key)
+                        retained += 1
+                    trace_request["result_decisions"].append({"url": url, "decision": decision})
             raw_results = merge_search_results(
                 raw_results,
-                search_results.get("results", []) or [],
+                returned,
                 max_sources=effective_search_policy["max_results"],
             )
             if len(raw_results) >= effective_search_policy["max_results"]:
                 break
         except Exception as e:
+            if trace_request is not None:
+                trace_request["status"] = "FAILED"
+                trace_request["error_type"] = type(e).__name__
+                trace_request["outcome"] = "ERROR"
             logger.warning(f"[evidence-search] search provider failed provider='{provider_name}' query='{query}': {e}")
             provider_errors.append({"provider": provider_name, "query": query, "error": str(e) or e.__class__.__name__})
 
@@ -782,13 +841,19 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             },
         )
 
+    policy_drops = []
     if strategy == EvidenceSearchStrategy.EXT_ONLY_OFFICIAL:
+        before_policy = raw_results
         raw_results = [
             item for item in raw_results
             if is_official_source_type(
                 source_type_for_domain(normalize_domain(urlparse(item.get("url") or "").netloc))
             )
         ]
+        if run_id:
+            kept_urls = {item.get("url") for item in raw_results}
+            policy_drops = [{"url": item.get("url"), "reason": "NOT_OFFICIAL_SOURCE_TYPE"}
+                            for item in before_policy if item.get("url") not in kept_urls]
 
     # Normalize raw provider results into the public evidence response contract.
     evidences = await build_evidences_with_optional_contexts(
@@ -797,6 +862,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         domain_resolution,
         max_results=effective_search_policy["max_results"],
         origin_document=origin_document,
+        capture_chunks=bool(run_id),
     )
     response = {
         "schema_version": "evidence-search-response-v2",
@@ -809,6 +875,13 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         "cached": False,
         "cache_key": cache_key,
     }
+
+    # Evaluation-only chunk text must never be stored in the shared response cache.
+    cache_response = response
+    if run_id:
+        cache_response = deepcopy(response)
+        for source in cache_response["evidences"]:
+            source.pop("evaluation_chunks", None)
 
     # Store the response with TTL metadata so identical future requests can reuse it.
     if cache_collection is not None:
@@ -829,12 +902,24 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                         "origin_document": origin_document,
                         "search_policy": effective_search_policy,
                     },
-                    "response": response,
+                    "response": cache_response,
                 }
             },
             upsert=True,
         )
         logger.info(f"[evidence-search] cache_store=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
 
+    if run_id:
+        response["evaluation_trace"] = {"run_id": run_id, "cache_hit": False,
+                                        "query_execution": trace_requests,
+                                        "policy_drops": policy_drops,
+                                        "chunk_detail": "CAPTURED",
+                                        "limits": {"max_results": effective_search_policy["max_results"],
+                                                   "max_contexts_per_source": EVIDENCE_MAX_CONTEXTS_PER_SOURCE,
+                                                   "max_contexts_total": EVIDENCE_MAX_CONTEXTS_TOTAL,
+                                                   "window_before": EVIDENCE_CONTEXT_WINDOW_BEFORE,
+                                                   "window_after": EVIDENCE_CONTEXT_WINDOW_AFTER,
+                                                   "chunk_size_chars": EVIDENCE_CHUNK_SIZE_CHARS,
+                                                   "chunk_overlap_chars": EVIDENCE_CHUNK_OVERLAP_CHARS}}
     # Return the fresh response to the validator service.
     return response

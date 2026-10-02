@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assermetry.local/schemas/order-diagnostic-v1.schema.json",
+  "title": "Saved evaluation order diagnostic",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "identity", "artifact_refs", "order", "validations"],
+  "properties": {
+    "schema_version": {"const": "order-diagnostic-v1"},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["campaign_id", "dataset_id", "order_id", "repetition"],
+      "properties": {
+        "campaign_id": {"$ref": "#/$defs/nonempty"},
+        "dataset_id": {"$ref": "#/$defs/nonempty"},
+        "order_id": {"$ref": "#/$defs/nonempty"},
+        "repetition": {"type": "integer", "minimum": 1},
+        "parent_run_id": {"type": ["string", "null"]}
+      }
+    },
+    "artifact_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "results"],
+      "properties": {
+        "order": {"$ref": "#/$defs/nonempty"},
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["run_id", "path"],
+            "properties": {
+              "run_id": {"$ref": "#/$defs/nonempty"},
+              "path": {"$ref": "#/$defs/nonempty"}
+            }
+          }
+        }
+      }
+    },
+    "order": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "original_text", "generation", "assertions"],
+      "properties": {
+        "status": {"$ref": "#/$defs/nonempty"},
+        "original_text": {"type": "string"},
+        "generation": {"$ref": "#/$defs/stage"},
+        "assertions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["assertion_id", "text"],
+            "properties": {
+              "assertion_id": {"$ref": "#/$defs/nonempty"},
+              "text": {"type": "string"},
+              "expected_case_id": {"type": ["string", "null"]}
+            }
+          }
+        }
+      }
+    },
+    "validations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run_id", "assertion_id", "validator_id", "stages"],
+        "properties": {
+          "run_id": {"$ref": "#/$defs/nonempty"},
+          "assertion_id": {"$ref": "#/$defs/nonempty"},
+          "validator_id": {"$ref": "#/$defs/nonempty"},
+          "stages": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["router", "evidence_search", "handoff", "llm", "citations", "consensus"],
+            "properties": {
+              "router": {"$ref": "#/$defs/stage"},
+              "evidence_search": {"$ref": "#/$defs/stage"},
+              "handoff": {"$ref": "#/$defs/stage"},
+              "llm": {"$ref": "#/$defs/stage"},
+              "citations": {"$ref": "#/$defs/stage"},
+              "consensus": {"$ref": "#/$defs/stage"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "status", "detail"],
+      "properties": {
+        "code": {"$ref": "#/$defs/nonempty"},
+        "status": {"enum": ["PASS", "FAIL", "PARTIAL", "NOT_EVALUATED", "SKIPPED"]},
+        "detail": {"type": "string"},
+        "observation_refs": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_status", "assessment", "observations", "checks"],
+      "properties": {
+        "execution_status": {"enum": ["COMPLETED", "FAILED", "SKIPPED", "NOT_RECORDED"]},
+        "assessment": {"enum": ["PASS", "FAIL", "PARTIAL", "NOT_EVALUATED", "SKIPPED"]},
+        "missing_reason": {"$ref": "#/$defs/nonempty"},
+        "observations": {"type": "object"},
+        "checks": {"type": "array", "items": {"$ref": "#/$defs/check"}}
+      },
+      "if": {"properties": {"assessment": {"enum": ["NOT_EVALUATED", "SKIPPED"]}}},
+      "then": {"required": ["missing_reason"]}
+    }
+  }
+}

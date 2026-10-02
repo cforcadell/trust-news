@@ -47,6 +47,23 @@ def validate_case(case: dict) -> None:
             raise EvaluationError(f"{identifier}: required_terms cannot be empty")
         if version == 2 and not str(item.get("text") or "").strip():
             raise EvaluationError(f"{identifier}: text is required")
+        excerpt = item.get("source_excerpt")
+        if excerpt is not None and (not isinstance(excerpt, str) or not excerpt.strip()
+                                    or excerpt not in case["news"]):
+            raise EvaluationError(f"{identifier}: source_excerpt must occur in news")
+        for key in ("expected_topic_code", "expected_evidence_kind"):
+            if key in item and (not isinstance(item[key], str) or not item[key].strip()):
+                raise EvaluationError(f"{identifier}: {key} must be non-empty text")
+        context = item.get("expected_context")
+        if context is not None:
+            if not isinstance(context, dict) or set(context) - {"entities", "locations", "temporal_context", "jurisdiction"}:
+                raise EvaluationError(f"{identifier}: invalid expected_context")
+            for key in ("entities", "locations", "temporal_context"):
+                if key in context:
+                    _strings(context[key], f"{identifier}: expected_context.{key}")
+            if "jurisdiction" in context and (not isinstance(context["jurisdiction"], dict)
+                                              or not context["jurisdiction"]):
+                raise EvaluationError(f"{identifier}: expected_context.jurisdiction must be an object")
         for key in ("required_terms", "acceptable_domains", "reference_facts"):
             _strings(item.get(key, []), key)
         for key in ("reference_sources", "reference_evidence"):

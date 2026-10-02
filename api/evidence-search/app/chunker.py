@@ -78,6 +78,7 @@ def build_context_windows(
     before: int = 1,
     after: int = 1,
     min_context_chars: int = 120,
+    selection_decisions: Dict[str, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Build deduplicated context windows around selected ranked chunks."""
     contexts: List[Dict[str, Any]] = []
@@ -87,6 +88,8 @@ def build_context_windows(
     for ranked in ranked_chunks:
         selected = chunk_by_id.get(ranked.get("chunk_id"))
         if not selected:
+            if selection_decisions is not None:
+                selection_decisions[str(ranked.get("chunk_id"))] = "CHUNK_NOT_FOUND"
             continue
         idx = int(selected["chunk_index"]) - 1
         start = max(0, idx - max(0, int(before or 0)))
@@ -95,13 +98,19 @@ def build_context_windows(
         included_ids = [chunk["chunk_id"] for chunk in window_chunks]
         included_set = set(included_ids)
         if any(included_set == previous or included_set.issubset(previous) or previous.issubset(included_set) for previous in used_windows):
+            if selection_decisions is not None:
+                selection_decisions[selected["chunk_id"]] = "OVERLAPPING_CONTEXT_WINDOW"
             continue
 
         text = _normalize_text(" ".join(chunk["text"] for chunk in window_chunks))
         if len(text) < min_context_chars and len(chunks) > len(window_chunks):
+            if selection_decisions is not None:
+                selection_decisions[selected["chunk_id"]] = "CONTEXT_TOO_SHORT"
             continue
 
         used_windows.append(included_set)
+        if selection_decisions is not None:
+            selection_decisions[selected["chunk_id"]] = "SELECTED_CONTEXT"
         contexts.append({
             "context_id": f"{source_id}-context-{len(contexts) + 1}",
             "selected_chunk_id": selected["chunk_id"],
@@ -114,4 +123,7 @@ def build_context_windows(
         if len(contexts) >= max_contexts:
             break
 
+    if selection_decisions is not None:
+        for ranked in ranked_chunks:
+            selection_decisions.setdefault(str(ranked.get("chunk_id")), "CONTEXT_LIMIT_REACHED")
     return contexts

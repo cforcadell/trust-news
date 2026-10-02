@@ -830,6 +830,9 @@ async def process_kafka_message(data: dict):
             if not doc:
                 return
 
+            if parsed.payload.evaluation_trace is not None:
+                await update_order(order_id, {"generation_evaluation_trace": parsed.payload.evaluation_trace.model_dump(mode="json")})
+
             assertions_document = parsed.payload.assertions_document
             validation_mode = assertions_document.mode
             expected_mode = normalize_validation_mode(doc.get("validation_mode", ValidationMode.BLOCKCHAIN))
@@ -912,6 +915,9 @@ async def process_kafka_message(data: dict):
             doc = await get_order_doc(order_id)
             if not doc:
                 return
+
+            if parsed.payload.evaluation_trace is not None:
+                await update_order(order_id, {"generation_evaluation_trace": parsed.payload.evaluation_trace.model_dump(mode="json")})
 
             await update_order(order_id, {
                 "status": "ASSERTIONS_NOT_AVAILABLE",
@@ -1236,6 +1242,7 @@ async def process_kafka_message(data: dict):
                     "sources_declared": payload.get("sources_declared", []),
                     "evidence_used": payload.get("evidence_used", []),
                     "evidence_validation": payload.get("evidence_validation"),
+                    "evaluation_citation_trace": payload.get("evaluation_citation_trace"),
                     "evidence_search_response": payload.get("evidence_search_response"),
                     "search_policy": payload.get("search_policy"),
                     "confidence": payload.get("confidence"),
@@ -1330,6 +1337,7 @@ async def process_kafka_message(data: dict):
                     "sources_declared": payload.get("sources_declared", []),
                     "evidence_used": payload.get("evidence_used", []),
                     "evidence_validation": payload.get("evidence_validation"),
+                    "evaluation_citation_trace": payload.get("evaluation_citation_trace"),
                     "evidence_search_response": payload.get("evidence_search_response"),
                     "search_policy": payload.get("search_policy"),
                     "execution_status": execution_status.value,

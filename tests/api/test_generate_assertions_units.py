@@ -1,5 +1,8 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 MODULE_PATH = Path(__file__).resolve().parents[2] / "api" / "generate-asertions" / "main.py"
@@ -53,3 +56,25 @@ def test_repair_prompt_contains_validation_error_and_invalid_json():
     assert "COUNTRY jurisdiction requires country_code" in repair_prompt
     assert '{"scope":"COUNTRY","country_code":null}' in repair_prompt
     assert "SOLAMENTE el JSON completo corregido" in repair_prompt
+
+
+@pytest.mark.asyncio
+async def test_evaluation_trace_records_structured_repair_without_response_body(monkeypatch):
+    monkeypatch.setattr(generate, "AI_PROVIDER", "gemini")
+    monkeypatch.setattr(generate, "GEMINI_MODEL", "example-model")
+    monkeypatch.setattr(generate, "build_assertions_llm_request", lambda text, model: object())
+    monkeypatch.setattr(generate, "parse_assertions_content", lambda content: ["assertion"])
+
+    async def fake_completion(provider, request, repair_builder):
+        repair_builder('{"bad":"response"}', "invalid schema")
+        return SimpleNamespace(model_dump=lambda **kwargs: {"assertions": []})
+
+    monkeypatch.setattr(generate, "acomplete_structured_with_repair", fake_completion)
+    trace = {}
+    result = await generate.extract_assertions_from_text("Texto", trace=trace)
+    assert result == ["assertion"]
+    assert trace["status"] == "COMPLETED"
+    assert trace["structured_attempts"] == 2
+    assert trace["repair_used"] is True
+    assert trace["assertion_count"] == 1
+    assert "response" not in str(trace)

@@ -23,7 +23,71 @@ def _within(base: Path, relative: str) -> Path:
 
 def _read_diagnostic(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
+    validate_order_diagnostic(value)
+    refs = {item["run_id"]: item["path"] for item in value["artifact_refs"]["results"]}
+    public_fields = ("validator_type", "provider", "model", "config_version",
+                     "temperature", "evidence_search_strategy")
+    for validation in value["validations"]:
+        metadata = validation.get("validator") or {}
+        result_path = path.parent / refs.get(validation["run_id"], "")
+        if result_path.is_file() and result_path.parent == path.parent:
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                source = result.get("validator") or {}
+                metadata = {field: metadata.get(field, source.get(field)) for field in public_fields}
+            except (OSError, ValueError, TypeError):
+                pass
+        if metadata:
+            validation["validator"] = metadata
+        strategy = metadata.get("evidence_search_strategy")
+        router = validation["stages"]["router"]
+        router["observations"]["evidence_search_strategy"] = strategy
+        if (strategy and strategy != "LOCAL" and router["execution_status"] == "NOT_RECORDED"
+                and not router["observations"].get("sources")):
+            router.update(execution_status="SKIPPED", assessment="SKIPPED",
+                          missing_reason=f"La estrategia {strategy} obtiene evidencia sin usar Source Router.")
+            router["observations"]["skip_reason"] = "EXTERNAL_EVIDENCE_STRATEGY"
     return validate_order_diagnostic(value)
+
+
+def _issue_type(stage_name: str, stage: dict, check: dict) -> str:
+    if check.get("type") in {"warning", "error"}:
+        return check["type"]
+    if stage_name == "generation" and check.get("code") not in {"GENERATION_ERROR", "MODULE_FAILED"}:
+        return "warning"
+    if stage_name == "router" and (stage.get("observations") or {}).get("sources"):
+        return "warning"
+    return "warning" if check.get("status") == "PARTIAL" else "error"
+
+
+def _diagnostic_incidents(diagnostic: dict, file_name: str) -> list[dict]:
+    """Flatten navigable findings without changing the saved diagnostic."""
+    incidents = []
+
+    def collect(stage_name, stage, *, assertion_id=None, run_id=None, validator_id=None):
+        checks = [check for check in stage.get("checks", [])
+                  if check.get("status") in {"FAIL", "PARTIAL"}]
+        if not checks and stage.get("assessment") in {"FAIL", "PARTIAL"}:
+            checks = [{"code": "MODULE_FAILED", "status": stage["assessment"],
+                       "detail": stage.get("missing_reason") or "La causa no quedó registrada."}]
+        for check in checks:
+            incidents.append({"file": file_name,
+                              "order_id": diagnostic["identity"]["order_id"],
+                              "dataset_id": diagnostic["identity"]["dataset_id"],
+                              "repetition": diagnostic["identity"]["repetition"],
+                              "assertion_id": assertion_id, "run_id": run_id,
+                              "validator_id": validator_id, "stage": stage_name,
+                              "assessment": stage["assessment"],
+                              "type": _issue_type(stage_name, stage, check),
+                              "code": check.get("code", "MODULE_FAILED"),
+                              "detail": check.get("detail", "")})
+
+    collect("generation", diagnostic["order"]["generation"])
+    for validation in diagnostic["validations"]:
+        for stage_name, stage in validation["stages"].items():
+            collect(stage_name, stage, assertion_id=validation["assertion_id"],
+                    run_id=validation["run_id"], validator_id=validation["validator_id"])
+    return incidents
 
 
 def index_campaign(root: Path, campaign: str) -> dict:
@@ -36,7 +100,7 @@ def index_campaign(root: Path, campaign: str) -> dict:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     except (OSError, ValueError) as exc:
         manifest, manifest_error = {}, f"manifest.json: {type(exc).__name__}"
-    orders, errors = [], []
+    orders, errors, incidents = [], [], []
     if manifest_error:
         errors.append(manifest_error)
     for path in sorted(directory.glob("*-viewer.json")):
@@ -47,16 +111,22 @@ def index_campaign(root: Path, campaign: str) -> dict:
                 raise ContractError("campaign_id does not match directory")
             order = diagnostic["order"]
             validations = diagnostic["validations"]
+            order_incidents = _diagnostic_incidents(diagnostic, path.name)
+            incidents.extend(order_incidents)
+            correct = sum(row["stages"]["llm"]["assessment"] == "PASS" for row in validations)
+            warnings = sum(item["type"] == "warning" for item in order_incidents)
+            technical_errors = sum(item["type"] == "error" for item in order_incidents)
             orders.append({"file": path.name, "order_id": identity["order_id"],
                            "dataset_id": identity["dataset_id"], "repetition": identity["repetition"],
                            "status": order["status"], "assertions": len(order["assertions"]),
-                           "validations": len(validations),
-                           "findings": sum(1 for row in validations for stage in row["stages"].values()
-                                           for check in stage["checks"] if check["status"] == "FAIL")})
+                           "validations": len(validations), "correct_validations": correct,
+                           "warnings": warnings, "errors": technical_errors,
+                           "findings": warnings + technical_errors})
         except (OSError, ValueError, KeyError, TypeError) as exc:
             errors.append(f"{path.name}: {type(exc).__name__}: {exc}")
     return {"campaign_id": campaign, "status": manifest.get("status", "UNKNOWN"),
-            "created_at": manifest.get("created_at"), "orders": orders, "errors": errors}
+            "created_at": manifest.get("created_at"), "orders": orders,
+            "incidents": incidents, "errors": errors}
 
 
 def list_campaigns(root: Path) -> list[dict]:

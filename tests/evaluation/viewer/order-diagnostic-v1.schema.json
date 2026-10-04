@@ -72,6 +72,18 @@
           "run_id": {"$ref": "#/$defs/nonempty"},
           "assertion_id": {"$ref": "#/$defs/nonempty"},
           "validator_id": {"$ref": "#/$defs/nonempty"},
+          "validator": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "validator_type": {"type": ["string", "null"]},
+              "provider": {"type": ["string", "null"]},
+              "model": {"type": ["string", "null"]},
+              "config_version": {"type": ["integer", "number", "string", "null"]},
+              "temperature": {"type": ["number", "null"]},
+              "evidence_search_strategy": {"type": ["string", "null"]}
+            }
+          },
           "stages": {
             "type": "object",
             "additionalProperties": false,
@@ -99,6 +111,7 @@
         "code": {"$ref": "#/$defs/nonempty"},
         "status": {"enum": ["PASS", "FAIL", "PARTIAL", "NOT_EVALUATED", "SKIPPED"]},
         "detail": {"type": "string"},
+        "type": {"enum": ["warning", "error"]},
         "observation_refs": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}
       }
     },

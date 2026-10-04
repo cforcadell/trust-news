@@ -49,6 +49,22 @@ EVIDENCE_CONTEXT_WINDOW_AFTER = int(os.getenv("EVIDENCE_CONTEXT_WINDOW_AFTER", "
 EVIDENCE_HTTP_TIMEOUT = float(os.getenv("EVIDENCE_HTTP_TIMEOUT", "10"))
 EVIDENCE_MIN_CONTEXT_CHARS = int(os.getenv("EVIDENCE_MIN_CONTEXT_CHARS", "120"))
 EVIDENCE_USER_AGENT = os.getenv("EVIDENCE_USER_AGENT", "TrustNewsEvidenceBot/1.0")
+EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS = int(os.getenv("EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS", "3"))
+
+QUERY_OPERATIONAL_TERMS = {
+    "comprobar", "comprobacion", "confirmar", "confirmacion", "evidencia", "evidencias",
+    "factcheck", "fuente", "fuentes", "oficial", "oficiales", "verificacion", "verificar",
+    "check", "evidence", "official", "source", "sources", "verification", "verify",
+}
+QUERY_CLAIM_QUALIFIERS = {
+    "alcanzo", "alcanzó", "cerró", "cerro", "exclusivamente", "exactamente", "genero", "generó",
+    "inferior", "negativa", "negativo", "solamente", "solo", "superior", "supero", "superó",
+    "totalmente", "únicamente", "unicamente",
+}
+QUERY_STOPWORDS = {
+    "a", "al", "and", "con", "de", "del", "durante", "el", "en", "la", "las", "los",
+    "mediante", "of", "según", "segun", "the", "una", "un", "y",
+}
 
 OFFICIAL_SOURCE_TYPES = {
     SourceType.STATISTICAL_OFFICE,
@@ -183,6 +199,62 @@ def base_queries_for_assertion(assertion: Dict[str, Any]) -> List[str]:
     return _dedupe_similar_queries(base_queries)
 
 
+def _relax_query_text(query: str) -> str:
+    """Remove retrieval instructions, disputed qualifiers and non-year quantities."""
+    relaxed = []
+    for token in re.findall(r"[^\W_]+|%", str(query or ""), flags=re.UNICODE):
+        folded = _fold_query_text(token)
+        if folded in QUERY_OPERATIONAL_TERMS or folded in QUERY_CLAIM_QUALIFIERS or folded in QUERY_STOPWORDS:
+            continue
+        if token == "%" or (token.isdigit() and not re.fullmatch(r"(?:19|20)\d{2}", token)):
+            continue
+        relaxed.append(token)
+    return " ".join(relaxed)
+
+
+def relaxed_query_variants(assertion: Dict[str, Any], exact_queries: List[str]) -> List[Dict[str, Any]]:
+    """Build a bounded, deterministic query ladder from generator-provided hints."""
+    hints = assertion.get("search_hints") or {}
+    candidates = [
+        *[str(value) for value in hints.get("suggested_queries") or []],
+        *[str(value) for value in hints.get("search_keywords") or []],
+        str(assertion.get("text") or ""),
+    ]
+    exact_tokens = _query_tokens(exact_queries[0]) if exact_queries else set()
+    anchors = []
+    context = assertion.get("context") or {}
+    anchors.extend(_context_values(context.get("locations"), "name"))
+    anchors.extend(_context_values(context.get("entities"), "name"))
+    anchors.extend(_context_values(context.get("temporal_context"), "value"))
+    anchor_tokens = {token for value in anchors for token in _query_tokens(value)}
+
+    relaxed_queries = []
+    for candidate in candidates:
+        relaxed = _relax_query_text(candidate)
+        tokens = _query_tokens(relaxed)
+        # Preserve explicit disambiguators and require at least one topical term.
+        if not tokens or (anchor_tokens and not anchor_tokens.issubset(tokens)):
+            continue
+        if not (tokens - anchor_tokens):
+            continue
+        if exact_tokens and tokens == exact_tokens:
+            continue
+        relaxed_queries.append(relaxed)
+
+    selected = _dedupe_similar_queries(relaxed_queries, similarity_threshold=0.8)
+    selected.sort(key=lambda value: (len(_query_tokens(value)), relaxed_queries.index(value)))
+    variants = []
+    for level, query in enumerate(selected[:max(0, EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS)], start=1):
+        query_tokens = _query_tokens(query)
+        variants.append({
+            "query": query,
+            "relaxation_level": level,
+            "relaxation_reason": "INITIAL_QUERY_EMPTY",
+            "removed_terms": sorted(exact_tokens - query_tokens),
+        })
+    return variants
+
+
 def _policy_value(policy: Any, name: str, default: Any = None) -> Any:
     return policy.get(name, default) if isinstance(policy, dict) else getattr(policy, name, default)
 
@@ -217,6 +289,9 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
                 "include_domains": domains,
                 "mode": "local_routed",
                 "external_source_policy": "none",
+                "relaxation_level": 0,
+                "relaxation_reason": None,
+                "removed_terms": [],
             })
 
     if strategy in {EvidenceSearchStrategy.EXT_OFFICIAL_FIRST, EvidenceSearchStrategy.EXT_ONLY_OFFICIAL}:
@@ -236,6 +311,9 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
                 "include_domains": None,
                 "mode": request_mode,
                 "external_source_policy": external_source_policy,
+                "relaxation_level": 0,
+                "relaxation_reason": None,
+                "removed_terms": [],
             })
 
     if strategy == EvidenceSearchStrategy.EXT_OFFICIAL_FIRST:
@@ -245,7 +323,35 @@ def _search_request_plan(assertion: Dict[str, Any], domain_resolution: Dict[str,
                 "include_domains": None,
                 "mode": "general_fallback",
                 "external_source_policy": "none",
+                "relaxation_level": 0,
+                "relaxation_reason": None,
+                "removed_terms": [],
             })
+
+    # Conditional requests are executed only while no candidate has survived
+    # the active domain/source policy.
+    for variant in relaxed_query_variants(assertion, base_queries):
+        if strategy == EvidenceSearchStrategy.LOCAL:
+            requests.append({
+                **variant,
+                "include_domains": grouped.get(base_queries[0], []) if base_queries else [],
+                "mode": "local_routed_relaxed",
+                "external_source_policy": "none",
+            })
+        elif strategy == EvidenceSearchStrategy.EXT_ONLY_OFFICIAL:
+            requests.append({
+                **variant,
+                "include_domains": None,
+                "mode": "external_only_official_relaxed",
+                "external_source_policy": "only_official",
+            })
+        elif strategy == EvidenceSearchStrategy.EXT_OFFICIAL_FIRST:
+            requests.extend([
+                {**variant, "include_domains": None, "mode": "external_official_first_relaxed",
+                 "external_source_policy": "official_first"},
+                {**variant, "include_domains": None, "mode": "general_fallback_relaxed",
+                 "external_source_policy": "none"},
+            ])
 
     # Return both the normalized base queries and the executable request plan for callers/tests.
     return {"base_queries": base_queries, "requests": requests}
@@ -362,6 +468,13 @@ def is_official_source_type(value: str) -> bool:
         return False
 
 
+def is_same_domain_family(domain: str, other: str) -> bool:
+    """Match a domain and its subdomains when suppressing a failed site."""
+    domain = normalize_domain(domain)
+    other = normalize_domain(other)
+    return bool(domain and other and (domain == other or domain.endswith(f".{other}") or other.endswith(f".{domain}")))
+
+
 def utc_now() -> datetime:
     """Return the current time as a timezone-aware UTC datetime."""
     # Centralize time creation so cache timestamps use the same timezone convention.
@@ -425,7 +538,12 @@ def search_backend_for_cache() -> Dict[str, Any]:
         "evidence_chunk_overlap_chars": EVIDENCE_CHUNK_OVERLAP_CHARS,
         "evidence_context_window_before": EVIDENCE_CONTEXT_WINDOW_BEFORE,
         "evidence_context_window_after": EVIDENCE_CONTEXT_WINDOW_AFTER,
+        "evidence_max_query_relaxation_attempts": EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS,
+        "progressive_query_relaxation": "v1",
         "citation_contract": "retrieved-context-id-v1",
+        # This changes the result set after an all-unusable LOCAL retrieval, so it
+        # must partition cached responses from the pre-fallback implementation.
+        "local_unrestricted_fetch_fallback": "v1",
     }
 
 
@@ -525,6 +643,7 @@ async def build_evidences_with_optional_contexts(
     max_results: int,
     origin_document: Optional[Dict[str, Any]] = None,
     capture_chunks: bool = False,
+    rank_offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """Normalize search results and optionally enrich them with selected document contexts."""
     evidences: List[Dict[str, Any]] = []
@@ -533,7 +652,7 @@ async def build_evidences_with_optional_contexts(
     if EVIDENCE_FETCH_FULL_TEXT:
         logger.info(f"[evidence-search] full_text_enrichment_start=true assertion_id={assertion.get('assertion_id')}")
 
-    for idx, source in enumerate(raw_results[:max_results], start=1):
+    for idx, source in enumerate(raw_results[:max_results], start=1 + rank_offset):
         evidence = evidence_from_source_v2(source, idx, domain_resolution, origin_document)
         source_id = evidence["source_id"]
 
@@ -553,6 +672,10 @@ async def build_evidences_with_optional_contexts(
         evidence["fetch_status"] = fetch_result.status
         evidence["content_type"] = getattr(fetch_result, "content_type", None)
         evidence["fetch_error"] = fetch_result.error
+        evidence["fetched_url"] = getattr(fetch_result, "fetched_url", None)
+        evidence["url_normalized"] = bool(getattr(fetch_result, "url_normalized", False))
+        evidence["normalization_reason"] = getattr(fetch_result, "normalization_reason", None)
+        evidence["fetch_attempted_urls"] = getattr(fetch_result, "attempted_urls", None) or [url]
         logger.info(f"[evidence-search] fetch_status source_id={source_id} status={fetch_result.status} error={fetch_result.error}")
 
         if fetch_result.status != "ok":
@@ -807,10 +930,17 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
     raw_results: List[Dict[str, Any]] = []
     successful_searches = 0
     provider_errors: List[Dict[str, str]] = []
+    policy_drops: List[Dict[str, str]] = []
     provider_name = SEARCH_PROVIDER
     for request_index, search_request in enumerate(search_requests):
         query = search_request["query"]
         trace_request = trace_requests[request_index] if trace_requests is not None else None
+        relaxation_level = int(search_request.get("relaxation_level") or 0)
+        if relaxation_level > 0 and raw_results:
+            if trace_request is not None:
+                trace_request["status"] = "SKIPPED"
+                trace_request["outcome"] = "RESULTS_ALREADY_FOUND"
+            continue
         if trace_request is not None:
             trace_request["status"] = "EXECUTED"
         include_domains = search_request.get("include_domains")
@@ -825,17 +955,33 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                 external_source_policy=external_source_policy,
             )
             successful_searches += 1
-            returned = search_results.get("results", []) or []
+            provider_returned = search_results.get("results", []) or []
+            returned = provider_returned
+            dropped_urls = set()
+            if strategy == EvidenceSearchStrategy.EXT_ONLY_OFFICIAL:
+                returned = []
+                for item in provider_returned:
+                    url = str(item.get("url") or "")
+                    if is_official_source_type(source_type_for_domain(normalize_domain(urlparse(url).netloc))):
+                        returned.append(item)
+                    else:
+                        dropped_urls.add(url)
+                        policy_drops.append({"url": url, "reason": "NOT_OFFICIAL_SOURCE_TYPE"})
             if trace_request is not None:
-                trace_request["returned_urls"] = [str(item.get("url") or "") for item in returned]
-                trace_request["result_count"] = len(returned)
-                trace_request["outcome"] = "RESULTS" if returned else "EMPTY"
+                trace_request["returned_urls"] = [str(item.get("url") or "") for item in provider_returned]
+                trace_request["result_count"] = len(provider_returned)
+                trace_request["retained_result_count"] = len(returned)
+                trace_request["outcome"] = (
+                    "RESULTS" if returned else "FILTERED_EMPTY" if provider_returned else "EMPTY"
+                )
                 seen = {item.get("url") or f"{item.get('title', '')}:{item.get('content', '')}" for item in raw_results}
                 retained = len(raw_results)
-                for item in returned:
+                for item in provider_returned:
                     url = str(item.get("url") or "")
                     key = url or f"{item.get('title', '')}:{item.get('content', '')}"
-                    if retained >= effective_search_policy["max_results"]:
+                    if url in dropped_urls:
+                        decision = "DROPPED_NOT_OFFICIAL"
+                    elif retained >= effective_search_policy["max_results"]:
                         decision = "NOT_CONSIDERED_LIMIT"
                     elif key in seen:
                         decision = "DUPLICATE"
@@ -869,20 +1015,6 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             },
         )
 
-    policy_drops = []
-    if strategy == EvidenceSearchStrategy.EXT_ONLY_OFFICIAL:
-        before_policy = raw_results
-        raw_results = [
-            item for item in raw_results
-            if is_official_source_type(
-                source_type_for_domain(normalize_domain(urlparse(item.get("url") or "").netloc))
-            )
-        ]
-        if run_id:
-            kept_urls = {item.get("url") for item in raw_results}
-            policy_drops = [{"url": item.get("url"), "reason": "NOT_OFFICIAL_SOURCE_TYPE"}
-                            for item in before_policy if item.get("url") not in kept_urls]
-
     # Normalize raw provider results into the public evidence response contract.
     evidences = await build_evidences_with_optional_contexts(
         assertion,
@@ -892,6 +1024,123 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         origin_document=origin_document,
         capture_chunks=bool(run_id),
     )
+
+    # A routed domain can be authoritative and still be impossible to extract
+    # (bot protection, an unsupported page template, etc.).  Broaden retrieval
+    # only after every first-pass source failed to yield a citable context; a
+    # successful routed source must always remain the preferred outcome.
+    fallback_used = False
+    fallback_reason = None
+    fallback_excluded_domains: List[str] = []
+    if (
+        strategy == EvidenceSearchStrategy.LOCAL
+        and EVIDENCE_FETCH_FULL_TEXT
+        and not any(item.get("citation_status") == "available" and item.get("contexts") for item in evidences)
+    ):
+        fallback_reason = "NO_INITIAL_RESULTS" if not evidences else "ALL_INITIAL_FETCHES_UNUSABLE"
+        fallback_used = True
+        initial_urls = {normalize_url(item.get("url") or "") for item in raw_results}
+        if evidences:
+            fallback_excluded_domains = list(dict.fromkeys(
+                normalize_domain(urlparse(item.get("url") or "").netloc)
+                for item in raw_results
+                if normalize_domain(urlparse(item.get("url") or "").netloc)
+            ))
+        highest_relaxation = max((int(item.get("relaxation_level") or 0) for item in search_requests), default=0)
+        fallback_seed_requests = [
+            item for item in search_requests
+            if int(item.get("relaxation_level") or 0) == highest_relaxation
+        ]
+        fallback_requests = [{
+            "query": item["query"],
+            "include_domains": None,
+            "mode": "unrestricted_after_no_results" if not evidences else "unrestricted_after_all_fetches_unusable",
+            "external_source_policy": "none",
+            "excluded_domains": fallback_excluded_domains,
+            "trigger": fallback_reason,
+            "relaxation_level": item.get("relaxation_level", 0),
+            "relaxation_reason": item.get("relaxation_reason"),
+            "removed_terms": item.get("removed_terms", []),
+        } for item in fallback_seed_requests]
+        fallback_raw_results: List[Dict[str, Any]] = []
+
+        for fallback_request in fallback_requests:
+            trace_request = None
+            if trace_requests is not None:
+                trace_request = {**fallback_request, "provider": SEARCH_PROVIDER, "status": "EXECUTED",
+                                 "returned_urls": [], "result_decisions": []}
+                trace_requests.append(trace_request)
+            try:
+                search_results = await search_with_provider(
+                    provider_name,
+                    fallback_request["query"],
+                    effective_search_policy["max_results"],
+                    include_domains=None,
+                    external_source_policy="none",
+                )
+                returned = search_results.get("results", []) or []
+                retained = []
+                seen_urls = {normalize_url(item.get("url") or "") for item in fallback_raw_results}
+                for item in returned:
+                    url = str(item.get("url") or "")
+                    normalized_url = normalize_url(url)
+                    domain = normalize_domain(urlparse(url).netloc)
+                    if any(is_same_domain_family(domain, excluded) for excluded in fallback_excluded_domains):
+                        decision = "EXCLUDED_INITIAL_UNUSABLE_DOMAIN"
+                    elif normalized_url and normalized_url in initial_urls:
+                        decision = "DUPLICATE_INITIAL_URL"
+                    elif normalized_url and normalized_url in seen_urls:
+                        decision = "DUPLICATE_FALLBACK_URL"
+                    else:
+                        decision = "RETAINED"
+                        retained.append(item)
+                        if normalized_url:
+                            seen_urls.add(normalized_url)
+                    if trace_request is not None:
+                        trace_request["result_decisions"].append({"url": url, "decision": decision})
+                if trace_request is not None:
+                    trace_request["returned_urls"] = [str(item.get("url") or "") for item in returned]
+                    trace_request["result_count"] = len(returned)
+                    trace_request["outcome"] = "RESULTS" if returned else "EMPTY"
+                fallback_raw_results = merge_search_results(
+                    fallback_raw_results, retained, max_sources=effective_search_policy["max_results"],
+                )
+                if len(fallback_raw_results) >= effective_search_policy["max_results"]:
+                    break
+            except Exception as exc:
+                if trace_request is not None:
+                    trace_request["status"] = "FAILED"
+                    trace_request["error_type"] = type(exc).__name__
+                    trace_request["outcome"] = "ERROR"
+                logger.warning(
+                    f"[evidence-search] unrestricted fallback provider failed "
+                    f"provider='{provider_name}' query='{fallback_request['query']}': {exc}"
+                )
+
+        if fallback_raw_results:
+            fallback_resolution = deepcopy(domain_resolution)
+            fallback_resolution["fallback_used"] = True
+            fallback_resolution["fallback_reason"] = fallback_reason
+            fallback_resolution["fallback_excluded_domains"] = fallback_excluded_domains
+            fallback_evidences = await build_evidences_with_optional_contexts(
+                assertion,
+                fallback_raw_results,
+                fallback_resolution,
+                max_results=effective_search_policy["max_results"],
+                origin_document=origin_document,
+                capture_chunks=bool(run_id),
+                rank_offset=len(evidences),
+            )
+            for item in fallback_evidences:
+                item["retrieval_mode"] = fallback_requests[0]["mode"]
+                item["fallback_reason"] = fallback_reason
+            evidences.extend(fallback_evidences)
+
+        domain_resolution["fallback_used"] = fallback_used
+        domain_resolution["fallback_reason"] = fallback_reason
+        domain_resolution["fallback_excluded_domains"] = fallback_excluded_domains
+        search_requests.extend(fallback_requests)
+
     response = {
         "schema_version": "evidence-search-response-v2",
         "assertion_id": assertion.get("assertion_id"),

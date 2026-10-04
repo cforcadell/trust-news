@@ -153,6 +153,36 @@ async def test_structured_repair_receives_invalid_response_and_validation_error(
     assert "COUNTRY jurisdiction requires country_code" in repair_inputs[0][1]
 
 
+@pytest.mark.asyncio
+async def test_failed_structured_repair_exposes_response_only_as_non_message_diagnostic(monkeypatch):
+    import common.llm.factory as factory
+
+    class InvalidRepairProvider(RepairingProvider):
+        name = "invalid-repair"
+
+        async def acomplete(self, request):
+            self.calls += 1
+            return LLMResponse(
+                content='{"scope":"COUNTRY","country_code":null}',
+                provider=self.name,
+                model=request.model,
+            )
+
+    provider = InvalidRepairProvider()
+    monkeypatch.setitem(factory._providers, provider.name, provider)
+    monkeypatch.setenv("LLM_MAX_RETRIES", "1")
+
+    with pytest.raises(Exception) as caught:
+        await acomplete_structured_with_repair(
+            provider.name,
+            LLMRequest(prompt="original", model="test", response_model=CountryPayload),
+            lambda invalid, error: "repair the JSON",
+        )
+
+    assert caught.value.response_content == '{"scope":"COUNTRY","country_code":null}'
+    assert caught.value.response_content not in str(caught.value)
+
+
 def test_openrouter_payload_requires_strict_json_schema_support():
     schema = Payload.model_json_schema()
     payload = OpenAICompatibleProvider("openrouter")._payload(

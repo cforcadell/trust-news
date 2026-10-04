@@ -11,6 +11,9 @@ SCHEMA_VERSION = "order-diagnostic-v1"
 STAGES = ("router", "evidence_search", "handoff", "llm", "citations", "consensus")
 ASSESSMENTS = {"PASS", "FAIL", "PARTIAL", "NOT_EVALUATED", "SKIPPED"}
 EXECUTION_STATUSES = {"COMPLETED", "FAILED", "SKIPPED", "NOT_RECORDED"}
+ISSUE_TYPES = {"warning", "error"}
+VALIDATOR_FIELDS = {"validator_type", "provider", "model", "config_version",
+                    "temperature", "evidence_search_strategy"}
 
 
 class ContractError(ValueError):
@@ -57,6 +60,8 @@ def _stage(value, name):
             _fail(f"{name}.checks[{index}].status is invalid")
         if not isinstance(check.get("detail"), str):
             _fail(f"{name}.checks[{index}].detail must be text")
+        if "type" in check and check["type"] not in ISSUE_TYPES:
+            _fail(f"{name}.checks[{index}].type is invalid")
 
 
 def _observation_refs(stage, document):
@@ -141,6 +146,13 @@ def validate_order_diagnostic(document):
             _fail(f"Duplicate assertion/validator pair: {pair}")
         seen_runs.add(run_id)
         seen_pairs.add(pair)
+        validator = validation.get("validator")
+        if validator is not None:
+            if not isinstance(validator, dict) or set(validator) - VALIDATOR_FIELDS:
+                _fail(f"validations[{index}].validator is invalid")
+            for field in ("validator_type", "provider", "model", "evidence_search_strategy"):
+                if validator.get(field) is not None and not isinstance(validator[field], str):
+                    _fail(f"validations[{index}].validator.{field} must be text or null")
         stages = validation.get("stages")
         if not isinstance(stages, dict) or set(stages) != set(STAGES):
             _fail(f"validations[{index}].stages must contain exactly {', '.join(STAGES)}")

@@ -14,4 +14,8 @@ class LLMProviderError(LLMError):
 
 
 class LLMResponseError(LLMError):
-    pass
+    def __init__(self, message: str, *, response_content: str | None = None):
+        # The response is kept in memory only so callers can derive sanitized
+        # diagnostics. It must never be included in str(exc) or persisted raw.
+        self.response_content = response_content
+        super().__init__(message)

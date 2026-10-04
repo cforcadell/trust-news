@@ -8,7 +8,7 @@ from .limits import effective_max_results
 from .models import SearchRequest, SearchResult
 from .normalization import normalize_url
 from .provider import SearchProvider
-from .tavily import _official_query, _text
+from .tavily import _text
 
 
 def normalize_exa_result(row: dict[str, Any]) -> dict[str, Any]:
@@ -37,7 +37,9 @@ class ExaSearchProvider(SearchProvider):
         if not api_key:
             raise SearchConfigurationError("API_KEY_PROVIDER is not configured")
         payload: dict[str, Any] = {
-            "query": _official_query(request.query, request.external_source_policy),
+            # Exa has a structured official-source category. Keep policy words
+            # out of the semantic query so they do not reduce recall.
+            "query": request.query,
             "numResults": effective_max_results(request.max_results),
             "contents": {
                 "highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true").lower() == "true",

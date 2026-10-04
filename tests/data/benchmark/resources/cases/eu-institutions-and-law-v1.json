@@ -18,8 +18,8 @@
       "id": "EU_MEMBER_STATES_27",
       "text": "La Unión Europea está formada por 27 países miembros.",
       "expected_verdict": "TRUE",
-      "expected_topic_code": "POLITICS",
-      "expected_evidence_kind": "OFFICIAL_STATEMENT",
+      "expected_topic_code": "POLITICS_GOVERNMENT",
+      "expected_evidence_kind": "PUBLIC_STATEMENT",
       "required_terms": ["Unión Europea", "27", "países", "miembros"],
       "acceptable_domains": ["european-union.europa.eu"],
       "reference_sources": [
@@ -33,8 +33,8 @@
       "id": "EU_PARLIAMENT_720_MEPS",
       "text": "El Parlamento Europeo cuenta con 720 diputados tras las elecciones europeas de 2024.",
       "expected_verdict": "TRUE",
-      "expected_topic_code": "POLITICS",
-      "expected_evidence_kind": "OFFICIAL_STATEMENT",
+      "expected_topic_code": "POLITICS_GOVERNMENT",
+      "expected_evidence_kind": "PUBLIC_STATEMENT",
       "required_terms": ["Parlamento Europeo", "720", "diputados", "2024"],
       "acceptable_domains": ["europarl.europa.eu"],
       "reference_sources": [
@@ -48,8 +48,8 @@
       "id": "GDPR_APPLIED_2020",
       "text": "El Reglamento General de Protección de Datos comenzó a aplicarse en 2020.",
       "expected_verdict": "FALSE",
-      "expected_topic_code": "LAW",
-      "expected_evidence_kind": "LEGAL_DOCUMENT",
+      "expected_topic_code": "LAW_JUSTICE",
+      "expected_evidence_kind": "LEGAL_TEXT",
       "required_terms": ["Reglamento General de Protección de Datos", "aplicarse", "2020"],
       "acceptable_domains": ["commission.europa.eu"],
       "reference_sources": [

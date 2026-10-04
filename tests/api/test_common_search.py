@@ -90,6 +90,43 @@ async def test_provider_payload_receives_router_discovery_limit(
 
 
 @pytest.mark.asyncio
+async def test_exa_keeps_official_policy_out_of_semantic_query(monkeypatch):
+    import common.search.exa as exa
+
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"results": []}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured.update(kwargs["json"])
+            return Response()
+
+    monkeypatch.setattr(exa.httpx, "AsyncClient", Client)
+    monkeypatch.setenv("API_KEY_PROVIDER", "test-key")
+    await ExaSearchProvider().search(SearchRequest(
+        query="inflación Alemania 2025", max_results=5, external_source_policy="only_official",
+    ))
+
+    assert captured["query"] == "inflación Alemania 2025"
+    assert captured["category"] == "official source"
+
+
+@pytest.mark.asyncio
 async def test_search_retries_retryable_provider_failure(monkeypatch):
     import common.search.factory as factory
 

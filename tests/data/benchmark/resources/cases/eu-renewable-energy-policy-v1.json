@@ -34,7 +34,7 @@
       "text": "La Directiva de Energías Renovables revisada fija para 2030 un objetivo vinculante de al menos el 42,5 % de renovables en la Unión Europea.",
       "expected_verdict": "TRUE",
       "expected_topic_code": "ENERGY",
-      "expected_evidence_kind": "LEGAL_DOCUMENT",
+      "expected_evidence_kind": "LEGAL_TEXT",
       "required_terms": ["Directiva", "renovables", "2030", "42,5", "vinculante"],
       "acceptable_domains": ["eur-lex.europa.eu"],
       "reference_sources": [
@@ -49,7 +49,7 @@
       "text": "La legislación de la Unión Europea obliga a que el 100 % del consumo energético sea renovable en 2030.",
       "expected_verdict": "FALSE",
       "expected_topic_code": "ENERGY",
-      "expected_evidence_kind": "LEGAL_DOCUMENT",
+      "expected_evidence_kind": "LEGAL_TEXT",
       "required_terms": ["legislación", "100", "consumo energético", "renovable", "2030"],
       "acceptable_domains": ["eur-lex.europa.eu"],
       "reference_sources": [

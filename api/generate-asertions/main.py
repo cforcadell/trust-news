@@ -97,6 +97,17 @@ MAX_ASSERTIONS = int(os.getenv("MAX_ASSERTIONS", "20"))
 LLM_CONFIG_VERSION = int(os.getenv("LLM_CONFIG_VERSION", "0"))
 MAX_REPAIR_RESPONSE_CHARS = 12_000
 MAX_REPAIR_ERROR_CHARS = 4_000
+JURISDICTION_CONTRACT_PROMPT = (
+    "CONTRATO OBLIGATORIO DE JURISDICCIÓN (usa null para códigos que no correspondan):\n"
+    '- GLOBAL: {"scope":"GLOBAL","country_code":null,"region_code":null,"jurisdiction_code":null,"applicable_country_codes":[]}\n'
+    '- SUPRANATIONAL (UE): {"scope":"SUPRANATIONAL","country_code":null,"region_code":null,"jurisdiction_code":"EU","applicable_country_codes":[]}\n'
+    '- COUNTRY (España): {"scope":"COUNTRY","country_code":"ES","region_code":null,"jurisdiction_code":null,"applicable_country_codes":[]}\n'
+    '- REGION (Catalunya): {"scope":"REGION","country_code":"ES","region_code":"ES-CT","jurisdiction_code":null,"applicable_country_codes":[]}\n'
+    '- LOCAL: requiere country_code, region_code y jurisdiction_code; applicable_country_codes debe ser [].\n'
+    '- UNKNOWN: usa todos los códigos en null y applicable_country_codes vacío.\n'
+    "Para SUPRANATIONAL, jurisdiction_code es obligatorio y country_code/region_code deben ser null. "
+    "No uses country_code=\"EU\": EU no es un país ISO 3166-1.\n"
+)
 
 def build_assertions_prompt(text: str) -> str:
     return (
@@ -123,8 +134,7 @@ def build_assertions_prompt(text: str) -> str:
         f"- EntityRole: {', '.join(item.value for item in EntityRole)}\n"
         f"- JurisdictionScope: {', '.join(item.value for item in JurisdictionScope)}\n"
         f"- TemporalType: {', '.join(item.value for item in TemporalType)}\n"
-        "- CONTRATO OBLIGATORIO COUNTRY -> country_code: si jurisdiction.scope es COUNTRY, country_code ISO 3166-1 alpha-2 es obligatorio; region_code y jurisdiction_code deben ser null y applicable_country_codes debe ser [].\n"
-        '- Ejemplo COUNTRY (España): {"scope":"COUNTRY","country_code":"ES","region_code":null,"jurisdiction_code":null,"applicable_country_codes":[]}.\n'
+        f"{JURISDICTION_CONTRACT_PROMPT}"
         "- region_code debe usar el código ISO 3166-2 completo (por ejemplo, ES-CT para Catalunya).\n"
         "- Si jurisdiction contiene region_code, su scope debe ser REGION; COUNTRY no puede contener region_code.\n"
         "- No uses valores fuera de estas listas ni códigos territoriales abreviados no canónicos.\n\n"
@@ -256,10 +266,58 @@ def build_assertions_repair_prompt(invalid_response: str, validation_error: str)
         "La respuesta JSON anterior incumple el contrato Pydantic. Corrígela.\n"
         "Devuelve SOLAMENTE el JSON completo corregido, sin Markdown ni explicación. "
         "No cambies el contenido de las aserciones salvo lo necesario para cumplir el esquema.\n\n"
+        f"{JURISDICTION_CONTRACT_PROMPT}\n"
+        "Si el error afecta a jurisdiction, corrige cada objeto según su scope: elimina los códigos "
+        "incompatibles y completa los obligatorios. Revisa todas las aserciones, no sólo la primera.\n\n"
         f"Error de validación:\n{validation_error[:MAX_REPAIR_ERROR_CHARS]}\n\n"
         "Respuesta JSON inválida a corregir:\n"
         f"{invalid_response[:MAX_REPAIR_RESPONSE_CHARS]}"
     )
+
+
+def summarize_assertion_validation(invalid_response: str) -> list[dict[str, Any]]:
+    """Return actionable schema diagnostics without retaining generated content."""
+    try:
+        payload = json.loads(invalid_response)
+        AssertionBatch.model_validate(payload)
+        return []
+    except json.JSONDecodeError as exc:
+        return [{
+            "code": "INVALID_JSON",
+            "location": f"line {exc.lineno}, column {exc.colno}",
+            "message": exc.msg,
+        }]
+    except ValidationError as exc:
+        payload = payload if isinstance(payload, dict) else {}
+        assertions = payload.get("assertions") if isinstance(payload.get("assertions"), list) else []
+        issues = []
+        for error in exc.errors(include_url=False, include_context=False, include_input=False):
+            location_parts = list(error.get("loc") or ())
+            assertion_index = (
+                location_parts[1]
+                if len(location_parts) > 1
+                and location_parts[0] == "assertions"
+                and isinstance(location_parts[1], int)
+                else None
+            )
+            assertion = assertions[assertion_index] if assertion_index is not None and assertion_index < len(assertions) else {}
+            assertion = assertion if isinstance(assertion, dict) else {}
+            jurisdiction = ((assertion.get("context") or {}).get("jurisdiction") or {})
+            jurisdiction = jurisdiction if isinstance(jurisdiction, dict) else {}
+            present_fields = [
+                field for field in ("country_code", "region_code", "jurisdiction_code", "applicable_country_codes")
+                if jurisdiction.get(field) not in (None, [], "")
+            ]
+            issues.append({
+                "code": "JURISDICTION_CONTRACT_MISMATCH" if "jurisdiction" in location_parts else "SCHEMA_VALIDATION_ERROR",
+                "assertion_index": assertion_index,
+                "assertion_id": str(assertion.get("idAssertion")) if assertion.get("idAssertion") is not None else None,
+                "location": ".".join(str(part) for part in location_parts) or "response",
+                "message": str(error.get("msg") or "Schema validation failed"),
+                "jurisdiction_scope": jurisdiction.get("scope"),
+                "present_jurisdiction_fields": present_fields,
+            })
+        return issues
 
 
 async def _call_configured_llm(text: str, trace: Optional[dict] = None) -> List[Assertion]:
@@ -279,7 +337,11 @@ async def _call_configured_llm(text: str, trace: Optional[dict] = None) -> List[
         return []
     def repair_prompt(invalid_response, validation_error):
         if trace is not None:
-            trace.update(structured_attempts=2, repair_used=True)
+            trace.update(
+                structured_attempts=2,
+                repair_used=True,
+                validation_issues=summarize_assertion_validation(invalid_response),
+            )
         return build_assertions_repair_prompt(invalid_response, validation_error)
     try:
         request = build_assertions_llm_request(text, model)
@@ -296,7 +358,10 @@ async def _call_configured_llm(text: str, trace: Optional[dict] = None) -> List[
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         if trace is not None:
+            final_response = getattr(exc, "response_content", None)
             trace.update(status="FAILED", error_type=type(exc).__name__)
+            if isinstance(final_response, str):
+                trace["validation_issues"] = summarize_assertion_validation(final_response)
         raise HTTPException(status_code=503, detail=exception_message(exc)) from exc
     finally:
         if trace is not None:

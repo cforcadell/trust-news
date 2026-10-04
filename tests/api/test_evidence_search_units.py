@@ -66,6 +66,84 @@ async def test_pdf_content_is_extracted_and_non_pdf_behavior_is_unchanged(monkey
     assert result.content_type == "application/pdf"
 
 
+@pytest.mark.asyncio
+async def test_tls_hostname_mismatch_retries_only_the_verified_www_variant(monkeypatch):
+    from app import document_fetcher
+
+    original = "https://statistics.example.test/report.pdf"
+    canonical = "https://www.statistics.example.test/report.pdf"
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "application/pdf"}
+        content = b"pdf bytes"
+        text = "not used"
+        url = canonical
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            if url == original:
+                raise document_fetcher.httpx.ConnectError(
+                    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch"
+                )
+            assert url == canonical
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    monkeypatch.setattr(document_fetcher, "extract_pdf_text", lambda content: "Texto del PDF")
+    result = await document_fetcher.fetch_main_text(original)
+
+    assert result.status == "ok"
+    assert result.fetched_url == canonical
+    assert result.url_normalized is True
+    assert result.normalization_reason == "tls_hostname_mismatch_www_variant"
+    assert result.attempted_urls == [original, canonical]
+
+
+@pytest.mark.asyncio
+async def test_connect_errors_do_not_try_hostname_variants(monkeypatch):
+    from app import document_fetcher
+
+    original = "https://statistics.example.test/report.pdf"
+    calls = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            raise document_fetcher.httpx.ConnectError("network unreachable")
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    result = await document_fetcher.fetch_main_text(original)
+
+    assert result.status == "failed"
+    assert result.error == "connect_error"
+    assert result.attempted_urls == [original]
+    assert calls == [original]
+
+
+def test_www_hostname_variant_is_strictly_limited_to_safe_https_hostnames():
+    from app.document_fetcher import www_hostname_variant
+
+    assert www_hostname_variant("https://example.test/report") == "https://www.example.test/report"
+    assert www_hostname_variant("https://www.example.test/report") == "https://example.test/report"
+    assert www_hostname_variant("http://example.test/report") is None
+    assert www_hostname_variant("https://127.0.0.1/report") is None
+    assert www_hostname_variant("https://user@example.test/report") is None
+    assert www_hostname_variant("https://example.test:8443/report") is None
+
+
 def assertion():
     return {
         "assertion_id": 1,
@@ -164,6 +242,90 @@ def test_base_queries_drop_near_duplicate_suggestions():
         },
     }
     assert evidence.base_queries_for_assertion(population) == ["población de España 2025 49 millones"]
+
+
+def inflation_assertion():
+    return {
+        **assertion(),
+        "text": "Alemania cerró 2025 con una inflación anual negativa, inferior al 0 %.",
+        "topic_code": "ECONOMY_MACRO",
+        "context": {
+            "locations": [{"name": "Alemania", "scope": "COUNTRY", "country_code": "DE",
+                           "origin": "explicit", "confidence": 0.9}],
+            "entities": [],
+            "temporal_context": [{"value": "2025", "type": "YEAR", "origin": "explicit", "confidence": 0.9}],
+            "language": "es",
+            "jurisdiction": {"scope": "COUNTRY", "country_code": "DE"},
+        },
+        "search_hints": {
+            "search_keywords": ["Alemania 2025 inflación negativa", "inflación 2025 Alemania", "deflación Alemania 2025"],
+            "suggested_queries": ["inflación Alemania 2025 fuente oficial", "Alemania inflación 2025"],
+        },
+    }
+
+
+def test_query_relaxation_keeps_topic_location_and_year_but_drops_claim_qualifiers(monkeypatch):
+    monkeypatch.setattr(evidence, "EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS", 3)
+    exact = evidence.base_queries_for_assertion(inflation_assertion())
+    variants = evidence.relaxed_query_variants(inflation_assertion(), exact)
+
+    assert variants[0]["query"] == "inflación Alemania 2025"
+    assert variants[0]["relaxation_level"] == 1
+    assert variants[0]["relaxation_reason"] == "INITIAL_QUERY_EMPTY"
+    assert {"negativa", "fuente", "oficial"}.issubset(variants[0]["removed_terms"])
+    assert variants[1]["query"] == "deflación Alemania 2025"
+
+
+@pytest.mark.asyncio
+async def test_only_official_executes_relaxed_query_after_empty_exact_search(monkeypatch):
+    calls = []
+
+    async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
+        calls.append((query, external_source_policy))
+        if query == "inflación Alemania 2025":
+            return {"results": [{"url": "https://ec.europa.eu/eurostat/inflation", "title": "Eurostat"}]}
+        return {"results": []}
+
+    req = EvidenceSearchRequestV2(
+        schema_version="evidence-search-request-v2",
+        assertion=inflation_assertion(),
+        origin_document={"url": "https://publisher.test/story", "domain": "publisher.test"},
+        search_policy={"strategy": "EXT_ONLY_OFFICIAL", "max_domains": 3, "max_results": 3,
+                       "max_queries": 1, "preferred_sources": []},
+    )
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", False)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    response = await evidence.search_evidence(req)
+
+    assert calls[-1] == ("inflación Alemania 2025", "only_official")
+    assert all(policy == "only_official" for _, policy in calls)
+    assert response["evidences"][0]["domain"] == "ec.europa.eu"
+    relaxed = next(item for item in response["queries_executed"] if item["relaxation_level"] == 1)
+    assert relaxed["removed_terms"]
+
+
+@pytest.mark.asyncio
+async def test_relaxed_queries_are_not_executed_when_exact_search_has_results(monkeypatch):
+    calls = []
+
+    async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
+        calls.append(query)
+        return {"results": [{"url": "https://ec.europa.eu/eurostat/inflation", "title": "Eurostat"}]}
+
+    req = EvidenceSearchRequestV2(
+        schema_version="evidence-search-request-v2",
+        assertion=inflation_assertion(),
+        origin_document={"url": "https://publisher.test/story", "domain": "publisher.test"},
+        search_policy={"strategy": "EXT_ONLY_OFFICIAL", "max_domains": 3, "max_results": 3,
+                       "max_queries": 1, "preferred_sources": []},
+    )
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", False)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    await evidence.search_evidence(req)
+
+    assert len(calls) == 1
 
 
 def test_strategy_plans_are_explicit_and_have_no_local_fallback():
@@ -309,13 +471,82 @@ async def test_failed_document_fetch_never_exposes_provider_snippet_as_citable(m
 
 
 @pytest.mark.asyncio
+async def test_local_search_retries_without_routed_domains_after_all_fetches_are_unusable(monkeypatch):
+    calls = []
+    document = " ".join(["La fuente alternativa confirma la estadística de empleo en Barcelona en 2024."] * 8)
+
+    async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
+        calls.append(include_domains)
+        if include_domains:
+            return {"results": [{"url": "https://ine.es/unreadable", "title": "Original"}]}
+        return {"results": [
+            {"url": "https://www.ine.es/still-unreadable", "title": "Subdominio excluido"},
+            {"url": "https://alternative.example/report", "title": "Alternativa"},
+        ]}
+
+    async def fake_fetch(url, **kwargs):
+        if "alternative.example" in url:
+            return SimpleNamespace(status="ok", error=None, text=document, document_length_chars=len(document))
+        return SimpleNamespace(status="empty_text", error=None, text="", document_length_chars=0)
+
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    response = await evidence.search_evidence(request("LOCAL", [preferred_source()]))
+
+    assert calls == [["ine.es"], None]
+    assert response["domain_resolution"]["fallback_used"] is True
+    assert response["domain_resolution"]["fallback_reason"] == "ALL_INITIAL_FETCHES_UNUSABLE"
+    assert response["domain_resolution"]["fallback_excluded_domains"] == ["ine.es"]
+    assert len(response["queries_executed"]) == 2
+    fallback_query = response["queries_executed"][1]
+    assert fallback_query["mode"] == "unrestricted_after_all_fetches_unusable"
+    assert fallback_query["include_domains"] is None
+    assert fallback_query["excluded_domains"] == ["ine.es"]
+    assert [item["url"] for item in response["evidences"]] == [
+        "https://ine.es/unreadable", "https://alternative.example/report",
+    ]
+    assert response["evidences"][1]["citation_status"] == "available"
+    assert response["evidences"][1]["retrieval_mode"] == "unrestricted_after_all_fetches_unusable"
+
+
+@pytest.mark.asyncio
+async def test_local_search_does_not_fallback_when_a_routed_source_is_citable(monkeypatch):
+    calls = []
+    document = " ".join(["La estadística oficial de empleo de Barcelona en 2024 está publicada."] * 8)
+
+    async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
+        calls.append(include_domains)
+        return {"results": [{"url": "https://ine.es/readable", "title": "Original"}]}
+
+    async def fake_fetch(*args, **kwargs):
+        return SimpleNamespace(status="ok", error=None, text=document, document_length_chars=len(document))
+
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    response = await evidence.search_evidence(request("LOCAL", [preferred_source()]))
+
+    assert calls == [["ine.es"]]
+    assert response["domain_resolution"].get("fallback_used") is None
+    assert len(response["queries_executed"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_fetched_document_context_is_citable_and_hashed(monkeypatch):
     document = " ".join([
         "En 2024 el instituto publicó la estadística oficial de empleo en Barcelona."
     ] * 8)
 
     async def successful_fetch(*args, **kwargs):
-        return SimpleNamespace(status="ok", error=None, text=document, document_length_chars=len(document))
+        return SimpleNamespace(
+            status="ok", error=None, text=document, document_length_chars=len(document),
+            content_type="application/pdf", fetched_url="https://www.ine.es/report",
+            url_normalized=True, normalization_reason="tls_hostname_mismatch_www_variant",
+            attempted_urls=["https://ine.es/report", "https://www.ine.es/report"],
+        )
 
     monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
     monkeypatch.setattr(evidence, "fetch_main_text", successful_fetch)
@@ -328,6 +559,10 @@ async def test_fetched_document_context_is_citable_and_hashed(monkeypatch):
 
     context = results[0]["contexts"][0]
     assert results[0]["citation_status"] == "available"
+    assert results[0]["fetched_url"] == "https://www.ine.es/report"
+    assert results[0]["url_normalized"] is True
+    assert results[0]["normalization_reason"] == "tls_hostname_mismatch_www_variant"
+    assert results[0]["fetch_attempted_urls"] == ["https://ine.es/report", "https://www.ine.es/report"]
     assert context["citation_eligible"] is True
     assert context["origin"] == "fetched_document"
     assert len(context["text_sha256"]) == 64

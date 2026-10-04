@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from evaluation import ROOT
+from common.routing_taxonomy import EvidenceKind, TopicCode
 from .artifacts import EvaluationError, read_json
 from .common_metrics import normalize_verdict
 
@@ -51,9 +52,12 @@ def validate_case(case: dict) -> None:
         if excerpt is not None and (not isinstance(excerpt, str) or not excerpt.strip()
                                     or excerpt not in case["news"]):
             raise EvaluationError(f"{identifier}: source_excerpt must occur in news")
-        for key in ("expected_topic_code", "expected_evidence_kind"):
-            if key in item and (not isinstance(item[key], str) or not item[key].strip()):
-                raise EvaluationError(f"{identifier}: {key} must be non-empty text")
+        expected_topic = item.get("expected_topic_code")
+        if expected_topic is not None and expected_topic not in {value.value for value in TopicCode}:
+            raise EvaluationError(f"{identifier}: expected_topic_code is not in {TopicCode.__name__}")
+        expected_kind = item.get("expected_evidence_kind")
+        if expected_kind is not None and expected_kind not in {value.value for value in EvidenceKind}:
+            raise EvaluationError(f"{identifier}: expected_evidence_kind is not in {EvidenceKind.__name__}")
         context = item.get("expected_context")
         if context is not None:
             if not isinstance(context, dict) or set(context) - {"entities", "locations", "temporal_context", "jurisdiction"}:

@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 from http.server import ThreadingHTTPServer
 
-from evaluation.viewer.server import index_campaign, list_campaigns, make_handler
+from evaluation.viewer.server import _read_diagnostic, index_campaign, list_campaigns, make_handler
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "data/evaluation/resources/viewer-fixtures/order-diagnostic-v1.json"
@@ -29,8 +29,28 @@ def test_campaign_index_isolates_broken_snapshots(tmp_path):
     assert len(indexed["orders"]) == 1
     assert indexed["orders"][0]["assertions"] == 2
     assert indexed["orders"][0]["validations"] == 2
+    assert indexed["orders"][0]["correct_validations"] == 1
+    assert indexed["orders"][0]["findings"] == len(indexed["incidents"])
+    assert {item["type"] for item in indexed["incidents"]} <= {"warning", "error"}
     assert len(indexed["errors"]) == 1
     assert list_campaigns(tmp_path)[0]["order_count"] == 1
+
+
+def test_legacy_snapshot_is_enriched_from_result_without_rewriting_it(tmp_path):
+    directory = _campaign(tmp_path)
+    result = {"validator": {"validator_type": "RAG_EVIDENCE_VALIDATION",
+                            "provider": "openrouter", "model": "model-a",
+                            "evidence_search_strategy": "EXT_ONLY_OFFICIAL"}}
+    (directory / "run-b.json").write_text(json.dumps(result), encoding="utf-8")
+
+    diagnostic = _read_diagnostic(directory / "fixture-parent-viewer.json")
+    validation = next(item for item in diagnostic["validations"] if item["run_id"] == "run-b")
+
+    assert validation["validator"]["model"] == "model-a"
+    assert validation["stages"]["router"]["execution_status"] == "SKIPPED"
+    assert validation["stages"]["router"]["observations"]["skip_reason"] == "EXTERNAL_EVIDENCE_STRATEGY"
+    persisted = json.loads((directory / "fixture-parent-viewer.json").read_text(encoding="utf-8"))
+    assert "validator" not in persisted["validations"][1]
 
 
 def test_http_navigation_and_missing_raw_artifact(tmp_path):

@@ -1,7 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const state = {campaigns: [], campaign: null, orderList: null, diagnostic: null,
-  assertionId: null, runId: null, stage: "generation", view: "detail",
-  filters: {caseId: "", validator: "", repetition: "", stage: "", code: ""}};
+  assertionId: null, runId: null, stage: "generation", view: "detail", campaignView: "orders",
+  filters: {caseId: "", validator: "", repetition: "", stage: "", code: "", type: ""},
+  campaignFilters: {orders: {}, incidents: {}}};
 const STAGES = [["generation", "Generate Assertions"], ["router", "Source Router"],
   ["evidence_search", "Evidence Search"], ["handoff", "Entrega"],
   ["llm", "LLM"], ["citations", "Citas"], ["consensus", "Consenso"]];
@@ -14,6 +15,16 @@ function el(tag, className = "", content = "") {
 }
 function add(parent, ...children) { for (const child of children) parent.append(child); return parent; }
 function clear(parent) { parent.replaceChildren(); return parent; }
+function matchesFilter(value, query) {
+  return !query || String(value ?? "").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+}
+function filterHeader(label, key, filters, apply, className = "") {
+  const cell = el("th", className), input = el("input", "column-filter");
+  input.type = "search"; input.placeholder = "Filtrar…"; input.value = filters[key] || "";
+  input.setAttribute("aria-label", `Filtrar ${label}`);
+  input.addEventListener("input", () => { filters[key] = input.value; apply(); });
+  return add(cell, el("span", "column-label", label), input);
+}
 function button(label, onClick, className = "") {
   const node = el("button", className, label); node.type = "button";
   node.addEventListener("click", onClick); return node;
@@ -21,6 +32,113 @@ function button(label, onClick, className = "") {
 function pill(status) {
   const icons = {PASS: "✓", FAIL: "✕", PARTIAL: "!", NOT_EVALUATED: "?", SKIPPED: "–"};
   return el("span", `pill pill-${status}`, `${icons[status] || "·"} ${status}`);
+}
+function recorded(value) { return value === null || value === undefined || value === "" ? "No registrado" : value; }
+function strategyLabel(strategy) {
+  return ({LOCAL: "RAG con dominios de Source Router", EXT_ONLY_OFFICIAL: "RAG con fuentes oficiales externas",
+    EXT_OFFICIAL_FIRST: "RAG externo, fuentes oficiales primero"})[strategy] || strategy || "Estrategia no registrada";
+}
+function stagePresentation(stage, stageKey) {
+  if (!stage) return {execution: "SIN VALIDADOR", result: "—", tone: "SKIPPED"};
+  if (stage.execution_status === "SKIPPED") {
+    const strategy = stage.observations?.evidence_search_strategy;
+    return {execution: "NO APLICA", result: strategy || "OMITIDO", tone: "SKIPPED"};
+  }
+  if (stage.execution_status === "NOT_RECORDED")
+    return {execution: "SIN REGISTRO", result: "NO EVALUADO", tone: "NOT_EVALUATED"};
+  if (stage.execution_status === "FAILED")
+    return {execution: "ERROR", result: stage.assessment, tone: "FAIL"};
+  if (stageKey === "router" && stage.assessment === "NOT_EVALUATED")
+    return {execution: "EJECUTADO", result: "SIN REFERENCIA", tone: "EXECUTED_NOT_EVALUATED"};
+  if (stageKey === "router" && stage.assessment === "PARTIAL")
+    return {execution: "EJECUTADO", result: "WARNING", tone: "PARTIAL"};
+  return {execution: "EJECUTADO", result: stage.assessment, tone: stage.assessment};
+}
+function issueType(type) { return el("span", `issue-type issue-type-${type}`, type); }
+function inferredIssueType(stageKey, check, stage) {
+  if (check.type) return check.type;
+  // Saved v1 diagnostics predate the explicit type field. Keep their quality
+  // findings out of the technical-error bucket without rewriting artifacts.
+  if (stageKey === "generation" && !["GENERATION_ERROR", "MODULE_FAILED"].includes(check.code)) return "warning";
+  if (stageKey === "router") {
+    const sources = stage.observations?.sources || [];
+    const matches = stage.observations?.matching_domains || [];
+    if (sources.length && !matches.length) return "warning";
+  }
+  return check.status === "PARTIAL" ? "warning" : "error";
+}
+function routerMisalignmentCheck(stage) {
+  const observations = stage.observations || {};
+  const expected = observations.acceptable_domains || [];
+  const selected = (observations.sources || []).filter(source => source?.domain).map(source => {
+    const type = source.source_type || "—", authority = source.authority_level || "—";
+    return `${source.domain} (${type} / ${authority})`;
+  });
+  return {
+    code: "ROUTER_EXPECTED_DOMAIN_MISSING", status: "FAIL", type: "warning",
+    detail: `Desalineamiento de dominio: se esperaba ${expected.join(", ") || "ningún dominio anotado"}; Router seleccionó ${selected.join(", ") || "dominios no identificados"}. Ninguno coincide con el dominio anotado, pero Router sí devolvió fuentes elegibles; se registra como aviso de evaluación.`
+  };
+}
+function generationIssueDetail(check, stage) {
+  const observations = stage.observations || {};
+  if (check.code === "GENERATION_ERROR" || check.code === "MODULE_FAILED")
+    return `Generate Assertions no produjo una salida evaluable. Causa registrada: ${observations.error_type || "no disponible en el artefacto"}.`;
+  const ref = (check.observation_refs || []).find(value => /generated_assertions\/\d+$/.test(value));
+  const index = ref?.match(/(\d+)$/)?.[1];
+  const actual = index == null ? null : observations.generated_assertions?.[Number(index)];
+  const match = observations.matches?.find(item => item.assertion_id === actual?.assertion_id);
+  const expected = observations.expected_assertions?.find(item => item.case_id === match?.case_id);
+  if (!actual || !expected) return check.detail;
+  const values = {
+    CATEGORY_MISMATCH: [expected.category_ids?.join(", ") || "sin categoría anotada", actual.categoryId ?? "ausente", "categoría"],
+    EXPECTED_TOPIC_CODE_MISMATCH: [expected.expected_topic_code ?? "ausente", actual.topic_code ?? "ausente", "topic_code"],
+    EXPECTED_EVIDENCE_KIND_MISMATCH: [expected.expected_evidence_kind ?? "ausente", actual.evidence_kind ?? "ausente", "evidence_kind"]
+  }[check.code];
+  if (values) return `Desalineamiento de ${values[2]}: para ${expected.case_id} se esperaba ${values[0]} y Generate Assertions produjo ${values[1]}.`;
+  return check.detail;
+}
+function sourceOutcomeDetail(observations) {
+  const sources = observations.evidences || [];
+  if (!sources.length) return "Evidence Search no devolvió fuentes candidatas, por lo que no pudo generar contexto citable.";
+  return sources.map(source => {
+    const name = source.domain || source.url || source.source_id || "fuente desconocida";
+    const status = source.fetch_status || "estado de descarga no registrado";
+    const contexts = (source.contexts || []).length;
+    const normalized = source.url_normalized && source.fetched_url ? `, URL normalizada a ${source.fetched_url}` : "";
+    return `${name}: ${status}, ${contexts} contextos${normalized}${source.fetch_error ? `, causa ${source.fetch_error}` : ""}`;
+  }).join("; ");
+}
+function explainIssue(stageKey, check, stage, validation = null) {
+  const obs = stage.observations || {};
+  if (stageKey === "generation") return generationIssueDetail(check, stage);
+  if (stageKey === "router" && (obs.acceptable_domains || []).length &&
+      (obs.sources || []).length && !(obs.matching_domains || []).length)
+    return routerMisalignmentCheck(stage).detail;
+  if (stageKey === "router" && !(obs.sources || []).length)
+    return `Router no entregó dominios elegibles. Estado de ruta=${obs.route_state || obs.status || "no registrado"}; diagnóstico=${obs.diagnostic_code || obs.diagnostics?.reason || "causa no registrada"}.`;
+  if (stageKey === "evidence_search" && ["MODULE_FAILED", "NO_CITABLE_EVIDENCE", "SOME_SOURCES_UNUSABLE"].includes(check.code))
+    return `La etapa quedó ${stage.assessment} por el resultado de recuperación: ${sourceOutcomeDetail(obs)}`;
+  if (stageKey === "handoff" && check.code === "HANDOFF_EVIDENCE_MISMATCH")
+    return `La evidencia cambió entre recuperación y validación: hash recuperado=${obs.retrieval_hash || "ausente"}; hash entregado=${obs.validator_input_hash || "ausente"}.`;
+  if (stageKey === "llm" && check.code === "TECHNICAL_ERROR") {
+    const errors = obs.errors || [];
+    return `La validación no produjo una decisión por estos errores registrados: ${errors.map(error =>
+      `etapa=${error.stage || "desconocida"}, código=${error.code || "desconocido"}, excepción=${error.exception_type || "no registrada"}${error.reason ? `, causa=${error.reason}` : ""}`
+    ).join("; ") || "causa no registrada"}.`;
+  }
+  if (stageKey === "llm" && check.code === "WRONG_VERDICT")
+    return `Decisión incorrecta: se esperaba ${obs.expected_verdict ?? "no registrado"}, pero el validador produjo ${obs.effective_verdict ?? "ausente"}; veredicto original=${obs.original_verdict ?? "ausente"}.`;
+  if (stageKey === "citations" && ["INVALID_CITATION_ID", "CITATION_REJECTED"].includes(check.code)) {
+    const invalid = (obs.citations || []).filter(item => !item.valid_identity);
+    return `La auditoría rechazó las citas porque no pudo vincularlas a contexto citable: ${invalid.map(item =>
+      `${item.source_id || "sin source_id"}/${item.context_id || "sin context_id"}: ${item.reason || "motivo no registrado"}`
+    ).join("; ") || (obs.audit_issues || []).map(item => item.code || String(item)).join(", ") || "motivo no registrado"}.`;
+  }
+  if (stageKey === "consensus" && check.code === "CONSENSUS_ERROR") {
+    const expected = obs.expected_verdict ?? validation?.stages?.llm?.observations?.expected_verdict ?? "no registrado";
+    return `El consenso produjo ${obs.verdict ?? "ausente"}, pero se esperaba ${expected}. Motivo=${obs.reason_code || "no registrado"}; distribución=${JSON.stringify(obs.distribution || {})}.`;
+  }
+  return check.detail || `La etapa ${stageKey} terminó con ${stage.assessment}, pero el artefacto no registró la causa.`;
 }
 function showError(message) {
   clear($("main")); add($("main"), add(el("section", "error-list"), el("strong", "", "No se pudo abrir el artefacto"), el("p", "", message)));
@@ -50,11 +168,12 @@ function renderCampaigns() {
 }
 async function openCampaign(campaign) {
   state.campaign = campaign; state.diagnostic = null;
-  state.filters = {caseId: "", validator: "", repetition: "", stage: "", code: ""};
+  state.campaignView = "orders";
+  state.campaignFilters = {orders: {}, incidents: {}};
+  state.filters = {caseId: "", validator: "", repetition: "", stage: "", code: "", type: ""};
   renderCampaigns();
   try { state.orderList = await api(`/api/campaigns/${enc(campaign)}/orders`); renderOrders();
-    if (state.orderList.orders.length) await openOrder(state.orderList.orders[0].file);
-    else renderEmptyCampaign();
+    renderCampaignOverview();
   } catch (error) { showError(error.message); }
 }
 function renderOrders() {
@@ -78,12 +197,103 @@ function renderEmptyCampaign() {
     el("p", "muted", "No hay órdenes legibles en esta campaña.")));
   const problems = errorBlock(state.orderList.errors); if (problems) add(main, problems);
 }
-async function openOrder(file) {
+function campaignTabs() {
+  const tabs = el("div", "view-tabs");
+  for (const [key, label] of [["orders", "Resumen de órdenes"], ["incidents", "Incidencias"]]) {
+    const node = button(label, () => { state.campaignView = key; renderCampaignOverview(); },
+      state.campaignView === key ? "active" : "");
+    node.setAttribute("role", "tab"); node.setAttribute("aria-selected", String(state.campaignView === key));
+    add(tabs, node);
+  }
+  return tabs;
+}
+function campaignOrderTable() {
+  const card = add(el("section", "card"), el("h2", "", "Órdenes de la campaña"));
+  if (!state.orderList.orders.length) return add(card, el("p", "muted", "No hay órdenes legibles en esta campaña."));
+  const filters = state.campaignFilters.orders;
+  const wrap = el("div", "table-wrap"), table = el("table", "campaign-table auto-columns"), head = el("tr"), body = el("tbody");
+  const entries = [];
+  function applyFilters() {
+    for (const entry of entries)
+      entry.node.hidden = !Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query));
+  }
+  const columns = [["Orden", "order", "order-column"], ["Dataset", "dataset", "dataset-column"],
+    ["Rep.", "repetition", "compact-column"], ["Afirmaciones", "assertions", "compact-column"],
+    ["Validaciones OK", "correct", "compact-column"], ["Validaciones", "validations", "compact-column"],
+    ["Avisos", "warnings", "compact-column"], ["Errores", "errors", "compact-column"],
+    ["Estado", "status", "status-column"]];
+  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className));
+  for (const item of state.orderList.orders) {
+    const values = {order: item.order_id, dataset: item.dataset_id, repetition: item.repetition,
+      assertions: item.assertions, correct: item.correct_validations ?? "—", validations: item.validations,
+      warnings: item.warnings ?? 0, errors: item.errors ?? 0, status: item.status};
+    const row = add(el("tr", "clickable-row"), el("td", "mono order-column", values.order),
+      el("td", "dataset-column", values.dataset), el("td", "compact-column", values.repetition),
+      el("td", "compact-column", values.assertions), el("td", "compact-column", values.correct),
+      el("td", "compact-column", values.validations), el("td", "compact-column", values.warnings),
+      el("td", "compact-column", values.errors), el("td", "status-column", values.status));
+    row.tabIndex = 0; row.title = "Abrir orden";
+    row.addEventListener("click", () => openOrder(item.file));
+    row.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openOrder(item.file); }
+    });
+    entries.push({node: row, values}); add(body, row);
+  }
+  applyFilters(); add(table, add(el("thead"), head), body); add(wrap, table); return add(card, wrap);
+}
+function campaignIncidentTable() {
+  const incidents = state.orderList.incidents || [];
+  const summary = el("p", "muted");
+  const card = add(el("section", "card"), el("h2", "", "Incidencias de la campaña"), summary);
+  if (!incidents.length) return add(card, el("p", "muted", "No hay incidencias registradas."));
+  const filters = state.campaignFilters.incidents;
+  const wrap = el("div", "table-wrap"), table = el("table", "campaign-incident-table campaign-table auto-columns"), head = el("tr"), body = el("tbody");
+  const entries = [];
+  function applyFilters() {
+    let errors = 0, warnings = 0, visible = 0;
+    for (const entry of entries) {
+      const shown = Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query));
+      entry.node.hidden = !shown;
+      if (shown) { visible += 1; errors += entry.values.type === "error"; warnings += entry.values.type === "warning"; }
+    }
+    summary.textContent = `${visible} incidencias visibles · ${errors} errores · ${warnings} avisos. Selecciona una fila para abrir el detalle.`;
+  }
+  const columns = [["Tipo", "type", "compact-column"], ["Orden", "order", "order-column"],
+    ["Rep.", "repetition", "compact-column"], ["Módulo", "stage", "module-column"],
+    ["Validador", "validator", "validator-column"], ["Código", "code", "code-column"],
+    ["Detalle", "detail", "detail-column"]];
+  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className));
+  for (const item of incidents) {
+    const stageName = STAGES.find(([key]) => key === item.stage)?.[1] || item.stage;
+    const values = {type: item.type, order: item.order_id, repetition: item.repetition, stage: stageName,
+      validator: item.validator_id || "—", code: item.code, detail: item.detail};
+    const row = add(el("tr", "clickable-row"), add(el("td", "compact-column"), issueType(values.type)),
+      el("td", "mono order-column", values.order), el("td", "compact-column", values.repetition),
+      el("td", "module-column", values.stage), el("td", "mono validator-column", values.validator),
+      el("td", "mono code-column", values.code), el("td", "detail-column", values.detail));
+    const open = () => openOrder(item.file, item);
+    row.tabIndex = 0; row.title = "Abrir el detalle de esta incidencia";
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+    });
+    entries.push({node: row, values}); add(body, row);
+  }
+  applyFilters(); add(table, add(el("thead"), head), body); add(wrap, table); return add(card, wrap);
+}
+function renderCampaignOverview() {
+  const main = clear($("main"));
+  add(main, el("div", "eyebrow", "Campaña"), el("h1", "", state.campaign),
+    el("p", "muted", `${state.orderList.orders.length} órdenes · ${state.orderList.status}`), campaignTabs());
+  const problems = errorBlock(state.orderList.errors); if (problems) add(main, problems);
+  add(main, state.campaignView === "incidents" ? campaignIncidentTable() : campaignOrderTable());
+}
+async function openOrder(file, focus = null) {
   try {
     state.diagnostic = await api(`/api/campaigns/${enc(state.campaign)}/orders/${enc(file)}`);
-    state.assertionId = state.diagnostic.order.assertions[0]?.assertion_id ?? null;
-    state.runId = state.diagnostic.validations.find(v => v.assertion_id === state.assertionId)?.run_id ?? null;
-    state.stage = "generation"; state.view = "detail"; renderOrders(); renderDetail();
+    state.assertionId = focus?.assertion_id || state.diagnostic.order.assertions[0]?.assertion_id || null;
+    state.runId = focus?.run_id || state.diagnostic.validations.find(v => v.assertion_id === state.assertionId)?.run_id || null;
+    state.stage = focus?.stage || "generation"; state.view = "detail"; renderOrders(); renderDetail();
   } catch (error) { showError(error.message); }
 }
 function metric(value, label) { return add(el("div", "metric"), el("strong", "", value), el("span", "", label)); }
@@ -101,14 +311,38 @@ function selectAssertion(id) {
 }
 function selectRun(id) { state.runId = id; state.stage = "router"; renderDetail(); }
 
+function validatorSummary(validatorId) {
+  const rows = state.diagnostic.validations.filter(item => item.validator_id === validatorId);
+  return {
+    total: rows.length,
+    correct: rows.filter(item => item.stages.llm.assessment === "PASS").length,
+    incorrect: rows.filter(item => item.stages.llm.assessment === "FAIL").length,
+    abstentions: rows.filter(item => item.stages.llm.observations?.effective_verdict === "UNKNOWN").length,
+    citationFailures: rows.filter(item => item.stages.citations.assessment === "FAIL").length,
+    technicalErrors: rows.filter(item => (item.stages.llm.observations?.errors || []).length ||
+      item.stages.llm.checks.some(check => ["TECHNICAL_ERROR", "INVALID_RESPONSE"].includes(check.code))).length
+  };
+}
+
+function stageIssueChecks(stageKey, stage) {
+  const issueChecks = (stage.checks || []).filter(check => ["FAIL", "PARTIAL"].includes(check.status));
+  if (issueChecks.length) return issueChecks;
+  const routerMismatch = stageKey === "router" && (stage.observations?.acceptable_domains || []).length &&
+    (stage.observations?.sources || []).length &&
+    !(stage.observations?.matching_domains || []).length;
+  if (routerMismatch) return [routerMisalignmentCheck(stage)];
+  if (stage.assessment === "FAIL")
+    return [{code: "MODULE_FAILED", status: "FAIL", detail: stage.missing_reason || "La causa no quedó registrada en el artefacto.", type: "error"}];
+  return [];
+}
+
 function failureRows(diagnostic) {
   const rows = [];
   const assertions = new Map(diagnostic.order.assertions.map(item => [item.assertion_id, item]));
   const generated = diagnostic.order.generation.observations?.generated_assertions || [];
   function addStage(stage, stageKey, assertionId = null, validation = null) {
-    if (!stage || stage.assessment !== "FAIL") return;
-    const failedChecks = (stage.checks || []).filter(check => check.status === "FAIL");
-    const checks = failedChecks.length ? failedChecks : [{code: "MODULE_FAILED", detail: stage.missing_reason || "El módulo terminó con fallo."}];
+    if (!stage || !["FAIL", "PARTIAL"].includes(stage.assessment)) return;
+    const checks = stageIssueChecks(stageKey, stage);
     for (const check of checks) {
       let resolvedAssertionId = assertionId;
       if (!resolvedAssertionId && stageKey === "generation") {
@@ -121,7 +355,8 @@ function failureRows(diagnostic) {
         assertionText: assertion?.text || generated.find(item => item.assertion_id === resolvedAssertionId)?.text || "—",
         caseId: assertion?.expected_case_id || "—", validatorId: validation?.validator_id || "—",
         runId: validation?.run_id || null, executionStatus: stage.execution_status,
-        assessment: stage.assessment, code: check.code || "—", detail: check.detail || "—"});
+        assessment: stage.assessment, code: check.code || "—", detail: explainIssue(stageKey, check, stage, validation),
+        type: inferredIssueType(stageKey, check, stage)});
     }
   }
   addStage(diagnostic.order.generation, "generation");
@@ -134,7 +369,7 @@ function failureRows(diagnostic) {
 function renderViewTabs() {
   const tabs = el("div", "view-tabs");
   const detail = button("Detalle", () => { state.view = "detail"; renderDetail(); }, state.view === "detail" ? "active" : "");
-  const failures = button("Resumen de fallos", () => { state.view = "failures"; renderDetail(); }, state.view === "failures" ? "active" : "");
+  const failures = button("Errores y avisos", () => { state.view = "failures"; renderDetail(); }, state.view === "failures" ? "active" : "");
   for (const [node, selected] of [[detail, state.view === "detail"], [failures, state.view === "failures"]]) {
     node.setAttribute("role", "tab"); node.setAttribute("aria-selected", String(selected));
   }
@@ -154,18 +389,21 @@ function renderFailureSummary(diagnostic) {
     (!state.filters.caseId || row.caseId === state.filters.caseId) &&
     (!state.filters.validator || row.validatorId === state.filters.validator) &&
     (!state.filters.stage || row.stageKey === state.filters.stage) &&
-    (!state.filters.code || row.code === state.filters.code));
+    (!state.filters.code || row.code === state.filters.code) &&
+    (!state.filters.type || row.type === state.filters.type));
   const modules = new Set(rows.map(row => row.stageKey === "generation" ? "generation/order" :
     `${row.stageKey}/${row.assertionId || "order"}/${row.runId || "order"}`));
-  const card = add(el("section", "card"), el("h2", "", "Resumen de fallos"),
-    el("p", "muted", `${modules.size} módulos con fallo · ${rows.length} comprobaciones fallidas. Selecciona una fila para abrir su contexto.`));
-  if (!rows.length) return add(card, el("p", "muted", "No hay fallos que coincidan con los filtros actuales."));
+  const errors = rows.filter(row => row.type === "error").length;
+  const warnings = rows.filter(row => row.type === "warning").length;
+  const card = add(el("section", "card"), el("h2", "", "Errores y avisos"),
+    el("p", "muted", `${modules.size} módulos afectados · ${errors} errores · ${warnings} avisos. Selecciona una fila para abrir su contexto.`));
+  if (!rows.length) return add(card, el("p", "muted", "No hay errores ni avisos que coincidan con los filtros actuales."));
   const wrap = el("div", "table-wrap"), table = el("table", "failure-table"), head = el("tr"), body = el("tbody");
-  for (const label of ["Módulo", "Aserción", "Caso", "Validador", "Estado", "Código", "Detalle"])
+  for (const label of ["Tipo", "Módulo", "Aserción", "Caso", "Validador", "Estado", "Código", "Detalle"])
     add(head, el("th", "", label));
   for (const row of rows) {
     const module = STAGES.find(([key]) => key === row.stageKey)?.[1] || row.stageKey;
-    const tableRow = add(el("tr", "clickable-row"), el("td", "", module), el("td", "", row.assertionText),
+    const tableRow = add(el("tr", "clickable-row"), add(el("td"), issueType(row.type)), el("td", "", module), el("td", "", row.assertionText),
       el("td", "", row.caseId), el("td", "mono", row.validatorId), add(el("td"), pill(row.assessment)),
       el("td", "mono", row.code), el("td", "", row.detail));
     tableRow.tabIndex = 0;
@@ -185,11 +423,11 @@ function renderDetail() {
     el("h1", "", `Orden ${d.identity.order_id}`),
     el("p", "muted", `Repetición ${d.identity.repetition} · ${d.order.status}`));
   const metrics = el("div", "summary");
-  const failedModules = (d.order.generation.assessment === "FAIL" ? 1 : 0) + d.validations.reduce((n, validation) =>
-    n + Object.values(validation.stages).filter(stage => stage.assessment === "FAIL").length, 0);
+  const failedModules = (["FAIL", "PARTIAL"].includes(d.order.generation.assessment) ? 1 : 0) + d.validations.reduce((n, validation) =>
+    n + Object.values(validation.stages).filter(stage => ["FAIL", "PARTIAL"].includes(stage.assessment)).length, 0);
   add(metrics, metric(d.order.assertions.length, "afirmaciones"),
     metric(d.validations.length, "validaciones"),
-    metricButton(failedModules, "módulos con fallos", () => { state.view = "failures"; renderDetail(); }));
+    metricButton(failedModules, "módulos con incidencias", () => { state.view = "failures"; renderDetail(); }));
   add(main, metrics, renderViewTabs(), renderFilters());
   const problems = errorBlock(state.orderList?.errors); if (problems) add(main, problems);
   if (state.view === "failures") { add(main, renderFailureSummary(d)); return; }
@@ -213,23 +451,33 @@ function renderDetail() {
     if (state.filters.validator && validation.validator_id !== state.filters.validator) continue;
     const node = button(validation.validator_id, () => selectRun(validation.run_id),
       validation.run_id === state.runId ? "active" : "");
-    add(node, el("small", "", `Run ${validation.run_id}`)); add(selector, node);
+    const metadata = validation.validator || {};
+    const llm = validation.stages.llm.observations || {};
+    const summary = validatorSummary(validation.validator_id);
+    add(node,
+      el("small", "validator-kind", `${metadata.validator_type || "Tipo no registrado"} · ${strategyLabel(metadata.evidence_search_strategy)}`),
+      el("small", "", `${metadata.provider || llm.provider || "Proveedor no registrado"} / ${metadata.model || llm.model || "Modelo no registrado"}`),
+      el("small", "validator-summary", `${summary.total} validaciones · ${summary.correct} acordes · ${summary.incorrect} no acordes · ${summary.abstentions} abstenciones · ${summary.citationFailures} fallos de cita · ${summary.technicalErrors} errores técnicos`),
+      el("small", "", `Run ${validation.run_id}`)); add(selector, node);
   }
   if (!selector.childElementCount) add(selector, el("p", "muted", "Sin validaciones para esta afirmación."));
   add(validators, selector); add(right, validators);
-  if (state.assertionId) add(right, renderComparisonControl());
   const flow = add(el("section", "card"), el("h2", "", "Cadena de ejecución"));
   const chain = el("div", "chain");
   STAGES.forEach(([key, label], index) => {
     if (state.filters.stage && key !== state.filters.stage) return;
     const stage = key === "generation" ? d.order.generation : currentValidation()?.stages[key];
+    const presentation = stagePresentation(stage, key);
     if (index) add(chain, el("span", "arrow", "→"));
     const node = button("", () => { state.stage = key; renderDetail(); },
-      `status status-${stage?.assessment || "SKIPPED"}${state.stage === key ? " active" : ""}`);
-    add(node, el("strong", "", label), el("small", "", stage?.assessment || "Sin validador"));
+      `status status-${presentation.tone}${state.stage === key ? " active" : ""}`);
+    add(node, el("strong", "", label), el("small", "stage-execution", presentation.execution),
+      el("small", "stage-result", presentation.result));
     add(chain, node);
   });
-  add(flow, chain); add(right, flow, renderStage()); add(layout, left, right); add(main, layout);
+  add(flow, chain); add(right, flow, renderStage());
+  if (state.assertionId) add(right, renderComparisonControl());
+  add(layout, left, right); add(main, layout);
 }
 function renderStage() {
   const selected = STAGES.find(([key]) => key === state.stage); const stage = stageData();
@@ -248,13 +496,15 @@ function renderStage() {
   if (state.stage === "citations") add(card, renderCitations(stage.observations));
   if (state.stage === "consensus") add(card, renderConsensus(stage.observations));
   add(card, el("h3", "", "Comprobaciones"));
-  if (!stage.checks.length) add(card, el("p", "muted", "No hay comprobaciones registradas."));
+  const visibleChecks = stage.checks.length ? stage.checks : stageIssueChecks(state.stage, stage);
+  if (!visibleChecks.length) add(card, el("p", "muted", "No hay comprobaciones registradas."));
   else {
     const wrap = el("div", "table-wrap"); const table = el("table"); const header = el("tr");
-    for (const label of ["Estado", "Código", "Detalle"]) add(header, el("th", "", label));
+    for (const label of ["Estado", "Tipo", "Código", "Detalle"]) add(header, el("th", "", label));
     add(table, add(el("thead"), header)); const body = el("tbody");
-    for (const check of stage.checks.filter(item => !state.filters.code || item.code === state.filters.code)) add(body, add(el("tr"),
-      add(el("td"), pill(check.status)), el("td", "", check.code), el("td", "", check.detail)));
+    for (const check of visibleChecks.filter(item => !state.filters.code || item.code === state.filters.code)) add(body, add(el("tr"),
+      add(el("td"), pill(check.status)), add(el("td"), issueType(inferredIssueType(state.stage, check, stage))),
+      el("td", "", check.code), el("td", "", explainIssue(state.stage, check, stage, currentValidation()))));
     add(table, body); add(wrap, table); add(card, wrap);
   }
   const observations = el("details"); add(observations, el("summary", "", "Observaciones de la etapa"));
@@ -280,10 +530,12 @@ function renderStage() {
 function renderGeneration(observations) {
   const block = el("section");
   const info = el("div", "summary");
-  add(info, metric(observations.model || "—", "modelo"),
-    metric(observations.structured_attempts ?? "—", "llamadas estructuradas"),
-    metric(observations.repair_used == null ? "—" : observations.repair_used ? "Sí" : "No", "reparación"),
-    metric(observations.duration_seconds ?? "—", "segundos"));
+  add(info, metric(recorded(observations.model), "modelo"),
+    metric(recorded(observations.structured_attempts), "llamadas estructuradas"),
+    metric(observations.repair_used == null ? "No registrado" : observations.repair_used ? "Sí" : "No", "reparación"),
+    metric(recorded(observations.duration_seconds), "segundos"));
+  if ([observations.structured_attempts, observations.repair_used, observations.duration_seconds].some(value => value == null))
+    add(block, el("p", "muted", "La orden no contiene la traza completa de Generate Assertions. Estos valores no pueden reconstruirse de forma fiable."));
   add(block, info, el("h3", "", "Esperadas y generadas"));
   const expected = observations.expected_assertions || [];
   const generated = observations.generated_assertions || [];
@@ -326,8 +578,9 @@ function renderGeneration(observations) {
 function renderRouter(observations) {
   const block = el("section"); const trace = observations.evaluation_trace || {};
   const summary = el("div", "summary");
-  add(summary, metric(observations.route_state || "—", "estado de ruta"),
-    metric(trace.cache_hit == null ? "—" : trace.cache_hit ? "Sí" : "No", "caché"),
+  add(summary, metric(observations.route_state || (observations.skip_reason ? "No aplica" : "No registrado"), "estado de ruta"),
+    metric(recorded(observations.evidence_search_strategy), "estrategia"),
+    metric(trace.cache_hit == null ? "No registrado" : trace.cache_hit ? "Sí" : "No", "caché"),
     metric((observations.sources || []).length, "dominios elegidos"),
     metric(observations.diagnostic_code || "—", "diagnóstico"));
   add(block, summary);
@@ -400,6 +653,19 @@ function renderRouter(observations) {
     el("td", "", `${source.source_type || "—"} / ${source.authority_level || "—"}`),
     el("td", "", source.route_score ?? "—"), el("td", "", `${source.reason || "—"}${observations.acceptable_domains?.length ? ` · ${observations.matching_domains?.includes(source.domain) ? "aceptable" : "fuera de referencia"}` : " · sin referencia"}`)));
   add(table, body); add(wrap, table); add(block, wrap);
+  add(block, el("h3", "", "Dominios esperados"));
+  const expected = observations.expected_domain_matches || (observations.acceptable_domains || []).map(domain => ({domain, matching_selected_domains: []}));
+  if (!expected.length) add(block, el("p", "muted", "No hay dominios esperados anotados en el dataset; la calidad de la selección no puede evaluarse."));
+  else {
+    const expectedWrap = el("div", "table-wrap"), expectedTable = el("table"), expectedHead = el("tr"), expectedBody = el("tbody");
+    for (const label of ["Dominio esperado", "Coincidencias seleccionadas", "Resultado"]) add(expectedHead, el("th", "", label));
+    for (const item of expected) {
+      const matches = item.matching_selected_domains || [];
+      add(expectedBody, add(el("tr"), el("td", "", item.domain), el("td", "", matches.join(", ") || "Ninguna"),
+        add(el("td"), matches.length ? pill("PASS") : issueType("warning"))));
+    }
+    add(expectedTable, add(el("thead"), expectedHead), expectedBody); add(expectedWrap, expectedTable); add(block, expectedWrap);
+  }
   const diagnostics = observations.diagnostics || {};
   const lists = el("div", "summary");
   for (const [key, label] of [["discovered_domains", "descubiertos"], ["classified_domains", "clasificados"],
@@ -440,8 +706,10 @@ function renderEvidenceSearch(observations) {
       const decisions = item.result_decisions || (item.returned_urls || []).map(url => ({url, decision: "DEVUELTA"}));
       if (!decisions.length) add(urls, el("span", "muted", "Sin URLs registradas"));
       for (const result of decisions) add(urls, el("div", "", `${result.decision || "—"}: ${result.url || "—"}`));
+      const relaxation = item.relaxation_level ?
+        ` · relajación ${item.relaxation_level}${item.removed_terms?.length ? ` · retirado: ${item.removed_terms.join(", ")}` : ""}` : "";
       add(body, add(el("tr"), el("td", "", item.query || "—"),
-        el("td", "", `${item.mode || item.provider || "—"} · ${(item.include_domains || []).join(", ") || item.external_source_policy || "sin filtro"}`),
+        el("td", "", `${item.mode || item.provider || "—"} · ${(item.include_domains || []).join(", ") || item.external_source_policy || "sin filtro"}${relaxation}`),
         el("td", "", item.status || (observations.cached ? "NO EJECUTADA (caché)" : "No registrado")), urls));
     }
     add(table, add(el("thead"), head), body); add(wrap, table); add(block, wrap);
@@ -462,6 +730,13 @@ function renderEvidenceSearch(observations) {
       metric(source.content_type || "—", "tipo"), metric(source.relationship_to_origin || "—", "relación con origen"),
       metric((source.contexts || []).length, "contextos"), metric(source.citation_status || "—", "citable"));
     add(panel, info);
+    if (source.fetched_url && source.fetched_url !== source.url) {
+      const reason = source.normalization_reason ? ` (${source.normalization_reason})` : "";
+      add(panel, el("p", "muted", `URL descargada: ${source.fetched_url}${reason}`));
+    }
+    if (source.fetch_attempted_urls?.length > 1) {
+      add(panel, el("p", "muted", `URLs intentadas: ${source.fetch_attempted_urls.join(" → ")}`));
+    }
     const chunks = source.evaluation_chunks || source.chunks || [];
     if (!chunks.length) add(panel, el("p", "muted", source.fetch_status && source.fetch_status !== "ok" ?
       "No se pudieron extraer chunks de esta URL." : "No hay detalle de chunks en este artefacto."));
@@ -531,7 +806,8 @@ function renderFilters() {
   const fields = el("div", "filter-row");
   add(fields, field("Caso", "caseId", cases), field("Repetición", "repetition", repetitions),
     field("Validador", "validator", validators),
-    field("Módulo", "stage", STAGES.map(item => item[0])), field("Código", "code", codes));
+    field("Módulo", "stage", STAGES.map(item => item[0])), field("Tipo", "type", ["error", "warning"]),
+    field("Código", "code", codes));
   return add(block, fields);
 }
 function renderComparisonControl() {

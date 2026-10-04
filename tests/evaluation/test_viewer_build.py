@@ -37,6 +37,8 @@ def test_generation_diagnosis_includes_missing_extra_and_context_loss():
     assert "CONTEXT_TEMPORAL_CONTEXT_MISSING" in codes
     assert generation["observations"]["repair_used"] is True
     assert generation["observations"]["structured_attempts"] == 2
+    assert {item["type"] for item in generation["checks"]} == {"warning"}
+    assert generation["assessment"] == "PARTIAL"
 
 
 def test_missing_generation_trace_does_not_invent_attempts():
@@ -110,6 +112,121 @@ def test_router_reference_domains_are_kept_separate_from_selected_domains():
         "retrieval": {"status": "SKIPPED"},
         "consensus": {"status": "NOT_EVALUATED"},
     })
-    assert stages["router"]["assessment"] == "FAIL"
+    assert stages["router"]["assessment"] == "PARTIAL"
     assert stages["router"]["observations"]["acceptable_domains"] == ["ine.es"]
     assert stages["router"]["observations"]["matching_domains"] == []
+    assert stages["router"]["observations"]["expected_domain_matches"] == [
+        {"domain": "ine.es", "matching_selected_domains": []}]
+    assert stages["router"]["checks"][0]["code"] == "ROUTER_EXPECTED_DOMAIN_MISSING"
+    assert stages["router"]["checks"][0]["type"] == "warning"
+    assert "se esperaba ine.es" in stages["router"]["checks"][0]["detail"]
+    assert "example.org" in stages["router"]["checks"][0]["detail"]
+
+
+def test_external_rag_strategy_marks_router_as_intentionally_skipped():
+    from evaluation.viewer.build import _validation_stages
+
+    stages = _validation_stages({
+        "validator": {"evidence_search_strategy": "EXT_ONLY_OFFICIAL"},
+        "expected": {"expected_verdict": "TRUE", "acceptable_domains": ["ine.es"]},
+        "router": {"status": "NOT_EVALUATED"},
+        "retrieval": {"status": "COMPLETED", "evidences": []},
+        "consensus": {"status": "NOT_EVALUATED"},
+    })
+
+    router = stages["router"]
+    assert router["execution_status"] == "SKIPPED"
+    assert router["assessment"] == "SKIPPED"
+    assert router["observations"]["skip_reason"] == "EXTERNAL_EVIDENCE_STRATEGY"
+    assert "EXT_ONLY_OFFICIAL" in router["missing_reason"]
+
+
+def test_snapshot_promotes_public_validator_metadata():
+    dataset = {"id": "example", "news": "Texto", "assertions": [
+        {"id": "one", "text": "Texto", "expected_verdict": "TRUE"}]}
+    order = {"order_id": "order-metadata", "status": "VALIDATED", "text": "Texto",
+             "assertions": [{"idAssertion": "1", "text": "Texto"}]}
+    row = {"run_id": "run-1", "assertion_id": "1",
+           "validator": {"id": "validator-1", "validator_type": "RAG_EVIDENCE_VALIDATION",
+                         "provider": "openrouter", "model": "model-a", "config_version": 3,
+                         "evidence_search_strategy": "LOCAL"},
+           "expected": {"expected_verdict": "TRUE"}, "router": {"status": "NOT_EVALUATED"},
+           "retrieval": {"status": "NOT_EVALUATED"}, "consensus": {"status": "NOT_EVALUATED"}}
+
+    snapshot = build_order_diagnostic(dataset, order, [row], campaign_id="campaign-1",
+                                      repetition=1, parent_run_id="parent-1")
+
+    assert snapshot["validations"][0]["validator"] == {
+        "validator_type": "RAG_EVIDENCE_VALIDATION", "provider": "openrouter",
+        "model": "model-a", "config_version": 3, "temperature": None,
+        "evidence_search_strategy": "LOCAL"}
+
+
+def test_viewer_marks_missing_route_or_citable_source_as_error():
+    from evaluation.viewer.build import _validation_stages
+
+    route_missing = _validation_stages({
+        "expected": {"expected_verdict": "UNKNOWN", "acceptable_domains": ["ine.es"]},
+        "metrics": {"routing": {"status": "FAIL"}},
+        "router": {"status": "COMPLETED", "sources": []},
+        "retrieval": {"status": "COMPLETED", "evidences": [{"fetch_status": "empty_text", "contexts": []}]},
+        "consensus": {"status": "NOT_EVALUATED"},
+    })
+    assert route_missing["router"]["checks"][0]["type"] == "error"
+    retrieval_check = route_missing["evidence_search"]["checks"][0]
+    assert retrieval_check["code"] == "NO_CITABLE_EVIDENCE"
+    assert retrieval_check["type"] == "error"
+    assert "empty_text" in retrieval_check["detail"]
+    assert "0 contextos" in retrieval_check["detail"]
+
+
+def test_failure_details_explain_observed_cause_and_expected_value():
+    from evaluation.viewer.build import _validation_stages
+
+    stages = _validation_stages({
+        "expected": {"expected_verdict": "TRUE"},
+        "router": {"status": "SKIPPED"},
+        "retrieval": {"status": "INJECTED", "evidences": []},
+        "validator_input": {"retrieval_evidence_bundle_hash": "retrieved", "validator_input_evidence_bundle_hash": "delivered"},
+        "validator_output": {"resultado": "FALSE", "effective_verdict": "FALSE"},
+        "consensus": {"status": "COMPLETED", "verdict": "FALSE", "reason_code": "MAJORITY_FALSE",
+                      "distribution": {"FALSE": 2, "TRUE": 1}},
+    })
+    assert "retrieved" in stages["handoff"]["checks"][0]["detail"]
+    assert "delivered" in stages["handoff"]["checks"][0]["detail"]
+    assert "se esperaba 'TRUE'" in stages["llm"]["checks"][0]["detail"]
+    assert "produjo 'FALSE'" in stages["llm"]["checks"][0]["detail"]
+    assert "MAJORITY_FALSE" in stages["consensus"]["checks"][0]["detail"]
+
+
+def test_generation_failure_explains_the_invalid_jurisdiction_fields():
+    from evaluation.viewer.build import _generation
+
+    dataset = {"assertions": [{"id": "expected-1", "text": "Una afirmación"}]}
+    order = {
+        "assertions_error": "Invalid structured LLM response",
+        "generation_evaluation_trace": {
+            "provider": "openrouter",
+            "model": "example",
+            "temperature": 0.1,
+            "status": "FAILED",
+            "error_type": "LLMResponseError",
+            "validation_issues": [{
+                "code": "JURISDICTION_CONTRACT_MISMATCH",
+                "assertion_index": 0,
+                "assertion_id": "generated-1",
+                "location": "assertions.0.context.jurisdiction",
+                "message": "SUPRANATIONAL jurisdiction requires only jurisdiction_code",
+                "jurisdiction_scope": "SUPRANATIONAL",
+                "present_jurisdiction_fields": ["country_code", "jurisdiction_code"],
+            }],
+        },
+    }
+
+    stage = _generation(dataset, order, [])
+
+    detail = next(check["detail"] for check in stage["checks"] if check["code"] == "GENERATION_ERROR")
+    assert "generated-1" in detail
+    assert "scope=SUPRANATIONAL" in detail
+    assert "country_code, jurisdiction_code" in detail
+    assert "requires only jurisdiction_code" in detail

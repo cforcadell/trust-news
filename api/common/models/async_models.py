@@ -297,6 +297,19 @@ class GenerateAssertionsRequest(BaseModel):
     payload: GenerateAssertionsPayload
 
 
+class GenerationValidationIssue(BaseModel):
+    """Sanitized schema failure for one generated assertion."""
+
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    assertion_index: Optional[int] = None
+    assertion_id: Optional[str] = None
+    location: str
+    message: str
+    jurisdiction_scope: Optional[str] = None
+    present_jurisdiction_fields: List[str] = Field(default_factory=list)
+
+
 class GenerationEvaluationTrace(BaseModel):
     """Operational diagnostics; never embedded in the published assertions document."""
 
@@ -311,6 +324,7 @@ class GenerationEvaluationTrace(BaseModel):
     status: Literal["COMPLETED", "FAILED"]
     error_type: Optional[str] = None
     assertion_count: int = 0
+    validation_issues: List[GenerationValidationIssue] = Field(default_factory=list)
 
 
 class AssertionGeneratedPayload(BaseModel):

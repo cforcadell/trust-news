@@ -16,7 +16,9 @@ def resource():
 
 def test_old_datasets_load():
     cases = load_datasets([str(ROOT / "tests/data/benchmark/resources/cases")])
-    assert len(cases) == 2
+    assert {case["id"] for case in cases} >= {
+        "eu-institutions-and-law-v1", "eu-renewable-energy-policy-v1",
+    }
 
 
 def test_v2_tags_and_optional_gold(tmp_path):
@@ -30,6 +32,7 @@ def test_v2_tags_and_optional_gold(tmp_path):
 @pytest.mark.parametrize("change", [
     {"expected_verdict": "MAYBE"}, {"reference_facts": "text"},
     {"reference_evidence": [{"text": ""}]}, {"tags": ["missing-family"]},
+    {"expected_topic_code": "POLITICS"}, {"expected_evidence_kind": "LEGAL_DOCUMENT"},
 ])
 def test_invalid_reference_rejected(change):
     case = resource()

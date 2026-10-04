@@ -118,4 +118,8 @@ async def acomplete_structured_with_repair(
             provider_name,
             repaired_request.model_copy(update={"strict_response_validation": False}),
         )
-        return parse_response(repaired_request, repaired_response)
+        try:
+            return parse_response(repaired_request, repaired_response)
+        except LLMResponseError as repair_exc:
+            repair_exc.response_content = repaired_response.content
+            raise

@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 VERDICTS = {0: "UNKNOWN", 1: "TRUE", 2: "FALSE"}
+NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
 def normalize_verdict(value: Any) -> str:
     if isinstance(value, bool):
@@ -34,6 +35,56 @@ def normalized_words(text: str) -> set[str]:
     substitutions = str.maketrans("áéíóúüñ", "aeiouun")
     normalized = normalized.translate(substitutions)
     return set(re.findall(r"[a-z0-9]+", normalized))
+
+
+def numbers_in(text: str) -> list[float]:
+    """Return locale-independent numbers observed in a piece of text."""
+    return [float(value.replace(",", ".")) for value in NUMBER.findall(str(text or ""))]
+
+
+def approximate_value_matches_text(spec: dict[str, Any], text: str) -> bool:
+    """Evaluate an explicit dataset equivalence, never infer one implicitly."""
+    value = float(spec["value"])
+    tolerance = float(spec.get("tolerance", 0))
+    if any(abs(observed - value) <= tolerance for observed in numbers_in(text)):
+        return True
+    words = normalized_words(text)
+    return any(normalized_words(alias) <= words for alias in spec.get("aliases", []))
+
+
+def missing_expected_numbers(expected: dict[str, Any], actual_text: str) -> list[str]:
+    """Find missing literals while honoring annotated approximate equivalents."""
+    actual_numbers = numbers_in(actual_text)
+    equivalents = expected.get("approximate_values") or []
+    missing = []
+    for literal in NUMBER.findall(str(expected.get("text") or "")):
+        value = float(literal.replace(",", "."))
+        if any(observed == value for observed in actual_numbers):
+            continue
+        applicable = [spec for spec in equivalents if float(spec["value"]) == value]
+        if applicable and any(approximate_value_matches_text(spec, actual_text) for spec in applicable):
+            continue
+        missing.append(literal)
+    return sorted(set(missing))
+
+
+def evidence_verdict_coherence(expected: dict[str, Any], assertion_text: str,
+                               bundle: list[dict[str, Any]], verdict: str | None) -> dict[str, Any]:
+    """Detect contradictions backed by explicit numeric-equivalence annotations."""
+    specs = expected.get("approximate_values") or []
+    if expected.get("expected_verdict") != "TRUE" or verdict != "FALSE" or not specs:
+        return {"status": "NOT_EVALUATED"}
+    contexts = [str(context.get("text") or "") for source in bundle if isinstance(source, dict)
+                for context in source.get("contexts") or [] if isinstance(context, dict)
+                and context.get("citation_eligible") is True]
+    matches = []
+    for spec in specs:
+        if approximate_value_matches_text(spec, assertion_text) and any(
+                approximate_value_matches_text(spec, context) for context in contexts):
+            matches.append({"value": spec["value"], "tolerance": spec.get("tolerance", 0),
+                            "aliases": spec.get("aliases", [])})
+    return ({"status": "VERDICT_EVIDENCE_CONTRADICTION", "matches": matches}
+            if matches else {"status": "NOT_EVALUATED"})
 
 
 def assertion_identifier(assertion: dict[str, Any], index: int) -> str:
@@ -107,4 +158,3 @@ def validation_records(order: dict[str, Any], assertion_id: str) -> list[tuple[s
             for index, value in enumerate(rows) if isinstance(value, dict)
         ]
     return []
-

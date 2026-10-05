@@ -8,6 +8,8 @@ from .artifacts import write_json
 
 
 def llm_report(rows):
+    observation_only = [row for row in rows if row.get("provenance", {}).get("scoring_eligible") is False]
+    rows = [row for row in rows if row.get("provenance", {}).get("scoring_eligible") is not False]
     groups = {}
     for row in rows:
         cfg = row["validator"]
@@ -48,11 +50,15 @@ def llm_report(rows):
             "same_evidence": len(set(hashes)) == 1 if all(hashes) else None,
             "same_prompt": len(set(prompts)) == 1 if all(prompts) else None,
             "quality_scope": "validator_only" if key[2] in {"GOLD_EVIDENCE", "VALIDATOR_REPLAY"} else "pipeline_dependent"})
-    return {"report": "llm-benchmark", "models": models, "comparison_conditions": conditions}
+    return {"report": "llm-benchmark", "models": models, "comparison_conditions": conditions,
+            "observation_only_executions": len(observation_only)}
 
 
 def pipeline_report(rows):
     # Count assertions, not validators or counterfactual executions.
+    all_rows = rows
+    observation_only = [row for row in rows if row.get("provenance", {}).get("scoring_eligible") is False]
+    rows = [row for row in rows if row.get("provenance", {}).get("scoring_eligible") is not False]
     groups = {}
     for row in rows:
         groups.setdefault((row.get("dataset_id"), row["case_id"], row.get("provenance", {}).get("repetition", 1)), []).append(row)
@@ -82,13 +88,18 @@ def pipeline_report(rows):
             correct += 1
         else:
             incorrect += 1
-    return {"report": "pipeline-evaluation", "total_cases": len(groups), "executions": len(rows),
+    observation_causes = Counter(row.get("root_cause", {}).get("code") for row in observation_only
+                                 if row.get("root_cause", {}).get("code"))
+    observed_causes = causes + observation_causes
+    return {"report": "pipeline-evaluation", "total_cases": len(groups), "executions": len(all_rows),
+            "scored_executions": len(rows), "observation_only_executions": len(observation_only),
             "end_to_end_correct": correct, "end_to_end_incorrect": incorrect, "not_evaluated": not_evaluated,
-            "root_causes": dict(causes),
-            "failures": {name: sum(n for code, n in causes.items() if code.startswith(prefix)) for name, prefix in (
+            "root_causes": dict(observed_causes), "observation_only_root_causes": dict(observation_causes),
+            "failures": {name: sum(n for code, n in observed_causes.items() if code.startswith(prefix)) for name, prefix in (
                 ("extraction", "EXTRACTION_"), ("routing", "ROUTER_"), ("retrieval", "RETRIEVAL_"),
                 ("handoff", "HANDOFF_"), ("validator", "LLM_"), ("grounding", "GROUNDING_"),
-                ("consensus", "CONSENSUS_"), ("technical", "TECHNICAL_"), ("undetermined", "UNDETERMINED"))}}
+                ("consensus", "CONSENSUS_"), ("technical", "TECHNICAL_"),
+                ("evidence_coherence", "VERDICT_EVIDENCE_"), ("undetermined", "UNDETERMINED"))}}
 
 
 def persist(directory: Path, rows: list[dict], kind: str, manifest: dict, *, initialized=False):
@@ -101,11 +112,13 @@ def persist(directory: Path, rows: list[dict], kind: str, manifest: dict, *, ini
     write_json(directory / "report.json", report)
     lines = ["# " + report["report"], "", "```json", __import__("json").dumps(report, ensure_ascii=False, indent=2), "```", ""]
     if kind == "pipeline":
-        lines += ["| Case | Mode | Validator | Expected | Verdict | Routing | Retrieval | Handoff | Grounding | Root cause |",
-                  "|---|---|---|---|---|---|---|---|---|---|"]
+        lines += ["| Case | Scope | Mode | Validator | Expected | Verdict | Routing | Retrieval | Handoff | Grounding | Root cause |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|"]
         for row in rows:
             m = row["metrics"]
-            cells = [row["case_id"], row["execution_mode"], row["validator"].get("id"), row["expected"]["expected_verdict"],
+            scope = "OBSERVATION_ONLY" if row.get("provenance", {}).get("scoring_eligible") is False else "SCORED"
+            cells = [row["case_id"], scope, row["execution_mode"], row["validator"].get("id"),
+                     row["expected"]["expected_verdict"] if scope == "SCORED" else None,
                      m["validation"]["verdict"], m["routing"]["status"], m["retrieval"]["status"], m["handoff"]["status"],
                      m["grounding"]["status"], row["root_cause"]["code"]]
             lines.append("| " + " | ".join(str(c if c is not None else "—").replace("|", "\\|").replace("\n", " ") for c in cells) + " |")

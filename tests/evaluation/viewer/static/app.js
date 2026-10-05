@@ -1,8 +1,12 @@
 const $ = (id) => document.getElementById(id);
 const state = {campaigns: [], campaign: null, orderList: null, diagnostic: null,
   assertionId: null, runId: null, stage: "generation", view: "detail", campaignView: "orders",
+  navigationView: "campaigns",
   filters: {caseId: "", validator: "", repetition: "", stage: "", code: "", type: ""},
-  campaignFilters: {orders: {}, incidents: {}}};
+  campaignFilters: {orders: {}, incidents: {}}, navigationFilters: {campaigns: {}},
+  pagination: {campaigns: {page: 1, size: 10}, orders: {page: 1, size: 10}},
+  sorting: {campaigns: {key: null, direction: "asc"}, orders: {key: null, direction: "asc"},
+    incidents: {key: null, direction: "asc"}}};
 const STAGES = [["generation", "Generate Assertions"], ["router", "Source Router"],
   ["evidence_search", "Evidence Search"], ["handoff", "Entrega"],
   ["llm", "LLM"], ["citations", "Citas"], ["consensus", "Consenso"]];
@@ -18,12 +22,68 @@ function clear(parent) { parent.replaceChildren(); return parent; }
 function matchesFilter(value, query) {
   return !query || String(value ?? "").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 }
-function filterHeader(label, key, filters, apply, className = "") {
+function filterHeader(label, key, filters, apply, className = "", sorting = null) {
   const cell = el("th", className), input = el("input", "column-filter");
+  let labelNode = el("span", "column-label", label);
+  if (sorting) {
+    cell.dataset.sortKey = key;
+    labelNode = button(label, () => {
+      sorting.direction = sorting.key === key && sorting.direction === "asc" ? "desc" : "asc";
+      sorting.key = key; apply(true);
+    }, "column-label column-sort");
+    labelNode.setAttribute("aria-label", `Ordenar por ${label}`);
+  }
   input.type = "search"; input.placeholder = "Filtrar…"; input.value = filters[key] || "";
   input.setAttribute("aria-label", `Filtrar ${label}`);
-  input.addEventListener("input", () => { filters[key] = input.value; apply(); });
-  return add(cell, el("span", "column-label", label), input);
+  input.addEventListener("input", () => { filters[key] = input.value; apply(true); });
+  return add(cell, labelNode, input);
+}
+function sortedEntries(entries, sorting) {
+  if (!sorting?.key) return entries;
+  const factor = sorting.direction === "desc" ? -1 : 1;
+  return entries.map((entry, index) => ({entry, index})).sort((left, right) => {
+    const a = left.entry.sortValues?.[sorting.key] ?? left.entry.values[sorting.key];
+    const b = right.entry.sortValues?.[sorting.key] ?? right.entry.values[sorting.key];
+    let result;
+    if (typeof a === "number" && typeof b === "number") result = a - b;
+    else result = String(a ?? "").localeCompare(String(b ?? ""), "es", {numeric: true, sensitivity: "base"});
+    return result ? result * factor : left.index - right.index;
+  }).map(item => item.entry);
+}
+function updateSortHeaders(head, sorting) {
+  for (const cell of head.querySelectorAll("th[data-sort-key]")) {
+    const active = cell.dataset.sortKey === sorting.key;
+    cell.setAttribute("aria-sort", active ? (sorting.direction === "asc" ? "ascending" : "descending") : "none");
+  }
+}
+function formatSavedDate(value) {
+  if (!value) return "—";
+  if (!/[T ]\d{2}:\d{2}/.test(value)) return String(value).slice(0, 10);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("es-ES", {dateStyle: "short", timeStyle: "medium"}).format(date);
+}
+function paginationControls(pagination, apply) {
+  const node = el("div", "pagination"), summary = el("span", "pagination-summary");
+  const previous = button("Anterior", () => { pagination.page -= 1; apply(); });
+  const next = button("Siguiente", () => { pagination.page += 1; apply(); });
+  const size = el("select", "page-size");
+  size.setAttribute("aria-label", "Filas por página");
+  for (const value of [10, 25, 50]) {
+    const option = el("option", "", `${value} / página`); option.value = value;
+    option.selected = pagination.size === value; add(size, option);
+  }
+  size.addEventListener("change", () => { pagination.size = Number(size.value); pagination.page = 1; apply(); });
+  add(node, summary, previous, next, size);
+  return {node, update(total) {
+    const pages = Math.max(1, Math.ceil(total / pagination.size));
+    pagination.page = Math.min(Math.max(1, pagination.page), pages);
+    const first = total ? (pagination.page - 1) * pagination.size + 1 : 0;
+    const last = Math.min(total, pagination.page * pagination.size);
+    summary.textContent = total ? `${first}–${last} de ${total}` : "0 resultados";
+    previous.disabled = pagination.page === 1; next.disabled = pagination.page === pages || !total;
+    return {first: total ? first - 1 : 0, last};
+  }};
 }
 function button(label, onClick, className = "") {
   const node = el("button", className, label); node.type = "button";
@@ -153,38 +213,103 @@ async function api(path) {
 function enc(value) { return encodeURIComponent(value); }
 
 async function loadCampaigns() {
-  try { state.campaigns = await api("/api/campaigns"); renderCampaigns(); }
+  try { state.campaigns = await api("/api/campaigns"); renderCampaignIndex(); }
   catch (error) { showError(error.message); }
 }
-function renderCampaigns() {
-  const host = clear($("campaigns"));
-  if (!state.campaigns.length) return add(host, el("p", "", "No hay órdenes con diagnóstico v1 en la carpeta configurada."));
-  for (const campaign of state.campaigns) {
-    const item = button(campaign.campaign_id, () => openCampaign(campaign.campaign_id),
-      campaign.campaign_id === state.campaign ? "active" : "");
-    const date = campaign.created_at ? ` · ${campaign.created_at.slice(0, 10)}` : "";
-    add(item, el("small", "", `${campaign.order_count} órdenes · ${campaign.status}${date}`)); add(host, item);
+function renderNavigation() {
+  const campaigns = $("nav-campaigns"), orders = $("nav-orders");
+  campaigns.classList.toggle("active", state.navigationView === "campaigns");
+  orders.classList.toggle("active", state.navigationView === "orders");
+  campaigns.toggleAttribute("aria-current", state.navigationView === "campaigns");
+  orders.toggleAttribute("aria-current", state.navigationView === "orders");
+  const campaignHost = clear($("selected-campaign")), orderHost = clear($("order-menu"));
+  if (state.campaign) {
+    const selectedCampaign = button(state.campaign, () => {
+      state.navigationView = "campaigns"; renderNavigation();
+      if (state.orderList) renderCampaignOverview();
+    }, "context-item active");
+    selectedCampaign.title = "Volver al resumen de la campaña seleccionada"; add(campaignHost, selectedCampaign);
   }
+  for (const item of state.orderList?.orders || []) {
+    const selected = state.diagnostic?.identity.order_id === item.order_id;
+    const order = button(item.order_id, () => openOrder(item.file), `context-item${selected ? " active" : ""}`);
+    order.title = `Abrir orden ${item.order_id}`;
+    add(order, el("small", "", `${item.dataset_id} · rep. ${item.repetition} · ${item.status}`)); add(orderHost, order);
+  }
+}
+function showCampaigns() {
+  state.campaign = null; state.orderList = null; state.diagnostic = null;
+  state.assertionId = null; state.runId = null; state.navigationView = "campaigns";
+  state.campaignFilters = {orders: {}, incidents: {}}; state.pagination.orders.page = 1;
+  renderNavigation(); renderCampaignIndex();
+}
+function showOrders() {
+  state.navigationView = "orders"; renderNavigation(); renderOrderIndex();
+}
+function renderCampaignIndex() {
+  state.navigationView = "campaigns"; renderNavigation();
+  const main = clear($("main"));
+  add(main, el("div", "eyebrow", "Navegación"), el("h1", "", "Campañas"),
+    el("p", "muted", "Selecciona una fila para abrir el detalle de la campaña."));
+  const card = add(el("section", "card"), el("h2", "", "Campañas guardadas")); add(main, card);
+  if (!state.campaigns.length) return add(card, el("p", "muted", "No hay órdenes con diagnóstico v1 en la carpeta configurada."));
+  const filters = state.navigationFilters.campaigns, pagination = state.pagination.campaigns;
+  const sorting = state.sorting.campaigns;
+  const wrap = el("div", "table-wrap"), table = el("table", "campaign-table auto-columns"), head = el("tr"), body = el("tbody");
+  const entries = [], noResults = el("p", "muted table-empty", "No hay campañas que coincidan con los filtros.");
+  let pager;
+  function applyFilters(resetPage = false) {
+    if (resetPage) pagination.page = 1;
+    const ordered = sortedEntries(entries, sorting); for (const entry of ordered) add(body, entry.node);
+    const visible = ordered.filter(entry => Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query)));
+    const range = pager.update(visible.length), shown = new Set(visible.slice(range.first, range.last));
+    for (const entry of entries) entry.node.hidden = !shown.has(entry);
+    noResults.hidden = Boolean(visible.length); updateSortHeaders(head, sorting);
+  }
+  const columns = [["Campaña", "campaign", "campaign-column"], ["Fecha", "date", "date-column"],
+    ["Órdenes", "orders", "compact-column"], ["Estado", "status", "status-column"],
+    ["Archivos con problemas", "errors", "compact-column"]];
+  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
+  for (const campaign of state.campaigns) {
+    const values = {campaign: campaign.campaign_id, date: formatSavedDate(campaign.created_at),
+      orders: campaign.order_count, status: campaign.status, errors: campaign.errors?.length || 0};
+    const dateCell = el("td", "date-column", values.date); if (campaign.created_at) dateCell.title = campaign.created_at;
+    const row = add(el("tr", `clickable-row${campaign.campaign_id === state.campaign ? " selected-row" : ""}`),
+      el("td", "campaign-column", values.campaign), dateCell,
+      el("td", "compact-column", values.orders), el("td", "status-column", values.status),
+      el("td", "compact-column", values.errors));
+    const open = () => openCampaign(campaign.campaign_id);
+    row.tabIndex = 0; row.title = "Abrir campaña"; row.addEventListener("click", open);
+    row.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+    });
+    entries.push({node: row, values, sortValues: {date: campaign.created_at ? Date.parse(campaign.created_at) : -Infinity}}); add(body, row);
+  }
+  pager = paginationControls(pagination, applyFilters);
+  add(table, add(el("thead"), head), body); add(wrap, table); add(card, wrap, noResults, pager.node); applyFilters();
 }
 async function openCampaign(campaign) {
-  state.campaign = campaign; state.diagnostic = null;
+  state.campaign = campaign; state.orderList = null; state.diagnostic = null;
+  state.navigationView = "campaigns";
   state.campaignView = "orders";
   state.campaignFilters = {orders: {}, incidents: {}};
+  state.pagination.orders.page = 1;
   state.filters = {caseId: "", validator: "", repetition: "", stage: "", code: "", type: ""};
-  renderCampaigns();
-  try { state.orderList = await api(`/api/campaigns/${enc(campaign)}/orders`); renderOrders();
-    renderCampaignOverview();
+  renderNavigation();
+  try {
+    state.orderList = await api(`/api/campaigns/${enc(campaign)}/orders`);
+    renderNavigation(); renderCampaignOverview();
   } catch (error) { showError(error.message); }
 }
-function renderOrders() {
-  const host = clear($("orders"));
-  for (const item of state.orderList.orders) {
-    if (state.filters.repetition && String(item.repetition) !== state.filters.repetition) continue;
-    const selected = state.diagnostic && state.diagnostic.identity.order_id === item.order_id;
-    const node = button(item.order_id, () => openOrder(item.file), selected ? "active" : "");
-    add(node, el("small", "", `${item.dataset_id} · rep. ${item.repetition} · ${item.status}`)); add(host, node);
-  }
-  if (!state.orderList.orders.length) add(host, el("p", "", "No hay órdenes válidas."));
+function renderOrderIndex() {
+  const main = clear($("main"));
+  if (!state.campaign || !state.orderList) return add(main, add(el("section", "empty"),
+    el("h1", "", "Selecciona primero una campaña"),
+    el("p", "", "La tabla de órdenes muestra las órdenes de la campaña seleccionada."),
+    button("Ver campañas", showCampaigns)));
+  add(main, el("div", "eyebrow", "Campaña"), el("h1", "", "Órdenes"), el("p", "muted", state.campaign));
+  const problems = errorBlock(state.orderList.errors); if (problems) add(main, problems);
+  add(main, campaignOrderTable("Órdenes de la campaña"));
 }
 function errorBlock(errors) {
   if (!errors || !errors.length) return null;
@@ -207,27 +332,35 @@ function campaignTabs() {
   }
   return tabs;
 }
-function campaignOrderTable() {
-  const card = add(el("section", "card"), el("h2", "", "Órdenes de la campaña"));
+function campaignOrderTable(title = "Órdenes de la campaña") {
+  const card = add(el("section", "card"), el("h2", "", title));
   if (!state.orderList.orders.length) return add(card, el("p", "muted", "No hay órdenes legibles en esta campaña."));
   const filters = state.campaignFilters.orders;
+  const pagination = state.pagination.orders;
+  const sorting = state.sorting.orders;
   const wrap = el("div", "table-wrap"), table = el("table", "campaign-table auto-columns"), head = el("tr"), body = el("tbody");
-  const entries = [];
-  function applyFilters() {
-    for (const entry of entries)
-      entry.node.hidden = !Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query));
+  const entries = [], noResults = el("p", "muted table-empty", "No hay órdenes que coincidan con los filtros.");
+  let pager;
+  function applyFilters(resetPage = false) {
+    if (resetPage) pagination.page = 1;
+    const ordered = sortedEntries(entries, sorting); for (const entry of ordered) add(body, entry.node);
+    const visible = ordered.filter(entry => Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query)));
+    const range = pager.update(visible.length), shown = new Set(visible.slice(range.first, range.last));
+    for (const entry of entries) entry.node.hidden = !shown.has(entry);
+    noResults.hidden = Boolean(visible.length); updateSortHeaders(head, sorting);
   }
   const columns = [["Orden", "order", "order-column"], ["Dataset", "dataset", "dataset-column"],
     ["Rep.", "repetition", "compact-column"], ["Afirmaciones", "assertions", "compact-column"],
     ["Validaciones OK", "correct", "compact-column"], ["Validaciones", "validations", "compact-column"],
     ["Avisos", "warnings", "compact-column"], ["Errores", "errors", "compact-column"],
     ["Estado", "status", "status-column"]];
-  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className));
+  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
   for (const item of state.orderList.orders) {
     const values = {order: item.order_id, dataset: item.dataset_id, repetition: item.repetition,
       assertions: item.assertions, correct: item.correct_validations ?? "—", validations: item.validations,
       warnings: item.warnings ?? 0, errors: item.errors ?? 0, status: item.status};
-    const row = add(el("tr", "clickable-row"), el("td", "mono order-column", values.order),
+    const selected = state.diagnostic?.identity.order_id === item.order_id;
+    const row = add(el("tr", `clickable-row${selected ? " selected-row" : ""}`), el("td", "mono order-column", values.order),
       el("td", "dataset-column", values.dataset), el("td", "compact-column", values.repetition),
       el("td", "compact-column", values.assertions), el("td", "compact-column", values.correct),
       el("td", "compact-column", values.validations), el("td", "compact-column", values.warnings),
@@ -239,7 +372,8 @@ function campaignOrderTable() {
     });
     entries.push({node: row, values}); add(body, row);
   }
-  applyFilters(); add(table, add(el("thead"), head), body); add(wrap, table); return add(card, wrap);
+  pager = paginationControls(pagination, applyFilters);
+  add(table, add(el("thead"), head), body); add(wrap, table); add(card, wrap, noResults, pager.node); applyFilters(); return card;
 }
 function campaignIncidentTable() {
   const incidents = state.orderList.incidents || [];
@@ -247,22 +381,25 @@ function campaignIncidentTable() {
   const card = add(el("section", "card"), el("h2", "", "Incidencias de la campaña"), summary);
   if (!incidents.length) return add(card, el("p", "muted", "No hay incidencias registradas."));
   const filters = state.campaignFilters.incidents;
+  const sorting = state.sorting.incidents;
   const wrap = el("div", "table-wrap"), table = el("table", "campaign-incident-table campaign-table auto-columns"), head = el("tr"), body = el("tbody");
   const entries = [];
   function applyFilters() {
     let errors = 0, warnings = 0, visible = 0;
-    for (const entry of entries) {
+    const ordered = sortedEntries(entries, sorting); for (const entry of ordered) add(body, entry.node);
+    for (const entry of ordered) {
       const shown = Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query));
       entry.node.hidden = !shown;
       if (shown) { visible += 1; errors += entry.values.type === "error"; warnings += entry.values.type === "warning"; }
     }
     summary.textContent = `${visible} incidencias visibles · ${errors} errores · ${warnings} avisos. Selecciona una fila para abrir el detalle.`;
+    updateSortHeaders(head, sorting);
   }
   const columns = [["Tipo", "type", "compact-column"], ["Orden", "order", "order-column"],
     ["Rep.", "repetition", "compact-column"], ["Módulo", "stage", "module-column"],
     ["Validador", "validator", "validator-column"], ["Código", "code", "code-column"],
     ["Detalle", "detail", "detail-column"]];
-  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className));
+  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
   for (const item of incidents) {
     const stageName = STAGES.find(([key]) => key === item.stage)?.[1] || item.stage;
     const values = {type: item.type, order: item.order_id, repetition: item.repetition, stage: stageName,
@@ -290,10 +427,11 @@ function renderCampaignOverview() {
 }
 async function openOrder(file, focus = null) {
   try {
+    state.navigationView = "orders"; state.diagnostic = null; renderNavigation();
     state.diagnostic = await api(`/api/campaigns/${enc(state.campaign)}/orders/${enc(file)}`);
     state.assertionId = focus?.assertion_id || state.diagnostic.order.assertions[0]?.assertion_id || null;
     state.runId = focus?.run_id || state.diagnostic.validations.find(v => v.assertion_id === state.assertionId)?.run_id || null;
-    state.stage = focus?.stage || "generation"; state.view = "detail"; renderOrders(); renderDetail();
+    state.stage = focus?.stage || "generation"; state.view = "detail"; renderNavigation(); renderDetail();
   } catch (error) { showError(error.message); }
 }
 function metric(value, label) { return add(el("div", "metric"), el("strong", "", value), el("span", "", label)); }
@@ -791,7 +929,6 @@ function renderFilters() {
     select.value = state.filters[key];
     select.addEventListener("change", () => {
       state.filters[key] = select.value;
-      if (key === "repetition") renderOrders();
       renderDetail();
     });
     return add(holder, select);
@@ -922,4 +1059,7 @@ function renderConsensus(obs) {
   return block;
 }
 
+$("nav-campaigns").addEventListener("click", showCampaigns);
+$("nav-orders").addEventListener("click", showOrders);
+renderNavigation();
 loadCampaigns();

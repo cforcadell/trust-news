@@ -88,6 +88,7 @@ The compatible container is `id`, `news`, and `assertions`. V1 retains its field
     "text": "Reviewed assertion",
     "expected_verdict": "TRUE",
     "required_terms": ["discriminating term"],
+    "approximate_values": [{"value": 24.5, "tolerance": 0.5, "aliases": ["a quarter"]}],
     "acceptable_domains": ["ine.es", "ec.europa.eu"],
     "reference_facts": ["Reviewed reference fact"],
     "reference_sources": [{"id": "report", "url": "https://example.org/report", "relation": "SUPPORTS"}],
@@ -97,6 +98,8 @@ The compatible container is `id`, `news`, and `assertions`. V1 retains its field
 ```
 
 This is a schema example, not a factual case. `reference_evidence.source` is an HTTP(S) URL or a `reference_sources` ID. Relations are `SUPPORTS`, `CONTRADICTS`, and `NEUTRAL`; neither relations nor gold verdicts are sent to a model. An explicit empty `reference_evidence: []` supplies zero evidence, while an absent field makes GOLD_EVIDENCE unavailable. Dataset authors review reference material; appearing in gold data does not imply official authority.
+
+`approximate_values` declares reviewed numeric equivalences used by deterministic diagnostics. A generated assertion matches an annotation when it contains a number within `tolerance` or one of its `aliases`; no unannotated semantic equivalence is inferred.
 
 `acceptable_domains` measures routing. Exact domains and their DNS subdomains match; another URL on the same domain can be valid. Domain recall measures coverage and does not require every acceptable domain for routing to pass.
 
@@ -145,13 +148,13 @@ Extraction uses the historical `required_terms` and category matching when avail
 
 Validation compares the effective verdict with `TRUE`, `FALSE`, or `UNKNOWN`. `UNNECESSARY_ABSTENTION` requires decisive annotated support or contradiction. Production `evaluate_evidence_grounding()` validates citation identity and eligibility, not semantic entailment.
 
-Root cause is deterministic and conservative: differing boundary hashes produce `HANDOFF_EVIDENCE_MISMATCH`; extraction failure produces `EXTRACTION_ERROR`; invalid responses, citation failures, grounding failures, and technical failures use their corresponding codes. A correct validator with an incorrect aggregate yields `CONSENSUS_ERROR`. Same-assertion, same-configuration, same-template counterfactuals can establish router or retrieval causes; sufficient frozen gold evidence can establish `LLM_WRONG_VERDICT` or `LLM_UNNECESSARY_ABSTENTION`. Otherwise the result is `UNDETERMINED`. Frozen evidence failures are never attributed to the router. Counterfactuals never cross datasets or repetitions.
+Root cause is deterministic and conservative: differing boundary hashes produce `HANDOFF_EVIDENCE_MISMATCH`; extraction failure produces `EXTRACTION_ERROR`; invalid responses, citation failures, grounding failures, and technical failures use their corresponding codes. When an assertion and its delivered citable evidence both match an explicit `approximate_values` annotation but the validator returns `FALSE`, evaluation reports `VERDICT_EVIDENCE_CONTRADICTION`. A correct validator with an incorrect aggregate yields `CONSENSUS_ERROR`. Same-assertion, same-configuration, same-template counterfactuals can establish router or retrieval causes; sufficient frozen gold evidence can establish `LLM_WRONG_VERDICT` or `LLM_UNNECESSARY_ABSTENTION`. Otherwise the result is `UNDETERMINED`. Frozen evidence failures are never attributed to the router. Counterfactuals never cross datasets or repetitions.
 
 Each assertion/validator run has its own UUID and an `evaluation-result-v1` envelope with assertion, expected result, stages, cache state, timings, errors, metrics, and public provenance. Historical CLI exports also contain calculated metrics and root cause, including `NOT_EVALUATED` handoffs for old orders. Direct service experiments send and log `X-Evaluation-Run-ID`.
 
 A campaign directory contains `manifest.json`, one `<run_id>.json` per completed call, `report.json`, and `report.md`; `--publish` also writes its order. JSON writes are atomic. Interrupted campaigns retain completed runs and a `RUNNING` manifest. Existing campaign directories are never overwritten. Artifact writing filters credential-like keys and never persists provider exception bodies or raw metadata.
 
-LLM reports group by configuration and mode, including accuracy, verdict distribution, grounding, citations, abstention, invalid responses, errors, latency, and provider-reported tokens. Direct-call cost is `null`; historical estimates remain in the historical benchmark. Pipeline reports count assertion/repetition units rather than validators or counterfactuals. A GOLD-only campaign has no end-to-end pass count, and root-cause counts need not sum to case totals.
+LLM reports group by configuration and mode, including accuracy, verdict distribution, grounding, citations, abstention, invalid responses, errors, latency, and provider-reported tokens. Direct-call cost is `null`; historical estimates remain in the historical benchmark. Pipeline reports count assertion/repetition units rather than validators or counterfactuals. Generated assertions without a gold match are retained as `OBSERVATION_ONLY`: their validations and technical errors remain visible, while they are excluded from accuracy and end-to-end denominators. A GOLD-only campaign has no end-to-end pass count, and root-cause counts need not sum to case totals.
 
 ## Offline per-validation analysis
 

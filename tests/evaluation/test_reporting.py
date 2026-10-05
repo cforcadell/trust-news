@@ -166,6 +166,36 @@ def test_handoff_failure_is_not_an_end_to_end_success():
     assert report["end_to_end_incorrect"] == 1
 
 
+def test_unmatched_generated_validation_is_visible_but_not_scored():
+    dataset = case()
+    order = {"assertions": [{"idAssertion": "extra", "text": "Texto ajeno al caso gold."}],
+             "validations": {"extra": {"validator": {"execution_status": "ERROR",
+                 "error_details": {"stage": "LLM_REQUEST", "status_code": 429,
+                                   "message": "rate limited"}}}}}
+    rows = [row.to_dict() for row in results_from_order(dataset, order)]
+    observed = next(row for row in rows if row["provenance"].get("scoring_eligible") is False)
+    assert observed["extraction"]["status"] == "UNMATCHED_GENERATED_ASSERTION"
+    assert observed["metrics"]["validation"]["correct"] is None
+    assert observed["errors"][0]["status_code"] == 429
+    report = pipeline_report(rows)
+    assert report["total_cases"] == 1
+    assert report["observation_only_executions"] == 1
+    assert report["failures"]["technical"] == 1
+
+
+def test_annotated_numeric_evidence_contradiction_has_specific_cause():
+    row = run().to_dict()
+    row["expected"]["approximate_values"] = [{"value": 24.5, "tolerance": 0.5,
+                                                "aliases": ["una cuarta parte"]}]
+    row["assertion"]["text"] = "La cuota fue aproximadamente una cuarta parte."
+    row["validator_input"]["evidences"] = [{"contexts": [
+        {"text": "The measured share was 24.5%.", "citation_eligible": True}]}]
+    row["validator_output"]["effective_verdict"] = "FALSE"
+    evaluated(row)
+    assert row["metrics"]["evidence_coherence"]["status"] == "VERDICT_EVIDENCE_CONTRADICTION"
+    assert row["root_cause"]["code"] == "VERDICT_EVIDENCE_CONTRADICTION"
+
+
 def test_cli_emits_secret_free_phase_traces(tmp_path, monkeypatch, capsys):
     import common.llm
 

@@ -9,13 +9,12 @@ from .models import CaseResult
 
 def results_from_order(dataset, order, run_id=None):
     generated = collect_assertions(order)
-    matches = {m["expected_id"]: m for m in match_assertions(dataset, generated)}
+    matched = match_assertions(dataset, generated)
+    matches = {m["expected_id"]: m for m in matched}
     results = []
-    for expected in dataset["assertions"]:
-        match = matches.get(expected["id"])
-        evaluated = bool(expected.get("required_terms"))
-        actual = deepcopy(generated[match["generated_index"]]) if match else {"text": expected.get("text", "")}
-        aid = match["generated_id"] if match else None
+
+    def append_results(expected, actual, aid, match, *, scoring_eligible):
+        evaluated = bool(expected.get("required_terms")) and scoring_eligible
         records = validation_records(order, aid) if aid else []
         for validator_id, validation in records or [(None, {})]:
             raw_config = validation.get("validator_config") or {}
@@ -34,8 +33,9 @@ def results_from_order(dataset, order, run_id=None):
                 except (ValueError, KeyError, TypeError):
                     pass
             row.provenance = {"parent_run_id": run_id, "correlation_id": validation.get("correlation_id"),
-                              "origin": "persisted_order"}
-            row.extraction = {"status": "NOT_EVALUATED" if not evaluated else
+                              "origin": "persisted_order", "scoring_eligible": scoring_eligible}
+            row.extraction = {"status": "UNMATCHED_GENERATED_ASSERTION" if not scoring_eligible else
+                              "NOT_EVALUATED" if not evaluated else
                               "EXTRACTION_PASS" if match and match.get("category_match") is not False else "EXTRACTION_ERROR",
                               "method": "required_terms_and_category", "match": match}
             response = deepcopy(validation.get("evidence_search_response") or {})
@@ -61,8 +61,12 @@ def results_from_order(dataset, order, run_id=None):
                     "evaluation_citation_trace": validation.get("evaluation_citation_trace")}
             if validation.get("execution_status") == "ERROR":
                 details = validation.get("error_details") or {}
-                row.errors = [{"stage": details.get("stage", "UNKNOWN"),
-                               "code": "INVALID_RESPONSE" if details.get("stage") == "LLM_RESPONSE_PARSE" else "TECHNICAL_ERROR"}]
+                error = {"stage": details.get("stage", "UNKNOWN"),
+                         "code": "INVALID_RESPONSE" if details.get("stage") == "LLM_RESPONSE_PARSE" else "TECHNICAL_ERROR"}
+                for key in ("exception_type", "status_code", "reason", "message"):
+                    if details.get(key) not in (None, ""):
+                        error[key] = details[key]
+                row.errors = [error]
             if not records and match:
                 row.errors = [{"stage": "VALIDATION", "code": "TECHNICAL_ERROR", "reason": "No validator responses"}]
             row.timings = {"validation_seconds": validation.get("response_time_seconds")}
@@ -70,6 +74,21 @@ def results_from_order(dataset, order, run_id=None):
             if aggregate:
                 row.consensus = {"status": "COMPLETED", **aggregate}
             results.append(row)
+
+    for expected in dataset["assertions"]:
+        match = matches.get(expected["id"])
+        actual = deepcopy(generated[match["generated_index"]]) if match else {"text": expected.get("text", "")}
+        aid = match["generated_id"] if match else None
+        append_results(expected, actual, aid, match, scoring_eligible=True)
+
+    matched_indexes = {match["generated_index"] for match in matched}
+    for index, assertion in enumerate(generated):
+        if index in matched_indexes:
+            continue
+        aid = str(assertion.get("idAssertion") or assertion.get("assertion_id") or assertion.get("id") or index + 1)
+        expected = {"id": f"UNMATCHED::{aid}", "text": str(assertion.get("text") or assertion.get("assertion") or ""),
+                    "expected_verdict": "UNKNOWN", "evaluation_scope": "OBSERVATION_ONLY"}
+        append_results(expected, deepcopy(assertion), aid, None, scoring_eligible=False)
     from evaluation.pipeline.metrics import evaluate
     from evaluation.pipeline.root_cause import diagnose
     for row in results:

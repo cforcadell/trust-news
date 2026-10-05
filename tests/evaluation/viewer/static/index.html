@@ -13,13 +13,20 @@
   </header>
   <div class="layout">
     <aside class="sidebar" aria-label="Campañas y órdenes">
-      <h2>Campañas</h2>
-      <div id="campaigns" aria-live="polite"></div>
-      <h2>Órdenes</h2>
-      <div id="orders" aria-live="polite"></div>
+      <h2>Navegación</h2>
+      <nav class="sidebar-nav" aria-label="Vistas del visor">
+        <div class="nav-group">
+          <button id="nav-campaigns" class="active" type="button" aria-current="page">Campañas</button>
+          <div id="selected-campaign" class="sidebar-submenu" aria-live="polite"></div>
+        </div>
+        <div class="nav-group">
+          <button id="nav-orders" type="button">Órdenes</button>
+          <div id="order-menu" class="sidebar-submenu" aria-live="polite"></div>
+        </div>
+      </nav>
     </aside>
     <main id="main">
-      <section class="empty"><h1>Selecciona una campaña</h1><p>Las órdenes de evaluación guardadas aparecerán aquí.</p></section>
+      <section class="empty"><h1>Cargando campañas…</h1><p>Las órdenes de evaluación guardadas aparecerán aquí.</p></section>
     </main>
   </div>
   <script type="module" src="/app.js"></script>

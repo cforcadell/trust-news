@@ -51,6 +51,34 @@ def test_missing_generation_trace_does_not_invent_attempts():
     assert snapshot["order"]["generation"]["observations"]["repair_used"] is None
 
 
+def test_generation_accepts_annotated_approximate_numeric_equivalence():
+    dataset = {"id": "example", "news": "Aproximadamente una cuarta parte.", "assertions": [
+        {"id": "share", "text": "La cuota fue 24,5 %.", "required_terms": ["cuota"],
+         "approximate_values": [{"value": 24.5, "tolerance": 0.5,
+                                 "aliases": ["una cuarta parte"]}]}]}
+    order = {"order_id": "order", "status": "COMPLETED",
+             "assertions": [{"idAssertion": "1", "text": "La cuota fue una cuarta parte."}]}
+    snapshot = build_order_diagnostic(dataset, order, [], campaign_id="campaign",
+                                      repetition=1, parent_run_id="parent")
+    codes = {check["code"] for check in snapshot["order"]["generation"]["checks"]}
+    assert "NUMBER_OR_DATE_MISSING" not in codes
+
+
+def test_unscored_validation_remains_visible_without_wrong_verdict_label():
+    from evaluation.viewer.build import _validation_stages
+
+    stages = _validation_stages({
+        "provenance": {"scoring_eligible": False},
+        "expected": {"expected_verdict": "UNKNOWN"},
+        "validator_output": {"effective_verdict": "TRUE"},
+        "router": {"status": "NOT_EVALUATED"}, "retrieval": {"status": "NOT_EVALUATED"},
+        "consensus": {"status": "COMPLETED", "verdict": "TRUE"},
+    })
+    assert stages["llm"]["assessment"] == "NOT_EVALUATED"
+    assert stages["llm"]["checks"][0]["code"] == "UNSCORED_VALIDATION"
+    assert stages["consensus"]["assessment"] == "NOT_EVALUATED"
+
+
 def test_citation_diagnosis_uses_only_contexts_delivered_to_same_validation():
     from evaluation.viewer.build import _validation_stages
 

@@ -29,6 +29,17 @@ def test_v2_tags_and_optional_gold(tmp_path):
         load_datasets([str(path)], ["lang:ca"])
 
 
+def test_approximate_value_annotations_are_validated():
+    case = {"schema_version": 2, "id": "approx", "news": "Aproximadamente un cuarto.",
+            "assertions": [{"id": "one", "text": "Fue 24,5 %.", "expected_verdict": "TRUE",
+                            "approximate_values": [{"value": 24.5, "tolerance": 0.5,
+                                                    "aliases": ["un cuarto"]}]}]}
+    validate_case(case)
+    case["assertions"][0]["approximate_values"][0]["tolerance"] = -1
+    with pytest.raises(EvaluationError, match="invalid approximate value"):
+        validate_case(case)
+
+
 @pytest.mark.parametrize("change", [
     {"expected_verdict": "MAYBE"}, {"reference_facts": "text"},
     {"reference_evidence": [{"text": ""}]}, {"tags": ["missing-family"]},

@@ -70,6 +70,15 @@ def validate_case(case: dict) -> None:
                 raise EvaluationError(f"{identifier}: expected_context.jurisdiction must be an object")
         for key in ("required_terms", "acceptable_domains", "reference_facts"):
             _strings(item.get(key, []), key)
+        approximate_values = item.get("approximate_values", [])
+        if not isinstance(approximate_values, list):
+            raise EvaluationError(f"{identifier}: approximate_values must be an array")
+        for spec in approximate_values:
+            if (not isinstance(spec, dict) or type(spec.get("value")) not in (int, float)
+                    or type(spec.get("tolerance", 0)) not in (int, float)
+                    or spec.get("tolerance", 0) < 0):
+                raise EvaluationError(f"{identifier}: invalid approximate value")
+            _strings(spec.get("aliases", []), f"{identifier}: approximate value aliases")
         for key in ("reference_sources", "reference_evidence"):
             rows = item.get(key, [])
             if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):

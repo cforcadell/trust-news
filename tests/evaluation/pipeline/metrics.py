@@ -1,7 +1,7 @@
 """Objective observations; lexical coverage is a proxy, never semantic proof."""
 
 from common.utils.search_normalization import normalize_domain
-from evaluation.core.common_metrics import normalized_words
+from evaluation.core.common_metrics import evidence_verdict_coherence, normalized_words
 from evaluation.core.evidence import gold_bundle
 from evaluation.core.artifacts import EvaluationError
 from common.utils.evidence_bundle import evidence_bundle_hash
@@ -70,6 +70,7 @@ def evaluate(result):
     bundle = inputs.get("evidences", row.get("retrieval", {}).get("evidences", []))
     verdict = output.get("effective_verdict", output.get("resultado"))
     errors = row.get("errors", [])
+    scoring_eligible = row.get("provenance", {}).get("scoring_eligible", True)
     gold_delivered = row["execution_mode"] == "GOLD_EVIDENCE"
     if row["execution_mode"] == "VALIDATOR_REPLAY" and "reference_evidence" in expected:
         try:
@@ -79,7 +80,9 @@ def evaluate(result):
     sufficient = gold_delivered and expected["expected_verdict"] in {"TRUE", "FALSE"} and any(
         e.get("relation") == ("SUPPORTS" if expected["expected_verdict"] == "TRUE" else "CONTRADICTS")
         for e in expected.get("reference_evidence", []))
-    if any(e.get("code") == "INVALID_RESPONSE" for e in errors):
+    if not scoring_eligible:
+        validation = "NOT_EVALUATED"
+    elif any(e.get("code") == "INVALID_RESPONSE" for e in errors):
         validation = "INVALID_RESPONSE"
     elif not verdict:
         validation = "NOT_EVALUATED"
@@ -97,15 +100,21 @@ def evaluate(result):
         grounding_status = "GROUNDING_ERROR"
     consensus = row.get("consensus", {})
     consensus_status = "NOT_EVALUATED"
-    if consensus.get("status") != "NOT_EVALUATED" and consensus.get("verdict"):
+    if scoring_eligible and consensus.get("status") != "NOT_EVALUATED" and consensus.get("verdict"):
         consensus_status = "CONSENSUS_PASS" if consensus["verdict"] == expected["expected_verdict"] else "CONSENSUS_ERROR"
+    coherence = evidence_verdict_coherence(expected, str(row.get("assertion", {}).get("text") or
+                                                          row.get("assertion", {}).get("assertion") or ""),
+                                           bundle, verdict) if scoring_eligible else {"status": "NOT_EVALUATED"}
     return {
         "extraction": row.get("extraction", {"status": "NOT_EVALUATED"}),
         "routing": routing_metrics(row.get("router", {}), expected),
         "retrieval": retrieval_metrics(row.get("retrieval", {}), expected, bundle),
         "handoff": handoff_metrics(inputs),
-        "validation": {"status": validation, "expected": expected["expected_verdict"], "verdict": verdict,
-                       "raw_verdict": output.get("resultado"), "gold_supports_expected": sufficient, "correct": verdict == expected["expected_verdict"] if verdict else None},
+        "validation": {"status": validation, "expected": expected["expected_verdict"] if scoring_eligible else None,
+                       "verdict": verdict, "raw_verdict": output.get("resultado"),
+                       "gold_supports_expected": sufficient,
+                       "correct": verdict == expected["expected_verdict"] if verdict and scoring_eligible else None},
+        "evidence_coherence": coherence,
         "grounding": {"status": grounding_status, "claimed_count": audit.get("claimed_count"),
                       "verified_count": audit.get("verified_count"), "rejected_count": audit.get("rejected_count")},
         "consensus": {"status": consensus_status, "verdict": consensus.get("verdict")},

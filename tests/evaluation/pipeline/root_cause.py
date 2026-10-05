@@ -21,6 +21,9 @@ def diagnose(row, counterfactuals=()):
         return result(m["grounding"]["status"], "Production grounding audit")
     if row.get("errors"):
         return result("TECHNICAL_ERROR", "Execution error; see stage and exception_type")
+    if m.get("evidence_coherence", {}).get("status") == "VERDICT_EVIDENCE_CONTRADICTION":
+        return result("VERDICT_EVIDENCE_CONTRADICTION",
+                      "Delivered citable evidence supports an explicitly annotated approximate value, but verdict is FALSE")
     if successful(row) and m["consensus"]["status"] != "CONSENSUS_ERROR":
         return result(None, "No observed decision failure")
     if successful(row) and m["consensus"]["status"] == "CONSENSUS_ERROR":

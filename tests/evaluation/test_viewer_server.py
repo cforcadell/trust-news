@@ -11,6 +11,7 @@ from evaluation.viewer.server import _read_diagnostic, index_campaign, list_camp
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "data/evaluation/resources/viewer-fixtures/order-diagnostic-v1.json"
+STATIC = Path(__file__).parent / "viewer/static"
 
 
 def _campaign(tmp_path):
@@ -81,3 +82,21 @@ def test_http_navigation_and_missing_raw_artifact(tmp_path):
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
+
+
+def test_static_navigation_uses_paginated_table_views():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="nav-campaigns"' in html
+    assert 'id="nav-orders"' in html
+    assert 'id="selected-campaign"' in html
+    assert 'id="order-menu"' in html
+    assert 'id="campaigns"' not in html
+    assert 'id="orders"' not in html
+    assert "renderCampaignIndex" in script
+    assert "renderOrderIndex" in script
+    assert "paginationControls" in script
+    assert "filterHeader" in script
+    assert "sortedEntries" in script
+    assert "formatSavedDate" in script

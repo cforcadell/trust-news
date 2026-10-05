@@ -2,14 +2,13 @@
 
 from copy import deepcopy
 import json
-import re
 
-from evaluation.core.common_metrics import normalized_words, collect_assertions, assertion_identifier
+from evaluation.core.common_metrics import (normalized_words, collect_assertions, assertion_identifier,
+                                            missing_expected_numbers)
 from evaluation.pipeline.metrics import domain_matches
 from evaluation.viewer_contract import validate_order_diagnostic
 
 
-NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 NEGATION = {"no", "not", "never", "nunca", "jamás", "sin", "ningún", "ninguna"}
 STAGES = ("router", "evidence_search", "handoff", "llm", "citations", "consensus")
 
@@ -134,7 +133,8 @@ def _generation(dataset, order, generated):
                       "source_excerpt": item.get("source_excerpt"),
                       "expected_topic_code": item.get("expected_topic_code"),
                       "expected_evidence_kind": item.get("expected_evidence_kind"),
-                      "expected_context": item.get("expected_context")}
+                      "expected_context": item.get("expected_context"),
+                      "approximate_values": item.get("approximate_values") or []}
                      for item in expected]
     threshold = float(dataset.get("match_threshold") or 0.5)
     candidates = []
@@ -165,8 +165,7 @@ def _generation(dataset, order, generated):
         gi = next(i for i, a in enumerate(observed) if a["assertion_id"] == match["assertion_id"])
         actual = observed[gi]
         ref = f"/order/generation/observations/generated_assertions/{gi}"
-        wanted_numbers = set(NUMBER.findall(item.get("text") or ""))
-        lost_numbers = sorted(wanted_numbers - set(NUMBER.findall(actual["text"])))
+        lost_numbers = missing_expected_numbers(item, actual["text"])
         if lost_numbers:
             checks.append(_check("NUMBER_OR_DATE_MISSING", "PARTIAL",
                                  f"La afirmación generada omitió {', '.join(lost_numbers)} presentes en el texto esperado. "
@@ -256,6 +255,7 @@ def _validation_stages(row):
     expected = row.get("expected") or {}
     errors = row.get("errors") or []
     validator = row.get("validator") or {}
+    scoring_eligible = row.get("provenance", {}).get("scoring_eligible", True)
     evidence_strategy = validator.get("evidence_search_strategy")
     route_metric = (metrics.get("routing") or {}).get("status")
     route_obs = deepcopy(router)
@@ -362,13 +362,27 @@ def _validation_stages(row):
                              "No se llamó al LLM porque no había contextos citables.")])
     elif not verdict:
         llm = _stage("NOT_RECORDED", "NOT_EVALUATED", llm_obs, missing_reason="No hay veredicto guardado.")
+    elif not scoring_eligible:
+        llm = _stage("COMPLETED", "NOT_EVALUATED", llm_obs,
+                     [_check("UNSCORED_VALIDATION", "NOT_EVALUATED",
+                             "La validación pertenece a una afirmación generada sin caso gold emparejado; "
+                             "se muestra para diagnóstico, pero no se puntúa.")],
+                     missing_reason="No existe un veredicto gold aplicable a esta afirmación generada.")
     else:
         correct = verdict == expected.get("expected_verdict")
+        contradiction = (metrics.get("evidence_coherence") or {}).get("status") == "VERDICT_EVIDENCE_CONTRADICTION"
+        if correct:
+            verdict_detail = f"El veredicto efectivo {verdict!r} coincide con el esperado."
+        elif contradiction:
+            verdict_detail = ("La evidencia citable contiene un valor equivalente al de la afirmación, pero el "
+                              f"validador produjo {verdict!r}; veredicto original={llm_obs['original_verdict']!r}.")
+        else:
+            verdict_detail = (f"Decisión incorrecta: se esperaba {expected.get('expected_verdict')!r}, pero el "
+                              f"validador produjo {verdict!r}; veredicto original={llm_obs['original_verdict']!r}.")
         llm = _stage("COMPLETED", "PASS" if correct else "FAIL", llm_obs,
-                     [_check("VERDICT_MATCH" if correct else "WRONG_VERDICT", "PASS" if correct else "FAIL",
-                             (f"El veredicto efectivo {verdict!r} coincide con el esperado. " if correct else
-                              f"Decisión incorrecta: se esperaba {expected.get('expected_verdict')!r}, pero el "
-                              f"validador produjo {verdict!r}; veredicto original={llm_obs['original_verdict']!r}."))])
+                     [_check("VERDICT_MATCH" if correct else
+                             "VERDICT_EVIDENCE_CONTRADICTION" if contradiction else "WRONG_VERDICT",
+                             "PASS" if correct else "FAIL", verdict_detail)])
     delivered = inputs.get("evidences") if isinstance(inputs.get("evidences"), list) else bundle
     contexts = [{"source_id": source.get("source_id"), "url": source.get("url"),
                  "relationship_to_origin": source.get("relationship_to_origin"),
@@ -433,7 +447,11 @@ def _validation_stages(row):
                                 "error": item.get("error") or item.get("error_details"),
                                 "audit_status": (item.get("evidence_validation") or {}).get("status")}
                                for item in aggregate.get("details") or [] if isinstance(item, dict)]
-    if aggregate.get("status") == "COMPLETED" and aggregate.get("verdict"):
+    if not scoring_eligible:
+        consensus = _stage("COMPLETED" if aggregate.get("status") == "COMPLETED" else "NOT_RECORDED",
+                           "NOT_EVALUATED", consensus_obs,
+                           missing_reason="La afirmación no tiene caso gold emparejado; el consenso no se puntúa.")
+    elif aggregate.get("status") == "COMPLETED" and aggregate.get("verdict"):
         good = aggregate["verdict"] == expected.get("expected_verdict")
         consensus = _stage("COMPLETED", "PASS" if good else "FAIL", consensus_obs,
                            [_check("CONSENSUS_MATCH" if good else "CONSENSUS_ERROR", "PASS" if good else "FAIL",

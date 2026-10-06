@@ -12,7 +12,7 @@ Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safet
 
 | ID | Gravedad | Current status/evidence | Objective |
 | --- | --- | --- | --- |
-| 001 | P1 | Mitigado; concurrencia pendiente | 13 |
+| 001 | P1 | Pending validation; safe refresh and lossless event merge implemented locally | 13 |
 | 002 | — | Solved 2026-08-19 | History |
 | 003–004 | P1 | Open; CI configuration confirmed, formal deferral from 13 pending | 16 proposed |
 | 005 | P1 | Open; reproduced in GUI and functions | 13 |
@@ -39,14 +39,12 @@ Unclosed P1 findings targeted at 13 block its closure. 003/004 are proposed for 
 
 ## Incidencias previas, revisadas
 
-### ISSUE-001 - Initialization career in the LIGHT validator cache
+### ISSUE-001 - Initialization race in the LIGHT validator cache
 
-- **Falazgo:** a set boot selected one of three validators.
-manual soda recovered nine validations for three assertions.
-- **Review:** `load_validators_cache_from_chain` replaces cache even
-for an empty list; it does not credit limited freshness or coordination with events. The current LIGHT 3×3 passes, but does not prove a concurrent restart.
-- **Close:** shared soda, last valid cache conservation, events
-Concurrent lossless and step-up 3×3 without intervention in Kind and Hetzner. Source: `api/news-handler/main.py`.
+- **Historical finding:** a startup selected only one of three validators; a manual refresh later recovered nine validations for three assertions. `load_validators_cache_from_chain` could replace a valid cache with an empty response and a late refresh could overwrite a concurrent validator event.
+- **Locally implemented (2026-10-06):** refresh now fetches before mutation, rejects empty or unusable snapshots, preserves the last valid cache after HTTP/schema failures, and commits a non-empty snapshot atomically. Event updates use the same lock and copy-on-write cache, initialize the cache even while news-chain is degraded, and remain authoritative until a newer chain timestamp catches up. Event-only validators missing from a stale snapshot are retained; internal cache provenance is not exposed by the UI endpoint.
+- **Local evidence:** six focused tests cover empty, failed and malformed refreshes, atomic replacement, an event arriving during an in-flight stale refresh, an event absent from the returned snapshot, degraded initialization and preservation of the three LIGHT validators. The related orchestration/scoring selection passes 76 tests; the clean global regression passes 284 API and 42 frontend tests.
+- **Pending closure:** deploy the same revision and prove a concurrent restart plus config events and a 3 assertions × 3 validators LIGHT run without manual refresh in Kind and Hetzner.
 
 ### ISSUE-002 - Secret OIDC no vacio como valor por defecto en tests
 
@@ -67,17 +65,13 @@ remains active; the fixture must still fail soon if configuration is missing (01
 
 ### ISSUE-005 - Dates, time zones and time states inconsistent with the results GUI
 
-- **Reproduced:** Blockchain activity at 19:16 and last update to
-21:16. `parseEventTimestamp` interprets `04/09` as April; the command parser interprets it as September.
-- **Close:** API UTC ISO 8601 with area; single parser and local presentation
-ES/EN, with zone tests, time change and events. Decision goes to 006.
+- **Locally implemented (2026-10-06):** new orders and events use zoned ISO 8601 in UTC at the API boundary; the GUI has a single strict parser and rejects ambiguous dates with slashes. Historical orders, events and validations were removed from the local `kind-trust-news` MongoDB by explicit product decision, so legacy date parsing is no longer supported.
+- **Pending closure:** deploy the same revision and verify local ES/EN presentation, offsets and a daylight-saving transition in a real LIGHT and BLOCKCHAIN order. Decision messaging remains coordinated with 006.
 
 ### ISSUE-006 - provisional/final status mixed in process screen
 
-- ** Confirmed:** `renderOrderProcess` keeps the provisional card without
-completion condition; other parts show definitive result for any state starting with `VALIDATED`, including errors.
-- **Close:** distinguish process, sufficiency of evidence and decision; messages
-At the end, with errors, without evidence and without consensus.
+- **Locally implemented (2026-10-06):** `renderOrderProcess` now derives one presentation from terminality, valid responses, errors, sufficiency and consensus. Terminal orders render a final result, including separate messages for errors, insufficient evidence, no consensus and no valid responses; they are never labelled provisional.
+- **Pending closure:** browser validation of the terminal-state matrix in deployed LIGHT and BLOCKCHAIN flows.
 
 ### ISSUE-007 - Global verification and consensus calculation do not explain draws or decisions
 
@@ -166,10 +160,8 @@ Independency and quality of the source. Self-confirmation and documentary eligib
 
 ### ISSUE-014 - Summary breaks with missing weighted results
 
-- **Reproduced:** `buildVerificationSummary` declares the number
-`completedValidations` and then try calling it a function; an unweighted validation command releases `TypeError`.
-- **Close:**correct collision and render old, partial and with orders
-only errors without exception. Source: `web_classic/app/js/app.js`.
+- **Locally solved (2026-10-06):** the count/function collision was removed and the fallback is covered for current partial orders without weighted results, including completed and error responses. Legacy order compatibility was removed from scope after the local historical dataset was deleted.
+- **Evidence:** clean local regression passes 284 API tests and 42 frontend tests; deployed browser validation remains part of 005/006.
 
 ### ISSUE-015 - Local selection of sources without accredited regional relevance
 
@@ -190,11 +182,9 @@ they are dealt with in ISSUE-021; the stability of the signature is resolved in 
 
 ### ISSUE-016 - Regression with false positives and incomplete diagnosis
 
-- **Confirmed:** the mobile E2E now captures `documentSize.width` and viewport size, but its `mobile-viewport` check only asserts the viewport dimensions; it does not fail on `scrollWidth > innerWidth`. The historical 847 px document in a 390 px viewport remains unaccredited. Earlier Blockchain checks could accept HTTP 500, and early exits could miss HTTP/console failures in the summary.
-- **In addition:** the log test uses `caplog` and the search request was rechecked. `tests/api/requirements.txt` contains only `aiokafka`, `pytest` and `pytest-asyncio`; it does not assemble the full API test dependency set. The fixture still needs a fail-fast credential check.
-- **Test 2026-09-19:** isolated tests of grounding/busqueda (27),
-scoring (29) and polling GUI (3) pass, but the 12 `test_validator_source_orchestration.py` tests do not even load scholarship the virtual testing environment does not contain `hexbytes`. This confirms the reproducible environment defective; a green global baseline should not be published.
-- **Close:** one reproducible command from a clean environment for API, frontend and contract checks; fail on HTTP/console errors and on `document.documentElement.scrollWidth > window.innerWidth` at 390 px; collect diagnostics in `finally`. Record effective identity, deployed revision and metadata. Prove the LIGHT and BLOCKCHAIN paths separately.
+- **Historical diagnosis:** the mobile E2E captured document and viewport widths without failing on overflow; early exits could omit HTTP/console failures; the API test requirements did not collect the whole local suite and lacked `hexbytes`, PyJWT and document-extraction dependencies.
+- **Locally implemented (2026-10-06):** `tests/run-local-regression.sh` creates a disposable environment from pinned dependencies and runs the local API and frontend suites. The E2E runner now fails on horizontal overflow at 390 px for the result and home views, and finalizes HTTP/loading/console diagnostics on both success and early failure. Configuration still fails before creating an order when credentials are absent.
+- **Local evidence:** dependency installation and `pip check` succeed from a clean environment; 284 API tests and 42 frontend tests pass. **Pending closure:** run the strict browser regression against the same deployed revision in LIGHT and BLOCKCHAIN and retain identity/revision metadata and artifacts.
 
 ### ISSUE-017 - Representative evaluation of factual quality and adverse content
 

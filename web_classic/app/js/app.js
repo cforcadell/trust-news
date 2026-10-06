@@ -294,7 +294,7 @@ function getLatestOrderEvent(events = []) {
     let latestEvent = events.at(-1);
     let latestTimestamp = Number.NEGATIVE_INFINITY;
     events.forEach(event => {
-        const timestamp = parseEventTimestamp(event?.timestamp)?.getTime();
+        const timestamp = parseApiTimestamp(event?.timestamp)?.getTime();
         if (Number.isFinite(timestamp) && timestamp >= latestTimestamp) {
             latestEvent = event;
             latestTimestamp = timestamp;
@@ -320,7 +320,8 @@ function summarizeOrderEvent(event) {
 }
 
 function formatPollingEventDate(value) {
-    const date = parseEventTimestamp(value) || new Date();
+    const date = parseApiTimestamp(value);
+    if (!date) return "—";
     const language = window.I18N?.getLanguage?.() === "en" ? "en-GB" : "es-ES";
     return date.toLocaleString(language, {
         day: "2-digit",
@@ -1204,7 +1205,7 @@ function formatMaxTwoDecimals(value) {
     return (Math.round(n * 100) / 100).toFixed(2).replace(/\.?0+$/, "");
 }
 
-function parseEventTimestamp(value) {
+function parseApiTimestamp(value) {
     if (value === null || value === undefined || value === "") return null;
 
     if (typeof value === "number") {
@@ -1214,29 +1215,9 @@ function parseEventTimestamp(value) {
     }
 
     const raw = String(value).trim();
-    const eventMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (eventMatch) {
-        const [, month, day, year, hours, minutes, seconds = "0"] = eventMatch;
-        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds));
-        return Number.isNaN(date.getTime()) ? null : date;
-    }
-
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw)) return null;
     const date = new Date(raw);
     return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function parseOrderTimestamp(value) {
-    if (value === null || value === undefined || value === "") return null;
-
-    const raw = String(value).trim();
-    const orderMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (orderMatch) {
-        const [, day, month, year, hours, minutes, seconds = "0"] = orderMatch;
-        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds));
-        return Number.isNaN(date.getTime()) ? null : date;
-    }
-
-    return parseEventTimestamp(value);
 }
 
 function formatDurationMinutesSeconds(milliseconds) {
@@ -1259,18 +1240,18 @@ function getEndToEndValidationDuration(order, events = []) {
     const completionActions = new Set(["validation_completed", "light_validation_completed"]);
     const validationStarts = events
         .filter(event => startActions.has(event?.action))
-        .map(event => parseEventTimestamp(event.timestamp))
+        .map(event => parseApiTimestamp(event.timestamp))
         .filter(Boolean);
     const validationCompletions = events
         .filter(event => completionActions.has(event?.action))
-        .map(event => parseEventTimestamp(event.timestamp))
+        .map(event => parseApiTimestamp(event.timestamp))
         .filter(Boolean);
 
     if (validationCompletions.length === 0) return "";
 
     const startDate = validationStarts.length
         ? new Date(Math.min(...validationStarts.map(date => date.getTime())))
-        : parseOrderTimestamp(order.created || order.created_at || order.createdAt);
+        : parseApiTimestamp(order.created_at);
     const endDate = new Date(Math.max(...validationCompletions.map(date => date.getTime())));
 
     if (!startDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "";
@@ -1388,11 +1369,11 @@ function buildVerificationSummary(order, events = []) {
     }, 0);
 
     const expectedValidations = getExpectedValidationCount(order);
-    const completedValidations = Object.values(validations).reduce((sum, validators) => {
+    const receivedValidationCount = Object.values(validations).reduce((sum, validators) => {
         return sum + (validators && typeof validators === "object" ? Object.keys(validators).length : 0);
     }, 0);
-    const totalValidations = validationRequestCount || expectedValidations || Math.max(completedValidations + Number(order.validators_pending || 0), 0);
-    const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - completedValidations, 0);
+    const totalValidations = validationRequestCount || expectedValidations || Math.max(receivedValidationCount + Number(order.validators_pending || 0), 0);
+    const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - receivedValidationCount, 0);
     const errorValidations = Object.values(validations).reduce((sum, validators) => {
         return sum + Object.values(validators || {}).filter(isValidationError).length;
     }, 0);
@@ -1455,12 +1436,12 @@ function buildVerificationSummary(order, events = []) {
     let statusKey = "inconclusive";
     let documentStatus = "INCONCLUSIVE";
 
-    if (totalValidations > 0 && completedValidations < totalValidations) {
+    if (totalValidations > 0 && receivedValidationCount < totalValidations) {
         statusKey = "pending";
     } else if (scoredAssertions === 0 && errorValidations > 0) {
         statusKey = "error";
     } else if (totalAssertions === 0) {
-        statusKey = completedValidations > 0 ? "inconclusive" : "pending";
+        statusKey = receivedValidationCount > 0 ? "inconclusive" : "pending";
     } else if (confirmedAssertions > 0 && contradictedAssertions > 0) {
         statusKey = "mixed";
         documentStatus = "MIXED";
@@ -1499,7 +1480,7 @@ function buildVerificationSummary(order, events = []) {
 
     let conclusionText;
     if (statusKey === "pending") {
-        conclusionText = t("summary.pendingConclusion", { completed: completedValidations, total: totalValidations || completedValidations });
+        conclusionText = t("summary.pendingConclusion", { completed: receivedValidationCount, total: totalValidations || receivedValidationCount });
     } else if (statusKey === "error") {
         conclusionText = `No valid result was produced; ${errorValidations} validation(s) ended in error.`;
     } else if (statusKey === "verified") {
@@ -1528,11 +1509,11 @@ function buildVerificationSummary(order, events = []) {
         noValidResponsesAssertions,
         unscoredAssertions,
         errorValidations,
-        validValidations: completedValidations - errorValidations,
+        validValidations: receivedValidationCount - errorValidations,
         totalValidations,
-        completedValidations,
+        completedValidations: receivedValidationCount,
         pendingValidations,
-        validationDuration: pendingValidations === 0 && completedValidations > 0
+        validationDuration: pendingValidations === 0 && receivedValidationCount > 0
             ? getEndToEndValidationDuration(order, events)
             : "",
         validatorVotes
@@ -1715,14 +1696,14 @@ function buildOrderProcessRows(orderData, events = []) {
         assertions_not_generated: ["ASSERTIONS_NOT_AVAILABLE"]
     };
     const sorted = [...(events || [])].sort((x, y) =>
-        (parseEventTimestamp(x?.timestamp)?.getTime() || 0) - (parseEventTimestamp(y?.timestamp)?.getTime() || 0)
+        (parseApiTimestamp(x?.timestamp)?.getTime() || 0) - (parseApiTimestamp(y?.timestamp)?.getTime() || 0)
     );
     const rows = [];
     const add = (status, date, action) => {
         if (!status || rows.at(-1)?.status === status) return;
         rows.push({ status, label: labels[status] || status.replaceAll("_", " "), date, action });
     };
-    add("CREATED", orderData?.created_at || orderData?.created, "Creación de la orden");
+    add("CREATED", orderData?.created_at, "Creación de la orden");
     sorted.forEach(event => (transitions[event.action] || []).forEach(status => add(status, event.timestamp, event.action)));
     add(orderData?.status, orderData?.updated_at || sorted.at(-1)?.timestamp || orderData?.created_at, "Estado actual");
     return rows;
@@ -1750,18 +1731,73 @@ function countProcessVotes(orderData) {
     return counts;
 }
 function getProcessElapsedTime(orderData) {
-    const start = parseOrderTimestamp(orderData?.created_at || orderData?.created || orderData?.createdAt);
+    const start = parseApiTimestamp(orderData?.created_at);
     if (!start) return "-";
-    const final = String(orderData?.status || "").toUpperCase().startsWith("VALIDATED");
-    const end = final ? parseOrderTimestamp(orderData?.updated_at || orderData?.updatedAt) || new Date() : new Date();
+    const final = isTerminalOrderStatus(orderData?.status);
+    const end = final ? parseApiTimestamp(orderData?.updated_at) || new Date() : new Date();
     return formatDurationMinutesSeconds(Math.max(0, end.getTime() - start.getTime()));
 }
 function getLastValidationAge(events = []) {
     const actions = new Set(["validation_completed", "light_validation_completed"]);
-    const dates = events.filter(event => actions.has(event?.action)).map(event => parseEventTimestamp(event.timestamp)).filter(Boolean);
+    const dates = events.filter(event => actions.has(event?.action)).map(event => parseApiTimestamp(event.timestamp)).filter(Boolean);
     if (!dates.length) return t("ui.noValidationYet");
     const seconds = Math.max(0, Math.round((Date.now() - Math.max(...dates.map(date => date.getTime()))) / 1000));
     return seconds < 60 ? t("ui.lastValidationSeconds", { count: seconds }) : t("ui.lastValidationMinutes", { count: Math.floor(seconds / 60) });
+}
+function buildProcessResultPresentation(orderData, summary) {
+    const terminal = isTerminalOrderStatus(orderData?.status);
+    const trend = summary.inconclusiveAssertions === 0 && summary.confirmedAssertions > 0 && summary.contradictedAssertions === 0
+        ? { label: t("ui.clearTrend"), className: "confirmed" }
+        : summary.inconclusiveAssertions === 0 && summary.contradictedAssertions > 0 && summary.confirmedAssertions === 0
+            ? { label: t("ui.disprovedTrend"), className: "contradicted" }
+            : { label: t("ui.noClearTrend"), className: "inconclusive" };
+
+    if (!terminal) {
+        return {
+            terminal: false,
+            ...trend,
+            title: t("ui.provisionalResult"),
+            badge: t("ui.provisional"),
+            notice: t("ui.provisionalNotice"),
+            activity: summary.pendingValidations
+                ? t("ui.waitingValidations", { count: summary.pendingValidations })
+                : t("ui.waitingUpdate"),
+            decision: t("ui.consensusOpen"),
+            resultState: t("ui.provisionalMayChange")
+        };
+    }
+
+    const noValidDecision = summary.validValidations <= 0
+        && summary.confirmedAssertions === 0
+        && summary.contradictedAssertions === 0;
+    const inconclusive = summary.noConsensusAssertions > 0
+        || summary.insufficientEvidenceAssertions > 0
+        || summary.noValidResponsesAssertions > 0
+        || (summary.inconclusiveAssertions > 0 && summary.confirmedAssertions === 0 && summary.contradictedAssertions === 0);
+    const normalizedStatus = String(orderData?.status || "").toUpperCase();
+    const completedWithErrors = summary.errorValidations > 0
+        || normalizedStatus === "VALIDATED_WITH_ERRORS"
+        || !normalizedStatus.startsWith("VALIDATED");
+
+    return {
+        terminal: true,
+        label: noValidDecision ? t("ui.noDecisionAvailable") : trend.label,
+        className: noValidDecision || inconclusive ? "inconclusive" : trend.className,
+        title: t("ui.finalResult"),
+        badge: completedWithErrors ? t("ui.completedWithIssues") : t("ui.definitive"),
+        notice: noValidDecision
+            ? t("ui.finalNoValidResponsesNotice")
+            : summary.noConsensusAssertions > 0
+                ? t("ui.finalNoConsensusNotice")
+                : inconclusive
+                    ? t("ui.finalInsufficientEvidenceNotice")
+                    : completedWithErrors
+                        ? t("ui.finalWithErrorsNotice")
+                        : t("ui.finalResultNotice"),
+        activity: completedWithErrors ? t("ui.validationsCompletedWithIssues") : t("ui.validationCollectionFinished"),
+        decision: t("ui.decisionClosed"),
+        resultState: noValidDecision ? t("ui.noDecisionAvailable") : t("ui.definitiveResult")
+    };
 }
 function renderOrderProcess(container, orderData, events = []) {
     const mode = isLightOrder(orderData) ? "LIGHT" : "BLOCKCHAIN";
@@ -1780,13 +1816,9 @@ function renderOrderProcess(container, orderData, events = []) {
     const confirmedPercent = percentage(votes.confirmed, validResponses);
     const contradictedPercent = percentage(votes.contradicted, validResponses);
     const pending = summary.pendingValidations;
-    const complete = String(orderData?.status || "").toUpperCase().startsWith("VALIDATED");
+    const resultPresentation = buildProcessResultPresentation(orderData, summary);
+    const complete = resultPresentation.terminal;
     const currentStage = stages[stage.currentIndex]?.label || t("ui.process");
-    const provisional = summary.inconclusiveAssertions === 0 && summary.confirmedAssertions > 0 && summary.contradictedAssertions === 0
-        ? { label: t("ui.clearTrend"), className: "confirmed" }
-        : summary.inconclusiveAssertions === 0 && summary.contradictedAssertions > 0 && summary.confirmedAssertions === 0
-            ? { label: t("ui.disprovedTrend"), className: "contradicted" }
-            : { label: t("ui.noClearTrend"), className: "inconclusive" };
     const recent = rows.slice(-4).reverse();
     const ratio = total ? `${received}/${total}` : String(received);
     const stageHtml = stages.map((item, index) => {
@@ -1795,12 +1827,12 @@ function renderOrderProcess(container, orderData, events = []) {
     }).join("");
     container.innerHTML = `
         <div class="process-dashboard mode-${mode.toLowerCase()}">
-            <section class="process-hero"><div class="process-radar"><span></span></div><div><div class="process-mode-label">${t("ui.mode").toUpperCase()} ${mode}</div><h2>${complete ? t("ui.verificationCompleted") : t("ui.verificationInProgress")}</h2><p>${complete ? t("ui.completedExplanation") : t("ui.progressExplanation")}</p></div><div class="process-live"><strong>${complete ? t("ui.completed") : t("ui.inProgress")}</strong><small>${t("ui.lastUpdate")}: ${formatAnyDate(orderData?.updated_at || events.at(-1)?.timestamp || orderData?.created_at)}</small></div></section>
+            <section class="process-hero"><div class="process-radar"><span></span></div><div><div class="process-mode-label">${t("ui.mode").toUpperCase()} ${mode}</div><h2>${complete ? t("ui.verificationCompleted") : t("ui.verificationInProgress")}</h2><p>${complete ? safeText(resultPresentation.notice) : t("ui.progressExplanation")}</p></div><div class="process-live"><strong>${complete ? t("ui.completed") : t("ui.inProgress")}</strong><small>${t("ui.lastUpdate")}: ${formatAnyDate(orderData?.updated_at || events.at(-1)?.timestamp || orderData?.created_at)}</small></div></section>
             <section class="process-stage-card" data-process-widget="flow"><div class="process-section-title"><strong>${t("ui.visualStageFlow", { mode })}</strong><span>${stage.reached}/${stages.length}</span></div><div class="process-stages">${stageHtml}</div><div class="process-progress-header"><strong>${t("ui.processProgress")}</strong><span>${processPercent}%</span></div><div class="process-progress-copy"><span><b>${t("ui.stagesReached", { reached: stage.reached, total: stages.length })}</b></span><span>${t("ui.currentPhase")}: <b>${safeText(currentStage)}</b></span></div><div class="process-progress-track" role="progressbar" aria-label="${safeText(t("ui.processProgress"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${processPercent}"><span style="width:${processPercent}%"></span></div></section>
             <div class="process-main-grid">
-                <section class="process-card process-now" data-process-widget="current-activity"><h3>${t("ui.currentActivity")}</h3><ul><li><i>◷</i><span>${complete ? t("ui.allValidationsReceived") : pending ? t("ui.waitingValidations", { count: pending }) : t("ui.waitingUpdate")}</span></li><li><i>◎</i><span>${complete ? t("ui.consensusClosed") : t("ui.consensusOpen")}</span></li><li><i>↻</i><span>${safeText(getLastValidationAge(events))}</span></li><li><i>◇</i><span>${complete ? t("ui.definitiveResult") : t("ui.provisionalMayChange")}</span></li></ul></section>
+                <section class="process-card process-now" data-process-widget="current-activity"><h3>${t("ui.currentActivity")}</h3><ul><li><i>◷</i><span>${safeText(resultPresentation.activity)}</span></li><li><i>◎</i><span>${safeText(resultPresentation.decision)}</span></li><li><i>↻</i><span>${safeText(getLastValidationAge(events))}</span></li><li><i>◇</i><span>${safeText(resultPresentation.resultState)}</span></li></ul></section>
                 <section class="process-card process-validations"><h3>${t("ui.receivedValidations")}</h3><div class="process-validation-content"><div class="process-donut" style="--confirmed:${confirmedPercent * 3.6}deg;--contradicted:${(confirmedPercent + contradictedPercent) * 3.6}deg"><span><b>${safeText(ratio)}</b><small>${t("ui.percentCompleted", { percent: validationPercent })}</small></span></div><div class="process-validation-breakdown"><div><i class="confirmed"></i><span>${t("ui.confirmed")}</span><b>${votes.confirmed}</b></div><div><i class="contradicted"></i><span>${t("ui.disproved")}</span><b>${votes.contradicted}</b></div><div><i class="inconclusive"></i><span>${t("ui.inconclusive")}</span><b>${votes.inconclusive}</b></div><div><i class="validation-error-text"></i><span>Error</span><b>${votes.errors}</b></div><strong>${t("ui.pendingCount", { count: pending })}</strong></div></div></section>
-                <section class="process-card process-provisional"><div class="process-section-title"><h3>${t("ui.provisionalResult")}</h3><span>${t("ui.provisional")}</span></div><strong class="provisional-result ${provisional.className}">${safeText(provisional.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>${t("ui.confirmed")}</small></div><div><b>${summary.contradictedAssertions}</b><small>${t("ui.disproved")}</small></div><div><b>${summary.inconclusiveAssertions}</b><small>${t("ui.inconclusive")}</small></div></div><p>${t("ui.provisionalNotice")}</p></section>
+                <section class="process-card process-provisional"><div class="process-section-title"><h3>${safeText(resultPresentation.title)}</h3><span>${safeText(resultPresentation.badge)}</span></div><strong class="provisional-result ${resultPresentation.className}">${safeText(resultPresentation.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>${t("ui.confirmed")}</small></div><div><b>${summary.contradictedAssertions}</b><small>${t("ui.disproved")}</small></div><div><b>${summary.inconclusiveAssertions}</b><small>${t("ui.inconclusive")}</small></div></div><p>${safeText(resultPresentation.notice)}</p></section>
                 <section class="process-card process-activity" data-process-widget="recent-activity"><div class="process-section-title"><h3>${t("ui.recentActivity")}</h3><span>${t("ui.changesCount", { count: rows.length })}</span></div><ol>${recent.map(row => `<li><i>•</i><span><b>${safeText(row.label)}</b><small>${formatAnyDate(row.date)}</small></span></li>`).join("") || `<li>${t("ui.noActivity")}</li>`}</ol></section>
             </div>
             <div class="process-kpi-grid"><article><i>V</i><div><small>${t("ui.validationSummary")}</small><strong>${safeText(ratio)}</strong><span>${t("ui.percentCompleted", { percent: validationPercent })}</span></div></article><article><i>◷</i><div><small>${t("ui.elapsedTime")}</small><strong>${safeText(getProcessElapsedTime(orderData))}</strong><span>${t("ui.sinceOrderCreation")}</span></div></article><article><i>◎</i><div><small>${t("ui.currentStatus")}</small><strong>${safeText(currentStage)}</strong><span>${pending ? t("ui.pendingCount", { count: pending }) : complete ? t("ui.consensusComplete") : t("ui.updating")}</span></div></article><article><i>↻</i><div><small>${t("ui.statusChanges")}</small><strong>${rows.length}</strong><span>${t("ui.untilNow")}</span></div></article></div>
@@ -3628,15 +3660,13 @@ function renderStatusBadge(status) {
 
 function formatAnyDate(value) {
     if (!value) return "N/A";
-    const raw = String(value);
-    const date = new Date(raw);
-    if (!Number.isNaN(date.getTime())) {
-        return date.toLocaleString("es-ES", {
-            day: "2-digit", month: "2-digit", year: "numeric",
-            hour: "2-digit", minute: "2-digit"
-        });
-    }
-    return safeText(raw);
+    const date = parseApiTimestamp(value);
+    if (!date) return "—";
+    const language = window.I18N?.getLanguage?.() === "en" ? "en-GB" : "es-ES";
+    return date.toLocaleString(language, {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+    });
 }
 
 function shortValue(value, size = 18) {

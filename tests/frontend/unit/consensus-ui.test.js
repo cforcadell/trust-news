@@ -40,7 +40,8 @@ function createContext(language = 'es') {
             return String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
         }
     `, context);
-    vm.runInContext(functionBlock('formatMaxTwoDecimals', 'parseEventTimestamp'), context);
+    vm.runInContext(functionBlock('formatMaxTwoDecimals', 'parseApiTimestamp'), context);
+    vm.runInContext(functionBlock('parseApiTimestamp', 'formatDurationMinutesSeconds'), context);
     vm.runInContext(functionBlock('formatWeightPercent', 'evidenceStrategyStatus'), context);
     return context;
 }
@@ -115,6 +116,67 @@ function installSummaryFunction(context) {
     `, context);
     vm.runInContext(functionBlock('buildVerificationSummary', 'assertionOutcome'), context);
 }
+
+test('API timestamps accept zoned ISO or epoch and reject ambiguous dates', () => {
+    const context = createContext('es');
+
+    assert.equal(context.parseApiTimestamp('2026-10-06T14:32:18Z').toISOString(), '2026-10-06T14:32:18.000Z');
+    assert.equal(context.parseApiTimestamp('2026-10-06T16:32:18+02:00').toISOString(), '2026-10-06T14:32:18.000Z');
+    assert.equal(context.parseApiTimestamp(1791297138).toISOString(), '2026-10-06T14:32:18.000Z');
+    assert.equal(context.parseApiTimestamp('04/09/2026 19:16:00'), null);
+    assert.equal(context.parseApiTimestamp('2026-10-06T14:32:18'), null);
+});
+
+test('summary falls back to current completed validations without weighted results', () => {
+    const context = createContext('es');
+    installSummaryFunction(context);
+    const summary = context.buildVerificationSummary({
+        assertions: [{ idAssertion: '1' }],
+        validations: {
+            1: {
+                completed: { execution_status: 'COMPLETED', approval: 'TRUE' },
+                failed: { execution_status: 'ERROR', approval: null }
+            }
+        },
+        assertion_results: {}
+    });
+
+    assert.equal(summary.confirmedAssertions, 1);
+    assert.equal(summary.completedValidations, 2);
+    assert.equal(summary.errorValidations, 1);
+    assert.equal(summary.validValidations, 1);
+});
+
+test('terminal process presentation never labels the result provisional', () => {
+    const context = createContext('es');
+    context.isTerminalOrderStatus = status => ['VALIDATED', 'VALIDATED_WITH_ERRORS', 'ERROR'].includes(String(status));
+    vm.runInContext(functionBlock('buildProcessResultPresentation', 'renderOrderProcess'), context);
+
+    const presentation = context.buildProcessResultPresentation(
+        { status: 'VALIDATED_WITH_ERRORS' },
+        {
+            confirmedAssertions: 0, contradictedAssertions: 0, inconclusiveAssertions: 1,
+            noConsensusAssertions: 0, insufficientEvidenceAssertions: 1, noValidResponsesAssertions: 0,
+            validValidations: 2, errorValidations: 1, pendingValidations: 0
+        }
+    );
+
+    assert.equal(presentation.terminal, true);
+    assert.equal(presentation.title, 'Resultado final');
+    assert.equal(presentation.badge, 'Finalizado con incidencias');
+    assert.doesNotMatch(`${presentation.title} ${presentation.badge} ${presentation.notice}`, /provisional/i);
+
+    const failed = context.buildProcessResultPresentation(
+        { status: 'ERROR' },
+        {
+            confirmedAssertions: 0, contradictedAssertions: 0, inconclusiveAssertions: 0,
+            noConsensusAssertions: 0, insufficientEvidenceAssertions: 0, noValidResponsesAssertions: 0,
+            validValidations: 0, errorValidations: 0, pendingValidations: 0
+        }
+    );
+    assert.equal(failed.label, 'Sin decisión disponible');
+    assert.equal(failed.badge, 'Finalizado con incidencias');
+});
 
 test('FALSE plus UNKNOWN is PARTIALLY_VERIFIED, never an absolute disproved document', () => {
     const context = createContext('es');

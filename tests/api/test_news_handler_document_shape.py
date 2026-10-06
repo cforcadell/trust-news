@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import importlib.util
 import os
 import sys
@@ -30,6 +31,27 @@ def assertion_payload():
             "jurisdiction": {"scope": "COUNTRY", "country_code": "ES"},
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-10-06T16:32:18+02:00", "2026-10-06T14:32:18+00:00"),
+        ("2026-10-06T14:32:18Z", "2026-10-06T14:32:18+00:00"),
+        (1791297138000, "2026-10-06T14:32:18+00:00"),
+        (datetime(2026, 10, 6, 14, 32, 18, tzinfo=timezone.utc), "2026-10-06T14:32:18+00:00"),
+    ],
+)
+def test_api_timestamp_contract_normalizes_to_utc(value, expected):
+    module = load_news_handler_module()
+    assert module.normalize_api_timestamp(value) == expected
+
+
+@pytest.mark.parametrize("value", ["04/09/2026 19:16:00", "2026-10-06T14:32:18", "", None, True])
+def test_api_timestamp_contract_rejects_ambiguous_or_unzoned_values(value):
+    module = load_news_handler_module()
+    with pytest.raises(ValueError):
+        module.normalize_api_timestamp(value)
 
 
 def test_generated_payload_requires_the_canonical_document():

@@ -150,6 +150,12 @@ These tests do not credit network, DNS, credentials, Kafka, MongoDB, real search
 
 ## 5. Local backend testing
 
+The canonical clean local regression (pinned disposable Python environment plus frontend unit checks) is:
+
+```bash
+tests/run-local-regression.sh
+```
+
 The rest of `tests/api` is distributed as follows:
 
 | Area | Ficheros |

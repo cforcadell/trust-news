@@ -148,6 +148,7 @@ mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 orders_collection = None
 validators_cache = {}
+validators_cache_lock = asyncio.Lock()
 order_locks = {}
 orders_collection = None
 events_collection = None
@@ -251,34 +252,90 @@ async def load_validator_type_weights():
     return validator_type_weights
 
 
-async def load_validators_cache_from_chain():
-    """On startup asks news-chain validators function and cache validators."""
+async def fetch_validators_from_chain() -> list[dict]:
+    """Fetch the current validator snapshot without mutating the local cache."""
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            f"{NEWS_CHAIN_URL}/blockchain/validators",
+            params={"recover_ipfs": True},
+        )
+        response.raise_for_status()
+        data = response.json()
+    if not isinstance(data, dict) or not isinstance(data.get("validators"), list):
+        raise ValueError("news-chain validators response must contain a validators list")
+    return data["validators"]
+
+
+def merge_refreshed_validator(previous: dict, refreshed: dict) -> dict:
+    """Keep a newer event update when the chain snapshot has not caught up yet."""
+    previous_updated_at = parse_iso_datetime(previous.get("updated_at"))
+    refreshed_updated_at = parse_iso_datetime(refreshed.get("updated_at"))
+    event_is_newer = previous.get("_cache_origin") == "validator-event" and (
+        refreshed_updated_at is None
+        or (previous_updated_at is not None and previous_updated_at >= refreshed_updated_at)
+    )
+    if event_is_newer:
+        return {**refreshed, **previous}
+    return {
+        **previous,
+        **refreshed,
+        "metrics_reset_at": refreshed.get("metrics_reset_at") or previous.get("metrics_reset_at"),
+    }
+
+
+async def load_validators_cache_from_chain(*, only_if_empty: bool = False) -> bool:
+    """Atomically install a non-empty news-chain snapshot, preserving the last valid cache."""
     global validators_cache
+    if only_if_empty:
+        async with validators_cache_lock:
+            if validators_cache:
+                return True
+
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(f"{NEWS_CHAIN_URL}/blockchain/validators", params={"recover_ipfs": True})
-            resp.raise_for_status()
-            data = resp.json()
-        validators = data.get("validators", [])
-        previous_cache = validators_cache or {}
+        validators = await fetch_validators_from_chain()
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load validators cache from news-chain: {e}")
+        return False
+
+    if not validators:
+        logger.warning("⚠️ News-chain returned no validators; preserving the last valid cache")
+        return False
+
+    async with validators_cache_lock:
+        if only_if_empty and validators_cache:
+            return True
+
+        previous_cache = validators_cache if isinstance(validators_cache, dict) else {}
         refreshed_cache = {}
         for validator in validators:
-            validator_hash = str(validator.get("validator", "")).lower()
+            if not isinstance(validator, dict):
+                continue
+            validator_hash = str(validator.get("validator", "")).strip().lower()
             if not validator_hash:
                 continue
             previous = previous_cache.get(validator_hash, {})
             config = validator.get("config") or {}
             validator_type = validator.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
-            refreshed_cache[validator_hash] = {
+            refreshed = {
                 **validator,
+                "validator": validator.get("validator") or validator_hash,
                 "validator_type": validator_type,
                 "reputation": float(validator.get("reputation", 1.0) or 1.0),
-                "metrics_reset_at": previous.get("metrics_reset_at")
+                "_cache_origin": "news-chain",
             }
+            refreshed_cache[validator_hash] = merge_refreshed_validator(previous, refreshed)
+
+        if not refreshed_cache:
+            logger.warning("⚠️ News-chain returned no usable validators; preserving the last valid cache")
+            return False
+
+        for validator_hash, previous in previous_cache.items():
+            if validator_hash not in refreshed_cache and previous.get("_cache_origin") == "validator-event":
+                refreshed_cache[validator_hash] = previous
+
         validators_cache = refreshed_cache
         logger.info(f"✅ Validators cache loaded from news-chain: {len(validators_cache)} validators")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not load validators cache from news-chain: {e}")
+        return True
 
 
 async def update_validator_cache_from_event(payload: dict):
@@ -288,38 +345,38 @@ async def update_validator_cache_from_event(payload: dict):
     if not validator:
         return
 
-    if validators_cache is None:
-        validators_cache = {}
-
     if not validators_cache:
-        try:
-            await load_validators_cache_from_chain()
+        loaded = await load_validators_cache_from_chain(only_if_empty=True)
+        if loaded:
             logger.info("✅ Validators cache initialized before applying validator config event")
-        except Exception as e:
-            logger.warning(f"⚠️ Validators cache could not be initialized from chain before event: {e}")
 
-    existing = validators_cache.get(validator.lower(), {})
-    incoming_categories = payload.get("categories")
-    if incoming_categories is None:
-        incoming_categories = existing.get("categories", [])
+    validator_key = validator.lower()
+    async with validators_cache_lock:
+        current_cache = validators_cache if isinstance(validators_cache, dict) else {}
+        existing = current_cache.get(validator_key, {})
+        incoming_categories = payload.get("categories")
+        if incoming_categories is None:
+            incoming_categories = existing.get("categories", [])
 
-    config = payload.get("config") or existing.get("config") or {}
-    validator_type = payload.get("validator_type") or existing.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
-    validators_cache[validator.lower()] = {
-        **existing,
-        "validator": validator,
-        "ipfs_hash": payload.get("ipfs_hash", existing.get("ipfs_hash")),
-        "config": config,
-        "categories": incoming_categories or [],
-        "validator_type": validator_type,
-        "reputation": float(payload.get("reputation", existing.get("reputation", 1.0)) or 1.0),
-        "updated_at": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
-        "metrics_reset_at": payload.get("metrics_reset_at") or existing.get("metrics_reset_at"),
-        "source": payload.get("source", existing.get("source", "validator-event"))
-    }
+        config = payload.get("config") or existing.get("config") or {}
+        validator_type = payload.get("validator_type") or existing.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
+        updated_validator = {
+            **existing,
+            "validator": validator,
+            "ipfs_hash": payload.get("ipfs_hash", existing.get("ipfs_hash")),
+            "config": config,
+            "categories": incoming_categories or [],
+            "validator_type": validator_type,
+            "reputation": float(payload.get("reputation", existing.get("reputation", 1.0)) or 1.0),
+            "updated_at": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+            "metrics_reset_at": payload.get("metrics_reset_at") or existing.get("metrics_reset_at"),
+            "source": payload.get("source") or existing.get("source") or "validator-event",
+            "_cache_origin": "validator-event",
+        }
+        validators_cache = {**current_cache, validator_key: updated_validator}
     logger.info(
         f"✅ Validators cache updated from event | validator={validator} "
-        f"categories={validators_cache[validator.lower()].get('categories', [])}"
+        f"categories={updated_validator.get('categories', [])}"
     )
 
 
@@ -436,6 +493,7 @@ def validator_summary_for_ui(validator: dict) -> dict:
     summary["validator_type"] = summary.get("validator_type") or config.get("type") or int(ValidatorType.LLM_MEMORY_VALIDATION)
     summary["reputation"] = float(summary.get("reputation", 1.0) or 1.0)
     summary.pop("stats", None)
+    summary.pop("_cache_origin", None)
     return summary
 
 
@@ -659,14 +717,11 @@ async def log_event(order_id: str, action: str, topic: str, payload: dict):
 
     events_col = events_collection
     
-    # 🚨 CAMBIO CLAVE: Usar time.time() * 1000 para obtener la marca de tiempo UNIX absoluta en milisegundos
-    current_ms_timestamp = int(time.time() * 1000) 
-    
     event_doc = {
         "order_id": order_id,
         "action": action,
         "topic": topic,
-        "timestamp": current_ms_timestamp, # Ahora es la marca de tiempo absoluta
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": payload,
     }
     await events_col.insert_one(event_doc)
@@ -679,6 +734,7 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
         return
 
     validations_col = validations_collection
+    recorded_at = datetime.now(timezone.utc).isoformat()
     val_doc = {
         "order_id": order_id,
         "postId": post_id,
@@ -690,8 +746,8 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
         "error_details": payload.get("error_details"),
         "tx_hash": tx_hash,
         "payload": payload,
-        "timestamp": asyncio.get_event_loop().time(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "timestamp": recorded_at,
+        "created_at": recorded_at,
         "response_time_seconds": response_time_seconds
     }
     for field in (
@@ -1803,6 +1859,32 @@ def _check_validation_details_consistency(order_data: Dict[str, Any], post_data:
 # =========================================================
 # FastAPI endpoints
 # =========================================================
+def normalize_api_timestamp(value: Any) -> str:
+    """Return the current API timestamp contract: ISO 8601 with a UTC offset."""
+    if isinstance(value, bool):
+        raise ValueError("boolean values are not valid timestamps")
+
+    if isinstance(value, (int, float)):
+        seconds = float(value) / 1000 if abs(float(value)) > 9_999_999_999 else float(value)
+        parsed = datetime.fromtimestamp(seconds, tz=timezone.utc)
+    elif isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            raise ValueError("empty timestamp")
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("timestamp must be ISO 8601 with an explicit timezone") from exc
+    else:
+        raise ValueError(f"unsupported timestamp type: {type(value).__name__}")
+
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must include an explicit timezone")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 @app.post("/publishNew", status_code=202)
 async def publish_new(req: PublishRequest, client_id: str):
     # 1. Comprobación de cuota "news_generation"
@@ -1933,15 +2015,19 @@ async def get_order(
     if not admin and order.get("client_id") != client_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this order")
 
+    order_object_id = order.get("_id")
+    created_at = order.get("created_at")
+    if created_at is None and order_object_id is not None:
+        created_at = order_object_id.generation_time
     try:
-        order_object_id = order["_id"]
-        created_datetime = order_object_id.generation_time
-        order["created"] = created_datetime.strftime("%d/%m/%Y %H:%M:%S")
-    except Exception as e:
-        logger.error(f"Error processing ObjectId: {e}")
-        order["created"] = "Format Error"
+        order["created_at"] = normalize_api_timestamp(created_at)
+        if order.get("updated_at") is not None:
+            order["updated_at"] = normalize_api_timestamp(order["updated_at"])
+    except ValueError as exc:
+        logger.error("Order %s contains an invalid timestamp: %s", order_id, exc)
+        raise HTTPException(status_code=500, detail="Order contains an invalid timestamp") from exc
 
-    order["_id"] = str(order_object_id)
+    order["_id"] = str(order_object_id) if order_object_id is not None else None
     attach_validator_config_snapshots(order)
     await load_validator_type_weights()
     order["assertion_results"] = calculate_order_assertion_results(order)
@@ -1965,15 +2051,12 @@ async def get_news_events(
     if not events:
         raise HTTPException(status_code=404, detail="No hay eventos para esta noticia")
 
-    for e in events:
-        ms_timestamp = e.get("timestamp")
-        
-        if isinstance(ms_timestamp, (int, float)):
-            unix_seconds = ms_timestamp / 1000.0 
-            event_datetime = datetime.fromtimestamp(unix_seconds)
-            e["timestamp"] = event_datetime.strftime("%m/%d/%Y %H:%M:%S")
-        elif not isinstance(ms_timestamp, str):
-            e["timestamp"] = str(ms_timestamp)
+    try:
+        for event in events:
+            event["timestamp"] = normalize_api_timestamp(event.get("timestamp"))
+    except ValueError as exc:
+        logger.error("Order %s contains an event with an invalid timestamp: %s", order_id, exc)
+        raise HTTPException(status_code=500, detail="Event contains an invalid timestamp") from exc
 
     return events
 

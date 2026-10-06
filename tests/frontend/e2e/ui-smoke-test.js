@@ -84,6 +84,7 @@ const report = {
   artifacts: [],
 };
 const consoleDiagnostics = [];
+let diagnosticsFinalized = false;
 
 let chromeSpawnError = null;
 let cdp = null;
@@ -302,6 +303,31 @@ function isAllowedHttpFailure(failure) {
     Number(rule.status) === Number(failure.status)
     && matchesRule(failure.path, rule.pathPattern)
   ));
+}
+
+function finalizeDiagnostics() {
+  if (diagnosticsFinalized) return;
+  diagnosticsFinalized = true;
+  report.network.unexpectedFailedResponses = report.network.failedResponses.filter(
+    failure => !isAllowedHttpFailure(failure),
+  );
+  addCheck("unexpected-http-failures", report.network.unexpectedFailedResponses.length === 0, {
+    actual: report.network.unexpectedFailedResponses.length,
+  });
+  addCheck("network-loading-failures", report.network.loadingFailures.length === 0, {
+    actual: report.network.loadingFailures.length,
+  });
+  const unexpectedConsoleErrors = consoleDiagnostics.filter(entry => (
+    entry.type === "error"
+    && !EXPECTED.allowedConsoleErrors.some(pattern => matchesRule(entry.message, pattern))
+  ));
+  report.browserConsole.unexpectedErrors = unexpectedConsoleErrors.map(entry => ({
+    type: entry.type,
+    message: entry.message,
+  }));
+  addCheck("unexpected-console-errors", unexpectedConsoleErrors.length === 0, {
+    actual: unexpectedConsoleErrors.length,
+  });
 }
 
 async function retry(operation, timeoutMs = 20000, intervalMs = 250) {
@@ -708,40 +734,32 @@ async function run() {
   const mobileHome = await snapshot();
   await screenshot("06-home-mobile.png");
   const viewportMatches = mobileHome.viewport.width === MOBILE_WIDTH && mobileHome.viewport.height === MOBILE_HEIGHT;
+  const resultFitsViewport = mobileResult.documentSize.width <= mobileResult.viewport.width;
+  const homeFitsViewport = mobileHome.documentSize.width <= mobileHome.viewport.width;
   addCheck("mobile-viewport", viewportMatches, {
     expected: { width: MOBILE_WIDTH, height: MOBILE_HEIGHT },
     actual: mobileHome.viewport,
   });
+  addCheck("mobile-result-no-horizontal-overflow", resultFitsViewport, {
+    viewportWidth: mobileResult.viewport.width,
+    documentWidth: mobileResult.documentSize.width,
+  });
+  addCheck("mobile-home-no-horizontal-overflow", homeFitsViewport, {
+    viewportWidth: mobileHome.viewport.width,
+    documentWidth: mobileHome.documentSize.width,
+  });
+  const responsivePassed = viewportMatches && resultFitsViewport && homeFitsViewport;
   report.tests.push({
     id: 4,
     name: "Responsive de la misma sesión",
-    status: viewportMatches ? "PASS" : "FAIL",
+    status: responsivePassed ? "PASS" : "FAIL",
     durationMs: Date.now() - responsiveStarted,
     mobileResult,
     mobileHome,
   });
 
-  report.network.unexpectedFailedResponses = report.network.failedResponses.filter(
-    failure => !isAllowedHttpFailure(failure),
-  );
-  addCheck("unexpected-http-failures", report.network.unexpectedFailedResponses.length === 0, {
-    actual: report.network.unexpectedFailedResponses.length,
-  });
-  addCheck("network-loading-failures", report.network.loadingFailures.length === 0, {
-    actual: report.network.loadingFailures.length,
-  });
-  const unexpectedConsoleErrors = consoleDiagnostics.filter(entry => (
-    entry.type === "error"
-    && !EXPECTED.allowedConsoleErrors.some(pattern => matchesRule(entry.message, pattern))
-  ));
-  report.browserConsole.unexpectedErrors = unexpectedConsoleErrors.map(entry => ({
-    type: entry.type,
-    message: entry.message,
-  }));
-  addCheck("unexpected-console-errors", unexpectedConsoleErrors.length === 0, {
-    actual: unexpectedConsoleErrors.length,
-  });
-  console.log(`TEST_4_${viewportMatches ? "OK" : "FAIL"} responsive`);
+  finalizeDiagnostics();
+  console.log(`TEST_4_${responsivePassed ? "OK" : "FAIL"} responsive`);
 
   report.finishedAt = new Date().toISOString();
   report.durationMs = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
@@ -775,6 +793,7 @@ run()
     console.log(`ORDERS_CREATED ${report.createdResources.orderIds.length}`);
   })
   .catch(error => {
+    finalizeDiagnostics();
     report.finishedAt = new Date().toISOString();
     report.durationMs = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
     report.status = "FAIL";

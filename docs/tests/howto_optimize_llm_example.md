@@ -67,7 +67,7 @@ Validation does not modify configuration or create commands:
 
     for profile in "$PLAN_DIR"/profiles/*.json; do
       python3 tests/llm-benchmark/llm-benchmark.py validate-profiles \
-        --case tests/data/benchmark/resources/cases/eu-news-2025-v1.json \
+        --case tests/data/benchmark/resources/cases/eu-news-2025-v2.json \
         --profile "$profile"
     done
 

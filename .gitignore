@@ -64,3 +64,4 @@ api/validate-asertions/__pycache__/main.cpython-312.pyc
 skaffold-v*.bak
 /tests/data/**/artifacts/
 /tests/data/historical-stats/resources/
+launch_e2e.sh

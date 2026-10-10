@@ -2,7 +2,7 @@
 
 `tests/llm-benchmark/llm-benchmark.py` compares complete OpenRouter LLM configurations through the existing LIGHT order flow. It temporarily applies a profile, publishes a news item, stores immutable JSON artifacts, indexes results in SQLite, and restores the initial configuration. Do not run it against production: it changes the effective local configuration and consumes generation and validation quota.
 
-The default case is `tests/data/benchmark/resources/cases/eu-news-2025-v1.json`. It measures assertion extraction and matching, category accuracy, aggregate and per-validator verdicts, RAG evidence use, completed responses, latency, and estimated module and total cost. The sample has four assertions; it is useful for regression checks, not for statistical conclusions. Run at least three repetitions, preferably five, and version a case rather than changing historical expectations.
+The default case is `tests/data/benchmark/resources/cases/eu-news-2025-v2.json`. It measures assertion extraction and matching, category accuracy, aggregate and per-validator verdicts, RAG evidence use, completed responses, latency, and estimated module and total cost. The sample has four assertions; it is useful for regression checks, not for statistical conclusions. Run at least three repetitions, preferably five, and version a case rather than changing historical expectations. The `v1` resources are retained below `cases/v_comptability/` for historical reproduction and are not loaded by default.
 
 ## Requirements and authentication
 

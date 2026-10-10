@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "id": "eu-official-statistics-2025-v2",
+  "title": "Tres afirmaciones estadísticas europeas de 2025",
+  "language": "es",
+  "description": "Caso sintético para regresión de extracción y taxonomía. No se usa como evidencia factual: para evaluación con fuentes, usar los casos oficiales dedicados.",
+  "news": "En 2025, España superó los 49 millones de habitantes según las estadísticas demográficas oficiales. Alemania cerró 2025 con una inflación anual negativa, inferior al 0 %. Francia generó el 100 % de su electricidad mediante fuentes renovables durante 2025.",
+  "match_threshold": 0.5,
+  "tags": ["lang:es", "jurisdiction:EU", "temporal:historical", "expected:decisive", "topic:statistics", "evidence:synthetic"],
+  "assertions": [
+    {"id":"ES_POPULATION_2025","text":"España superó los 49 millones de habitantes en 2025 según las estadísticas demográficas oficiales.","source_excerpt":"España superó los 49 millones de habitantes según las estadísticas demográficas oficiales.","expected_verdict":"TRUE","category_ids":[10],"expected_topic_code":"DEMOGRAPHY","expected_evidence_kind":"STATISTICAL_DATA","expected_context":{"entities":["España"],"temporal_context":["2025"],"jurisdiction":{"scope":"COUNTRY","country_code":"ES"}},"required_terms":["España","49","millones","habitantes","2025"]},
+    {"id":"DE_NEGATIVE_INFLATION_2025","text":"Alemania cerró 2025 con una inflación anual negativa, inferior al 0 %.","source_excerpt":"Alemania cerró 2025 con una inflación anual negativa, inferior al 0 %.","expected_verdict":"FALSE","category_ids":[1],"expected_topic_code":"ECONOMY_MACRO","expected_evidence_kind":"STATISTICAL_DATA","expected_context":{"entities":["Alemania"],"temporal_context":["2025"],"jurisdiction":{"scope":"COUNTRY","country_code":"DE"}},"required_terms":["Alemania","2025","inflación","negativa"]},
+    {"id":"FR_RENEWABLE_ELECTRICITY_2025","text":"Francia generó el 100 % de su electricidad mediante fuentes renovables durante 2025.","source_excerpt":"Francia generó el 100 % de su electricidad mediante fuentes renovables durante 2025.","expected_verdict":"FALSE","category_ids":[9],"expected_topic_code":"ENERGY","expected_evidence_kind":"STATISTICAL_DATA","expected_context":{"entities":["Francia"],"temporal_context":["2025"],"jurisdiction":{"scope":"COUNTRY","country_code":"FR"}},"required_terms":["Francia","100","electricidad","renovables","2025"]}
+  ]
+}

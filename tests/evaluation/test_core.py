@@ -18,7 +18,9 @@ def test_old_datasets_load():
     cases = load_datasets([str(ROOT / "tests/data/benchmark/resources/cases")])
     assert {case["id"] for case in cases} >= {
         "eu-institutions-and-law-v1", "eu-renewable-energy-policy-v1",
+        "eu-news-2025-v2", "eu-official-statistics-2025-v2",
     }
+    assert "eu-news-2025-v1" not in {case["id"] for case in cases}
 
 
 def test_v2_tags_and_optional_gold(tmp_path):

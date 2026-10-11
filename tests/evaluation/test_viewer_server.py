@@ -70,6 +70,7 @@ def test_http_navigation_and_missing_raw_artifact(tmp_path):
         with urlopen(base + "/api/campaigns/fixture-campaign/orders/fixture-parent-viewer.json") as response:
             detail = json.load(response)
         assert detail["validations"][1]["stages"]["citations"]["assessment"] == "FAIL"
+        assert detail["viewer_summary"]["validators_observed"] == 2
         with urlopen(base + "/") as response:
             assert b"Benchmark Viewer" in response.read()
         try:
@@ -100,3 +101,49 @@ def test_static_navigation_uses_paginated_table_views():
     assert "filterHeader" in script
     assert "sortedEntries" in script
     assert "formatSavedDate" in script
+    assert 'campaignView: "summary"' in script
+    assert "renderOrderSummary" in script
+    assert "Aserciones × validadores" in script
+    assert 'campaigns: {key: "date", direction: "desc"}' in script
+
+
+def test_campaign_orders_and_campaigns_are_sorted_by_saved_date(tmp_path):
+    old = tmp_path / "old-campaign"
+    new = tmp_path / "new-campaign"
+    old.mkdir(); new.mkdir()
+    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    for directory, campaign, created in [
+            (old, "old-campaign", "2026-01-01T00:00:00Z"),
+            (new, "new-campaign", "2026-03-01T00:00:00Z")]:
+        document = json.loads(json.dumps(fixture))
+        document["identity"]["campaign_id"] = campaign
+        (directory / "fixture-parent-viewer.json").write_text(json.dumps(document), encoding="utf-8")
+        (directory / "fixture-parent-order.json").write_text(json.dumps({
+            "created_at": created, "updated_at": created}), encoding="utf-8")
+        (directory / "manifest.json").write_text(json.dumps({
+            "status": "COMPLETED", "created_at": created}), encoding="utf-8")
+
+    assert [item["campaign_id"] for item in list_campaigns(tmp_path)] == [
+        "new-campaign", "old-campaign"]
+    indexed = index_campaign(tmp_path, "new-campaign")
+    assert indexed["orders"][0]["created_at"] == "2026-03-01T00:00:00Z"
+    assert indexed["incidents"][0]["created_at"] == "2026-03-01T00:00:00Z"
+
+
+def test_campaign_with_report_but_without_viewer_snapshot_remains_visible(tmp_path):
+    directory = tmp_path / "failed-campaign"
+    directory.mkdir()
+    (directory / "manifest.json").write_text(json.dumps({
+        "status": "COMPLETED_WITH_ERRORS", "created_at": "2026-04-01T00:00:00Z"}),
+        encoding="utf-8")
+    (directory / "report.json").write_text(json.dumps({
+        "total_cases": 3, "end_to_end_correct": 0, "end_to_end_incorrect": 3,
+        "failures": {"technical": 3}}), encoding="utf-8")
+
+    listed = list_campaigns(tmp_path)
+    indexed = index_campaign(tmp_path, "failed-campaign")
+
+    assert listed[0]["campaign_id"] == "failed-campaign"
+    assert listed[0]["order_count"] == 0
+    assert indexed["orders"] == []
+    assert indexed["report"]["failures"]["technical"] == 3

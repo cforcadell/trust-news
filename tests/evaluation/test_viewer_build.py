@@ -64,6 +64,50 @@ def test_generation_accepts_annotated_approximate_numeric_equivalence():
     assert "NUMBER_OR_DATE_MISSING" not in codes
 
 
+def test_incompatible_numeric_match_does_not_propagate_gold_verdict():
+    dataset = {"id": "example", "news": "La norma se aplica desde 2018.", "assertions": [
+        {"id": "applied-2020", "text": "La norma se aplica desde 2020.",
+         "required_terms": ["norma", "aplica"], "expected_verdict": "FALSE"}]}
+    order = {"order_id": "order", "status": "VALIDATED", "text": dataset["news"],
+             "assertions": [{"idAssertion": "1", "text": "La norma se aplica desde 2018."}]}
+    row = {"run_id": "run-1", "assertion_id": "1", "validator": {"id": "validator-1"},
+           "expected": {"expected_verdict": "FALSE"}, "router": {"status": "NOT_EVALUATED"},
+           "retrieval": {"status": "INJECTED"},
+           "validator_output": {"effective_verdict": "TRUE"},
+           "consensus": {"status": "COMPLETED", "verdict": "TRUE"}}
+
+    snapshot = build_order_diagnostic(dataset, order, [row], campaign_id="campaign",
+                                      repetition=1, parent_run_id="parent")
+
+    assertion = snapshot["order"]["assertions"][0]
+    assert assertion["expected_case_id"] is None
+    assert assertion["candidate_case_id"] == "applied-2020"
+    assert assertion["match_status"] == "INCOMPATIBLE"
+    check = snapshot["order"]["generation"]["checks"][0]
+    assert check["code"] == "GOLD_MATCH_INCOMPATIBLE"
+    assert check["origin"] == "EVALUATOR"
+    assert check["impact"] == "METRICS_ONLY"
+    stages = snapshot["validations"][0]["stages"]
+    assert stages["llm"]["assessment"] == "NOT_EVALUATED"
+    assert stages["consensus"]["assessment"] == "NOT_EVALUATED"
+
+
+def test_accepted_evidence_kind_is_not_reported_as_mismatch():
+    dataset = {"id": "example", "news": "La institución tiene 27 miembros.", "assertions": [
+        {"id": "members", "text": "La institución tiene 27 miembros.",
+         "required_terms": ["institución", "27", "miembros"],
+         "expected_evidence_kind": "PUBLIC_STATEMENT",
+         "accepted_evidence_kinds": ["PUBLIC_STATEMENT", "STATISTICAL_DATA"]}]}
+    order = {"order_id": "order", "status": "VALIDATED", "text": dataset["news"],
+             "assertions": [{"idAssertion": "1", "text": dataset["news"],
+                             "evidence_kind": "STATISTICAL_DATA"}]}
+
+    snapshot = build_order_diagnostic(dataset, order, [], campaign_id="campaign",
+                                      repetition=1, parent_run_id="parent")
+    assert "EXPECTED_EVIDENCE_KIND_MISMATCH" not in {
+        check["code"] for check in snapshot["order"]["generation"]["checks"]}
+
+
 def test_unscored_validation_remains_visible_without_wrong_verdict_label():
     from evaluation.viewer.build import _validation_stages
 
@@ -206,6 +250,31 @@ def test_viewer_marks_missing_route_or_citable_source_as_error():
     assert retrieval_check["type"] == "error"
     assert "empty_text" in retrieval_check["detail"]
     assert "0 contextos" in retrieval_check["detail"]
+
+
+def test_retrieval_failures_are_promoted_when_they_cause_decisive_abstention():
+    from evaluation.viewer.build import _validation_stages
+
+    stages = _validation_stages({
+        "assertion_id": "2", "validator": {"id": "v1", "evidence_search_strategy": "EXT_ONLY_OFFICIAL"},
+        "expected": {"expected_verdict": "TRUE"}, "router": {"status": "SKIPPED"},
+        "retrieval": {"status": "COMPLETED", "evidences": [
+            {"domain": "official.example", "fetch_status": "failed", "fetch_error": "http_403", "contexts": []},
+            {"domain": "other.example", "fetch_status": "ok", "contexts": [
+                {"context_id": "ctx", "text": "Contexto relacionado", "citation_eligible": True}]}]},
+        "validator_output": {"effective_verdict": "UNKNOWN"},
+        "consensus": {"status": "NOT_EVALUATED"},
+    })
+
+    evidence = stages["evidence_search"]
+    assert evidence["assessment"] == "FAIL"
+    check = evidence["checks"][0]
+    assert check["code"] == "RETRIEVAL_CAUSED_ABSTENTION"
+    assert check["origin"] == "RETRIEVAL"
+    assert check["severity"] == "HIGH"
+    assert check["impact"] == "CAUSED_ABSTENTION"
+    assert stages["llm"]["assessment"] == "NOT_EVALUATED"
+    assert stages["llm"]["checks"][0]["code"] == "ABSTENTION_DUE_TO_INSUFFICIENT_EVIDENCE"
 
 
 def test_failure_details_explain_observed_cause_and_expected_value():

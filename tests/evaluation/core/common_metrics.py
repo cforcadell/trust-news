@@ -5,6 +5,7 @@ from typing import Any
 
 VERDICTS = {0: "UNKNOWN", 1: "TRUE", 2: "FALSE"}
 NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+NEGATION = {"no", "not", "never", "nunca", "jamás", "sin", "ningún", "ninguna"}
 
 def normalize_verdict(value: Any) -> str:
     if isinstance(value, bool):
@@ -68,6 +69,22 @@ def missing_expected_numbers(expected: dict[str, Any], actual_text: str) -> list
     return sorted(set(missing))
 
 
+def match_incompatibilities(expected: dict[str, Any], actual_text: str) -> list[str]:
+    """Return deterministic reasons why a lexical match must not inherit gold."""
+    expected_numbers = set(numbers_in(expected.get("text") or ""))
+    actual_numbers = set(numbers_in(actual_text))
+    reasons = []
+    # Missing values are extraction-quality findings. Conflicting explicit
+    # values identify a different factual proposition and make scoring unsafe.
+    if expected_numbers and actual_numbers and expected_numbers.isdisjoint(actual_numbers):
+        reasons.append("NUMERIC_OR_TEMPORAL_VALUE_CONFLICT")
+    expected_negation = normalized_words(expected.get("text") or "") & NEGATION
+    actual_negation = normalized_words(actual_text) & NEGATION
+    if expected_negation and not actual_negation:
+        reasons.append("NEGATION_POLARITY_CONFLICT")
+    return reasons
+
+
 def evidence_verdict_coherence(expected: dict[str, Any], assertion_text: str,
                                bundle: list[dict[str, Any]], verdict: str | None) -> dict[str, Any]:
     """Detect contradictions backed by explicit numeric-equivalence annotations."""
@@ -98,17 +115,19 @@ def assertion_identifier(assertion: dict[str, Any], index: int) -> str:
 
 def match_assertions(case: dict[str, Any], generated: list[dict[str, Any]]) -> list[dict[str, Any]]:
     threshold = float(case.get("match_threshold") or 0.5)
-    candidates: list[tuple[float, int, int]] = []
+    candidates: list[tuple[float, int, int, list[str]]] = []
     for expected_index, expected in enumerate(case["assertions"]):
         required = normalized_words(" ".join(expected.get("required_terms", [])))
         for generated_index, actual in enumerate(generated):
             words = normalized_words(str(actual.get("text") or actual.get("assertion") or ""))
             score = len(required & words) / len(required) if required else 0.0
-            candidates.append((score, expected_index, generated_index))
+            candidates.append((score, expected_index, generated_index,
+                               match_incompatibilities(expected, str(actual.get("text") or actual.get("assertion") or ""))))
     used_expected: set[int] = set()
     used_generated: set[int] = set()
     matches: list[dict[str, Any]] = []
-    for score, expected_index, generated_index in sorted(candidates, reverse=True):
+    for score, expected_index, generated_index, incompatibilities in sorted(
+            candidates, key=lambda row: (bool(row[3]), -row[0], row[1], row[2])):
         if score < threshold or expected_index in used_expected or generated_index in used_generated:
             continue
         used_expected.add(expected_index)
@@ -126,6 +145,8 @@ def match_assertions(case: dict[str, Any], generated: list[dict[str, Any]]) -> l
             "generated_text": actual.get("text") or actual.get("assertion"),
             "generated_category_id": actual_category,
             "match_score": round(score, 6),
+            "match_status": "INCOMPATIBLE" if incompatibilities else "HEURISTIC_MATCH",
+            "incompatibility_reasons": incompatibilities,
             "category_match": (
                 int(actual_category) in expected_categories
                 if actual_category is not None and expected_categories else None

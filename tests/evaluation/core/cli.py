@@ -166,6 +166,17 @@ def main(kind, argv=None):
                     except Exception as exc:
                         trace("repetition.failed", parent_run_id=parent_id, stage="ORDER_EXECUTION",
                               exception_type=type(exc).__name__)
+                        # A terminal failure is still a valuable order snapshot for the
+                        # viewer.  Polling raises before returning it, so fetch the saved
+                        # terminal document once without masking the original failure.
+                        if order is None and published.get("order_id"):
+                            try:
+                                failed_order = client.get(f"/orders/{published['order_id']}")
+                                if isinstance(failed_order, dict):
+                                    order = failed_order
+                                    write_json(output / (parent_id + "-order.json"), order)
+                            except Exception:
+                                pass
                         imported = []
                         for expected in dataset["assertions"]:
                             failure = CaseResult(expected["id"], "FULL_PIPELINE", {"text": expected.get("text", "")}, expected,

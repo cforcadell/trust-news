@@ -6,6 +6,8 @@ from evaluation import ROOT
 from evaluation.core.artifacts import EvaluationError, write_json
 from evaluation.core.datasets import load_datasets, validate_case
 from evaluation.core.models import CaseResult
+from evaluation.core.common_metrics import match_assertions
+from evaluation.core.orders import results_from_order
 
 
 def resource():
@@ -40,6 +42,23 @@ def test_approximate_value_annotations_are_validated():
     case["assertions"][0]["approximate_values"][0]["tolerance"] = -1
     with pytest.raises(EvaluationError, match="invalid approximate value"):
         validate_case(case)
+
+
+def test_numeric_conflict_is_linked_but_not_scored_as_same_assertion():
+    case = {"schema_version": 2, "id": "dates", "news": "La norma se aplica desde 2018.",
+            "assertions": [{"id": "wrong-date", "text": "La norma se aplica desde 2020.",
+                            "expected_verdict": "FALSE", "required_terms": ["norma", "aplica"]}]}
+    generated = [{"idAssertion": "1", "text": "La norma se aplica desde 2018."}]
+
+    match = match_assertions(case, generated)[0]
+    assert match["match_status"] == "INCOMPATIBLE"
+    assert match["incompatibility_reasons"] == ["NUMERIC_OR_TEMPORAL_VALUE_CONFLICT"]
+
+    row = results_from_order(case, {"order_id": "order", "assertions": generated})[0].to_dict()
+    assert row["provenance"]["scoring_eligible"] is False
+    assert row["extraction"]["status"] == "INCOMPATIBLE_GENERATED_ASSERTION"
+    assert row["metrics"]["validation"]["status"] == "NOT_EVALUATED"
+    assert row["metrics"]["consensus"]["status"] == "NOT_EVALUATED"
 
 
 @pytest.mark.parametrize("change", [

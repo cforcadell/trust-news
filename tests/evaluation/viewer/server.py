@@ -3,10 +3,12 @@
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from evaluation.viewer_contract import ContractError, validate_order_diagnostic
+from evaluation.viewer.summary import summarize_campaign, summarize_order
 
 
 STATIC = Path(__file__).parent / "static"
@@ -90,19 +92,51 @@ def _diagnostic_incidents(diagnostic: dict, file_name: str) -> list[dict]:
     return incidents
 
 
+def _saved_order_dates(directory: Path, diagnostic: dict) -> tuple[str | None, str | None]:
+    """Read order timestamps when the referenced immutable artifact has them."""
+    name = diagnostic.get("artifact_refs", {}).get("order")
+    if not name:
+        return None, None
+    path = directory / name
+    if not path.is_file() or path.parent != directory:
+        return None, None
+    try:
+        order = json.loads(path.read_text(encoding="utf-8"))
+        return order.get("created_at"), order.get("updated_at")
+    except (OSError, ValueError, TypeError):
+        return None, None
+
+
+def _date_key(value: str | None) -> float:
+    if not value:
+        return float("-inf")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
 def index_campaign(root: Path, campaign: str) -> dict:
     directory = _within(root, campaign)
     if not directory.is_dir() or directory.parent != root.resolve():
         raise FileNotFoundError(campaign)
     manifest_path = directory / "manifest.json"
+    report_path = directory / "report.json"
     manifest_error = None
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     except (OSError, ValueError) as exc:
         manifest, manifest_error = {}, f"manifest.json: {type(exc).__name__}"
-    orders, errors, incidents = [], [], []
+    report_error = None
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+    except (OSError, ValueError) as exc:
+        report, report_error = {}, f"report.json: {type(exc).__name__}"
+    orders, errors, incidents, order_summaries = [], [], [], []
     if manifest_error:
         errors.append(manifest_error)
+    if report_error:
+        errors.append(report_error)
     for path in sorted(directory.glob("*-viewer.json")):
         try:
             diagnostic = _read_diagnostic(path)
@@ -111,21 +145,31 @@ def index_campaign(root: Path, campaign: str) -> dict:
                 raise ContractError("campaign_id does not match directory")
             order = diagnostic["order"]
             validations = diagnostic["validations"]
+            summary = summarize_order(diagnostic)
+            order_summaries.append(summary)
+            created_at, updated_at = _saved_order_dates(directory, diagnostic)
             order_incidents = _diagnostic_incidents(diagnostic, path.name)
+            for incident in order_incidents:
+                incident.update(created_at=created_at, updated_at=updated_at)
             incidents.extend(order_incidents)
             correct = sum(row["stages"]["llm"]["assessment"] == "PASS" for row in validations)
             warnings = sum(item["type"] == "warning" for item in order_incidents)
             technical_errors = sum(item["type"] == "error" for item in order_incidents)
             orders.append({"file": path.name, "order_id": identity["order_id"],
                            "dataset_id": identity["dataset_id"], "repetition": identity["repetition"],
+                           "created_at": created_at, "updated_at": updated_at,
                            "status": order["status"], "assertions": len(order["assertions"]),
                            "validations": len(validations), "correct_validations": correct,
                            "warnings": warnings, "errors": technical_errors,
-                           "findings": warnings + technical_errors})
+                           "findings": warnings + technical_errors, "summary": summary})
         except (OSError, ValueError, KeyError, TypeError) as exc:
             errors.append(f"{path.name}: {type(exc).__name__}: {exc}")
+    orders.sort(key=lambda item: _date_key(item.get("created_at")), reverse=True)
+    incidents.sort(key=lambda item: _date_key(item.get("created_at")), reverse=True)
     return {"campaign_id": campaign, "status": manifest.get("status", "UNKNOWN"),
-            "created_at": manifest.get("created_at"), "orders": orders,
+            "created_at": manifest.get("created_at"), "has_manifest": manifest_path.exists(),
+            "orders": orders, "report": report,
+            "summary": summarize_campaign(order_summaries),
             "incidents": incidents, "errors": errors}
 
 
@@ -137,12 +181,13 @@ def list_campaigns(root: Path) -> list[dict]:
         if path.is_dir() and not path.is_symlink():
             try:
                 summary = index_campaign(root, path.name)
-                if summary["orders"] or summary["errors"]:
+                if summary["orders"] or summary["errors"] or summary["has_manifest"]:
                     campaigns.append({key: summary[key] for key in
                                       ("campaign_id", "status", "created_at", "errors")}
                                      | {"order_count": len(summary["orders"])})
             except (OSError, ValueError):
                 continue
+    campaigns.sort(key=lambda item: _date_key(item.get("created_at")), reverse=True)
     return campaigns
 
 
@@ -182,7 +227,7 @@ def make_handler(root: Path):
                         diagnostic = _read_diagnostic(file)
                         if diagnostic["identity"]["campaign_id"] != campaign:
                             raise ContractError("campaign_id does not match directory")
-                        return self._send(200, diagnostic)
+                        return self._send(200, diagnostic | {"viewer_summary": summarize_order(diagnostic)})
                     if len(parts) == 5 and parts[3] == "artifacts":
                         name = parts[4]
                         file = _within(directory, name)

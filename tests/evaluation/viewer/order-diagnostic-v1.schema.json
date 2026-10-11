@@ -56,7 +56,9 @@
             "properties": {
               "assertion_id": {"$ref": "#/$defs/nonempty"},
               "text": {"type": "string"},
-              "expected_case_id": {"type": ["string", "null"]}
+              "expected_case_id": {"type": ["string", "null"]},
+              "candidate_case_id": {"type": ["string", "null"]},
+              "match_status": {"enum": ["HEURISTIC_MATCH", "INCOMPATIBLE", "UNMATCHED"]}
             }
           }
         }
@@ -72,6 +74,7 @@
           "run_id": {"$ref": "#/$defs/nonempty"},
           "assertion_id": {"$ref": "#/$defs/nonempty"},
           "validator_id": {"$ref": "#/$defs/nonempty"},
+          "evaluation_match": {"type": ["object", "null"]},
           "validator": {
             "type": "object",
             "additionalProperties": false,
@@ -112,6 +115,12 @@
         "status": {"enum": ["PASS", "FAIL", "PARTIAL", "NOT_EVALUATED", "SKIPPED"]},
         "detail": {"type": "string"},
         "type": {"enum": ["warning", "error"]},
+        "origin": {"enum": ["EXECUTION", "GENERATION", "ROUTER", "RETRIEVAL", "VALIDATOR", "CONSENSUS", "DATASET", "EVALUATOR"]},
+        "nature": {"enum": ["FUNCTIONAL_FAILURE", "TECHNICAL_FAILURE", "QUALITY_DEGRADATION", "POLICY_CONSTRAINT", "BENCHMARK_DEVIATION", "EVALUATION_UNCERTAINTY"]},
+        "severity": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]},
+        "impact": {"enum": ["BLOCKED_EXECUTION", "CHANGED_VERDICT", "CAUSED_ABSTENTION", "NO_VERDICT_IMPACT", "METRICS_ONLY", "UNKNOWN"]},
+        "root_cause_id": {"$ref": "#/$defs/nonempty"},
+        "recommended_action": {"type": "string"},
         "observation_refs": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}
       }
     },

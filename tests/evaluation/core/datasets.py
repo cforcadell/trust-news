@@ -58,6 +58,11 @@ def validate_case(case: dict) -> None:
         expected_kind = item.get("expected_evidence_kind")
         if expected_kind is not None and expected_kind not in {value.value for value in EvidenceKind}:
             raise EvaluationError(f"{identifier}: expected_evidence_kind is not in {EvidenceKind.__name__}")
+        accepted_kinds = item.get("accepted_evidence_kinds", [])
+        _strings(accepted_kinds, f"{identifier}: accepted_evidence_kinds")
+        invalid_kinds = set(accepted_kinds) - {value.value for value in EvidenceKind}
+        if invalid_kinds:
+            raise EvaluationError(f"{identifier}: accepted_evidence_kinds contains unknown values")
         context = item.get("expected_context")
         if context is not None:
             if not isinstance(context, dict) or set(context) - {"entities", "locations", "temporal_context", "jurisdiction"}:

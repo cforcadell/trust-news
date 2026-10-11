@@ -1,12 +1,13 @@
 const $ = (id) => document.getElementById(id);
 const state = {campaigns: [], campaign: null, orderList: null, diagnostic: null,
-  assertionId: null, runId: null, stage: "generation", view: "detail", campaignView: "orders",
+  assertionId: null, runId: null, stage: "generation", view: "summary", campaignView: "summary",
   navigationView: "campaigns",
-  filters: {caseId: "", validator: "", repetition: "", stage: "", code: "", type: ""},
+  filters: {caseId: "", validator: "", repetition: "", stage: "", code: "", type: "",
+    origin: "", nature: "", severity: "", impact: ""},
   campaignFilters: {orders: {}, incidents: {}}, navigationFilters: {campaigns: {}},
   pagination: {campaigns: {page: 1, size: 10}, orders: {page: 1, size: 10}},
-  sorting: {campaigns: {key: null, direction: "asc"}, orders: {key: null, direction: "asc"},
-    incidents: {key: null, direction: "asc"}}};
+  sorting: {campaigns: {key: "date", direction: "desc"}, orders: {key: "date", direction: "desc"},
+    incidents: {key: "date", direction: "desc"}}};
 const STAGES = [["generation", "Generate Assertions"], ["router", "Source Router"],
   ["evidence_search", "Evidence Search"], ["handoff", "Entrega"],
   ["llm", "LLM"], ["citations", "Citas"], ["consensus", "Consenso"]];
@@ -62,6 +63,20 @@ function formatSavedDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return new Intl.DateTimeFormat("es-ES", {dateStyle: "short", timeStyle: "medium"}).format(date);
+}
+function outcomePresentation(value) {
+  return ({ACHIEVED: ["Conseguido", "PASS"], PARTIALLY_ACHIEVED: ["Parcial", "PARTIAL"],
+    NOT_ACHIEVED: ["No conseguido", "FAIL"], UNRESOLVED: ["No resuelto", "PARTIAL"],
+    NOT_EVALUATED: ["No evaluado", "NOT_EVALUATED"]})[value] || [value || "No evaluado", "NOT_EVALUATED"];
+}
+function healthPresentation(value) {
+  return ({HEALTHY: ["Saludable", "PASS"], DEGRADED: ["Degradado", "PARTIAL"],
+    FAILED: ["Fallido", "FAIL"], UNKNOWN: ["Desconocido", "NOT_EVALUATED"]})[value] ||
+    [value || "Desconocido", "NOT_EVALUATED"];
+}
+function labeledPill(label, tone) {
+  const icons = {PASS: "✓", FAIL: "✕", PARTIAL: "!", NOT_EVALUATED: "?", SKIPPED: "–"};
+  return el("span", `pill pill-${tone}`, `${icons[tone] || "·"} ${label}`);
 }
 function paginationControls(pagination, apply) {
   const node = el("div", "pagination"), summary = el("span", "pagination-summary");
@@ -126,6 +141,21 @@ function inferredIssueType(stageKey, check, stage) {
     if (sources.length && !matches.length) return "warning";
   }
   return check.status === "PARTIAL" ? "warning" : "error";
+}
+function inferredIssueMetadata(stageKey, check) {
+  const stageOrigins = {generation: "GENERATION", router: "ROUTER", evidence_search: "RETRIEVAL",
+    handoff: "EXECUTION", llm: "VALIDATOR", citations: "VALIDATOR", consensus: "CONSENSUS"};
+  const benchmarkCodes = new Set(["EXPECTED_ASSERTION_MISSING", "CATEGORY_MISMATCH",
+    "EXPECTED_TOPIC_CODE_MISMATCH", "EXPECTED_EVIDENCE_KIND_MISMATCH", "ROUTER_EXPECTED_DOMAIN_MISSING"]);
+  const evaluationCodes = new Set(["GOLD_MATCH_INCOMPATIBLE", "UNMATCHED_GENERATED_ASSERTION"]);
+  const nature = check.nature || (evaluationCodes.has(check.code) ? "EVALUATION_UNCERTAINTY" :
+    benchmarkCodes.has(check.code) ? "BENCHMARK_DEVIATION" :
+    check.code === "SOME_SOURCES_UNUSABLE" ? "QUALITY_DEGRADATION" : "FUNCTIONAL_FAILURE");
+  return {origin: check.origin || (evaluationCodes.has(check.code) ? "EVALUATOR" :
+      benchmarkCodes.has(check.code) ? "DATASET" : stageOrigins[stageKey] || "EXECUTION"),
+    nature, severity: check.severity || (check.status === "FAIL" ? "HIGH" : "LOW"),
+    impact: check.impact || (["BENCHMARK_DEVIATION", "EVALUATION_UNCERTAINTY", "POLICY_CONSTRAINT"].includes(nature) ?
+      "METRICS_ONLY" : "UNKNOWN")};
 }
 function routerMisalignmentCheck(stage) {
   const observations = stage.observations || {};
@@ -291,7 +321,7 @@ function renderCampaignIndex() {
 async function openCampaign(campaign) {
   state.campaign = campaign; state.orderList = null; state.diagnostic = null;
   state.navigationView = "campaigns";
-  state.campaignView = "orders";
+  state.campaignView = "summary";
   state.campaignFilters = {orders: {}, incidents: {}};
   state.pagination.orders.page = 1;
   state.filters = {caseId: "", validator: "", repetition: "", stage: "", code: "", type: ""};
@@ -324,13 +354,67 @@ function renderEmptyCampaign() {
 }
 function campaignTabs() {
   const tabs = el("div", "view-tabs");
-  for (const [key, label] of [["orders", "Resumen de órdenes"], ["incidents", "Incidencias"]]) {
+  for (const [key, label] of [["summary", "Resumen"], ["orders", "Órdenes"], ["incidents", "Incidencias"]]) {
     const node = button(label, () => { state.campaignView = key; renderCampaignOverview(); },
       state.campaignView === key ? "active" : "");
     node.setAttribute("role", "tab"); node.setAttribute("aria-selected", String(state.campaignView === key));
     add(tabs, node);
   }
   return tabs;
+}
+function campaignSummaryView() {
+  const summary = state.orderList.summary || {};
+  const report = state.orderList.report || {};
+  const block = el("div", "stack");
+  if (state.orderList.orders.length) add(block, add(el("section", "summary overview-metrics"),
+      metric(`${summary.orders_achieved ?? 0}/${summary.orders_total ?? 0}`, "órdenes con objetivo conseguido"),
+      metric(`${summary.assertions_achieved ?? 0}/${summary.assertions_total ?? 0}`, "aserciones correctas por consenso"),
+      metric(summary.orders_degraded ?? 0, "órdenes conseguidas o ejecutadas con degradación"),
+      metric(summary.consensus_rescues ?? 0, "aserciones rescatadas por consenso"),
+      metric(`${summary.decisive_votes ?? 0}/${summary.assigned_votes ?? 0}`, "votos decisivos / asignados"),
+      metric(summary.abstentions ?? 0, "abstenciones"),
+      metric(summary.contradictions ?? 0, "contradicciones"),
+      metric(summary.technical_errors ?? 0, "errores técnicos")));
+  if (!state.orderList.orders.length && Object.keys(report).length) {
+    add(block, add(el("section", "card status status-PARTIAL"),
+      el("h2", "", "Campaña sin instantánea de orden navegable"),
+      el("p", "", "La campaña y su informe existen, pero la ejecución terminó antes de guardar un diagnóstico *-viewer.json. Se muestra el resultado agregado disponible."),
+      add(el("div", "summary"),
+        metric(report.total_cases ?? 0, "casos del informe"),
+        metric(report.end_to_end_correct ?? 0, "correctos E2E"),
+        metric(report.end_to_end_incorrect ?? 0, "incorrectos E2E"),
+        metric(report.not_evaluated ?? 0, "no evaluados"),
+        metric(report.failures?.technical ?? 0, "fallos técnicos"))));
+  }
+  const card = add(el("section", "card"), el("h2", "", "Resultado por orden"),
+    el("p", "muted", "El resultado E2E y la salud del proceso se muestran por separado. Una orden puede conseguir el objetivo aunque algún validador se abstenga."));
+  if (!state.orderList.orders.length) add(card, el("p", "muted", "No hay órdenes legibles en esta campaña."));
+  else {
+    const wrap = el("div", "table-wrap"), table = el("table", "campaign-table auto-columns"), head = el("tr"), body = el("tbody");
+    for (const label of ["Fecha", "Orden / dataset", "Resultado E2E", "Aserciones", "Validadores", "Participación", "Salud", "Consenso compensó"])
+      add(head, el("th", "", label));
+    for (const item of state.orderList.orders) {
+      const value = item.summary || {};
+      const [outcomeLabel, outcomeTone] = outcomePresentation(value.outcome);
+      const [healthLabel, healthTone] = healthPresentation(value.health);
+      const row = add(el("tr", "clickable-row"), el("td", "date-column", formatSavedDate(item.created_at)),
+        add(el("td", "order-column"), el("strong", "mono", item.order_id), el("small", "table-secondary", item.dataset_id)),
+        add(el("td"), labeledPill(outcomeLabel, outcomeTone)),
+        el("td", "compact-column", `${value.assertions_achieved ?? 0}/${value.assertions_total ?? 0}`),
+        el("td", "compact-column", value.validators_observed ?? 0),
+        el("td", "compact-column", `${value.decisive_votes ?? 0}/${value.assigned_votes ?? 0} decisivos`),
+        add(el("td"), labeledPill(healthLabel, healthTone)),
+        el("td", "compact-column", value.consensus_rescues ?? 0));
+      row.tabIndex = 0; row.title = "Abrir resumen de la orden";
+      row.addEventListener("click", () => openOrder(item.file));
+      row.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openOrder(item.file); }
+      });
+      add(body, row);
+    }
+    add(table, add(el("thead"), head), body); add(wrap, table); add(card, wrap);
+  }
+  return add(block, card);
 }
 function campaignOrderTable(title = "Órdenes de la campaña") {
   const card = add(el("section", "card"), el("h2", "", title));
@@ -349,20 +433,28 @@ function campaignOrderTable(title = "Órdenes de la campaña") {
     for (const entry of entries) entry.node.hidden = !shown.has(entry);
     noResults.hidden = Boolean(visible.length); updateSortHeaders(head, sorting);
   }
-  const columns = [["Orden", "order", "order-column"], ["Dataset", "dataset", "dataset-column"],
+  const columns = [["Fecha", "date", "date-column"], ["Orden", "order", "order-column"], ["Dataset", "dataset", "dataset-column"],
     ["Rep.", "repetition", "compact-column"], ["Afirmaciones", "assertions", "compact-column"],
-    ["Validaciones OK", "correct", "compact-column"], ["Validaciones", "validations", "compact-column"],
+    ["Resultado E2E", "outcome", "status-column"], ["Salud", "health", "status-column"],
+    ["Decisivos", "decisive", "compact-column"], ["Validaciones", "validations", "compact-column"],
     ["Avisos", "warnings", "compact-column"], ["Errores", "errors", "compact-column"],
     ["Estado", "status", "status-column"]];
   for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
   for (const item of state.orderList.orders) {
-    const values = {order: item.order_id, dataset: item.dataset_id, repetition: item.repetition,
-      assertions: item.assertions, correct: item.correct_validations ?? "—", validations: item.validations,
+    const orderSummary = item.summary || {};
+    const [outcomeLabel, outcomeTone] = outcomePresentation(orderSummary.outcome);
+    const [healthLabel, healthTone] = healthPresentation(orderSummary.health);
+    const values = {date: formatSavedDate(item.created_at), order: item.order_id, dataset: item.dataset_id, repetition: item.repetition,
+      assertions: `${orderSummary.assertions_achieved ?? 0}/${orderSummary.assertions_total ?? item.assertions}`,
+      outcome: outcomeLabel, health: healthLabel,
+      decisive: `${orderSummary.decisive_votes ?? 0}/${orderSummary.assigned_votes ?? 0}`,
+      validations: item.validations,
       warnings: item.warnings ?? 0, errors: item.errors ?? 0, status: item.status};
     const selected = state.diagnostic?.identity.order_id === item.order_id;
-    const row = add(el("tr", `clickable-row${selected ? " selected-row" : ""}`), el("td", "mono order-column", values.order),
+    const row = add(el("tr", `clickable-row${selected ? " selected-row" : ""}`), el("td", "date-column", values.date), el("td", "mono order-column", values.order),
       el("td", "dataset-column", values.dataset), el("td", "compact-column", values.repetition),
-      el("td", "compact-column", values.assertions), el("td", "compact-column", values.correct),
+      el("td", "compact-column", values.assertions), add(el("td"), labeledPill(outcomeLabel, outcomeTone)),
+      add(el("td"), labeledPill(healthLabel, healthTone)), el("td", "compact-column", values.decisive),
       el("td", "compact-column", values.validations), el("td", "compact-column", values.warnings),
       el("td", "compact-column", values.errors), el("td", "status-column", values.status));
     row.tabIndex = 0; row.title = "Abrir orden";
@@ -370,7 +462,7 @@ function campaignOrderTable(title = "Órdenes de la campaña") {
     row.addEventListener("keydown", event => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openOrder(item.file); }
     });
-    entries.push({node: row, values}); add(body, row);
+    entries.push({node: row, values, sortValues: {date: item.created_at ? Date.parse(item.created_at) : -Infinity}}); add(body, row);
   }
   pager = paginationControls(pagination, applyFilters);
   add(table, add(el("thead"), head), body); add(wrap, table); add(card, wrap, noResults, pager.node); applyFilters(); return card;
@@ -395,16 +487,16 @@ function campaignIncidentTable() {
     summary.textContent = `${visible} incidencias visibles · ${errors} errores · ${warnings} avisos. Selecciona una fila para abrir el detalle.`;
     updateSortHeaders(head, sorting);
   }
-  const columns = [["Tipo", "type", "compact-column"], ["Orden", "order", "order-column"],
+  const columns = [["Fecha", "date", "date-column"], ["Tipo", "type", "compact-column"], ["Orden", "order", "order-column"],
     ["Rep.", "repetition", "compact-column"], ["Módulo", "stage", "module-column"],
     ["Validador", "validator", "validator-column"], ["Código", "code", "code-column"],
     ["Detalle", "detail", "detail-column"]];
   for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
   for (const item of incidents) {
     const stageName = STAGES.find(([key]) => key === item.stage)?.[1] || item.stage;
-    const values = {type: item.type, order: item.order_id, repetition: item.repetition, stage: stageName,
+    const values = {date: formatSavedDate(item.created_at), type: item.type, order: item.order_id, repetition: item.repetition, stage: stageName,
       validator: item.validator_id || "—", code: item.code, detail: item.detail};
-    const row = add(el("tr", "clickable-row"), add(el("td", "compact-column"), issueType(values.type)),
+    const row = add(el("tr", "clickable-row"), el("td", "date-column", values.date), add(el("td", "compact-column"), issueType(values.type)),
       el("td", "mono order-column", values.order), el("td", "compact-column", values.repetition),
       el("td", "module-column", values.stage), el("td", "mono validator-column", values.validator),
       el("td", "mono code-column", values.code), el("td", "detail-column", values.detail));
@@ -414,7 +506,7 @@ function campaignIncidentTable() {
     row.addEventListener("keydown", event => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
     });
-    entries.push({node: row, values}); add(body, row);
+    entries.push({node: row, values, sortValues: {date: item.created_at ? Date.parse(item.created_at) : -Infinity}}); add(body, row);
   }
   applyFilters(); add(table, add(el("thead"), head), body); add(wrap, table); return add(card, wrap);
 }
@@ -423,7 +515,8 @@ function renderCampaignOverview() {
   add(main, el("div", "eyebrow", "Campaña"), el("h1", "", state.campaign),
     el("p", "muted", `${state.orderList.orders.length} órdenes · ${state.orderList.status}`), campaignTabs());
   const problems = errorBlock(state.orderList.errors); if (problems) add(main, problems);
-  add(main, state.campaignView === "incidents" ? campaignIncidentTable() : campaignOrderTable());
+  add(main, state.campaignView === "summary" ? campaignSummaryView() :
+    state.campaignView === "incidents" ? campaignIncidentTable() : campaignOrderTable());
 }
 async function openOrder(file, focus = null) {
   try {
@@ -431,7 +524,7 @@ async function openOrder(file, focus = null) {
     state.diagnostic = await api(`/api/campaigns/${enc(state.campaign)}/orders/${enc(file)}`);
     state.assertionId = focus?.assertion_id || state.diagnostic.order.assertions[0]?.assertion_id || null;
     state.runId = focus?.run_id || state.diagnostic.validations.find(v => v.assertion_id === state.assertionId)?.run_id || null;
-    state.stage = focus?.stage || "generation"; state.view = "detail"; renderNavigation(); renderDetail();
+    state.stage = focus?.stage || "generation"; state.view = focus ? "detail" : "summary"; renderNavigation(); renderDetail();
   } catch (error) { showError(error.message); }
 }
 function metric(value, label) { return add(el("div", "metric"), el("strong", "", value), el("span", "", label)); }
@@ -476,6 +569,7 @@ function stageIssueChecks(stageKey, stage) {
 
 function failureRows(diagnostic) {
   const rows = [];
+  const seenConsensus = new Set();
   const assertions = new Map(diagnostic.order.assertions.map(item => [item.assertion_id, item]));
   const generated = diagnostic.order.generation.observations?.generated_assertions || [];
   function addStage(stage, stageKey, assertionId = null, validation = null) {
@@ -489,12 +583,17 @@ function failureRows(diagnostic) {
         resolvedAssertionId = match ? generated[Number(match[1])]?.assertion_id : null;
       }
       const assertion = assertions.get(resolvedAssertionId);
+      const duplicateKey = stageKey === "consensus" ? `${resolvedAssertionId}:${check.code}:${check.detail}` : null;
+      if (duplicateKey && seenConsensus.has(duplicateKey)) continue;
+      if (duplicateKey) seenConsensus.add(duplicateKey);
+      const metadata = inferredIssueMetadata(stageKey, check);
       rows.push({stageKey, assertionId: resolvedAssertionId,
         assertionText: assertion?.text || generated.find(item => item.assertion_id === resolvedAssertionId)?.text || "—",
         caseId: assertion?.expected_case_id || "—", validatorId: validation?.validator_id || "—",
         runId: validation?.run_id || null, executionStatus: stage.execution_status,
         assessment: stage.assessment, code: check.code || "—", detail: explainIssue(stageKey, check, stage, validation),
-        type: inferredIssueType(stageKey, check, stage)});
+        type: inferredIssueType(stageKey, check, stage), ...metadata,
+        rootCauseId: check.root_cause_id || null, recommendedAction: check.recommended_action || null});
     }
   }
   addStage(diagnostic.order.generation, "generation");
@@ -504,14 +603,118 @@ function failureRows(diagnostic) {
   return rows;
 }
 
+function validatorAlias(index) { return `Validador ${String.fromCharCode(65 + index)}`; }
+function voteTone(vote, expected) {
+  if (vote?.error) return "FAIL";
+  if (!vote || vote.verdict === "UNKNOWN") return "NOT_EVALUATED";
+  if (["TRUE", "FALSE"].includes(expected)) return vote.verdict === expected ? "PASS" : "FAIL";
+  return "NOT_EVALUATED";
+}
+function openSummaryCell(assertionId, validatorId) {
+  const validation = state.diagnostic.validations.find(item =>
+    item.assertion_id === assertionId && item.validator_id === validatorId);
+  state.assertionId = assertionId;
+  state.runId = validation?.run_id || null;
+  state.stage = validation ? "llm" : "consensus";
+  state.view = "detail";
+  renderDetail();
+}
+function renderOrderSummary(diagnostic) {
+  const summary = diagnostic.viewer_summary || {};
+  const block = el("div", "stack");
+  const [outcomeLabel, outcomeTone] = outcomePresentation(summary.outcome);
+  const [healthLabel, healthTone] = healthPresentation(summary.health);
+  const hero = add(el("section", `card outcome-hero status-${outcomeTone}`),
+    add(el("div", "detail-head"), add(el("div"), el("h2", "", `Resultado E2E: ${outcomeLabel}`),
+      el("p", "", `${summary.assertions_achieved ?? 0} de ${summary.assertions_total ?? 0} aserciones alcanzaron el resultado esperado mediante consenso.`)),
+      labeledPill(outcomeLabel, outcomeTone)),
+    add(el("p", "health-line"), labeledPill(healthLabel, healthTone),
+      el("span", "", summary.health === "DEGRADED" ?
+        ` El objetivo final se conserva, pero hubo ${summary.abstentions ?? 0} abstenciones, ${summary.contradictions ?? 0} contradicciones y ${summary.technical_errors ?? 0} errores técnicos.` :
+        " La salud operativa se presenta separada del resultado final.")));
+  add(block, hero, add(el("section", "summary overview-metrics"),
+    metric(`${summary.assertions_achieved ?? 0}/${summary.assertions_total ?? 0}`, "aserciones correctas por consenso"),
+    metric(summary.validators_observed ?? 0, "validadores observados"),
+    metric(`${summary.decisive_votes ?? 0}/${summary.assigned_votes ?? 0}`, "votos decisivos / asignados"),
+    metric(summary.abstentions ?? 0, "abstenciones"),
+    metric(summary.contradictions ?? 0, "contradicciones"),
+    metric(summary.consensus_rescues ?? 0, "aserciones rescatadas por consenso")));
+
+  const validators = summary.validators || [];
+  const matrixCard = add(el("section", "card"), el("h2", "", "Aserciones × validadores"),
+    el("p", "muted", "Las columnas se generan a partir de los validadores observados en esta orden; no existe un número fijo."));
+  if (!(summary.assertions || []).length) add(matrixCard, el("p", "muted", "La orden no contiene aserciones resumibles."));
+  else {
+    const wrap = el("div", "table-wrap validator-matrix-wrap"), table = el("table", "validator-matrix"), head = el("tr"), body = el("tbody");
+    add(head, el("th", "sticky-column", "Aserción"), el("th", "", "Esperado"), el("th", "", "Consenso"));
+    validators.forEach((validator, index) => {
+      const cell = el("th", "validator-matrix-head", validatorAlias(index));
+      cell.title = validator.validator_id;
+      add(cell, el("small", "mono", validator.validator_id)); add(head, cell);
+    });
+    add(head, el("th", "", "Cobertura"));
+    for (const assertion of summary.assertions) {
+      const consensusTone = assertion.consensus_assessment === "PASS" ? "PASS" :
+        assertion.consensus_assessment === "FAIL" ? "FAIL" : "NOT_EVALUATED";
+      const assertionCell = add(el("td", "sticky-column assertion-summary-cell"),
+        el("strong", "", `Aserción ${assertion.assertion_id}`),
+        el("span", "", assertion.text), el("small", "", assertion.case_id || "Sin caso emparejado"));
+      const row = add(el("tr"), assertionCell, el("td", "", assertion.expected_verdict || "—"),
+        add(el("td"), labeledPill(assertion.consensus_verdict || "No resuelto", consensusTone)));
+      for (const validator of validators) {
+        const vote = assertion.votes.find(item => item.validator_id === validator.validator_id);
+        const cell = el("td", "validator-vote-cell");
+        const verdict = vote?.verdict || "Sin respuesta";
+        const validation = diagnostic.validations.find(item => item.assertion_id === assertion.assertion_id &&
+          item.validator_id === validator.validator_id);
+        const content = validation ? button("", () => openSummaryCell(assertion.assertion_id, validator.validator_id), "vote-button") :
+          el("div", "vote-button vote-unavailable");
+        add(content, labeledPill(verdict, voteTone(vote, assertion.expected_verdict)),
+          el("small", "", vote?.error ? "Error" : verdict === "UNKNOWN" ? "Abstención" : vote ? "Voto decisivo" : "No observado"));
+        if (!validation) content.title = "No hay ejecución detallada guardada para esta combinación";
+        add(cell, content); add(row, cell);
+      }
+      const coverage = assertion.assigned ? `${assertion.decisive}/${assertion.assigned}` : "—";
+      add(row, add(el("td", "compact-column"), el("strong", "", coverage),
+        el("small", "", assertion.rescued_by_consensus ? "Compensado por consenso" : assertion.reason_code || "—")));
+      add(body, row);
+    }
+    add(table, add(el("thead"), head), body); add(wrap, table); add(matrixCard, wrap);
+  }
+  add(block, matrixCard);
+
+  const validatorCard = add(el("section", "card"), el("h2", "", "Resumen por validador"));
+  if (!validators.length) add(validatorCard, el("p", "muted", "No hay validadores observados en esta orden."));
+  else {
+    const wrap = el("div", "table-wrap"), table = el("table"), head = el("tr"), body = el("tbody");
+    for (const label of ["Validador", "Asignaciones", "Decisivas", "Acordes", "Abstenciones", "Contradicciones", "Incidencias", "Errores", "Salud"])
+      add(head, el("th", "", label));
+    validators.forEach((validator, index) => {
+      const [label, tone] = healthPresentation(validator.health);
+      const identity = add(el("td", "validator-identity"), el("strong", "", validatorAlias(index)),
+        el("small", "mono", validator.validator_id));
+      add(body, add(el("tr"), identity, el("td", "", validator.assigned_assertions),
+        el("td", "", validator.decisive), el("td", "", validator.expected_matches),
+        el("td", "", validator.abstentions), el("td", "", validator.contradictions),
+        el("td", "", validator.stage_issues), el("td", "", validator.errors),
+        add(el("td"), labeledPill(label, tone))));
+    });
+    add(table, add(el("thead"), head), body); add(wrap, table); add(validatorCard, wrap);
+  }
+  add(block, validatorCard, el("p", "muted roster-note", summary.roster_source === "observed" ?
+    "Participación reconstruida desde las validaciones y votos guardados. Un artefacto antiguo puede no distinguir un validador no asignado de uno que nunca llegó a responder." : ""));
+  return block;
+}
+
 function renderViewTabs() {
   const tabs = el("div", "view-tabs");
+  const summary = button("Resumen", () => { state.view = "summary"; renderDetail(); }, state.view === "summary" ? "active" : "");
   const detail = button("Detalle", () => { state.view = "detail"; renderDetail(); }, state.view === "detail" ? "active" : "");
-  const failures = button("Errores y avisos", () => { state.view = "failures"; renderDetail(); }, state.view === "failures" ? "active" : "");
-  for (const [node, selected] of [[detail, state.view === "detail"], [failures, state.view === "failures"]]) {
+  const failures = button("Diagnóstico", () => { state.view = "failures"; renderDetail(); }, state.view === "failures" ? "active" : "");
+  for (const [node, selected] of [[summary, state.view === "summary"], [detail, state.view === "detail"], [failures, state.view === "failures"]]) {
     node.setAttribute("role", "tab"); node.setAttribute("aria-selected", String(selected));
   }
-  return add(tabs, detail, failures);
+  return add(tabs, summary, detail, failures);
 }
 
 function openFailure(row) {
@@ -528,22 +731,33 @@ function renderFailureSummary(diagnostic) {
     (!state.filters.validator || row.validatorId === state.filters.validator) &&
     (!state.filters.stage || row.stageKey === state.filters.stage) &&
     (!state.filters.code || row.code === state.filters.code) &&
-    (!state.filters.type || row.type === state.filters.type));
+    (!state.filters.type || row.type === state.filters.type) &&
+    (!state.filters.origin || row.origin === state.filters.origin) &&
+    (!state.filters.nature || row.nature === state.filters.nature) &&
+    (!state.filters.severity || row.severity === state.filters.severity) &&
+    (!state.filters.impact || row.impact === state.filters.impact));
   const modules = new Set(rows.map(row => row.stageKey === "generation" ? "generation/order" :
     `${row.stageKey}/${row.assertionId || "order"}/${row.runId || "order"}`));
   const errors = rows.filter(row => row.type === "error").length;
   const warnings = rows.filter(row => row.type === "warning").length;
-  const card = add(el("section", "card"), el("h2", "", "Errores y avisos"),
-    el("p", "muted", `${modules.size} módulos afectados · ${errors} errores · ${warnings} avisos. Selecciona una fila para abrir su contexto.`));
+  const functional = rows.filter(row => ["FUNCTIONAL_FAILURE", "TECHNICAL_FAILURE"].includes(row.nature) && row.impact !== "METRICS_ONLY").length;
+  const degradations = rows.filter(row => row.nature === "QUALITY_DEGRADATION").length;
+  const policy = rows.filter(row => ["POLICY_CONSTRAINT", "BENCHMARK_DEVIATION"].includes(row.nature)).length;
+  const evaluation = rows.filter(row => row.nature === "EVALUATION_UNCERTAINTY").length;
+  const card = add(el("section", "card"), el("h2", "", "Diagnóstico de incidencias"),
+    el("p", "muted", `${functional} incidencias funcionales · ${degradations} degradaciones · ${policy} desviaciones de política/benchmark · ${evaluation} incertidumbres de evaluación. ${modules.size} módulos · ${errors} errores · ${warnings} avisos.`));
   if (!rows.length) return add(card, el("p", "muted", "No hay errores ni avisos que coincidan con los filtros actuales."));
   const wrap = el("div", "table-wrap"), table = el("table", "failure-table"), head = el("tr"), body = el("tbody");
-  for (const label of ["Tipo", "Módulo", "Aserción", "Caso", "Validador", "Estado", "Código", "Detalle"])
+  for (const label of ["Tipo", "Origen", "Naturaleza", "Impacto", "Gravedad", "Módulo", "Aserción", "Caso", "Validador", "Estado", "Código", "Detalle"])
     add(head, el("th", "", label));
   for (const row of rows) {
     const module = STAGES.find(([key]) => key === row.stageKey)?.[1] || row.stageKey;
-    const tableRow = add(el("tr", "clickable-row"), add(el("td"), issueType(row.type)), el("td", "", module), el("td", "", row.assertionText),
+    const detail = row.recommendedAction ? `${row.detail} Acción: ${row.recommendedAction}` : row.detail;
+    const tableRow = add(el("tr", "clickable-row"), add(el("td"), issueType(row.type)),
+      el("td", "mono", row.origin), el("td", "mono", row.nature), el("td", "mono", row.impact),
+      el("td", "mono", row.severity), el("td", "", module), el("td", "", row.assertionText),
       el("td", "", row.caseId), el("td", "mono", row.validatorId), add(el("td"), pill(row.assessment)),
-      el("td", "mono", row.code), el("td", "", row.detail));
+      el("td", "mono", row.code), el("td", "", detail));
     tableRow.tabIndex = 0;
     tableRow.title = "Abrir el contexto de este fallo";
     tableRow.addEventListener("click", () => openFailure(row));
@@ -566,8 +780,10 @@ function renderDetail() {
   add(metrics, metric(d.order.assertions.length, "afirmaciones"),
     metric(d.validations.length, "validaciones"),
     metricButton(failedModules, "módulos con incidencias", () => { state.view = "failures"; renderDetail(); }));
-  add(main, metrics, renderViewTabs(), renderFilters());
+  add(main, metrics, renderViewTabs());
   const problems = errorBlock(state.orderList?.errors); if (problems) add(main, problems);
+  if (state.view === "summary") { add(main, renderOrderSummary(d)); return; }
+  add(main, renderFilters());
   if (state.view === "failures") { add(main, renderFailureSummary(d)); return; }
   const layout = el("div", "grid"); const left = el("div", "stack");
   const originals = add(el("section", "card"), el("h2", "", "Texto original"), el("p", "", d.order.original_text));
@@ -940,10 +1156,15 @@ function renderFilters() {
     .map(item => String(item.repetition)))].sort((a, b) => Number(a) - Number(b));
   const codes = [...new Set([d.order.generation, ...d.validations.flatMap(item => Object.values(item.stages))]
     .flatMap(stage => stage.checks.map(item => item.code)))].sort();
+  const issueRows = failureRows(d);
   const fields = el("div", "filter-row");
   add(fields, field("Caso", "caseId", cases), field("Repetición", "repetition", repetitions),
     field("Validador", "validator", validators),
     field("Módulo", "stage", STAGES.map(item => item[0])), field("Tipo", "type", ["error", "warning"]),
+    field("Origen", "origin", [...new Set(issueRows.map(item => item.origin))].sort()),
+    field("Naturaleza", "nature", [...new Set(issueRows.map(item => item.nature))].sort()),
+    field("Gravedad", "severity", ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]),
+    field("Impacto", "impact", [...new Set(issueRows.map(item => item.impact))].sort()),
     field("Código", "code", codes));
   return add(block, fields);
 }
@@ -960,19 +1181,20 @@ function renderComparisonControl() {
     }
     try {
       const matching = state.orderList.orders.filter(item => item.dataset_id === active.identity.dataset_id);
-      const diagnostics = await Promise.all(matching.map(item => item.order_id === active.identity.order_id ?
-        Promise.resolve(active) : api(`/api/campaigns/${enc(state.campaign)}/orders/${enc(item.file)}`).catch(() => null)));
-      const rows = diagnostics.filter(Boolean).flatMap(diagnostic => {
+      const diagnostics = await Promise.all(matching.map(async item => ({item, diagnostic: item.order_id === active.identity.order_id ?
+        active : await api(`/api/campaigns/${enc(state.campaign)}/orders/${enc(item.file)}`).catch(() => null)})));
+      const rows = diagnostics.filter(entry => entry.diagnostic).flatMap(({item: orderItem, diagnostic}) => {
         const assertion = diagnostic.order.assertions.find(item => item.expected_case_id === selected.expected_case_id);
         return diagnostic.validations.filter(item => item.assertion_id === assertion?.assertion_id && item.validator_id === validator)
-          .map(item => ({identity: diagnostic.identity, validation: item}));
-      }).sort((a, b) => a.identity.repetition - b.identity.repetition);
+          .map(item => ({identity: diagnostic.identity, validation: item, createdAt: orderItem.created_at}));
+      }).sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0));
       clear(output);
       if (!rows.length) return add(output, el("p", "muted", "No hay repeticiones comparables guardadas."));
       const wrap = el("div", "table-wrap"), table = el("table"), head = el("tr"), body = el("tbody");
-      for (const label of ["Repetición", "Orden", ...STAGES.slice(1).map(item => item[1]), "Veredicto"]) add(head, el("th", "", label));
+      for (const label of ["Fecha", "Repetición", "Orden", ...STAGES.slice(1).map(item => item[1]), "Veredicto"]) add(head, el("th", "", label));
       for (const row of rows) {
-        const cells = [el("td", "", row.identity.repetition), el("td", "", row.identity.order_id)];
+        const cells = [el("td", "date-column", formatSavedDate(row.createdAt)),
+          el("td", "", row.identity.repetition), el("td", "", row.identity.order_id)];
         for (const [key] of STAGES.slice(1)) cells.push(add(el("td"), pill(row.validation.stages[key].assessment)));
         cells.push(el("td", "", row.validation.stages.llm.observations.effective_verdict || "—"));
         add(body, add(el("tr"), ...cells));

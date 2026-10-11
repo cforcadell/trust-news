@@ -4,7 +4,7 @@ from copy import deepcopy
 import json
 
 from evaluation.core.common_metrics import (normalized_words, collect_assertions, assertion_identifier,
-                                            missing_expected_numbers)
+                                            missing_expected_numbers, match_incompatibilities)
 from evaluation.pipeline.metrics import domain_matches
 from evaluation.viewer_contract import validate_order_diagnostic
 
@@ -12,14 +12,52 @@ from evaluation.viewer_contract import validate_order_diagnostic
 NEGATION = {"no", "not", "never", "nunca", "jamás", "sin", "ningún", "ninguna"}
 STAGES = ("router", "evidence_search", "handoff", "llm", "citations", "consensus")
 
+CHECK_CLASSIFICATION = {
+    "EXPECTED_ASSERTION_MISSING": ("DATASET", "BENCHMARK_DEVIATION", "LOW", "METRICS_ONLY"),
+    "UNMATCHED_GENERATED_ASSERTION": ("EVALUATOR", "EVALUATION_UNCERTAINTY", "LOW", "METRICS_ONLY"),
+    "NUMBER_OR_DATE_MISSING": ("GENERATION", "QUALITY_DEGRADATION", "MEDIUM", "METRICS_ONLY"),
+    "NEGATION_MISSING": ("GENERATION", "QUALITY_DEGRADATION", "HIGH", "METRICS_ONLY"),
+    "CATEGORY_MISMATCH": ("DATASET", "BENCHMARK_DEVIATION", "LOW", "METRICS_ONLY"),
+    "EXPECTED_TOPIC_CODE_MISMATCH": ("DATASET", "BENCHMARK_DEVIATION", "LOW", "METRICS_ONLY"),
+    "EXPECTED_EVIDENCE_KIND_MISMATCH": ("DATASET", "POLICY_CONSTRAINT", "LOW", "METRICS_ONLY"),
+    "ROUTER_EXPECTED_DOMAIN_MISSING": ("DATASET", "POLICY_CONSTRAINT", "LOW", "METRICS_ONLY"),
+    "GOLD_MATCH_INCOMPATIBLE": ("EVALUATOR", "EVALUATION_UNCERTAINTY", "HIGH", "METRICS_ONLY"),
+    "SOME_SOURCES_UNUSABLE": ("RETRIEVAL", "QUALITY_DEGRADATION", "LOW", "NO_VERDICT_IMPACT"),
+    "RETRIEVAL_CAUSED_ABSTENTION": ("RETRIEVAL", "FUNCTIONAL_FAILURE", "HIGH", "CAUSED_ABSTENTION"),
+    "ABSTENTION_DUE_TO_INSUFFICIENT_EVIDENCE": ("VALIDATOR", "QUALITY_DEGRADATION", "INFO", "CAUSED_ABSTENTION"),
+    "NO_CITABLE_EVIDENCE": ("RETRIEVAL", "FUNCTIONAL_FAILURE", "HIGH", "BLOCKED_EXECUTION"),
+    "ROUTER_NO_SOURCE": ("ROUTER", "FUNCTIONAL_FAILURE", "HIGH", "BLOCKED_EXECUTION"),
+    "TECHNICAL_ERROR": ("EXECUTION", "TECHNICAL_FAILURE", "CRITICAL", "BLOCKED_EXECUTION"),
+    "HANDOFF_EVIDENCE_MISMATCH": ("EXECUTION", "TECHNICAL_FAILURE", "CRITICAL", "CHANGED_VERDICT"),
+    "WRONG_VERDICT": ("VALIDATOR", "FUNCTIONAL_FAILURE", "HIGH", "CHANGED_VERDICT"),
+    "VERDICT_EVIDENCE_CONTRADICTION": ("VALIDATOR", "FUNCTIONAL_FAILURE", "HIGH", "CHANGED_VERDICT"),
+    "CONSENSUS_ERROR": ("CONSENSUS", "FUNCTIONAL_FAILURE", "HIGH", "CHANGED_VERDICT"),
+    "GENERATION_ERROR": ("GENERATION", "FUNCTIONAL_FAILURE", "HIGH", "BLOCKED_EXECUTION"),
+    "INVALID_CITATION_ID": ("VALIDATOR", "FUNCTIONAL_FAILURE", "HIGH", "CHANGED_VERDICT"),
+    "CITATION_REJECTED": ("VALIDATOR", "FUNCTIONAL_FAILURE", "HIGH", "CHANGED_VERDICT"),
+    "JURISDICTION_MISMATCH": ("DATASET", "BENCHMARK_DEVIATION", "LOW", "METRICS_ONLY"),
+    "UNSCORED_VALIDATION": ("EVALUATOR", "EVALUATION_UNCERTAINTY", "INFO", "METRICS_ONLY"),
+}
 
-def _check(code, status, detail, *refs, issue_type=None):
+
+def _check(code, status, detail, *refs, issue_type=None, origin=None, nature=None,
+           severity=None, impact=None, root_cause_id=None, recommended_action=None):
     """Build an operator-facing check with a severity independent of its result."""
     value = {"code": code, "status": status, "detail": detail}
     if issue_type is None and status in {"FAIL", "PARTIAL"}:
         issue_type = "error" if status == "FAIL" else "warning"
     if issue_type:
         value["type"] = issue_type
+    fallback = (("DATASET", "BENCHMARK_DEVIATION", "LOW", "METRICS_ONLY")
+                if code.startswith("CONTEXT_") else
+                ("EXECUTION", "FUNCTIONAL_FAILURE", "HIGH" if issue_type == "error" else "MEDIUM", "UNKNOWN"))
+    default_origin, default_nature, default_severity, default_impact = CHECK_CLASSIFICATION.get(code, fallback)
+    value.update({"origin": origin or default_origin, "nature": nature or default_nature,
+                  "severity": severity or default_severity, "impact": impact or default_impact})
+    if root_cause_id:
+        value["root_cause_id"] = root_cause_id
+    if recommended_action:
+        value["recommended_action"] = recommended_action
     if refs:
         value["observation_refs"] = list(refs)
     return value
@@ -133,6 +171,7 @@ def _generation(dataset, order, generated):
                       "source_excerpt": item.get("source_excerpt"),
                       "expected_topic_code": item.get("expected_topic_code"),
                       "expected_evidence_kind": item.get("expected_evidence_kind"),
+                      "accepted_evidence_kinds": item.get("accepted_evidence_kinds") or [],
                       "expected_context": item.get("expected_context"),
                       "approximate_values": item.get("approximate_values") or []}
                      for item in expected]
@@ -141,21 +180,24 @@ def _generation(dataset, order, generated):
     for ei, item in enumerate(expected):
         reference = " ".join(item.get("required_terms") or []) or item.get("text") or ""
         for gi, actual in enumerate(observed):
-            candidates.append((_similarity(reference, actual["text"]), ei, gi))
+            score = _similarity(reference, actual["text"])
+            reasons = match_incompatibilities(item, actual["text"])
+            candidates.append((score, ei, gi, reasons))
     used_expected, used_generated = set(), set()
     matches = []
-    for score, ei, gi in sorted(candidates, key=lambda row: (-row[0], row[1], row[2])):
+    for score, ei, gi, reasons in sorted(candidates, key=lambda row: (bool(row[3]), -row[0], row[1], row[2])):
         if score < threshold or ei in used_expected or gi in used_generated:
             continue
         used_expected.add(ei)
         used_generated.add(gi)
         matches.append({"case_id": expected[ei]["id"], "assertion_id": observed[gi]["assertion_id"],
                         "score": round(score, 6), "method": "required_terms_coverage" if expected[ei].get("required_terms") else "word_coverage",
-                        "status": "HEURISTIC_MATCH"})
+                        "status": "INCOMPATIBLE" if reasons else "HEURISTIC_MATCH",
+                        "incompatibility_reasons": reasons})
     checks = []
     for ei, item in enumerate(expected):
         if ei not in used_expected:
-            best = max((score for score, expected_index, _ in candidates if expected_index == ei), default=0.0)
+            best = max((score for score, expected_index, _, _ in candidates if expected_index == ei), default=0.0)
             checks.append(_check("EXPECTED_ASSERTION_MISSING", "FAIL",
                                  f"No se emparejó el caso {item['id']}: la mejor cobertura léxica fue {best:.3f}, "
                                  f"por debajo del umbral {threshold:.3f}. Texto esperado: {item.get('text') or '—'}.",
@@ -165,6 +207,17 @@ def _generation(dataset, order, generated):
         gi = next(i for i, a in enumerate(observed) if a["assertion_id"] == match["assertion_id"])
         actual = observed[gi]
         ref = f"/order/generation/observations/generated_assertions/{gi}"
+        if match["status"] == "INCOMPATIBLE":
+            checks.append(_check(
+                "GOLD_MATCH_INCOMPATIBLE", "PARTIAL",
+                f"El caso {item['id']} y la afirmación generada comparten vocabulario, pero no son "
+                f"semánticamente puntuables: {', '.join(match['incompatibility_reasons'])}. "
+                f"Esperado: {item.get('text') or '—'}; generado: {actual['text'] or '—'}. "
+                "No se heredará el veredicto gold.", ref, issue_type="warning",
+                root_cause_id=f"gold-match:{item['id']}",
+                recommended_action="Revisar el caso gold o el emparejamiento antes de puntuar validadores."
+            ))
+            continue
         lost_numbers = missing_expected_numbers(item, actual["text"])
         if lost_numbers:
             checks.append(_check("NUMBER_OR_DATE_MISSING", "PARTIAL",
@@ -183,12 +236,19 @@ def _generation(dataset, order, generated):
                                  f"Desalineamiento de categoría: se esperaba una de {category_ids} y Generate Assertions "
                                  f"asignó {actual['categoryId']!r}.", ref,
                                  issue_type="warning"))
-        for field, actual_field in (("expected_topic_code", "topic_code"),
-                                    ("expected_evidence_kind", "evidence_kind")):
+        for field, actual_field in (("expected_topic_code", "topic_code"),):
             if item.get(field) and item[field] != actual[actual_field]:
                 checks.append(_check(field.upper() + "_MISMATCH", "FAIL",
                                      f"Desalineamiento de {actual_field}: se esperaba {item[field]!r} y Generate Assertions "
                                      f"produjo {actual[actual_field]!r}.", ref, issue_type="warning"))
+        accepted_kinds = set(item.get("accepted_evidence_kinds") or [])
+        if item.get("expected_evidence_kind"):
+            accepted_kinds.add(item["expected_evidence_kind"])
+        if accepted_kinds and actual["evidence_kind"] not in accepted_kinds:
+            checks.append(_check("EXPECTED_EVIDENCE_KIND_MISMATCH", "FAIL",
+                                 f"Desalineamiento de evidence_kind: se aceptaba {sorted(accepted_kinds)!r} y "
+                                 f"Generate Assertions produjo {actual['evidence_kind']!r}.", ref,
+                                 issue_type="warning"))
         expected_context = item.get("expected_context") or {}
         for field in ("entities", "locations", "temporal_context"):
             wanted = expected_context.get(field) or []
@@ -256,6 +316,7 @@ def _validation_stages(row):
     errors = row.get("errors") or []
     validator = row.get("validator") or {}
     scoring_eligible = row.get("provenance", {}).get("scoring_eligible", True)
+    verdict = output.get("effective_verdict", output.get("resultado"))
     evidence_strategy = validator.get("evidence_search_strategy")
     route_metric = (metrics.get("routing") or {}).get("status")
     route_obs = deepcopy(router)
@@ -314,9 +375,20 @@ def _validation_stages(row):
             evidence_checks.append(_check("NO_CITABLE_EVIDENCE", "FAIL",
                                           _retrieval_detail(bundle, citable), issue_type="error"))
         elif fetch_failures:
-            evidence_checks.append(_check("SOME_SOURCES_UNUSABLE", "PARTIAL",
-                                          _retrieval_detail(bundle, citable),
-                                          issue_type="warning"))
+            decisive_expected = expected.get("expected_verdict") in {"TRUE", "FALSE"}
+            caused_abstention = verdict == "UNKNOWN" and decisive_expected and scoring_eligible
+            code = "RETRIEVAL_CAUSED_ABSTENTION" if caused_abstention else "SOME_SOURCES_UNUSABLE"
+            if caused_abstention:
+                evidence_status = "FAIL"
+            evidence_checks.append(_check(
+                code, "FAIL" if caused_abstention else "PARTIAL", _retrieval_detail(bundle, citable),
+                issue_type="error" if caused_abstention else "warning",
+                root_cause_id=(f"retrieval-abstention:{row.get('assertion_id')}:{validator.get('id')}"
+                               if caused_abstention else None),
+                recommended_action=("Ampliar el fallback manteniendo la misma clase de autoridad y revisar las fuentes "
+                                    "que devolvieron 403, 404 o texto vacío."
+                                    if caused_abstention else None)
+            ))
         evidence = _stage("COMPLETED", evidence_status, evidence_obs, evidence_checks)
     elif retrieval.get("status") in {"INJECTED", "SKIPPED"}:
         evidence = _stage("SKIPPED", "SKIPPED", deepcopy(retrieval), missing_reason="La evidencia se inyectó o se omitió la búsqueda.")
@@ -337,7 +409,6 @@ def _validation_stages(row):
     else:
         handoff = _stage("NOT_RECORDED", "NOT_EVALUATED", handoff_obs,
                          missing_reason="Faltan hashes de uno o ambos límites de entrega.")
-    verdict = output.get("effective_verdict", output.get("resultado"))
     audit = deepcopy((row.get("grounding") or {}).get("validation") or {})
     llm_obs = {"provider": row.get("validator", {}).get("provider"),
                "model": output.get("resolved_model") or row.get("validator", {}).get("model"),
@@ -368,6 +439,15 @@ def _validation_stages(row):
                              "La validación pertenece a una afirmación generada sin caso gold emparejado; "
                              "se muestra para diagnóstico, pero no se puntúa.")],
                      missing_reason="No existe un veredicto gold aplicable a esta afirmación generada.")
+    elif verdict == "UNKNOWN" and any(
+            check.get("code") == "RETRIEVAL_CAUSED_ABSTENTION" for check in evidence.get("checks", [])):
+        llm = _stage(
+            "COMPLETED", "NOT_EVALUATED", llm_obs,
+            [_check("ABSTENTION_DUE_TO_INSUFFICIENT_EVIDENCE", "NOT_EVALUATED",
+                    "El validador se abstuvo con evidencia insuficiente. La causa se atribuye a Retrieval y no "
+                    "se contabiliza como un veredicto LLM incorrecto.", issue_type="warning")],
+            missing_reason="Evidence Search no entregó evidencia suficiente para exigir una decisión."
+        )
     else:
         correct = verdict == expected.get("expected_verdict")
         contradiction = (metrics.get("evidence_coherence") or {}).get("status") == "VERDICT_EVIDENCE_CONTRADICTION"
@@ -473,11 +553,18 @@ def build_order_diagnostic(dataset, order, rows, *, campaign_id, repetition, par
     order_id = str(order.get("order_id") or "")
     generated = collect_assertions(order)
     generation = _generation(dataset, order, generated)
-    matches = {item["assertion_id"]: item["case_id"] for item in generation["observations"]["matches"]}
-    assertions = [{"assertion_id": assertion_identifier(item, index),
-                   "text": str(item.get("text") or item.get("assertion") or ""),
-                   "expected_case_id": matches.get(assertion_identifier(item, index))}
-                  for index, item in enumerate(generated)]
+    observed_matches = {item["assertion_id"]: item for item in generation["observations"]["matches"]}
+    scorable_matches = {assertion_id: item["case_id"] for assertion_id, item in observed_matches.items()
+                        if item.get("status") != "INCOMPATIBLE"}
+    assertions = []
+    for index, item in enumerate(generated):
+        assertion_id = assertion_identifier(item, index)
+        match = observed_matches.get(assertion_id)
+        assertions.append({"assertion_id": assertion_id,
+                           "text": str(item.get("text") or item.get("assertion") or ""),
+                           "expected_case_id": scorable_matches.get(assertion_id),
+                           "candidate_case_id": match.get("case_id") if match else None,
+                           "match_status": match.get("status") if match else "UNMATCHED"})
     assertion_ids = {item["assertion_id"] for item in assertions}
     validations = []
     for row in rows:
@@ -489,9 +576,14 @@ def build_order_diagnostic(dataset, order, rows, *, campaign_id, repetition, par
         validator = {key: raw_validator.get(key) for key in
                      ("validator_type", "provider", "model", "config_version",
                       "temperature", "evidence_search_strategy")}
+        diagnostic_row = deepcopy(row)
+        provenance = diagnostic_row.setdefault("provenance", {})
+        provenance["scoring_eligible"] = bool(provenance.get("scoring_eligible", True) and
+                                                assertion_id in scorable_matches)
         validations.append({"run_id": row["run_id"], "assertion_id": assertion_id,
                             "validator_id": validator_id, "validator": validator,
-                            "stages": _validation_stages(row)})
+                            "evaluation_match": deepcopy(observed_matches.get(assertion_id)),
+                            "stages": _validation_stages(diagnostic_row)})
     snapshot = {"schema_version": "order-diagnostic-v1",
                 "identity": {"campaign_id": campaign_id, "dataset_id": dataset["id"],
                              "order_id": order_id, "repetition": repetition,

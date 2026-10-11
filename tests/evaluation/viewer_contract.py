@@ -12,6 +12,13 @@ STAGES = ("router", "evidence_search", "handoff", "llm", "citations", "consensus
 ASSESSMENTS = {"PASS", "FAIL", "PARTIAL", "NOT_EVALUATED", "SKIPPED"}
 EXECUTION_STATUSES = {"COMPLETED", "FAILED", "SKIPPED", "NOT_RECORDED"}
 ISSUE_TYPES = {"warning", "error"}
+ISSUE_ORIGINS = {"EXECUTION", "GENERATION", "ROUTER", "RETRIEVAL", "VALIDATOR", "CONSENSUS",
+                 "DATASET", "EVALUATOR"}
+ISSUE_NATURES = {"FUNCTIONAL_FAILURE", "TECHNICAL_FAILURE", "QUALITY_DEGRADATION",
+                 "POLICY_CONSTRAINT", "BENCHMARK_DEVIATION", "EVALUATION_UNCERTAINTY"}
+ISSUE_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
+ISSUE_IMPACTS = {"BLOCKED_EXECUTION", "CHANGED_VERDICT", "CAUSED_ABSTENTION",
+                 "NO_VERDICT_IMPACT", "METRICS_ONLY", "UNKNOWN"}
 VALIDATOR_FIELDS = {"validator_type", "provider", "model", "config_version",
                     "temperature", "evidence_search_strategy"}
 
@@ -62,6 +69,13 @@ def _stage(value, name):
             _fail(f"{name}.checks[{index}].detail must be text")
         if "type" in check and check["type"] not in ISSUE_TYPES:
             _fail(f"{name}.checks[{index}].type is invalid")
+        for field, allowed in (("origin", ISSUE_ORIGINS), ("nature", ISSUE_NATURES),
+                               ("severity", ISSUE_SEVERITIES), ("impact", ISSUE_IMPACTS)):
+            if field in check and check[field] not in allowed:
+                _fail(f"{name}.checks[{index}].{field} is invalid")
+        for field in ("root_cause_id", "recommended_action"):
+            if field in check:
+                _nonempty(check[field], f"{name}.checks[{index}].{field}")
 
 
 def _observation_refs(stage, document):

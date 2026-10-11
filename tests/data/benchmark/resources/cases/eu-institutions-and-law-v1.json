@@ -20,6 +20,7 @@
       "expected_verdict": "TRUE",
       "expected_topic_code": "POLITICS_GOVERNMENT",
       "expected_evidence_kind": "PUBLIC_STATEMENT",
+      "accepted_evidence_kinds": ["PUBLIC_STATEMENT", "STATISTICAL_DATA"],
       "required_terms": ["Unión Europea", "27", "países", "miembros"],
       "acceptable_domains": ["european-union.europa.eu"],
       "reference_sources": [
@@ -35,6 +36,7 @@
       "expected_verdict": "TRUE",
       "expected_topic_code": "POLITICS_GOVERNMENT",
       "expected_evidence_kind": "PUBLIC_STATEMENT",
+      "accepted_evidence_kinds": ["PUBLIC_STATEMENT", "STATISTICAL_DATA"],
       "required_terms": ["Parlamento Europeo", "720", "diputados", "2024"],
       "acceptable_domains": ["europarl.europa.eu"],
       "reference_sources": [

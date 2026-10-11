@@ -110,6 +110,35 @@ def test_publish_uses_shared_light_runner_and_imports_results(tmp_path, monkeypa
     assert artifact["provenance"]["parent_run_id"]
 
 
+def test_publish_terminal_failure_preserves_order_for_viewer(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    from evaluation.core.artifacts import BenchmarkError
+    import evaluation.core.cli as cli
+    dataset = case()
+    path = tmp_path / "case.json"
+    path.write_text(json.dumps(dataset))
+    client = Mock()
+    client.post.return_value = {"order_id": "failed-order"}
+    failed_order = {"order_id": "failed-order", "status": "ASSERTIONS_NOT_AVAILABLE",
+                    "text": dataset["news"], "assertions": [],
+                    "assertions_error": {"provider": "example", "error": "unavailable"}}
+    client.get.return_value = failed_order
+    wait = Mock(side_effect=BenchmarkError("terminal failure"))
+    monkeypatch.setattr(cli, "legacy_client", lambda *args: (client, wait))
+    output = tmp_path / "failed-published"
+
+    assert cli.main("pipeline", ["--dataset", str(path), "--publish", "--output", str(output)]) == 1
+
+    viewers = list(output.glob("*-viewer.json"))
+    orders = list(output.glob("*-order.json"))
+    assert len(viewers) == 1
+    assert len(orders) == 1
+    snapshot = json.loads(viewers[0].read_text())
+    assert snapshot["identity"]["order_id"] == "failed-order"
+    assert snapshot["order"]["status"] == "ASSERTIONS_NOT_AVAILABLE"
+    assert snapshot["order"]["generation"]["assessment"] == "FAIL"
+
+
 def test_existing_output_is_rejected_before_any_llm_call(tmp_path, monkeypatch):
     from unittest.mock import Mock
     import common.llm

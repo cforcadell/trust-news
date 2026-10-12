@@ -13,6 +13,20 @@ SPEC.loader.exec_module(benchmark)
 
 
 class LLMBenchmarkTests(unittest.TestCase):
+    def test_markdown_report_identifies_validator_type_and_strategy(self):
+        report = benchmark.markdown_report({
+            "batch_id": "batch", "status": "PASS", "started_at": "start", "finished_at": "end",
+            "case_id": "case", "profiles": [{
+                "profile_id": "profile", "runs": 1, "passed": 1,
+                "quality_score_mean": 100, "verdict_accuracy_mean": 1,
+                "sample_cost_usd_mean": 0.1, "normalized_5_assertions_cost_usd_mean": 0.2,
+                "duration_seconds_mean": 1,
+                "validators": [{"validator_id": "rag-local", "validator_type": "RAG_EVIDENCE_VALIDATION",
+                                "strategy": "LOCAL", "provider": "openrouter", "model": "vendor/model"}],
+            }],
+        })
+        self.assertIn("| profile | rag-local | RAG_EVIDENCE_VALIDATION | LOCAL — RAG con dominios de Source Router | openrouter/vendor/model |", report)
+
     def test_clear_evidence_cache_uses_delete_and_returns_audit_data(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps({
@@ -217,6 +231,10 @@ class LLMBenchmarkTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in profiles], ["premium-safe", "budget-safe"])
         self.assertEqual(profiles[0]["validators"][0]["selector"], {"id": "validator-1"})
         self.assertEqual(profiles[0]["validators"][0]["temperature"], 0.2)
+        self.assertEqual(profiles[0]["generation"]["validator_catalog"], [{
+            "validator_id": "validator-1", "validator_type": "LLM_MEMORY_VALIDATION",
+            "strategy": "NOT_RECORDED",
+        }])
         self.assertEqual(discarded[0]["reason"], "duplicate_configuration")
         self.assertEqual(discarded[0]["duplicate_of"], "premium-safe")
         self.assertTrue(all(

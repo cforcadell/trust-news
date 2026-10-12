@@ -104,6 +104,8 @@ def test_static_navigation_uses_paginated_table_views():
     assert 'campaignView: "summary"' in script
     assert "renderOrderSummary" in script
     assert "Aserciones × validadores" in script
+    assert "Tipo / estrategia" in script
+    assert "validatorKindLabel" in script
     assert 'campaigns: {key: "date", direction: "desc"}' in script
 
 

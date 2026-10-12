@@ -113,6 +113,10 @@ function strategyLabel(strategy) {
   return ({LOCAL: "RAG con dominios de Source Router", EXT_ONLY_OFFICIAL: "RAG con fuentes oficiales externas",
     EXT_OFFICIAL_FIRST: "RAG externo, fuentes oficiales primero"})[strategy] || strategy || "Estrategia no registrada";
 }
+function validatorKindLabel(metadata = {}) {
+  const type = metadata.validator_type || "Tipo no registrado";
+  return `${type} · ${strategyLabel(metadata.evidence_search_strategy)}`;
+}
 function stagePresentation(stage, stageKey) {
   if (!stage) return {execution: "SIN VALIDADOR", result: "—", tone: "SKIPPED"};
   if (stage.execution_status === "SKIPPED") {
@@ -650,7 +654,8 @@ function renderOrderSummary(diagnostic) {
     validators.forEach((validator, index) => {
       const cell = el("th", "validator-matrix-head", validatorAlias(index));
       cell.title = validator.validator_id;
-      add(cell, el("small", "mono", validator.validator_id)); add(head, cell);
+      add(cell, el("small", "mono", validator.validator_id),
+        el("small", "validator-kind", validatorKindLabel(validator.metadata))); add(head, cell);
     });
     add(head, el("th", "", "Cobertura"));
     for (const assertion of summary.assertions) {
@@ -687,13 +692,13 @@ function renderOrderSummary(diagnostic) {
   if (!validators.length) add(validatorCard, el("p", "muted", "No hay validadores observados en esta orden."));
   else {
     const wrap = el("div", "table-wrap"), table = el("table"), head = el("tr"), body = el("tbody");
-    for (const label of ["Validador", "Asignaciones", "Decisivas", "Acordes", "Abstenciones", "Contradicciones", "Incidencias", "Errores", "Salud"])
+    for (const label of ["Validador", "Tipo / estrategia", "Asignaciones", "Decisivas", "Acordes", "Abstenciones", "Contradicciones", "Incidencias", "Errores", "Salud"])
       add(head, el("th", "", label));
     validators.forEach((validator, index) => {
       const [label, tone] = healthPresentation(validator.health);
       const identity = add(el("td", "validator-identity"), el("strong", "", validatorAlias(index)),
         el("small", "mono", validator.validator_id));
-      add(body, add(el("tr"), identity, el("td", "", validator.assigned_assertions),
+      add(body, add(el("tr"), identity, el("td", "validator-kind", validatorKindLabel(validator.metadata)), el("td", "", validator.assigned_assertions),
         el("td", "", validator.decisive), el("td", "", validator.expected_matches),
         el("td", "", validator.abstentions), el("td", "", validator.contradictions),
         el("td", "", validator.stage_issues), el("td", "", validator.errors),
@@ -809,7 +814,7 @@ function renderDetail() {
     const llm = validation.stages.llm.observations || {};
     const summary = validatorSummary(validation.validator_id);
     add(node,
-      el("small", "validator-kind", `${metadata.validator_type || "Tipo no registrado"} · ${strategyLabel(metadata.evidence_search_strategy)}`),
+      el("small", "validator-kind", validatorKindLabel(metadata)),
       el("small", "", `${metadata.provider || llm.provider || "Proveedor no registrado"} / ${metadata.model || llm.model || "Modelo no registrado"}`),
       el("small", "validator-summary", `${summary.total} validaciones · ${summary.correct} acordes · ${summary.incorrect} no acordes · ${summary.abstentions} abstenciones · ${summary.citationFailures} fallos de cita · ${summary.technicalErrors} errores técnicos`),
       el("small", "", `Run ${validation.run_id}`)); add(selector, node);

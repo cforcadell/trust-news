@@ -44,9 +44,9 @@ Technical errors return exit code 1. A completed run with incorrect verdicts ret
 
 ## Progress logs
 
-Both evaluation runners emit line-oriented, secret-free progress records prefixed with `EVALUATION_TRACE`, mirroring the historical benchmark’s trace style. Each record starts with `phase=...` and may include only identifiers, execution mode, cache mode, counts, durations, statuses, verdicts, and exception types. It never includes prompts, evidence text, credentials, provider request bodies, or exception bodies.
+Both evaluation runners emit line-oriented, secret-free progress records prefixed with `EVALUATION_TRACE`, mirroring the historical benchmark’s trace style. Each record starts with `phase=...` and may include identifiers, execution mode, cache mode, counts, durations, statuses, verdicts, exception types, stable diagnostic codes, and sanitized failure reasons. It never includes prompts, evidence text, credentials, provider request bodies, or raw exception bodies.
 
-Direct execution emits `campaign.prepared`, `run.start`, Router/Retrieval stage start and completion (or injected/skipped state), `validator_input.prepared`, validation and grounding phases, `run.persisted`, metrics, root-cause, report, and `campaign.complete`. `--publish` additionally emits repetition, order publishing, polling, terminal-order, and order-import phases. Failures emit `run.failed`, `repetition.failed`, or `campaign.failed` with a stage and exception type.
+Direct execution emits `campaign.prepared`, `run.start`, Router/Retrieval stage start and completion (or injected/skipped state), `validator_input.prepared`, validation and grounding phases, `run.persisted`, metrics, root-cause, report, and `campaign.complete`. `--publish` additionally emits repetition, order publishing, polling, terminal-order, and order-import phases. Failures emit `run.failed`, `repetition.failed`, or `campaign.failed` with a stage, diagnostic code, exception type, and actionable sanitized reason. Authentication, publication, polling timeout, and terminal-order failures are distinguished. The same detail is retained in `manifest.json`, each affected run artifact, and the grouped `execution_failures` section of `report.json` and `report.md`, so one failed order is shown once even when it affects several cases.
 
 ## Direct evaluation examples
 

@@ -27,7 +27,8 @@ from typing import Any, Callable
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests"))
-from evaluation.core.artifacts import EvaluationError, canonical_json, sha256_text, read_json, write_json
+from evaluation.core.artifacts import (EvaluationError, canonical_json, order_failure_details,
+                                       safe_error_text, sha256_text, read_json, write_json)
 from evaluation.core.datasets import validate_case
 from evaluation.core.common_metrics import (
     normalize_verdict, collect_assertions, normalized_words, assertion_identifier,
@@ -66,7 +67,7 @@ def trace(phase: str, **fields: Any) -> None:
     for key, value in fields.items():
         if value is None:
             continue
-        text = str(value).replace("\n", " ").replace("\r", " ").strip()
+        text = safe_error_text(value)
         parts.append(f"{key}={text or '-'}")
     print("LLM_BENCHMARK_TRACE " + " ".join(parts), flush=True)
 
@@ -832,7 +833,20 @@ def comparison(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str,
     }
 
 
-def profile_summary(profile_id: str, runs: list[dict[str, Any]]) -> dict[str, Any]:
+def profile_summary(
+    profile_id: str, runs: list[dict[str, Any]], snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved = (runs[0].get("resolved_profile") or {}).get("validators") if runs else {}
+    validators = []
+    for validator_id, config in sorted((resolved or {}).items()):
+        metadata = ((snapshot or {}).get("validators") or {}).get(validator_id) or {}
+        validators.append({
+            "validator_id": validator_id,
+            "validator_type": metadata.get("validator_type") or "NOT_RECORDED",
+            "strategy": metadata.get("strategy") or "NOT_RECORDED",
+            "provider": config.get("provider") or metadata.get("provider") or "NOT_RECORDED",
+            "model": config.get("model") or metadata.get("model") or "NOT_RECORDED",
+        })
     return {
         "profile_id": profile_id,
         "runs": len(runs),
@@ -846,7 +860,17 @@ def profile_summary(profile_id: str, runs: list[dict[str, Any]]) -> dict[str, An
             (run.get("costs") or {}).get("normalized_5_assertions_total_usd") for run in runs
         ]),
         "duration_seconds_mean": mean([run.get("duration_seconds") for run in runs]),
+        "validators": validators,
     }
+
+
+def evidence_strategy_label(value: Any) -> str:
+    strategy = str(value or "NOT_RECORDED").upper()
+    return {
+        "LOCAL": "LOCAL — RAG con dominios de Source Router",
+        "EXT_ONLY_OFFICIAL": "EXT_ONLY_OFFICIAL — RAG con fuentes oficiales externas",
+        "EXT_OFFICIAL_FIRST": "EXT_OFFICIAL_FIRST — RAG externo, fuentes oficiales primero",
+    }.get(strategy, strategy)
 
 
 def markdown_report(summary: dict[str, Any]) -> str:
@@ -871,6 +895,24 @@ def markdown_report(summary: dict[str, Any]) -> str:
             f"{show(item['normalized_5_assertions_cost_usd_mean'])} | "
             f"{show(item['duration_seconds_mean'], 2)} |"
         )
+    validator_rows = [
+        (item["profile_id"], validator)
+        for item in summary["profiles"] for validator in item.get("validators") or []
+    ]
+    if validator_rows:
+        lines.extend([
+            "",
+            "## Configuración de validadores",
+            "",
+            "| Perfil | Validador | Tipo | Estrategia de evidencia | Modelo |",
+            "|---|---|---|---|---|",
+        ])
+        for profile_id, validator in validator_rows:
+            lines.append(
+                f"| {profile_id} | {validator['validator_id']} | {validator['validator_type']} | "
+                f"{evidence_strategy_label(validator['strategy'])} | "
+                f"{validator['provider']}/{validator['model']} |"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -1012,6 +1054,14 @@ def generated_profiles(
             })
             continue
         fingerprints[fingerprint] = profile_id
+        validator_catalog = [
+            {
+                "validator_id": validator_id,
+                "validator_type": config.get("validator_type") or "NOT_RECORDED",
+                "strategy": config.get("strategy") or "NOT_RECORDED",
+            }
+            for validator_id, config in sorted((snapshot.get("validators") or {}).items())
+        ]
         profiles.append({
             "schema_version": 1,
             "id": profile_id,
@@ -1027,6 +1077,7 @@ def generated_profiles(
                 "requested_max_news_cost_usd": requested_max_usd,
                 "effective_max_news_cost_usd": effective_max_usd,
                 "configuration_sha256": fingerprint,
+                "validator_catalog": validator_catalog,
             },
         })
     if not profiles:
@@ -1254,15 +1305,18 @@ def run_benchmark(args: argparse.Namespace) -> int:
                             "status": "RUNNING",
                             "resolved_profile": resolved,
                         }
+                        operation_stage = "ORDER_PUBLISH"
                         try:
                             trace("repetition.start", run_id=run_id, profile_id=profile["id"], repetition=repetition)
                             if args.clear_evidence_cache:
+                                operation_stage = "EVIDENCE_CACHE_CLEAR"
                                 trace("evidence_cache.clear.start", run_id=run_id)
                                 run["evidence_cache_clear"] = clear_evidence_cache(
                                     args.evidence_search_url, verify_tls, args.http_timeout,
                                 )
                                 trace("evidence_cache.clear.complete", run_id=run_id, deleted_count=run["evidence_cache_clear"].get("deleted_count"))
                                 monotonic_start = time.monotonic()
+                            operation_stage = "ORDER_PUBLISH"
                             trace("order.publish.start", run_id=run_id)
                             from evaluation.core.order_execution import publish_and_wait
                             def published_order(order_id):
@@ -1280,6 +1334,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                             )
                             order_id = run["order_id"]
                             trace("order.terminal", run_id=run_id, order_id=order_id, status=order.get("status"))
+                            operation_stage = "SCORING"
                             write_json(run_dir / "order.json", order)
                             from evaluation.core.orders import results_from_order
                             for evaluation_result in results_from_order(case, order, run_id):
@@ -1296,8 +1351,20 @@ def run_benchmark(args: argparse.Namespace) -> int:
                             write_json(run_dir / "score.json", score)
                             write_json(run_dir / "costs.json", costs)
                         except Exception as exc:
-                            trace("repetition.failed", run_id=run_id, error=type(exc).__name__)
-                            run.update({"status": "FAIL", "error": str(exc)})
+                            if operation_stage in {"EVIDENCE_CACHE_CLEAR", "SCORING"}:
+                                failure = {
+                                    "stage": operation_stage, "code": "TECHNICAL_ERROR",
+                                    "diagnostic_code": f"{operation_stage}_ERROR",
+                                    "exception_type": type(exc).__name__,
+                                    "reason": safe_error_text(exc),
+                                }
+                            else:
+                                failure = order_failure_details(
+                                    exc, run.get("order_id"), timeout_seconds=args.result_timeout)
+                            trace("repetition.failed", run_id=run_id,
+                                  order_id=run.get("order_id"), **failure)
+                            run.update({"status": "FAIL", "error": failure["reason"],
+                                        "failure": failure})
                         run["finished_at"] = utc_now()
                         run["duration_seconds"] = round(time.monotonic() - monotonic_start, 6)
                         write_json(run_dir / "run.json", run)
@@ -1324,15 +1391,18 @@ def run_benchmark(args: argparse.Namespace) -> int:
             batch_status = "PASS" if all_runs and all(run["status"] == "PASS" for run in all_runs) else "FAIL"
             trace("batch.complete", batch_id=batch_id, status=batch_status, runs=len(all_runs))
     except Exception as exc:
-        manifest["runner_error"] = str(exc)
-        trace("batch.failed", batch_id=batch_id, error=type(exc).__name__)
-        print(f"LLM_BENCHMARK_ERROR {exc}", file=sys.stderr)
+        manifest["runner_error"] = safe_error_text(exc)
+        trace("batch.failed", batch_id=batch_id, exception_type=type(exc).__name__,
+              reason=manifest["runner_error"])
+        print(f"LLM_BENCHMARK_ERROR {manifest['runner_error']}", file=sys.stderr)
     finally:
         if initial_snapshot and restore_errors:
             manifest["restore_errors"] = restore_errors
         finished_at = utc_now()
         summaries = [
-            profile_summary(profile_id, [run for run in all_runs if run["profile_id"] == profile_id])
+            profile_summary(
+                profile_id, [run for run in all_runs if run["profile_id"] == profile_id], initial_snapshot,
+            )
             for profile_id in profile_ids
         ]
         summary = {
@@ -1493,5 +1563,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except BenchmarkError as exc:
-        print(f"LLM_BENCHMARK_ERROR {exc}", file=sys.stderr)
+        print(f"LLM_BENCHMARK_ERROR {safe_error_text(exc)}", file=sys.stderr)
         raise SystemExit(2)

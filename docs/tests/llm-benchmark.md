@@ -44,7 +44,7 @@ python3 tests/llm-benchmark/llm-benchmark.py generate-profiles \
   --max-news-cost-usd 0.25 --budget-headroom-percent 10
 ```
 
-The default 5% headroom means a `0.25` cap accepts estimates up to `0.2375`. Plans are written below `tests/data/benchmark/artifacts/generated/<plan-id>/` and include pricing, effective configuration, hashes, and deduplicated profiles.
+The default 5% headroom means a `0.25` cap accepts estimates up to `0.2375`. Plans are written below `tests/data/benchmark/artifacts/generated/<plan-id>/` and include pricing, effective configuration, hashes, deduplicated profiles, and a `generation.validator_catalog` with the type and evidence strategy of every selected validator (for example, `RAG_EVIDENCE_VALIDATION` + `LOCAL`).
 
 | Flag | Meaning and accepted values |
 |---|---|

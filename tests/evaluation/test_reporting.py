@@ -123,7 +123,8 @@ def test_publish_terminal_failure_preserves_order_for_viewer(tmp_path, monkeypat
                     "text": dataset["news"], "assertions": [],
                     "assertions_error": {"provider": "example", "error": "unavailable"}}
     client.get.return_value = failed_order
-    wait = Mock(side_effect=BenchmarkError("terminal failure"))
+    wait = Mock(side_effect=BenchmarkError(
+        "La orden failed-order terminó en ASSERTIONS_NOT_AVAILABLE"))
     monkeypatch.setattr(cli, "legacy_client", lambda *args: (client, wait))
     output = tmp_path / "failed-published"
 
@@ -137,6 +138,82 @@ def test_publish_terminal_failure_preserves_order_for_viewer(tmp_path, monkeypat
     assert snapshot["identity"]["order_id"] == "failed-order"
     assert snapshot["order"]["status"] == "ASSERTIONS_NOT_AVAILABLE"
     assert snapshot["order"]["generation"]["assessment"] == "FAIL"
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert manifest["failures"][0]["diagnostic_code"] == "ORDER_TERMINAL_FAILURE"
+    artifact = json.loads(next(path for path in output.glob("*.json") if path.stem in manifest["runs"]).read_text())
+    assert artifact["errors"][0]["reason"] == "La orden failed-order terminó en ASSERTIONS_NOT_AVAILABLE"
+
+
+def test_publish_authentication_failure_is_explicit_and_grouped(tmp_path, monkeypatch, capsys):
+    from unittest.mock import Mock
+    from evaluation.core.artifacts import BenchmarkError
+    import evaluation.core.cli as cli
+    dataset = case()
+    second = json.loads(json.dumps(dataset["assertions"][0]))
+    second["id"] = "case-2"
+    second["text"] = "Segunda afirmación del mismo pedido."
+    dataset["assertions"].append(second)
+    path = tmp_path / "case.json"
+    path.write_text(json.dumps(dataset))
+    client = Mock()
+    client.post.side_effect = BenchmarkError(
+        "No se pudo obtener token de Keycloak: <urlopen error [Errno 111] Connection refused>")
+    monkeypatch.setattr(cli, "legacy_client", lambda *args: (client, Mock()))
+    output = tmp_path / "auth-failure"
+
+    assert cli.main("pipeline", ["--dataset", str(path), "--publish", "--output", str(output)]) == 1
+
+    traces = capsys.readouterr().out
+    assert "phase=repetition.failed" in traces
+    assert "stage=AUTHENTICATION" in traces
+    assert "diagnostic_code=AUTHENTICATION_ERROR" in traces
+    assert "Connection refused" in traces
+    assert "phase=order.snapshot.skipped" in traces
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert manifest["failures"][0]["order_id"] is None
+    assert manifest["failures"][0]["diagnostic_code"] == "AUTHENTICATION_ERROR"
+    report = json.loads((output / "report.json").read_text())
+    assert len(report["execution_failures"]) == 1
+    assert report["execution_failures"][0]["affected_cases"] == [
+        dataset["assertions"][0]["id"], "case-2"]
+
+
+def test_publish_timeout_records_limit_and_last_status(tmp_path, monkeypatch, capsys):
+    from unittest.mock import Mock
+    from evaluation.core.artifacts import BenchmarkError
+    import evaluation.core.cli as cli
+    dataset = case()
+    path = tmp_path / "case.json"
+    path.write_text(json.dumps(dataset))
+    client = Mock()
+    client.post.return_value = {"order_id": "slow-order"}
+    client.get.return_value = {"order_id": "slow-order", "status": "PROCESSING", "assertions": []}
+    wait = Mock(side_effect=BenchmarkError(
+        "Timeout esperando la orden slow-order; último estado: PROCESSING"))
+    monkeypatch.setattr(cli, "legacy_client", lambda *args: (client, wait))
+    output = tmp_path / "timeout"
+
+    assert cli.main("pipeline", ["--dataset", str(path), "--publish", "--result-timeout", "120",
+                                 "--output", str(output)]) == 1
+
+    traces = capsys.readouterr().out
+    assert "diagnostic_code=ORDER_TIMEOUT" in traces
+    assert "último estado: PROCESSING" in traces
+    manifest = json.loads((output / "manifest.json").read_text())
+    failure = manifest["failures"][0]
+    assert failure["stage"] == "ORDER_POLL"
+    assert failure["timeout_seconds"] == 120.0
+    assert failure["order_id"] == "slow-order"
+    assert list(output.glob("*-order.json"))
+
+
+def test_error_diagnostics_redact_credentials():
+    from evaluation.core.artifacts import safe_error_text
+
+    value = safe_error_text("connection failed password=hunter2 Authorization: Bearer abc.def.ghi")
+    assert "hunter2" not in value
+    assert "Bearer abc" not in value
+    assert "[REDACTED]" in value
 
 
 def test_existing_output_is_rejected_before_any_llm_call(tmp_path, monkeypatch):

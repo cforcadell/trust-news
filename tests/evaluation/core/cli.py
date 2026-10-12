@@ -8,7 +8,8 @@ import subprocess
 import uuid
 
 from evaluation import ROOT
-from .artifacts import EvaluationError, read_json, canonical_json, sha256_text, write_json
+from .artifacts import (EvaluationError, read_json, canonical_json, order_failure_details,
+                        safe_error_text, sha256_text, write_json)
 from .datasets import load_datasets
 from .execution import execute, validator_config
 from .evidence import replay_bundle
@@ -30,7 +31,7 @@ def trace(phase, **fields):
     for key, value in fields.items():
         if value is None:
             continue
-        value = str(value).replace("\n", " ").replace("\r", " ").strip()
+        value = safe_error_text(value)
         parts.append(f"{key}={value or '-'}")
     print("EVALUATION_TRACE " + " ".join(parts), flush=True)
 
@@ -121,7 +122,8 @@ def main(kind, argv=None):
         manifest = {"schema_version": "evaluation-manifest-v1", "status": "RUNNING", "git_commit": commit,
                     "git_dirty": bool(dirty), "created_at": datetime.now(timezone.utc).isoformat(),
                     "datasets": [{"id": d["id"], "sha256": sha256_text(canonical_json(d))} for d in datasets],
-                    "validators": configs, "prompt_template_hash": sha256_text(template), "runs": [], "tags": args.tag}
+                    "validators": configs, "prompt_template_hash": sha256_text(template), "runs": [],
+                    "failures": [], "tags": args.tag}
         write_json(output / "manifest.json", manifest)
         trace("campaign.prepared", kind=kind, mode=MODES[args.mode],
               datasets=len(datasets), assertions=sum(len(d["assertions"]) for d in datasets),
@@ -164,8 +166,16 @@ def main(kind, argv=None):
                         imported = results_from_order(dataset, order, parent_id)
                         trace("order.import.complete", parent_run_id=parent_id, results=len(imported))
                     except Exception as exc:
-                        trace("repetition.failed", parent_run_id=parent_id, stage="ORDER_EXECUTION",
-                              exception_type=type(exc).__name__)
+                        failure_detail = order_failure_details(
+                            exc, published.get("order_id"), timeout_seconds=args.result_timeout)
+                        trace("repetition.failed", parent_run_id=parent_id,
+                              order_id=published.get("order_id"), **failure_detail)
+                        manifest["failures"].append({
+                            "parent_run_id": parent_id, "dataset_id": dataset["id"],
+                            "repetition": repetition, "order_id": published.get("order_id"),
+                            **failure_detail,
+                        })
+                        write_json(output / "manifest.json", manifest)
                         # A terminal failure is still a valuable order snapshot for the
                         # viewer.  Polling raises before returning it, so fetch the saved
                         # terminal document once without masking the original failure.
@@ -175,13 +185,20 @@ def main(kind, argv=None):
                                 if isinstance(failed_order, dict):
                                     order = failed_order
                                     write_json(output / (parent_id + "-order.json"), order)
-                            except Exception:
-                                pass
+                                    trace("order.snapshot.saved", parent_run_id=parent_id,
+                                          order_id=published["order_id"], status=order.get("status"))
+                            except Exception as snapshot_exc:
+                                snapshot_error = order_failure_details(snapshot_exc, published.get("order_id"))
+                                trace("order.snapshot.failed", parent_run_id=parent_id,
+                                      order_id=published.get("order_id"), **snapshot_error)
+                        elif not published.get("order_id"):
+                            trace("order.snapshot.skipped", parent_run_id=parent_id,
+                                  reason="La publicación no devolvió order_id")
                         imported = []
                         for expected in dataset["assertions"]:
                             failure = CaseResult(expected["id"], "FULL_PIPELINE", {"text": expected.get("text", "")}, expected,
                                 dataset_id=dataset["id"], order_id=published.get("order_id"))
-                            failure.errors = [{"stage": "ORDER_EXECUTION", "code": "TECHNICAL_ERROR", "exception_type": type(exc).__name__}]
+                            failure.errors = [failure_detail.copy()]
                             failure.provenance = {"parent_run_id": parent_id, "origin": "persisted_order"}
                             imported.append(failure)
                     for result in imported:
@@ -250,5 +267,6 @@ def main(kind, argv=None):
         return 1 if any(row["errors"] for row in rows) else 0
     except (EvaluationError, ValueError, OSError) as exc:
         # Known local configuration errors contain no provider request/response data.
-        trace("campaign.failed", kind=kind, exception_type=type(exc).__name__)
-        p.error(str(exc))
+        trace("campaign.failed", kind=kind, exception_type=type(exc).__name__,
+              reason=safe_error_text(exc))
+        p.error(safe_error_text(exc))

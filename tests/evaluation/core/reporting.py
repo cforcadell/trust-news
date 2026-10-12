@@ -91,10 +91,26 @@ def pipeline_report(rows):
     observation_causes = Counter(row.get("root_cause", {}).get("code") for row in observation_only
                                  if row.get("root_cause", {}).get("code"))
     observed_causes = causes + observation_causes
+    grouped_failures = {}
+    for row in all_rows:
+        parent_run_id = row.get("provenance", {}).get("parent_run_id")
+        for error in row.get("errors") or []:
+            key = (parent_run_id, row.get("order_id"), error.get("stage"), error.get("diagnostic_code"),
+                   error.get("exception_type"), error.get("reason"), error.get("status_code"))
+            item = grouped_failures.setdefault(key, {
+                "parent_run_id": parent_run_id, "order_id": row.get("order_id"),
+                **{name: error.get(name) for name in
+                   ("stage", "code", "diagnostic_code", "exception_type", "reason", "status_code", "timeout_seconds")
+                   if error.get(name) is not None},
+                "affected_cases": [],
+            })
+            if row.get("case_id") not in item["affected_cases"]:
+                item["affected_cases"].append(row.get("case_id"))
     return {"report": "pipeline-evaluation", "total_cases": len(groups), "executions": len(all_rows),
             "scored_executions": len(rows), "observation_only_executions": len(observation_only),
             "end_to_end_correct": correct, "end_to_end_incorrect": incorrect, "not_evaluated": not_evaluated,
             "root_causes": dict(observed_causes), "observation_only_root_causes": dict(observation_causes),
+            "execution_failures": list(grouped_failures.values()),
             "failures": {name: sum(n for code, n in observed_causes.items() if code.startswith(prefix)) for name, prefix in (
                 ("extraction", "EXTRACTION_"), ("routing", "ROUTER_"), ("retrieval", "RETRIEVAL_"),
                 ("handoff", "HANDOFF_"), ("validator", "LLM_"), ("grounding", "GROUNDING_"),
@@ -112,6 +128,15 @@ def persist(directory: Path, rows: list[dict], kind: str, manifest: dict, *, ini
     write_json(directory / "report.json", report)
     lines = ["# " + report["report"], "", "```json", __import__("json").dumps(report, ensure_ascii=False, indent=2), "```", ""]
     if kind == "pipeline":
+        if report.get("execution_failures"):
+            lines += ["## Execution failures", "",
+                      "| Stage | Diagnostic | Order | Affected cases | Reason |",
+                      "|---|---|---|---|---|"]
+            for failure in report["execution_failures"]:
+                cells = [failure.get("stage"), failure.get("diagnostic_code"), failure.get("order_id"),
+                         ", ".join(failure.get("affected_cases") or []), failure.get("reason")]
+                lines.append("| " + " | ".join(str(c if c is not None else "—").replace("|", "\\|").replace("\n", " ") for c in cells) + " |")
+            lines += [""]
         lines += ["| Case | Scope | Mode | Validator | Expected | Verdict | Routing | Retrieval | Handoff | Grounding | Root cause |",
                   "|---|---|---|---|---|---|---|---|---|---|---|"]
         for row in rows:

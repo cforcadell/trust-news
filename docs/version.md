@@ -1,6 +1,6 @@
 # v0.0.13 — Iterative functional stabilization
 
-**In progress. Revision: 2026-09-29 (`d051f18`).** LIGHT and BLOCKCHAIN complete the local basic route; BLOCKCHAIN records the CID, creates the post and receives on-chain validations after the contract and IPFS fixes (ISSUE-023). Validator configuration, benchmark runners and offline campaign analysis have advanced since the previous review. Security defects, factual quality, presentation and reproducible operation remain open. **The version does not yet prove stable factual verification.** The inventory and closure criteria are in [issues.md](issues.md).
+**In progress. Review: 2026-10-15, `HEAD b9003cf` plus uncommitted benchmark work.** LIGHT and BLOCKCHAIN complete the local basic route; BLOCKCHAIN records the CID, creates the post and receives on-chain validations after the contract and IPFS fixes (ISSUE-023). Since the previous review, dates, terminal presentation, validator-cache safety, summary rendering and regression diagnostics were fixed locally, and the evaluation runner/viewer gained richer traces and summaries. The working tree also prepares `Official Gold v0`, but it is not committed or independently approved. Security defects, factual quality, presentation and reproducible target operation remain open. **The version does not yet prove stable factual verification.** The inventory and closure criteria are in [issues.md](issues.md).
 
 Released versions: [releases.md](releases.md). Later evolution: [next_releases.md](next_releases.md). Incremental execution plan: [working.md](working.md).
 
@@ -60,9 +60,9 @@ ISSUE-001 is locally implemented as of 2026-10-06: empty, malformed or failed ne
 - A source on another domain is currently labelled `INDEPENDENT`; this does not detect copies or two outlets repeating the same underlying report (021).
 - `document_type` remains `UNKNOWN`, and the retriever does not provide auditable PDF page/fragment extraction for the primary report in the original regression case (021).
 - Canonical citation identity proves that a model cited a delivered context; it does not prove that the context supports the claim or is independent (017, 021).
-- The benchmark and offline `--analyze` runner now record stages, verdicts, errors and cited contexts. The two current v1 case files contain seven synthetic assertions and lack reviewed acceptable domains and reference sources; they cannot certify factual quality or routing correctness (017).
+- The benchmark, viewer and offline `--analyze` runner now record stages, verdicts, errors, cited contexts and campaign summaries. The working tree replaces the active legacy fixtures with `Official Gold v0`: twelve atomic cases, balanced as six `TRUE` and six `FALSE`, paired against six official primary sources. The files pass structural validation, but every source remains `CANDIDATE_PENDING_INDEPENDENT_HUMAN_APPROVAL`; they are diagnostic inputs, not acceptance evidence (017).
 
-Complete PDF recovery, provenance/copy classification and the rule for claims attributed to a primary document before treating secondary evidence as decisive. Keep order `355f6090-cec0-4ed3-a29a-46763fe66cc6` as regression evidence: the submitted news cannot be its own decisive corroboration. Then validate route taxonomy and cache behavior on the deployed system. Add reviewed TRUE/FALSE/UNKNOWN cases with sources and pre-agreed thresholds before claiming benchmark quality.
+Complete PDF recovery, provenance/copy classification and the rule for claims attributed to a primary document before treating secondary evidence as decisive. Keep order `355f6090-cec0-4ed3-a29a-46763fe66cc6` as regression evidence: the submitted news cannot be its own decisive corroboration. Then validate route taxonomy and cache behavior on the deployed system. Independently approve and freeze the twelve `Official Gold v0` cases before executing acceptance campaigns; define thresholds and add a separate abstention/`UNKNOWN` set before claiming benchmark quality.
 
 ### Iteration 13.5 — Convergence and demo tests
 
@@ -72,9 +72,9 @@ Current order, revisable with new evidence:
 
 | Order | Result sought | Main issues |
 | --- | --- | --- |
-| 1 | Remove deterministic GUI failures | 014, 005, 006 |
-| 2 | Make regression reproducible and restore validator-cache safety | 016, 001 |
-| 3 | Establish independent primary evidence and representative quality measures | 021, 017 |
+| 1 | Remove plaintext operational credentials and verify their invalidation | 024 |
+| 2 | Deploy and validate the locally fixed GUI/cache/regression defects | 014, 005, 006, 016, 001 |
+| 3 | Approve the initial gold set, then establish independent primary evidence and quality measures | 017, 021 |
 | 4 | Complete error/polling matrix in both modes | 008, 019 |
 | 5 | Deploy and accredit implemented work in Hetzner | 007, 011, 012, 013, 015, 018, 022, 023 |
 | 6 | Accredit mobile usability and full consecutive demos | 020 and all v0.0.13 blockers |
@@ -83,11 +83,13 @@ For 003/004, record the owner, risk, mitigation and v0.0.16 destination in the e
 
 ## Cumulative baseline
 
-The last recorded broad local baseline on 2026-09-08 was **199 passing Python tests**, excluding six historical external integrations. Targeted routing tests and configuration syntax were checked. This attests local code behavior, not factual quality or deployment. There is no newer documented clean full-suite baseline.
+The historical broad local baseline on 2026-09-08 was **199 passing Python tests**, excluding six external integrations. It has been superseded by the reproducible regression below; neither baseline attests factual quality or target deployment.
 
 The smokes of September 4–5 completed LIGHT (23/23) and a BLOCKCHAIN repeat (26/26). There was no complete joint execution in green. The inspection found mobile overflow, counters and inconsistent dates. Subsequent insulation corrections, JWT and links are deployed; consensus, grounding and Source Router require completion of their end-to-end checks according to `issues.md`.
 
-On 2026-10-06, `tests/run-local-regression.sh` created a disposable environment from pinned dependencies, passed `pip check`, and completed **284 API tests plus 42 frontend unit tests**, including the concurrent validator-cache safety matrix for ISSUE-001. This supersedes the incomplete 2026-09-19 environment that lacked `hexbytes`. The browser runner now fails on horizontal overflow, rejects missing credentials before browser startup and preserves HTTP/loading/console diagnostics after early failures, but strict LIGHT and BLOCKCHAIN runs against the same deployed revision are still required to close ISSUE-016.
+On 2026-10-06, `tests/run-local-regression.sh` created a disposable environment from pinned dependencies, passed `pip check`, and completed **284 API tests plus 42 frontend unit tests**, including the concurrent validator-cache safety matrix for ISSUE-001. The same result was reproduced on 2026-10-15 against `b9003cf` plus the current working tree: `pip check` clean, **284 API tests and 42 frontend unit tests passing**. This supersedes the incomplete 2026-09-19 environment that lacked `hexbytes`. The browser runner now fails on horizontal overflow, rejects missing credentials before browser startup and preserves HTTP/loading/console diagnostics after early failures, but strict LIGHT and BLOCKCHAIN runs against the same deployed revision are still required to close ISSUE-016.
+
+On 2026-10-15, the uncommitted `Official Gold v0` directory validated as **12 datasets / 12 assertions**. The evaluation, viewer and LLM-benchmark selection passed **100 focused tests**; 99 passed inside the restricted sandbox and the single local-HTTP server test passed when repeated with loopback socket access. This verifies structure and runner behavior only; it is not a provider campaign or a factual-quality result.
 
 A local three-repetition `eu-official-statistics-2025-v1` evaluation on 2026-09-29 saved 27 validator results and five upstream HTTP 429 errors. Its recovered pipeline report counts 2 of 9 assertion/repetition units as end-to-end correct under the strict rule that any validator error or extraction failure fails the unit. The case has three synthetic assertions with no reviewed acceptable domains or reference sources; this result diagnoses the runner and current configuration, not population factual accuracy. The local artifacts remain under `tests/data/evaluation/artifacts/` and need durable retention before serving as release evidence.
 
@@ -97,6 +99,8 @@ Limitations of accumulated evidence:
 - effective external integrations and proveedor/modelo without full baseline;
 - temporary original artifacts, not persistent file;
 - no previous PASS alone provides factual correction;
+- `Official Gold v0` is uncommitted and still awaiting independent human approval;
+- the ignored local helper `launch_e2e.sh` contains a plaintext OIDC client credential pending removal and invalidation review (024);
 - new real cases are incorporated as reversed regressions.
 
 ## Exit criterion

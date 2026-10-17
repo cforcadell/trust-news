@@ -115,6 +115,49 @@ def test_discovery_query_localizes_country_name_without_changing_route_key():
     ]
 
 
+def test_contextual_discovery_uses_entities_and_hints_and_separates_cache_keys():
+    req = request(
+        topic_code="POLITICS_GOVERNMENT",
+        evidence_kind="LEGAL_TEXT",
+        jurisdiction={"scope": "UNKNOWN"},
+        language="es",
+        discovery_context={
+            "entity_terms": ["Reglamento General de Protección de Datos"],
+            "search_terms": ["GDPR fecha de aplicación"],
+        },
+    )
+    signature = signatures.build_route_signature(req)
+
+    assert query_builder.build_discovery_queries(signature, req) == [
+        "official law legislation gazette Reglamento General de Protección de Datos politics government",
+        "GDPR fecha de aplicación official",
+        "official law legislation gazette politics government",
+    ]
+    assert signatures.route_key(signature).startswith(
+        "route-v2|routing-taxonomy-v1|POLITICS_GOVERNMENT|LEGAL_TEXT|UNKNOWN|CTX:"
+    )
+    other = request(
+        topic_code="POLITICS_GOVERNMENT",
+        evidence_kind="LEGAL_TEXT",
+        jurisdiction={"scope": "UNKNOWN"},
+        language="es",
+        discovery_context={"entity_terms": ["Otra ley"]},
+    )
+    assert signatures.route_key(signature) != signatures.route_key(signatures.build_route_signature(other))
+
+
+def test_contextual_discovery_normalizes_terms_and_removes_provider_operators():
+    req = request(discovery_context={
+        "entity_terms": ["  Population\nregister  ", "population register"],
+        "search_terms": ["population site:example.test filetype:pdf official"],
+    })
+    queries = query_builder.build_discovery_queries(signatures.build_route_signature(req), req)
+
+    assert req.discovery_context.entity_terms == ["Population register"]
+    assert "site:" not in queries[1]
+    assert "filetype:" not in queries[1]
+
+
 @pytest.mark.asyncio
 async def test_classifier_rejects_invented_domain_and_uses_schema(monkeypatch):
     async def fake_complete(provider, llm_request):
@@ -339,6 +382,50 @@ async def test_missing_route_builds_profiles_and_fresh_route_reuses_them(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_contextual_discovery_skips_generic_query_after_finding_candidates(monkeypatch):
+    repo = MemoryRepository()
+    router = service_module.SourceRouterService(repo, settings())
+    req = request(discovery_context={"entity_terms": ["Catalonia population"]})
+    calls = []
+
+    async def fake_search(provider, query, limit):
+        calls.append(query)
+        return {"results": [{"url": "https://idescat.cat/data"}]}
+
+    async def fake_classify(*args, **kwargs):
+        return [classified()]
+
+    monkeypatch.setattr(service_module, "search_with_provider", fake_search)
+    monkeypatch.setattr(service_module, "classify_candidates", fake_classify)
+    result = await router.resolve(req)
+
+    assert result.sources
+    assert calls == ["official statistics data authority Catalonia population demography Catalunya Cataluña Spain Espanya"]
+
+
+@pytest.mark.asyncio
+async def test_contextual_discovery_uses_generic_query_as_empty_result_fallback(monkeypatch):
+    repo = MemoryRepository()
+    router = service_module.SourceRouterService(repo, settings())
+    req = request(discovery_context={"entity_terms": ["Catalonia population"]})
+    calls = []
+
+    async def fake_search(provider, query, limit):
+        calls.append(query)
+        return {"results": []} if len(calls) == 1 else {"results": [{"url": "https://idescat.cat/data"}]}
+
+    async def fake_classify(*args, **kwargs):
+        return [classified()]
+
+    monkeypatch.setattr(service_module, "search_with_provider", fake_search)
+    monkeypatch.setattr(service_module, "classify_candidates", fake_classify)
+    result = await router.resolve(req)
+
+    assert result.sources
+    assert calls[-1] == "official statistics data authority demography Catalunya Cataluña Spain Espanya"
+
+
+@pytest.mark.asyncio
 async def test_stale_route_is_used_when_refresh_fails(monkeypatch):
     source = classified()
     old = route_document(source, stale=True)
@@ -426,6 +513,8 @@ async def test_partial_classification_preserves_rejection_diagnostics_and_short_
     assert [item.domain for item in result.sources] == ["idescat.cat"]
     assert result.diagnostic_code == "CLASSIFICATION_PARTIAL"
     assert result.diagnostics.rejected_domains == ["wrong.example"]
+    assert result.diagnostics.rejected_domain_details[0].model_dump() == {
+        "domain": "wrong.example", "reasons": ["JURISDICTION_MISMATCH"]}
     assert result.diagnostics.failed_domains == ["bad.example"]
     assert repo.route.refresh_after - repo.route.updated_at == timedelta(seconds=300)
 
@@ -447,6 +536,8 @@ async def test_no_eligible_sources_are_diagnosed_and_not_cached(monkeypatch, wit
     result = await router.resolve(request())
     assert result.sources == []
     assert result.diagnostic_code == ("NO_ELIGIBLE_SOURCES" if with_candidates else "NO_DISCOVERY_CANDIDATES")
+    assert [item.model_dump() for item in result.diagnostics.rejected_domain_details] == (
+        [{"domain": "wrong.example", "reasons": ["JURISDICTION_MISMATCH"]}] if with_candidates else [])
     assert repo.saved_routes == []
 
 

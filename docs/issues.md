@@ -1,6 +1,6 @@
 # Incidences of Assermetry
 
-Review: **2026-09-29 (`d051f18`)**. Cumulative inventory of findings and closure criteria for [v0.0.13](version.md). This revision checks the current repository, the external review supplied with this update, focused local evidence and the saved evaluation campaign. It is not a complete regression or a target-environment acceptance. 011, 012 and 018 are recorded as deployed in Hetzner; local implementation and deployment alone do not establish every closure check.
+Review: **2026-10-15 (`HEAD b9003cf` plus uncommitted benchmark work)**. Cumulative inventory of findings and closure criteria for [v0.0.13](version.md). This revision checks the current repository and working tree, focused local evidence and the saved evaluation campaign. It is not a complete regression or a target-environment acceptance. 011, 012 and 018 are recorded as deployed in Hetzner; local implementation and deployment alone do not establish every closure check.
 
 Execution order and benchmark protocol: [working.md](working.md).
 
@@ -15,8 +15,8 @@ Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safet
 | 001 | P1 | Pending validation; safe refresh and lossless event merge implemented locally | 13 |
 | 002 | — | Solved 2026-08-19 | History |
 | 003–004 | P1 | Open; CI configuration confirmed, formal deferral from 13 pending | 16 proposed |
-| 005 | P1 | Open; reproduced in GUI and functions | 13 |
-| 006 | P1 | Open; confirmed contradiction in rendering | 13 |
+| 005 | P1 | Pending validation; UTC/ISO contract and strict GUI parser implemented locally | 13 |
+| 006 | P1 | Pending validation; terminal-state presentation implemented locally | 13 |
 | 007 | P1 | Pending validation; local solution, target deployment evidence pending | 13 |
 | 008 | P1 | Pending validation; exclusion of errors already implemented | 13 |
 | 009 | P1 | Open; optional edition already exists | 14 |
@@ -24,18 +24,19 @@ Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safet
 | 011 | P1 | Pending validation; deployed, two-identity target evidence pending | 13 |
 | 012 | P1 | Pending validation; deployed, negative-token target evidence pending | 13 |
 | 013 | P1 | Pending validation; canonical grounding local, target pending | 13 |
-| 014 | P1 | Open; confirmed in local code/probes | 13 |
+| 014 | P1 | Pending validation; summary collision and partial-order fallback solved locally | 13 |
 | 015 | P1 | Pending validation; local LIGHT route checked, target pending | 13 |
-| 016 | P1 | Open; incomplete dependencies and mobile/HTTP assertions | 13 |
-| 017 | P1 | In progress; benchmark infrastructure exists, representative corpus and thresholds pending | 13, expand by 14 |
+| 016 | P1 | Pending validation; clean local regression and strict browser diagnostics implemented | 13 |
+| 017 | P1 | In progress; 12-case candidate gold set and runner/viewer exist, human approval and thresholds pending | 13, expand by 14 |
 | 018 | P1 | Pending validation; deployed, browser link check pending | 13 |
 | 019 | P1 | Pending validation; local polling fix, partial/duplicate matrix missing | 13 |
-| 020 | P2 | Open; document width captured but overflow is not asserted | 13 |
+| 020 | P2 | Open; regression now asserts overflow, but the reproduced mobile/UI defects lack a validated fix | 13 |
 | 021 | P1 | In progress; canonical grounding and official filter applied, PDF and independence pending | 13 |
 | 022 | P2 | Pending validation; taxonomy/route-v2 local, Hetzner and cache measurements pending | 13 |
 | 023 | P1 | Pending validation; local BLOCKCHAIN E2E passed, target pending | 13 |
+| 024 | P1 | Open; ignored local launch helper contains a plaintext OIDC client credential | 13 |
 
-Unclosed P1 findings targeted at 13 block its closure. 003/004 are proposed for 16 but still require a recorded owner, mitigation and explicit deferral decision for 13; private-demo scope is not automatic risk acceptance. 009–010 block the review/evidence experience of 14. 020 must pass an actual overflow check before mobile accreditation. 022 must complete target deployment and route/cache measurements before the route cache is considered stable.
+Unclosed P1 findings targeted at 13 block its closure. 003/004 are proposed for 16 but still require a recorded owner, mitigation and explicit deferral decision for 13; private-demo scope is not automatic risk acceptance. 009–010 block the review/evidence experience of 14. 020 must demonstrate the corrected interface under the strict overflow check before mobile accreditation. 022 must complete target deployment and route/cache measurements before the route cache is considered stable. 024 requires removing the plaintext value and verifying rotation or invalidation before any further shared or target execution.
 
 ## Incidencias previas, revisadas
 
@@ -184,14 +185,15 @@ they are dealt with in ISSUE-021; the stability of the signature is resolved in 
 
 - **Historical diagnosis:** the mobile E2E captured document and viewport widths without failing on overflow; early exits could omit HTTP/console failures; the API test requirements did not collect the whole local suite and lacked `hexbytes`, PyJWT and document-extraction dependencies.
 - **Locally implemented (2026-10-06):** `tests/run-local-regression.sh` creates a disposable environment from pinned dependencies and runs the local API and frontend suites. The E2E runner now fails on horizontal overflow at 390 px for the result and home views, and finalizes HTTP/loading/console diagnostics on both success and early failure. Configuration still fails before creating an order when credentials are absent.
-- **Local evidence:** dependency installation and `pip check` succeed from a clean environment; 284 API tests and 42 frontend tests pass. **Pending closure:** run the strict browser regression against the same deployed revision in LIGHT and BLOCKCHAIN and retain identity/revision metadata and artifacts.
+- **Local evidence:** dependency installation and `pip check` succeed from a clean environment; 284 API tests and 42 frontend tests passed on 2026-10-06 and were reproduced on 2026-10-15 against `b9003cf` plus the current working tree. **Pending closure:** run the strict browser regression against the same deployed revision in LIGHT and BLOCKCHAIN and retain identity/revision metadata and artifacts.
 
 ### ISSUE-017 - Representative evaluation of factual quality and adverse content
 
-- **Current state:** benchmark infrastructure now exists: the historical OpenRouter CLI records profiles, repeated LIGHT orders, SQLite history, cost/latency estimates and comparisons; shared evaluation runners provide full, gold-domain, gold-evidence and replay modes, versioned artifacts and offline `--analyze` per validation. See [evaluation.md](tests/evaluation.md) and [llm-benchmark.md](tests/llm-benchmark.md). This is implementation progress, not factual-quality certification.
-- **Coverage gap:** the current `eu-news-2025-v1` and `eu-official-statistics-2025-v1` cases contain four and three synthetic assertions respectively. They lack a representative human-reviewed TRUE/FALSE/UNKNOWN corpus, reviewed source/domain annotations, adversarial content and thresholds agreed before scoring. The synthetic population fixture checks arithmetic and abstention only.
+- **Current state:** benchmark infrastructure now exists: the historical OpenRouter CLI records profiles, repeated LIGHT orders, SQLite history, cost/latency estimates and comparisons; shared evaluation runners provide full, gold-domain, gold-evidence and replay modes, versioned artifacts, campaign summaries, a local viewer and offline `--analyze` per validation. See [evaluation.md](tests/evaluation.md), [llm-benchmark.md](tests/llm-benchmark.md) and [working.md](working.md). This is implementation progress, not factual-quality certification.
+- **Candidate corpus (working tree, 2026-10-15):** `Official Gold v0` contains twelve atomic cases, six `TRUE` and six `FALSE`, paired around six official primary sources with domains, reference evidence and provenance metadata. Structural validation reports `datasets=12 assertions=12`; 100 focused evaluation/viewer/benchmark tests pass when the one loopback-server test is allowed to bind locally. All six provenance entries remain `CANDIDATE`, the files are uncommitted, and no provider or published-product campaign has been run against this hash.
+- **Coverage gap:** the candidate set has no independent human approval, `UNKNOWN`/abstention cases, adversarial content, PDFs or representative scale. Acceptance thresholds and the simple LLM-plus-web-search comparison are not fixed. Historical pre-gold resources are retained only for deliberate regression and cannot be merged into current acceptance metrics.
 - **Observed evaluation:** the 2026-09-29 three-repetition official-statistics run saved 27 validator records and five upstream HTTP 429 failures. The recovered pipeline report marks 2/9 assertion/repetition units end-to-end correct under its strict technical/error criteria. It cannot establish product quality or routing correctness: the case has no reviewed acceptable domains or reference sources. The artifacts are local and Git-ignored until retained durably.
-- **Close:** create a versioned, human-reviewed corpus with TRUE/FALSE/UNKNOWN, dates, quantities, negation, attribution, primary and secondary evidence, PDFs, insufficient evidence and adversarial instructions. Measure extraction, domain selection, retrieval, citation eligibility and semantic support, verdict errors, abstention, latency and cost. Define acceptance thresholds and a simple LLM plus web-search comparison before measuring; run repeated frozen-evidence and full-pipeline evaluations. Extend coverage through v0.0.14 without postponing the minimum v0.0.13 quality gate.
+- **Close:** independently approve and freeze `Official Gold v0`, then add a separate reviewed abstention set and broader cases covering dates, quantities, negation, attribution, primary and secondary evidence, PDFs, insufficient evidence and adversarial instructions. Measure extraction, domain selection, retrieval, citation eligibility and semantic support, verdict errors, abstention, latency and cost. Define acceptance thresholds and a simple LLM plus web-search comparison before measuring; run repeated frozen-evidence and full-pipeline evaluations. Extend coverage through v0.0.14 without postponing the minimum v0.0.13 quality gate.
 
 ### ISSUE-018 - Evidence links without validating the schema
 
@@ -268,3 +270,11 @@ Blockchain validations. GUI case cannot satisfy CID/post/tx/IPFS or reach `VALID
 - **Closing validation:**28 focused tests pass.
 `synthetic-blockchain-01` creó la orden `a237441b-f1aa-4c32-8468-fe79163f865c`, CID `QmNaWX2Ra7SKUzoswZERE7GGHwFpRxT3WZVwHaaWCbpXR3`, post `36` y transacción `0x019cff71a2bf46fea9a5840f7b1426ad1b0fa44eb740b779caea2e64861a051b`. Alcanzó `VALIDATED` con cuatro aserciones, doce validaciones y cero pendientes; comprobó pestaña IPFS, escritorio/móvil y ausencia de errores HTTP/consola inesperados. Artefactos: `/tmp/assermetry-e2e-blockchain-v2-retry-20260920`.
 - **Limit:** This evidence is from the local cluster, not from the target environment.
+
+## Hallazgo nuevo — 2026-10-15
+
+### ISSUE-024 - Credencial OIDC en texto claro en el lanzador local
+
+- **Estado:** abierta. El fichero local ignorado `launch_e2e.sh` exporta directamente un identificador de cliente y un secreto OIDC antes de publicar una campaña. `git check-ignore` confirma que el fichero está excluido por `.gitignore`; no se ha encontrado como fichero versionado ni se infiere por ello una exposición en el historial Git.
+- **Impacto:** cualquier copia, captura, backup o acceso al workspace puede revelar la credencial y permitir usar el cliente según sus permisos. Además contradice el contrato documental de suministrar secretos solo mediante el entorno o un almacén externo.
+- **Cierre:** retirar el valor literal del script y exigir variables ya definidas o carga desde un mecanismo local no versionado; comprobar por un canal seguro si la credencial sigue activa y rotarla o revocarla si procede; revisar artefactos y el historial versionado sin imprimir valores; demostrar que el lanzador falla pronto cuando falta configuración y que ninguna prueba guarda secretos.

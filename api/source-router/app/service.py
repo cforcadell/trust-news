@@ -19,11 +19,12 @@ from .models import (
     DomainProfile,
     ResolveRouteRequest,
     ResolveRouteResponse,
+    RejectedDomainDetail,
     RouteDocument,
     RouteDiagnostics,
     SourceClassification,
 )
-from .query_builder import build_discovery_queries
+from .query_builder import build_discovery_queries, build_generic_discovery_query
 from .ranking import classification_score, rank_sources, route_candidate
 from .repository import SourceRouteRepository, utc_now
 from .signatures import build_route_signature, route_key
@@ -104,7 +105,13 @@ class SourceRouterService:
     async def _discover(self, request: ResolveRouteRequest, trace: dict | None = None) -> list[CandidateSource]:
         signature = build_route_signature(request)
         candidates: dict[str, CandidateSource] = {}
+        generic_query = build_generic_discovery_query(signature, request)
         for query in build_discovery_queries(signature, request):
+            # Contextual discovery is preferred. The generic taxonomy query is
+            # retained as a fallback, but does not consume a provider request
+            # after contextual queries already produced candidates.
+            if request.discovery_context.has_terms() and query == generic_query and candidates:
+                continue
             query_trace = None
             if trace is not None:
                 query_trace = {"query": query, "provider": self.settings.search_provider,
@@ -273,7 +280,12 @@ class SourceRouterService:
             diagnostics.classified_domains = [item.domain for item in classified]
             classifications = eligible_sources(signature, classified)
             eligible_domains = {item.domain for item in classifications}
-            diagnostics.rejected_domains = [item.domain for item in classified if item.domain not in eligible_domains]
+            rejected = [item for item in classified if item.domain not in eligible_domains]
+            diagnostics.rejected_domains = [item.domain for item in rejected]
+            diagnostics.rejected_domain_details = [
+                RejectedDomainDetail(domain=item.domain, reasons=rejection_reasons(signature, item))
+                for item in rejected
+            ]
             if evaluation_trace is not None:
                 try:
                     evaluation_trace["classification"] = [{
@@ -291,8 +303,8 @@ class SourceRouterService:
                         "rejection_reasons": rejection_reasons(signature, item) if item.domain not in eligible_domains else [],
                     } for item in classified]
                     evaluation_trace["rejected_domains"] = [
-                        {"domain": item["domain"], "reasons": item["rejection_reasons"]}
-                        for item in evaluation_trace["classification"] if not item["eligible"]]
+                        item.model_dump(mode="json") for item in diagnostics.rejected_domain_details
+                    ]
                 except Exception as exc:
                     logger.warning("Evaluation classification trace failed", exc_info=True)
                     evaluation_trace["trace_error_type"] = type(exc).__name__

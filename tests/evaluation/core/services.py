@@ -14,10 +14,20 @@ class HttpServices:
         return response.json()
 
     def route(self, assertion, run_id, cache_mode):
+        context = assertion.get("context") or {}
+        hints = assertion.get("search_hints") or {}
         return self.post(self.router_url + "/routes/resolve", {
             "topic_code": assertion["topic_code"], "evidence_kind": assertion["evidence_kind"],
-            "jurisdiction": assertion["context"]["jurisdiction"],
-            "language": assertion["context"]["language"],
+            "jurisdiction": context["jurisdiction"],
+            "language": context["language"],
+            "discovery_context": {
+                "entity_terms": [item.get("name", "") for item in context.get("entities", [])
+                                 if item.get("name")][:5],
+                "search_terms": [
+                    *hints.get("search_keywords", []),
+                    *hints.get("suggested_queries", []),
+                ][:6],
+            },
         }, run_id, cache_mode)
 
     def retrieve(self, assertion, sources, origin, run_id, cache_mode):

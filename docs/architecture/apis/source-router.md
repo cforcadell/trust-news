@@ -5,7 +5,8 @@ Internal service used exclusively by `RAG_EVIDENCE_VALIDATION + LOCAL`. Discover
 - `domain_profiles_v1`: Stable Domain Properties (`source_type`,
 `authority_level`, jurisdictions, topics, types of evidence and languages).
 - `source_routes_v2`: reusable routes formed by `topic_code`,
-`evidence_kind` and canonical jurisdiction; they contain only references and scores that are typical of that path.
+`evidence_kind`, canonical jurisdiction and, when present, a fingerprint of the
+contextual discovery terms; they contain only references and scores.
 
 ```text
 RouteSignature -> source_routes_v2 -> FRESH -> unir DomainProfile -> ranking
@@ -15,29 +16,47 @@ RouteSignature -> source_routes_v2 -> FRESH -> unir DomainProfile -> ranking
 
 ## API
 
-`POST /routes/resolve` accepts `topic_code`, `evidence_kind`, `jurisdiction` and `language`. All except for the language are `routing-taxonomy-v1` closed vocabulary. Returns `route_key`, `route_state`, `router_version` and `sources[]` with domain, type, authority, jurisdictions, score, and profile version. A `FRESH` path does not make external calls.
+`POST /routes/resolve` accepts `topic_code`, `evidence_kind`, `jurisdiction`,
+`language` and an optional `discovery_context` containing bounded
+`entity_terms` and `search_terms`. All taxonomy fields use the
+`routing-taxonomy-v1` closed vocabulary. It returns `route_key`, `route_state`,
+`router_version` and `sources[]` with domain, type, authority, jurisdictions,
+score, and profile version. A `FRESH` path does not make external calls.
 
 The key is:
 
 ```text
 route-v2|routing-taxonomy-v1|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY
+route-v2|routing-taxonomy-v1|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY|CTX:FINGERPRINT
 ```
 
-Text, entities and dates do not fragment this thematic memory. These data appear later in the specific query of Evidence Search.
+The first form remains compatible with requests without discovery context. The
+second prevents a route discovered for one entity or factual search intent from
+being reused for another one. Raw assertion text is not part of the key; the
+fingerprint is derived from normalized, bounded terms.
 
 `GET /routes` supports `route_key`, `topic_code`, `evidence_kind`, `jurisdiction_key` and `limit` filters. `GET /routes/{route_key}` recovers an exact route. Both endpoints are Mongo-only and never run Discovery or LLM.
 
 ## Resolution and interconnection flow
 
-The usual caller is `validate-asertions`. For an assertion in LOCAL mode, build the payload from `assertion.topic_code`, `assertion.evidence_kind`, `assertion.context.jurisdiction` and the context language. `source-router` does not receive the text of the assertion, entities or dates: that data remains in `evidence-search` and is used when constructing the final query.
+The usual caller is `validate-asertions`. For an assertion in LOCAL mode, it
+builds the payload from `assertion.topic_code`, `assertion.evidence_kind`,
+`assertion.context.jurisdiction`, the context language, entity names and the
+already structured search hints. `source-router` does not receive unrestricted
+raw assertion text.
 
 The resolution follows these steps:
 
 1. `signatures.py` builds `RouteSignature` and the canonical `route_key`.
 2. If there is a route whose `refresh_after` has not yet expired, your
 domain profiles and recalculates the ranking without calling search engine or LLM.
-3. For a `MISSING` or expired (`STALE`), `query_builder.py` generates the
-Discovery query based on the type of evidence, subject and jurisdiction. ISO codes remain the internal representation and identity of the route, but expand to complete geographical names — including the variant of the language requested when available — before calling Exa or Tavily. `search_with_provider` doubles the results by standard domain.
+3. For a `MISSING` or expired (`STALE`), `query_builder.py` generates up to two
+contextual discovery queries from the leading entity and search hint. The
+taxonomy-only query is retained as a fallback when contextual discovery returns
+no candidates. Provider-specific operators are removed and terms are bounded.
+ISO codes remain the internal representation and identity of the route, but
+expand to complete geographical names — including the requested language when
+available — before calling Exa or Tavily.
 4. `classifier.py` ranks all candidates in an LLM batch. The output is
 valid per candidate against `SourceClassification`; LLM describes properties and compatibility, but does not decide the selection or veracity.
 5. `eligibility.py` applies deterministic rules: theme matching and
@@ -77,7 +96,7 @@ For discovered domains whose classification fails, existing profiles of `domain_
 
 Partial or recovered routes carry `degraded=true` and expire in up to five minutes to allow reconstruction. The diagnosis is preserved in MongoDB and cache responses. An answer without eligible candidates does not create an empty route with 30 days expiration; if there is an earlier route it is reused as `STALE`.
 
-`diagnostic_code` distinguishes `CLASSIFICATION_PARTIAL`, `CLASSIFICATION_FAILED`, `PROFILE_FALLBACK`, `NO_DISCOVERY_CANDIDATES` and `NO_ELIGIBLE_SOURCES`. `diagnostics` lists domains that have been discovered, classified, rejected by eligibility, failed and recovered from profiles. The validator keeps these fields in `evidence_search_response.route`, and continues to look for evidence when the degraded response contains sources.
+`diagnostic_code` distinguishes `CLASSIFICATION_PARTIAL`, `CLASSIFICATION_FAILED`, `PROFILE_FALLBACK`, `NO_DISCOVERY_CANDIDATES` and `NO_ELIGIBLE_SOURCES`. `diagnostics` lists domains that have been discovered, classified, rejected by eligibility, failed and recovered from profiles. `rejected_domain_details` persists each rejected domain together with deterministic reasons such as `JURISDICTION_MISMATCH`, `TOPIC_MISMATCH`, `EVIDENCE_KIND_MISMATCH`, `SOURCE_TYPE_INELIGIBLE` or `AUTHORITY_INELIGIBLE`. The validator keeps these fields in `evidence_search_response.route`, and continues to look for evidence when the degraded response contains sources.
 
 Logs include the path key, query and URLs of the discovery, errors per candidate and the JSON of the rejected candidate (limited to 4000 characters). The complete raw response of the supplier is not stored. This trace allows to distinguish absence of results, schema errors and eligibility rejections.
 

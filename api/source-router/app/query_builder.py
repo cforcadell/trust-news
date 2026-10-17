@@ -1,4 +1,5 @@
 import gettext
+import re
 
 import pycountry
 
@@ -80,7 +81,37 @@ def _jurisdiction_search_terms(signature: RouteSignature, request: ResolveRouteR
     return list(dict.fromkeys(term for term in terms if term))
 
 
+def build_generic_discovery_query(signature: RouteSignature, request: ResolveRouteRequest) -> str:
+    jurisdiction = " ".join(_jurisdiction_search_terms(signature, request))
+    topic = signature.topic_code.value.replace("_", " ").lower()
+    return " ".join(filter(None, (EVIDENCE_TERMS[signature.evidence_kind], topic, jurisdiction)))
+
+
+def _safe_context_term(value: str) -> str:
+    # Search hints are generated upstream, but provider-specific operators must
+    # not be allowed to override the Router's discovery policy.
+    value = re.sub(r"\b(?:site|filetype|inurl|intitle):\S+", " ", value, flags=re.IGNORECASE)
+    return " ".join(value.split())[:300].strip()
+
+
 def build_discovery_queries(signature: RouteSignature, request: ResolveRouteRequest) -> list[str]:
     jurisdiction = " ".join(_jurisdiction_search_terms(signature, request))
     topic = signature.topic_code.value.replace("_", " ").lower()
-    return [" ".join(filter(None, (EVIDENCE_TERMS[signature.evidence_kind], topic, jurisdiction)))]
+    context = request.discovery_context
+    queries = []
+
+    if context.entity_terms:
+        entity = _safe_context_term(context.entity_terms[0])
+        if entity:
+            queries.append(" ".join(filter(None, (
+                EVIDENCE_TERMS[signature.evidence_kind], entity, topic, jurisdiction,
+            ))))
+
+    if context.search_terms:
+        hint = _safe_context_term(context.search_terms[0])
+        if hint:
+            queries.append(" ".join(filter(None, (hint, "official", jurisdiction))))
+
+    generic = build_generic_discovery_query(signature, request)
+    queries.append(generic)
+    return list(dict.fromkeys(query for query in queries if query))

@@ -1,0 +1,80 @@
+{
+  "schema_version": "gold-provenance-v1",
+  "dataset_id": "official-gold-v0",
+  "created_at": "2026-10-15",
+  "ground_truth_method": "official_primary_source_and_direct_pairwise_contradiction",
+  "review_status": "CANDIDATE_PENDING_INDEPENDENT_HUMAN_APPROVAL",
+  "review_policy": "Cada fuente y cada implicación deben ser aprobadas por una persona distinta de quien redactó el caso antes de usar el lote como aceptación.",
+  "sources": [
+    {
+      "id": "ine-census-2025",
+      "url": "https://www.ine.es/dyngs/Prensa/es/CensoVariables2025.html",
+      "publisher": "Instituto Nacional de Estadística",
+      "published_at": "2025-12-02",
+      "retrieved_at": "2026-10-15",
+      "valid_as_of": "2025-01-01",
+      "data_status": "DEFINITIVE",
+      "locator": "Principales resultados y tabla Censo 2025",
+      "cases": ["ES_POPULATION_FINAL_2025_TRUE", "ES_POPULATION_FINAL_2025_FALSE"],
+      "review_status": "CANDIDATE"
+    },
+    {
+      "id": "ree-close-2024",
+      "url": "https://www.ree.es/es/sala-de-prensa/actualidad/nota-de-prensa/2025/03/la-produccion-renovable-crece-en-Espana-un-10-3-por-ciento-2024-alcanza-mayores-registros",
+      "publisher": "Red Eléctrica",
+      "published_at": "2025-03-18",
+      "retrieved_at": "2026-10-15",
+      "valid_as_of": "2024-12-31",
+      "data_status": "ANNUAL_CLOSE",
+      "locator": "Entradilla y primer párrafo",
+      "cases": ["ES_RENEWABLE_GENERATION_2024_TRUE", "ES_RENEWABLE_GENERATION_2024_FALSE"],
+      "review_status": "CANDIDATE"
+    },
+    {
+      "id": "eurostat-renewables-2023",
+      "url": "https://ec.europa.eu/eurostat/en/web/products-eurostat-news/w/ddn-20241219-3",
+      "publisher": "Eurostat",
+      "published_at": "2024-12-19",
+      "retrieved_at": "2026-10-15",
+      "valid_as_of": "2023-12-31",
+      "data_status": "PUBLISHED_STATISTIC",
+      "locator": "Primer párrafo; dataset nrg_ind_ren",
+      "cases": ["EU_RENEWABLE_SHARE_2023_TRUE", "EU_RENEWABLE_SHARE_2023_FALSE"],
+      "review_status": "CANDIDATE"
+    },
+    {
+      "id": "red-iii",
+      "url": "https://eur-lex.europa.eu/legal-content/ES/ALL/?uri=CELEX:32023L2413",
+      "publisher": "Diario Oficial de la Unión Europea",
+      "published_at": "2023-10-31",
+      "retrieved_at": "2026-10-15",
+      "valid_as_of": "2030",
+      "data_status": "LEGAL_TEXT_IN_FORCE",
+      "locator": "Artículo 1, modificación del artículo 3.1 de la Directiva (UE) 2018/2001",
+      "cases": ["EU_RENEWABLE_TARGET_2030_TRUE", "EU_RENEWABLE_TARGET_2030_FALSE"],
+      "review_status": "CANDIDATE"
+    },
+    {
+      "id": "ec-gdpr-framework",
+      "url": "https://commission.europa.eu/law/law-topic/data-protection/legal-framework-eu-data-protection_en",
+      "publisher": "Comisión Europea",
+      "retrieved_at": "2026-10-15",
+      "valid_as_of": "2018-05-25",
+      "data_status": "CURRENT_LEGAL_SUMMARY",
+      "locator": "Legislation / The General Data Protection Regulation",
+      "cases": ["EU_GDPR_APPLICATION_TRUE", "EU_GDPR_APPLICATION_FALSE"],
+      "review_status": "CANDIDATE"
+    },
+    {
+      "id": "ep-members",
+      "url": "https://www.europarl.europa.eu/about-parliament/en/organisation-and-rules/organisation/members",
+      "publisher": "Parlamento Europeo",
+      "retrieved_at": "2026-10-15",
+      "valid_as_of": "2024-2029",
+      "data_status": "CURRENT_INSTITUTIONAL_PAGE",
+      "locator": "The Members, primer párrafo",
+      "cases": ["EU_PARLIAMENT_MEMBERS_TRUE", "EU_PARLIAMENT_MEMBERS_FALSE"],
+      "review_status": "CANDIDATE"
+    }
+  ]
+}

@@ -53,6 +53,23 @@ def minimal_payload():
     return SimpleNamespace(assertion=assertion, origin_document=origin)
 
 
+def test_source_router_payload_forwards_contextual_discovery_terms(validator):
+    payload = minimal_payload()
+    payload.assertion.context.entities = [
+        SimpleNamespace(name="Reglamento General de Protección de Datos")]
+    payload.assertion.search_hints = SimpleNamespace(
+        search_keywords=["RGPD fecha de aplicación"],
+        suggested_queries=["GDPR application date"],
+    )
+
+    route_payload = validator.source_route_payload(payload)
+
+    assert route_payload["discovery_context"] == {
+        "entity_terms": ["Reglamento General de Protección de Datos"],
+        "search_terms": ["RGPD fecha de aplicación", "GDPR application date"],
+    }
+
+
 @pytest.mark.parametrize("original", ["TRUE", "FALSE"])
 def test_unverified_opinion_preserves_audit_without_decisive_vote(validator, monkeypatch, original):
     monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
@@ -169,6 +186,7 @@ def test_rag_local_calls_router_then_evidence(validator, monkeypatch, diagnostic
     def post(url, json, timeout):
         calls.append((url, json))
         if "source-router" in url:
+            assert json["discovery_context"] == {"entity_terms": [], "search_terms": []}
             return Response({"route_key": "k", "route_state": "MISSING", "router_version": "v2", "sources": [routed_source()],
                              "degraded": diagnostic is not None, "diagnostic_code": diagnostic,
                              "diagnostics": {"failed_domains": ["bad.example"] if diagnostic else []}})

@@ -42,7 +42,9 @@ async def resolve_route(payload: ResolveRouteRequest, source_router=Depends(serv
                                   ("stored_route" if response.route_state == "FRESH" else "current_resolution"),
             "discovered_domains": response.diagnostics.discovered_domains,
             "classified_domains": response.diagnostics.classified_domains,
-            "rejected_domains": trace.get("rejected_domains", []),
+            "rejected_domains": trace.get("rejected_domains") or [
+                item.model_dump(mode="json") for item in response.diagnostics.rejected_domain_details
+            ],
             "failed_domains": trace.get("failed_domains", response.diagnostics.failed_domains),
             "fallback_domains": trace.get("fallback_domains", response.diagnostics.fallback_domains),
             "selection": [{"domain": source.domain, "rank": source.rank,

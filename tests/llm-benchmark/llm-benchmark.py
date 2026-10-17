@@ -36,7 +36,7 @@ from evaluation.core.common_metrics import (
 )
 
 TEST_ROOT = ROOT / "tests" / "llm-benchmark"
-DEFAULT_CASE = ROOT / "tests/data/benchmark/resources/cases/eu-news-2025-v2.json"
+DEFAULT_CASE = ROOT / "tests/data/benchmark/resources/cases/historical/pre-gold-v0/eu-news-2025-v2.json"
 DEFAULT_PROFILE = ROOT / "tests/data/benchmark/resources/profiles/current-openrouter.json"
 DEFAULT_ARTIFACTS = ROOT / "tests/data/benchmark/artifacts"
 DEFAULT_DATABASE = DEFAULT_ARTIFACTS / "history.sqlite"

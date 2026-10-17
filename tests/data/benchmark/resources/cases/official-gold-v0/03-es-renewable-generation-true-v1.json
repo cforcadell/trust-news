@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "id": "gold-v0-es-renewable-generation-true-v1",
+  "title": "Generación renovable española en 2024",
+  "language": "es",
+  "description": "Caso atómico real basado en el cierre anual de Red Eléctrica.",
+  "news": "Las fuentes renovables produjeron el 56,8 % de la electricidad generada en España durante 2024.",
+  "tags": ["suite:official-gold-v0", "lang:es", "jurisdiction:ES", "topic:energy", "difficulty:easy", "temporal:historical", "evidence:official", "expected:decisive", "status:candidate"],
+  "assertions": [{
+    "id": "ES_RENEWABLE_GENERATION_2024_TRUE",
+    "text": "Las fuentes renovables produjeron el 56,8 % de la electricidad generada en España durante 2024.",
+    "source_excerpt": "Las fuentes renovables produjeron el 56,8 % de la electricidad generada en España durante 2024.",
+    "expected_verdict": "TRUE",
+    "category_ids": [9],
+    "expected_topic_code": "ENERGY",
+    "expected_evidence_kind": "STATISTICAL_DATA",
+    "expected_context": {"entities": ["Red Eléctrica", "España"], "temporal_context": ["2024"], "jurisdiction": {"scope": "COUNTRY", "country_code": "ES"}},
+    "pipeline_assertion": {"assertion_id": "ES_RENEWABLE_GENERATION_2024_TRUE", "assertion_index": 0, "text": "Las fuentes renovables produjeron el 56,8 % de la electricidad generada en España durante 2024.", "categoryId": 9, "topic_code": "ENERGY", "evidence_kind": "STATISTICAL_DATA", "context": {"language": "es", "jurisdiction": {"scope": "COUNTRY", "country_code": "ES"}}},
+    "required_terms": ["renovables", "56,8", "electricidad", "España", "2024"],
+    "acceptable_domains": ["ree.es"],
+    "reference_facts": ["Red Eléctrica informó de 148.999 GWh renovables, equivalentes al 56,8 % del mix de 2024."],
+    "reference_sources": [{"id": "ree-close-2024", "url": "https://www.ree.es/es/sala-de-prensa/actualidad/nota-de-prensa/2025/03/la-produccion-renovable-crece-en-Espana-un-10-3-por-ciento-2024-alcanza-mayores-registros", "title": "La producción renovable crece en España un 10,3% en 2024"}],
+    "reference_evidence": [{"source": "ree-close-2024", "relation": "SUPPORTS", "text": "El 56,8% de toda la electricidad generada en España en 2024 procedió de fuentes renovables."}]
+  }]
+}

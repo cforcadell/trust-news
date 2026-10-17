@@ -987,6 +987,16 @@ function renderRouter(observations) {
     }
     add(table, add(el("thead"), head), body); add(wrap, table); add(block, wrap);
   }
+  const persistedRejections = observations.diagnostics?.rejected_domain_details || [];
+  if (!classifications.length && persistedRejections.length) {
+    add(block, el("h3", "", "Motivos de rechazo por dominio"));
+    const wrap = el("div", "table-wrap"), table = el("table"), head = el("tr"), body = el("tbody");
+    for (const label of ["Dominio", "Motivos"]) add(head, el("th", "", label));
+    for (const item of persistedRejections) add(body, add(el("tr"),
+      el("td", "", item.domain || "—"),
+      el("td", "", (item.reasons || []).join(", ") || "Motivo no registrado")));
+    add(table, add(el("thead"), head), body); add(wrap, table); add(block, wrap);
+  }
   const ranking = trace.ranking || [];
   if (ranking.length) {
     add(block, el("h3", "", "Ranking y límite de fuentes"));

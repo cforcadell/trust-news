@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "id": "gold-v0-eu-parliament-members-false-v1",
+  "title": "Composición anterior atribuida a la legislatura de 2024",
+  "language": "es",
+  "description": "Caso atómico falso: atribuye a la legislatura posterior a 2024 el tamaño anterior del Parlamento.",
+  "news": "Después de las elecciones europeas de 2024, el Parlamento Europeo quedó compuesto por 705 diputados.",
+  "tags": ["suite:official-gold-v0", "lang:es", "jurisdiction:EU", "topic:institutions", "difficulty:medium", "temporal:current", "evidence:official", "expected:decisive", "status:candidate"],
+  "assertions": [{
+    "id": "EU_PARLIAMENT_MEMBERS_FALSE",
+    "text": "Después de las elecciones europeas de 2024, el Parlamento Europeo quedó compuesto por 705 diputados.",
+    "source_excerpt": "Después de las elecciones europeas de 2024, el Parlamento Europeo quedó compuesto por 705 diputados.",
+    "expected_verdict": "FALSE",
+    "category_ids": [3],
+    "expected_topic_code": "POLITICS_GOVERNMENT",
+    "expected_evidence_kind": "PUBLIC_STATEMENT",
+    "accepted_evidence_kinds": ["PUBLIC_STATEMENT", "GOVERNMENT_RECORD"],
+    "expected_context": {"entities": ["Parlamento Europeo", "Unión Europea"], "temporal_context": ["2024-2029"], "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}},
+    "pipeline_assertion": {"assertion_id": "EU_PARLIAMENT_MEMBERS_FALSE", "assertion_index": 0, "text": "Después de las elecciones europeas de 2024, el Parlamento Europeo quedó compuesto por 705 diputados.", "categoryId": 3, "topic_code": "POLITICS_GOVERNMENT", "evidence_kind": "PUBLIC_STATEMENT", "context": {"language": "es", "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}}},
+    "required_terms": ["elecciones", "2024", "Parlamento Europeo", "705", "diputados"],
+    "acceptable_domains": ["europarl.europa.eu"],
+    "reference_facts": ["La composición posterior a las elecciones de 2024 es de 720 miembros, no 705."],
+    "reference_sources": [{"id": "ep-members", "url": "https://www.europarl.europa.eu/about-parliament/en/organisation-and-rules/organisation/members", "title": "The Members - European Parliament"}],
+    "reference_evidence": [{"source": "ep-members", "relation": "CONTRADICTS", "text": "El Parlamento Europeo informa de una composición de 720 miembros elegidos en los 27 Estados de la UE."}]
+  }]
+}

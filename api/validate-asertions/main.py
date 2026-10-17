@@ -578,11 +578,21 @@ def current_evidence_search_policy() -> Dict[str, Any]:
 
 def source_route_payload(payload_v2: AssertionValidationPayloadV2) -> Dict[str, Any]:
     assertion = payload_v2.assertion
+    entities = getattr(assertion.context, "entities", []) or []
+    hints = getattr(assertion, "search_hints", None)
+    search_terms = []
+    if hints is not None:
+        search_terms.extend(getattr(hints, "search_keywords", []) or [])
+        search_terms.extend(getattr(hints, "suggested_queries", []) or [])
     return {
         "topic_code": assertion.topic_code.value,
         "evidence_kind": assertion.evidence_kind.value,
         "jurisdiction": assertion.context.jurisdiction.model_dump(mode="json"),
         "language": assertion.context.language,
+        "discovery_context": {
+            "entity_terms": [str(entity.name) for entity in entities if str(getattr(entity, "name", "")).strip()][:5],
+            "search_terms": [str(value) for value in search_terms if str(value).strip()][:6],
+        },
     }
 
 

@@ -16,13 +16,19 @@ def resource():
                             "tags": ["evidence:insufficient"]}]}
 
 
-def test_old_datasets_load():
-    cases = load_datasets([str(ROOT / "tests/data/benchmark/resources/cases")])
-    assert {case["id"] for case in cases} >= {
+def test_active_and_historical_datasets_load_separately():
+    active = load_datasets([str(ROOT / "tests/data/benchmark/resources/cases/official-gold-v0")])
+    assert len(active) == 12
+    assert all("suite:official-gold-v0" in case.get("tags", []) for case in active)
+
+    historical = load_datasets([
+        str(ROOT / "tests/data/benchmark/resources/cases/historical/pre-gold-v0")
+    ])
+    assert {case["id"] for case in historical} >= {
         "eu-institutions-and-law-v1", "eu-renewable-energy-policy-v1",
         "eu-news-2025-v2", "eu-official-statistics-2025-v2",
     }
-    assert "eu-news-2025-v1" not in {case["id"] for case in cases}
+    assert "eu-news-2025-v1" not in {case["id"] for case in historical}
 
 
 def test_v2_tags_and_optional_gold(tmp_path):

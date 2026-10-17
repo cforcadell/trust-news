@@ -14,12 +14,12 @@ Run these commands from the repository root with `PYTHONPATH=tests` (and `:api` 
 
 ```bash
 python -m evaluation.llm_benchmark --dataset synthetic-population-v2 --validate-only
-python -m evaluation.pipeline --dataset eu-official-statistics-2025-v1 --mode full --publish --repetitions 3
+python -m evaluation.pipeline --dataset tests/data/benchmark/resources/cases/official-gold-v0 --mode full --publish --repetitions 3
 ```
 
 | Flag | Meaning and accepted values |
 |---|---|
-| `--dataset ID_OR_PATH` | Dataset ID, JSON file, or directory. Repeat it to combine datasets. Required unless `--mode replay` supplies an artifact. Dataset IDs resolve in `tests/data/evaluation/resources/datasets` and benchmark case resources. |
+| `--dataset ID_OR_PATH` | Dataset ID, JSON file, or directory. Repeat it to combine datasets. Required unless `--mode replay` supplies an artifact. Dataset IDs resolve in `tests/data/evaluation/resources/datasets` and root-level benchmark case resources; nested active or historical suites are selected by explicit file/directory path. |
 | `--tag FAMILY:VALUE` | Repeatable AND filter. A selected assertion must match every tag across its case and assertion tags. Tags are non-empty `family:value` strings. |
 | `--mode VALUE` | Execution mode: `full`, `gold-domains`, `gold-evidence`, or `replay`. Defaults to `gold-evidence` for LLM Benchmark and `full` for Pipeline Evaluation. |
 | `--model PROVIDER:MODEL` | Repeatable direct validator configuration. Providers are `openrouter`, `gemini`, `mistral`, or `grok`; model must be non-empty. Required for direct execution, forbidden with `--publish` or `--order`. |
@@ -191,7 +191,7 @@ El visor independiente de `web_classic` lee campañas nuevas con archivos `<pare
 
 ```bash
 PYTHONPATH=tests:api .venv/bin/python -m evaluation.viewer.server \
-  --artifacts-root tests/data/evaluation/artifacts --host 127.0.0.1 --port 8765
+  --artifacts-root tests/data/evaluation/artifacts --host 0.0.0.0 --port 8765
 ```
 
 Abrir `http://127.0.0.1:8765/`. Para crear el diagnóstico desde una orden guardada, usar `--order RUTA_A_LA_ORDEN --mode full --dataset ID_DEL_DATASET --output CARPETA_NUEVA` con `evaluation.pipeline`; `--publish` también emite el diagnóstico al guardar una orden nueva. Los artefactos anteriores no se migran. El contrato, rutas y límites están en [benchmark-viewer-contract.md](benchmark-viewer-contract.md); el avance por fases está en [benchmark-viewer-plan.md](benchmark-viewer-plan.md).

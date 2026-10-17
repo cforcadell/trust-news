@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "id": "gold-v0-eu-gdpr-application-true-v1",
+  "title": "Fecha de aplicación del RGPD",
+  "language": "es",
+  "description": "Caso atómico real basado en la ficha legal de la Comisión Europea.",
+  "news": "El Reglamento General de Protección de Datos se aplica desde el 25 de mayo de 2018.",
+  "tags": ["suite:official-gold-v0", "lang:es", "jurisdiction:EU", "topic:law", "difficulty:easy", "temporal:historical", "evidence:official", "expected:decisive", "status:candidate"],
+  "assertions": [{
+    "id": "EU_GDPR_APPLICATION_TRUE",
+    "text": "El Reglamento General de Protección de Datos se aplica desde el 25 de mayo de 2018.",
+    "source_excerpt": "El Reglamento General de Protección de Datos se aplica desde el 25 de mayo de 2018.",
+    "expected_verdict": "TRUE",
+    "category_ids": [3],
+    "expected_topic_code": "LAW_JUSTICE",
+    "expected_evidence_kind": "LEGAL_TEXT",
+    "expected_context": {"entities": ["Reglamento General de Protección de Datos"], "temporal_context": ["2018-05-25"], "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}},
+    "pipeline_assertion": {"assertion_id": "EU_GDPR_APPLICATION_TRUE", "assertion_index": 0, "text": "El Reglamento General de Protección de Datos se aplica desde el 25 de mayo de 2018.", "categoryId": 3, "topic_code": "LAW_JUSTICE", "evidence_kind": "LEGAL_TEXT", "context": {"language": "es", "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}}},
+    "required_terms": ["Reglamento General de Protección de Datos", "aplica", "25 de mayo", "2018"],
+    "acceptable_domains": ["commission.europa.eu", "eur-lex.europa.eu"],
+    "reference_facts": ["El RGPD entró en vigor en 2016 y se aplica desde el 25 de mayo de 2018."],
+    "reference_sources": [{"id": "ec-gdpr-framework", "url": "https://commission.europa.eu/law/law-topic/data-protection/legal-framework-eu-data-protection_en", "title": "Legal framework of EU data protection"}],
+    "reference_evidence": [{"source": "ec-gdpr-framework", "relation": "SUPPORTS", "text": "The Regulation entered into force on 24 May 2016 and applies since 25 May 2018."}]
+  }]
+}

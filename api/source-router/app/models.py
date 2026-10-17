@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,12 +16,45 @@ from common.routing_taxonomy import (
 )
 
 
+def _normalized_discovery_terms(values: Any) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("discovery terms must be a list")
+    normalized = []
+    seen = set()
+    for value in values:
+        text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or ""))
+        text = " ".join(text.split())[:300].strip()
+        key = text.casefold()
+        if text and key not in seen:
+            seen.add(key)
+            normalized.append(text)
+    return normalized
+
+
+class DiscoveryContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entity_terms: list[str] = Field(default_factory=list, max_length=5)
+    search_terms: list[str] = Field(default_factory=list, max_length=6)
+
+    @field_validator("entity_terms", "search_terms", mode="before")
+    @classmethod
+    def normalize_terms(cls, values: Any) -> list[str]:
+        return _normalized_discovery_terms(values)
+
+    def has_terms(self) -> bool:
+        return bool(self.entity_terms or self.search_terms)
+
+
 class ResolveRouteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     topic_code: TopicCode
     evidence_kind: EvidenceKind
     jurisdiction: JurisdictionContext
     language: str = "unknown"
+    discovery_context: DiscoveryContext = Field(default_factory=DiscoveryContext)
 
     @field_validator("language")
     @classmethod
@@ -36,6 +70,7 @@ class RouteSignature(BaseModel):
     evidence_kind: EvidenceKind
     jurisdiction: JurisdictionContext
     jurisdiction_key: str
+    discovery_context_key: str | None = None
 
 
 class CandidateSource(BaseModel):
@@ -167,10 +202,18 @@ RouteDiagnosticCode = Literal[
 ]
 
 
+class RejectedDomainDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    domain: str
+    reasons: list[str] = Field(default_factory=list)
+
+
 class RouteDiagnostics(BaseModel):
     discovered_domains: list[str] = Field(default_factory=list)
     classified_domains: list[str] = Field(default_factory=list)
     rejected_domains: list[str] = Field(default_factory=list)
+    rejected_domain_details: list[RejectedDomainDetail] = Field(default_factory=list)
     failed_domains: list[str] = Field(default_factory=list)
     fallback_domains: list[str] = Field(default_factory=list)
 

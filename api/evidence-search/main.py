@@ -37,6 +37,8 @@ MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
 MONGO_CACHE_COLLECTION = os.getenv("EVIDENCE_SEARCH_CACHE_COLLECTION", "evidence_search_cache_v2")
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_CACHE_TTL_SECONDS", "86400"))
+EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS", "300"))
+EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS", "1800"))
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "").lower() or None
 EVIDENCE_FETCH_FULL_TEXT = os.getenv("EVIDENCE_FETCH_FULL_TEXT", "false").lower() == "true"
@@ -50,6 +52,9 @@ EVIDENCE_HTTP_TIMEOUT = float(os.getenv("EVIDENCE_HTTP_TIMEOUT", "10"))
 EVIDENCE_MIN_CONTEXT_CHARS = int(os.getenv("EVIDENCE_MIN_CONTEXT_CHARS", "120"))
 EVIDENCE_USER_AGENT = os.getenv("EVIDENCE_USER_AGENT", "TrustNewsEvidenceBot/1.0")
 EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS = int(os.getenv("EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS", "3"))
+EVIDENCE_MAX_RESULTS_PER_DOMAIN = int(os.getenv("EVIDENCE_MAX_RESULTS_PER_DOMAIN", "2"))
+EVIDENCE_CANDIDATE_MULTIPLIER = max(1, int(os.getenv("EVIDENCE_CANDIDATE_MULTIPLIER", "3")))
+EVIDENCE_TARGET_CITABLE_SOURCES = max(1, int(os.getenv("EVIDENCE_TARGET_CITABLE_SOURCES", "1")))
 
 QUERY_OPERATIONAL_TERMS = {
     "comprobar", "comprobacion", "confirmar", "confirmacion", "evidencia", "evidencias",
@@ -539,11 +544,14 @@ def search_backend_for_cache() -> Dict[str, Any]:
         "evidence_context_window_before": EVIDENCE_CONTEXT_WINDOW_BEFORE,
         "evidence_context_window_after": EVIDENCE_CONTEXT_WINDOW_AFTER,
         "evidence_max_query_relaxation_attempts": EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS,
+        "evidence_max_results_per_domain": EVIDENCE_MAX_RESULTS_PER_DOMAIN,
+        "evidence_candidate_multiplier": EVIDENCE_CANDIDATE_MULTIPLIER,
+        "evidence_target_citable_sources": EVIDENCE_TARGET_CITABLE_SOURCES,
         "progressive_query_relaxation": "v1",
         "citation_contract": "retrieved-context-id-v1",
-        # This changes the result set after an all-unusable LOCAL retrieval, so it
-        # must partition cached responses from the pre-fallback implementation.
-        "local_unrestricted_fetch_fallback": "v1",
+        # Refill never widens LOCAL or EXT_ONLY_OFFICIAL beyond their active policy.
+        "policy_safe_refill": "v1",
+        "resilient_retrieval": "v2",
     }
 
 
@@ -676,9 +684,24 @@ async def build_evidences_with_optional_contexts(
         evidence["url_normalized"] = bool(getattr(fetch_result, "url_normalized", False))
         evidence["normalization_reason"] = getattr(fetch_result, "normalization_reason", None)
         evidence["fetch_attempted_urls"] = getattr(fetch_result, "attempted_urls", None) or [url]
+        evidence["fetch_attempts"] = getattr(fetch_result, "attempts", None) or []
+        evidence["http_status"] = getattr(fetch_result, "http_status", None)
+        evidence["response_bytes"] = int(getattr(fetch_result, "response_bytes", 0) or 0)
+        evidence["extraction"] = {
+            "detected_format": getattr(fetch_result, "detected_format", None),
+            "extractor": getattr(fetch_result, "extractor", None),
+            "text_length": int(getattr(fetch_result, "document_length_chars", 0) or 0),
+        }
         logger.info(f"[evidence-search] fetch_status source_id={source_id} status={fetch_result.status} error={fetch_result.error}")
 
         if fetch_result.status != "ok":
+            failure_code = getattr(fetch_result, "failure_code", None) or (
+                str(fetch_result.error or fetch_result.status).upper())
+            evidence["failure"] = {
+                "stage": getattr(fetch_result, "failure_stage", None) or "FETCH",
+                "code": failure_code,
+                "retryable": bool(getattr(fetch_result, "retryable", False)),
+            }
             mark_evidence_uncitable(evidence, fetch_result.status)
             evidence["contexts_total"] = 0
             evidences.append(evidence)
@@ -728,6 +751,11 @@ async def build_evidences_with_optional_contexts(
             } for chunk in chunks]
 
         if not chunks or not contexts:
+            evidence["failure"] = {
+                "stage": "RANKING",
+                "code": "NO_RANKED_CONTEXT",
+                "retryable": False,
+            }
             mark_evidence_uncitable(evidence, "no_ranked_chunks")
             evidence["contexts_total"] = 0
             evidences.append(evidence)
@@ -771,7 +799,7 @@ def merge_search_results(*result_groups: List[Dict[str, Any]], max_sources: int)
     for results in result_groups:
         for result in results or []:
             url = result.get("url") or ""
-            dedupe_key = url or f"{result.get('title', '')}:{result.get('content', '')}"
+            dedupe_key = normalize_url(url) or f"{result.get('title', '')}:{result.get('content', '')}"
             if dedupe_key in seen_urls:
                 continue
             seen_urls.add(dedupe_key)
@@ -779,6 +807,76 @@ def merge_search_results(*result_groups: List[Dict[str, Any]], max_sources: int)
             if len(merged) >= max_sources:
                 return merged
     return merged
+
+
+def diversify_search_results(
+    results: List[Dict[str, Any]],
+    max_sources: int,
+    max_per_domain: int = EVIDENCE_MAX_RESULTS_PER_DOMAIN,
+) -> List[Dict[str, Any]]:
+    """Select candidates round-robin by domain while preserving provider rank."""
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    domain_order: List[str] = []
+    for result in results or []:
+        domain = normalize_domain(urlparse(result.get("url") or "").netloc) or "__unknown__"
+        if domain not in buckets:
+            buckets[domain] = []
+            domain_order.append(domain)
+        if len(buckets[domain]) < max_per_domain:
+            buckets[domain].append(result)
+
+    selected: List[Dict[str, Any]] = []
+    offset = 0
+    while len(selected) < max_sources:
+        added = False
+        for domain in domain_order:
+            bucket = buckets[domain]
+            if offset < len(bucket):
+                selected.append(bucket[offset])
+                added = True
+                if len(selected) >= max_sources:
+                    break
+        if not added:
+            break
+        offset += 1
+    return selected
+
+
+def response_cache_policy(evidences: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Choose a TTL without letting temporary retrieval failures linger."""
+    if any(item.get("citation_status") == "available" and item.get("contexts") for item in evidences):
+        return {"classification": "POSITIVE", "ttl_seconds": EVIDENCE_SEARCH_CACHE_TTL_SECONDS}
+    if not evidences or any((item.get("failure") or {}).get("retryable") for item in evidences):
+        return {"classification": "TRANSIENT_NEGATIVE",
+                "ttl_seconds": EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS}
+    return {"classification": "UNUSABLE_NEGATIVE", "ttl_seconds": EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS}
+
+
+def retrieval_summary(
+    evidences: List[Dict[str, Any]],
+    candidates_considered: int,
+    target_documents: int,
+    fallback_rounds: int,
+) -> Dict[str, Any]:
+    citable = sum(bool(item.get("citation_status") == "available" and item.get("contexts")) for item in evidences)
+    extracted = sum(item.get("fetch_status") == "ok" for item in evidences)
+    attempts = sum(max(1, len(item.get("fetch_attempts") or [])) for item in evidences)
+    failures: Dict[str, int] = {}
+    for item in evidences:
+        code = (item.get("failure") or {}).get("code")
+        if code:
+            failures[code] = failures.get(code, 0) + 1
+    return {
+        "target_documents": target_documents,
+        "candidates_considered": candidates_considered,
+        "fetch_attempts": attempts,
+        "documents_scheduled": len(evidences),
+        "documents_extracted": extracted,
+        "documents_citable": citable,
+        "fallback_rounds": fallback_rounds,
+        "failure_counts": failures,
+        "stop_reason": "TARGET_REACHED" if citable >= target_documents else "BUDGET_EXHAUSTED",
+    }
 
 
 
@@ -928,6 +1026,13 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
 
     # Execute provider searches. Missing credentials are a dependency error, never placeholders.
     raw_results: List[Dict[str, Any]] = []
+    candidate_budget = max(
+        effective_search_policy["max_results"],
+        effective_search_policy["max_results"] * EVIDENCE_CANDIDATE_MULTIPLIER,
+    )
+    target_citable_sources = min(
+        effective_search_policy["max_results"], EVIDENCE_TARGET_CITABLE_SOURCES,
+    )
     successful_searches = 0
     provider_errors: List[Dict[str, str]] = []
     policy_drops: List[Dict[str, str]] = []
@@ -950,7 +1055,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             search_results = await search_with_provider(
                 provider_name,
                 query,
-                effective_search_policy["max_results"],
+                candidate_budget,
                 include_domains=include_domains or None,
                 external_source_policy=external_source_policy,
             )
@@ -981,7 +1086,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                     key = url or f"{item.get('title', '')}:{item.get('content', '')}"
                     if url in dropped_urls:
                         decision = "DROPPED_NOT_OFFICIAL"
-                    elif retained >= effective_search_policy["max_results"]:
+                    elif retained >= candidate_budget:
                         decision = "NOT_CONSIDERED_LIMIT"
                     elif key in seen:
                         decision = "DUPLICATE"
@@ -993,9 +1098,9 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             raw_results = merge_search_results(
                 raw_results,
                 returned,
-                max_sources=effective_search_policy["max_results"],
+                max_sources=candidate_budget,
             )
-            if len(raw_results) >= effective_search_policy["max_results"]:
+            if len(raw_results) >= candidate_budget:
                 break
         except Exception as e:
             if trace_request is not None:
@@ -1016,36 +1121,54 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         )
 
     # Normalize raw provider results into the public evidence response contract.
+    scheduled_results = diversify_search_results(
+        raw_results,
+        max_sources=effective_search_policy["max_results"],
+    )
     evidences = await build_evidences_with_optional_contexts(
         assertion,
-        raw_results,
+        scheduled_results,
         domain_resolution,
         max_results=effective_search_policy["max_results"],
         origin_document=origin_document,
         capture_chunks=bool(run_id),
     )
 
-    # A routed domain can be authoritative and still be impossible to extract
-    # (bot protection, an unsupported page template, etc.).  Broaden retrieval
-    # only after every first-pass source failed to yield a citable context; a
-    # successful routed source must always remain the preferred outcome.
+    # Refill the retrieval budget when the first pass cannot produce the
+    # configured number of citable sources. Every fallback keeps the active
+    # source policy; EXT_ONLY_OFFICIAL is filtered again after provider search.
     fallback_used = False
     fallback_reason = None
     fallback_excluded_domains: List[str] = []
+    fallback_candidate_count = 0
+    fallback_rounds = 0
+    initial_citable = sum(
+        bool(item.get("citation_status") == "available" and item.get("contexts"))
+        for item in evidences
+    )
     if (
-        strategy == EvidenceSearchStrategy.LOCAL
-        and EVIDENCE_FETCH_FULL_TEXT
-        and not any(item.get("citation_status") == "available" and item.get("contexts") for item in evidences)
+        EVIDENCE_FETCH_FULL_TEXT
+        and initial_citable < target_citable_sources
     ):
-        fallback_reason = "NO_INITIAL_RESULTS" if not evidences else "ALL_INITIAL_FETCHES_UNUSABLE"
+        fallback_rounds = 1
+        fallback_reason = (
+            "NO_INITIAL_RESULTS" if not evidences else
+            "ALL_INITIAL_FETCHES_UNUSABLE" if initial_citable == 0 else
+            "INSUFFICIENT_CITABLE_SOURCES"
+        )
         fallback_used = True
-        initial_urls = {normalize_url(item.get("url") or "") for item in raw_results}
-        if evidences:
-            fallback_excluded_domains = list(dict.fromkeys(
-                normalize_domain(urlparse(item.get("url") or "").netloc)
-                for item in raw_results
-                if normalize_domain(urlparse(item.get("url") or "").netloc)
-            ))
+        initial_urls = {normalize_url(item.get("url") or "") for item in scheduled_results}
+        fallback_include_domains = selected_domains if strategy == EvidenceSearchStrategy.LOCAL else None
+        fallback_policy = {
+            EvidenceSearchStrategy.LOCAL: "none",
+            EvidenceSearchStrategy.EXT_ONLY_OFFICIAL: "only_official",
+            EvidenceSearchStrategy.EXT_OFFICIAL_FIRST: "official_first",
+        }[strategy]
+        fallback_mode_prefix = {
+            EvidenceSearchStrategy.LOCAL: "local_routed",
+            EvidenceSearchStrategy.EXT_ONLY_OFFICIAL: "official_only",
+            EvidenceSearchStrategy.EXT_OFFICIAL_FIRST: "official_first",
+        }[strategy]
         highest_relaxation = max((int(item.get("relaxation_level") or 0) for item in search_requests), default=0)
         fallback_seed_requests = [
             item for item in search_requests
@@ -1053,9 +1176,10 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         ]
         fallback_requests = [{
             "query": item["query"],
-            "include_domains": None,
-            "mode": "unrestricted_after_no_results" if not evidences else "unrestricted_after_all_fetches_unusable",
-            "external_source_policy": "none",
+            "include_domains": fallback_include_domains,
+            "mode": f"{fallback_mode_prefix}_after_no_results" if not evidences else
+                    f"{fallback_mode_prefix}_after_all_fetches_unusable",
+            "external_source_policy": fallback_policy,
             "excluded_domains": fallback_excluded_domains,
             "trigger": fallback_reason,
             "relaxation_level": item.get("relaxation_level", 0),
@@ -1074,11 +1198,15 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                 search_results = await search_with_provider(
                     provider_name,
                     fallback_request["query"],
-                    effective_search_policy["max_results"],
-                    include_domains=None,
-                    external_source_policy="none",
+                    candidate_budget,
+                    include_domains=fallback_include_domains,
+                    external_source_policy=fallback_policy,
                 )
                 returned = search_results.get("results", []) or []
+                if strategy == EvidenceSearchStrategy.EXT_ONLY_OFFICIAL:
+                    returned = [item for item in returned if is_official_source_type(
+                        source_type_for_domain(normalize_domain(urlparse(str(item.get("url") or "")).netloc))
+                    )]
                 retained = []
                 seen_urls = {normalize_url(item.get("url") or "") for item in fallback_raw_results}
                 for item in returned:
@@ -1103,9 +1231,9 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                     trace_request["result_count"] = len(returned)
                     trace_request["outcome"] = "RESULTS" if returned else "EMPTY"
                 fallback_raw_results = merge_search_results(
-                    fallback_raw_results, retained, max_sources=effective_search_policy["max_results"],
+                    fallback_raw_results, retained, max_sources=candidate_budget,
                 )
-                if len(fallback_raw_results) >= effective_search_policy["max_results"]:
+                if len(fallback_raw_results) >= candidate_budget:
                     break
             except Exception as exc:
                 if trace_request is not None:
@@ -1113,18 +1241,23 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                     trace_request["error_type"] = type(exc).__name__
                     trace_request["outcome"] = "ERROR"
                 logger.warning(
-                    f"[evidence-search] unrestricted fallback provider failed "
+                    f"[evidence-search] policy-safe refill provider failed "
                     f"provider='{provider_name}' query='{fallback_request['query']}': {exc}"
                 )
 
         if fallback_raw_results:
+            fallback_candidate_count = len(fallback_raw_results)
             fallback_resolution = deepcopy(domain_resolution)
             fallback_resolution["fallback_used"] = True
             fallback_resolution["fallback_reason"] = fallback_reason
             fallback_resolution["fallback_excluded_domains"] = fallback_excluded_domains
+            fallback_scheduled = diversify_search_results(
+                fallback_raw_results,
+                max_sources=max(1, effective_search_policy["max_results"] - initial_citable),
+            )
             fallback_evidences = await build_evidences_with_optional_contexts(
                 assertion,
-                fallback_raw_results,
+                fallback_scheduled,
                 fallback_resolution,
                 max_results=effective_search_policy["max_results"],
                 origin_document=origin_document,
@@ -1141,6 +1274,13 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         domain_resolution["fallback_excluded_domains"] = fallback_excluded_domains
         search_requests.extend(fallback_requests)
 
+    summary = retrieval_summary(
+        evidences,
+        candidates_considered=len(raw_results) + fallback_candidate_count,
+        target_documents=target_citable_sources,
+        fallback_rounds=fallback_rounds,
+    )
+    cache_policy = response_cache_policy(evidences)
     response = {
         "schema_version": "evidence-search-response-v2",
         "assertion_id": assertion.get("assertion_id"),
@@ -1148,6 +1288,8 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         "search_policy": effective_search_policy,
         "queries_executed": search_requests,
         "evidences": evidences,
+        "retrieval_summary": summary,
+        "cache_policy": cache_policy,
         "evidence_bundle_hash": evidence_bundle_hash(evidences),
         "cached": False,
         "cache_key": cache_key,
@@ -1173,7 +1315,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                     "search_strategy": strategy.value,
                     "search_backend": search_backend_for_cache(),
                     "created_at": now,
-                    "expires_at": now + timedelta(seconds=EVIDENCE_SEARCH_CACHE_TTL_SECONDS),
+                    "expires_at": now + timedelta(seconds=cache_policy["ttl_seconds"]),
                     "request": {
                         "assertion": assertion,
                         "origin_document": origin_document,
@@ -1186,12 +1328,18 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         )
         logger.info(f"[evidence-search] cache_store=true assertion_id={assertion.get('assertion_id')} cache_key={cache_key}")
 
+    logger.info({"event": "retrieval.summary", "assertion_id": str(assertion.get("assertion_id")), **summary,
+                 "cache_classification": cache_policy["classification"]})
+
     if run_id:
         response["evaluation_trace"] = {"run_id": run_id, "cache_hit": False,
                                         "query_execution": trace_requests,
                                         "policy_drops": policy_drops,
                                         "chunk_detail": "CAPTURED",
                                         "limits": {"max_results": effective_search_policy["max_results"],
+                                                   "candidate_budget": candidate_budget,
+                                                   "max_results_per_domain": EVIDENCE_MAX_RESULTS_PER_DOMAIN,
+                                                   "target_citable_sources": target_citable_sources,
                                                    "max_contexts_per_source": EVIDENCE_MAX_CONTEXTS_PER_SOURCE,
                                                    "max_contexts_total": EVIDENCE_MAX_CONTEXTS_TOTAL,
                                                    "window_before": EVIDENCE_CONTEXT_WINDOW_BEFORE,

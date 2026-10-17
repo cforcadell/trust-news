@@ -99,6 +99,9 @@ def test_static_navigation_uses_paginated_table_views():
     assert "renderOrderIndex" in script
     assert "paginationControls" in script
     assert "filterHeader" in script
+    assert "tabulatedValues" in script
+    assert "matchesColumnFilter" in script
+    assert "column-filter-select" in script
     assert "sortedEntries" in script
     assert "formatSavedDate" in script
     assert 'campaignView: "summary"' in script

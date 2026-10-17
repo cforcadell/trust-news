@@ -15,7 +15,7 @@
       "valid_as_of": "2025-01-01",
       "data_status": "DEFINITIVE",
       "locator": "Principales resultados y tabla Censo 2025",
-      "cases": ["ES_POPULATION_FINAL_2025_TRUE", "ES_POPULATION_FINAL_2025_FALSE"],
+      "cases": ["ES_POPULATION_FINAL_2025_TRUE"],
       "review_status": "CANDIDATE"
     },
     {

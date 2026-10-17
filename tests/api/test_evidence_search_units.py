@@ -67,6 +67,95 @@ async def test_pdf_content_is_extracted_and_non_pdf_behavior_is_unchanged(monkey
 
 
 @pytest.mark.asyncio
+async def test_document_format_uses_payload_signature_before_content_type(monkeypatch):
+    from app import document_fetcher
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "text/html"}
+        content = b"%PDF-1.7 binary payload"
+        text = "%PDF-1.7 binary payload"
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    monkeypatch.setattr(document_fetcher, "extract_pdf_text", lambda content: "Texto PDF recuperado")
+    result = await document_fetcher.fetch_main_text("https://example.test/download")
+
+    assert result.status == "ok"
+    assert result.detected_format == "PDF"
+    assert result.extractor == "pdf"
+    assert result.text == "Texto PDF recuperado"
+
+
+@pytest.mark.asyncio
+async def test_plain_text_payload_is_extractable(monkeypatch):
+    from app import document_fetcher
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "text/plain; charset=utf-8"}
+        content = "Dato oficial\nrecuperado".encode()
+        text = "Dato oficial\nrecuperado"
+        encoding = "utf-8"
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    result = await document_fetcher.fetch_main_text("https://example.test/data.txt")
+
+    assert result.status == "ok"
+    assert result.detected_format == "TEXT"
+    assert result.text == "Dato oficial recuperado"
+
+
+@pytest.mark.asyncio
+async def test_fetch_failure_exposes_stable_stage_code_and_retryability(monkeypatch):
+    from app import document_fetcher
+
+    class Response:
+        status_code = 429
+        headers = {"content-type": "text/html"}
+        content = b"Too many requests"
+        text = "Too many requests"
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.status == "failed"
+    assert result.failure_stage == "FETCH"
+    assert result.failure_code == "HTTP_RATE_LIMITED"
+    assert result.retryable is True
+    assert result.http_status == 429
+
+
+@pytest.mark.asyncio
 async def test_tls_hostname_mismatch_retries_only_the_verified_www_variant(monkeypatch):
     from app import document_fetcher
 
@@ -451,6 +540,40 @@ def test_source_type_heuristics_use_normalized_exact_domain_boundaries():
     assert evidence.source_type_for_domain("notreuters.com") == "MEDIA"
 
 
+def test_candidate_selection_round_robins_domains_and_caps_concentration():
+    results = [
+        {"url": "https://a.example/1"},
+        {"url": "https://a.example/2"},
+        {"url": "https://a.example/3"},
+        {"url": "https://b.example/1"},
+        {"url": "https://c.example/1"},
+    ]
+
+    selected = evidence.diversify_search_results(results, max_sources=4, max_per_domain=2)
+
+    assert [item["url"] for item in selected] == [
+        "https://a.example/1",
+        "https://b.example/1",
+        "https://c.example/1",
+        "https://a.example/2",
+    ]
+
+
+def test_negative_cache_ttl_distinguishes_transient_and_permanent_failures(monkeypatch):
+    monkeypatch.setattr(evidence, "EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS", 30)
+    monkeypatch.setattr(evidence, "EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS", 300)
+
+    transient = evidence.response_cache_policy([
+        {"citation_status": "unavailable", "failure": {"code": "TIMEOUT", "retryable": True}}
+    ])
+    permanent = evidence.response_cache_policy([
+        {"citation_status": "unavailable", "failure": {"code": "FORMAT_UNSUPPORTED", "retryable": False}}
+    ])
+
+    assert transient == {"classification": "TRANSIENT_NEGATIVE", "ttl_seconds": 30}
+    assert permanent == {"classification": "UNUSABLE_NEGATIVE", "ttl_seconds": 300}
+
+
 @pytest.mark.asyncio
 async def test_failed_document_fetch_never_exposes_provider_snippet_as_citable(monkeypatch):
     async def failed_fetch(*args, **kwargs):
@@ -471,21 +594,18 @@ async def test_failed_document_fetch_never_exposes_provider_snippet_as_citable(m
 
 
 @pytest.mark.asyncio
-async def test_local_search_retries_without_routed_domains_after_all_fetches_are_unusable(monkeypatch):
+async def test_local_search_refill_preserves_routed_domains_after_unusable_fetch(monkeypatch):
     calls = []
     document = " ".join(["La fuente alternativa confirma la estadística de empleo en Barcelona en 2024."] * 8)
 
     async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
         calls.append(include_domains)
-        if include_domains:
+        if len(calls) == 1:
             return {"results": [{"url": "https://ine.es/unreadable", "title": "Original"}]}
-        return {"results": [
-            {"url": "https://www.ine.es/still-unreadable", "title": "Subdominio excluido"},
-            {"url": "https://alternative.example/report", "title": "Alternativa"},
-        ]}
+        return {"results": [{"url": "https://ine.es/alternative", "title": "Alternativa"}]}
 
     async def fake_fetch(url, **kwargs):
-        if "alternative.example" in url:
+        if url.endswith("/alternative"):
             return SimpleNamespace(status="ok", error=None, text=document, document_length_chars=len(document))
         return SimpleNamespace(status="empty_text", error=None, text="", document_length_chars=0)
 
@@ -495,20 +615,52 @@ async def test_local_search_retries_without_routed_domains_after_all_fetches_are
     monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
     response = await evidence.search_evidence(request("LOCAL", [preferred_source()]))
 
-    assert calls == [["ine.es"], None]
+    assert calls == [["ine.es"], ["ine.es"]]
     assert response["domain_resolution"]["fallback_used"] is True
     assert response["domain_resolution"]["fallback_reason"] == "ALL_INITIAL_FETCHES_UNUSABLE"
-    assert response["domain_resolution"]["fallback_excluded_domains"] == ["ine.es"]
+    assert response["domain_resolution"]["fallback_excluded_domains"] == []
     assert len(response["queries_executed"]) == 2
     fallback_query = response["queries_executed"][1]
-    assert fallback_query["mode"] == "unrestricted_after_all_fetches_unusable"
-    assert fallback_query["include_domains"] is None
-    assert fallback_query["excluded_domains"] == ["ine.es"]
+    assert fallback_query["mode"] == "local_routed_after_all_fetches_unusable"
+    assert fallback_query["include_domains"] == ["ine.es"]
+    assert fallback_query["excluded_domains"] == []
     assert [item["url"] for item in response["evidences"]] == [
-        "https://ine.es/unreadable", "https://alternative.example/report",
+        "https://ine.es/unreadable", "https://ine.es/alternative",
     ]
     assert response["evidences"][1]["citation_status"] == "available"
-    assert response["evidences"][1]["retrieval_mode"] == "unrestricted_after_all_fetches_unusable"
+    assert response["evidences"][1]["retrieval_mode"] == "local_routed_after_all_fetches_unusable"
+
+
+@pytest.mark.asyncio
+async def test_official_refill_never_relaxes_the_official_only_policy(monkeypatch):
+    calls = []
+    document = " ".join(["Eurostat publica la estadística oficial solicitada."] * 12)
+
+    async def fake_search(provider, query, max_results, include_domains=None, external_source_policy="none"):
+        calls.append(external_source_policy)
+        if len(calls) == 1:
+            return {"results": [{"url": "https://ec.europa.eu/unreadable", "title": "Inicial"}]}
+        return {"results": [
+            {"url": "https://example.com/not-official", "title": "No oficial"},
+            {"url": "https://ec.europa.eu/alternative", "title": "Alternativa oficial"},
+        ]}
+
+    async def fake_fetch(url, **kwargs):
+        if url.endswith("/alternative"):
+            return SimpleNamespace(status="ok", error=None, text=document, document_length_chars=len(document))
+        return SimpleNamespace(status="empty_text", error=None, text="", document_length_chars=0)
+
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    response = await evidence.search_evidence(request("EXT_ONLY_OFFICIAL"))
+
+    assert calls == ["only_official", "only_official"]
+    assert [item["domain"] for item in response["evidences"]] == ["ec.europa.eu", "ec.europa.eu"]
+    assert response["evidences"][1]["citation_status"] == "available"
+    assert response["retrieval_summary"]["fallback_rounds"] == 1
+    assert response["retrieval_summary"]["stop_reason"] == "TARGET_REACHED"
 
 
 @pytest.mark.asyncio

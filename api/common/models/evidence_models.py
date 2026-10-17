@@ -1,6 +1,4 @@
-from typing import List
-
-from typing import Literal
+from typing import Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -66,6 +64,27 @@ class EvidenceSearchRequestV2(BaseModel):
     search_policy: EvidenceSearchPolicy
 
 
+class EvidenceRetrievalSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_documents: int = Field(ge=0)
+    candidates_considered: int = Field(ge=0)
+    fetch_attempts: int = Field(ge=0)
+    documents_scheduled: int = Field(ge=0)
+    documents_extracted: int = Field(ge=0)
+    documents_citable: int = Field(ge=0)
+    fallback_rounds: int = Field(ge=0)
+    failure_counts: Dict[str, int] = Field(default_factory=dict)
+    stop_reason: Literal["TARGET_REACHED", "BUDGET_EXHAUSTED"]
+
+
+class EvidenceCachePolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    classification: Literal["POSITIVE", "TRANSIENT_NEGATIVE", "UNUSABLE_NEGATIVE"]
+    ttl_seconds: int = Field(ge=0)
+
+
 class EvidenceSearchResponseV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -79,3 +98,5 @@ class EvidenceSearchResponseV2(BaseModel):
     cache_key: str
     evidence_bundle_hash: str | None = None
     evaluation_trace: dict | None = None
+    retrieval_summary: EvidenceRetrievalSummary | None = None
+    cache_policy: EvidenceCachePolicy | None = None

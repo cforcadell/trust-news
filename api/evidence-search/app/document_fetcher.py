@@ -19,8 +19,13 @@ except Exception:  # pragma: no cover - dependency is installed in the service i
 
 HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
 PDF_CONTENT_TYPES = ("application/pdf", "application/x-pdf")
+TEXT_CONTENT_TYPES = ("text/plain", "text/csv", "application/json", "application/xml", "text/xml")
 REMOVE_SELECTORS = ("script", "style", "noscript", "svg", "form", "nav", "footer", "header")
 PDF_MAX_BYTES = 15 * 1024 * 1024
+BLOCK_PAGE_MARKERS = (
+    "access denied", "captcha", "checking your browser", "enable javascript",
+    "just a moment", "too many requests", "verify you are human",
+)
 
 
 @dataclass
@@ -36,6 +41,14 @@ class FetchResult:
     url_normalized: bool = False
     normalization_reason: Optional[str] = None
     attempted_urls: Optional[List[str]] = None
+    failure_stage: Optional[str] = None
+    failure_code: Optional[str] = None
+    retryable: bool = False
+    http_status: Optional[int] = None
+    response_bytes: int = 0
+    detected_format: Optional[str] = None
+    extractor: Optional[str] = None
+    attempts: Optional[List[dict]] = None
 
     @property
     def document_length_chars(self) -> int:
@@ -93,6 +106,58 @@ def extract_pdf_text(content: bytes) -> str:
     return _clean_text(" ".join(page.extract_text() or "" for page in reader.pages))
 
 
+def detect_document_format(content_type: str, content: bytes) -> str:
+    """Detect the payload format from bytes first and headers second."""
+    sample = (content or b"")[:1024].lstrip()
+    lowered = sample.lower()
+    if sample.startswith(b"%PDF-"):
+        return "PDF"
+    if lowered.startswith((b"<!doctype html", b"<html", b"<head", b"<body")) or b"<html" in lowered:
+        return "HTML"
+    if content_type in PDF_CONTENT_TYPES:
+        return "PDF"
+    if content_type in HTML_CONTENT_TYPES:
+        return "HTML"
+    if content_type in TEXT_CONTENT_TYPES or content_type.startswith("text/"):
+        return "TEXT"
+    return "UNKNOWN"
+
+
+def block_page_code(text: str) -> Optional[str]:
+    folded = _clean_text(text).casefold()
+    if any(marker in folded for marker in BLOCK_PAGE_MARKERS):
+        return "BLOCK_PAGE"
+    return None
+
+
+def failure_metadata(error: str, stage: str) -> tuple[str, bool]:
+    """Map legacy errors to stable diagnostic codes and retryability."""
+    if error.startswith("http_"):
+        try:
+            status = int(error.split("_", 1)[1])
+        except ValueError:
+            status = 0
+        code = "HTTP_RATE_LIMITED" if status == 429 else (
+            "HTTP_SERVER_ERROR" if status >= 500 else "HTTP_CLIENT_ERROR")
+        return code, status == 429 or status >= 500
+    mapping = {
+        "http_timeout": ("TIMEOUT", True),
+        "connect_error": ("NETWORK_ERROR", True),
+        "tls_hostname_mismatch": ("TLS_HOSTNAME_MISMATCH", True),
+        "non_html_content_type": ("FORMAT_UNSUPPORTED", False),
+        "pdf_parser_unavailable": ("FORMAT_UNSUPPORTED", False),
+        "pdf_text_extraction_failed": ("EXTRACTOR_ERROR", False),
+        "pdf_too_large": ("DOCUMENT_TOO_LARGE", False),
+        "unsupported_url_scheme": ("UNSUPPORTED_URL", False),
+        "empty_body": ("BODY_EMPTY", True),
+        "html_no_main_content": ("HTML_NO_MAIN_CONTENT", True),
+        "pdf_no_text": ("PDF_NO_TEXT", False),
+        "text_empty": ("BODY_EMPTY", True),
+        "block_page": ("BLOCK_PAGE", True),
+    }
+    return mapping.get(error, ("FETCH_ERROR" if stage == "FETCH" else "EXTRACTOR_ERROR", True))
+
+
 def _fetch_error_code(exc: Exception) -> str:
     """Return a stable, non-sensitive reason suitable for API responses."""
     message = str(exc).lower()
@@ -142,12 +207,16 @@ def www_hostname_variant(url: str) -> Optional[str]:
 
 
 async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "TrustNewsEvidenceBot/1.0") -> FetchResult:
-    """Download HTML or PDF and return extracted text without raising endpoint-level errors."""
+    """Download and extract a document while retaining structured diagnostics."""
     parsed = urlparse(url or "")
     if parsed.scheme not in {"http", "https"}:
-        return FetchResult(status="failed", error="unsupported_url_scheme", attempted_urls=[url])
+        code, retryable = failure_metadata("unsupported_url_scheme", "FETCH")
+        return FetchResult(status="failed", error="unsupported_url_scheme", attempted_urls=[url],
+                           failure_stage="FETCH", failure_code=code, retryable=retryable,
+                           attempts=[{"url": url, "outcome": code}])
 
     attempted_urls = [url]
+    attempts = []
     normalized_url = None
     normalization_reason = None
     try:
@@ -160,58 +229,111 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
                 response = await client.get(url)
             except Exception as exc:
                 error = _fetch_error_code(exc)
+                code, retryable = failure_metadata(error, "FETCH")
+                attempts.append({"url": url, "outcome": code})
                 normalized_url = www_hostname_variant(url) if error == "tls_hostname_mismatch" else None
                 if not normalized_url:
-                    return FetchResult(status="failed", error=error, attempted_urls=attempted_urls)
+                    return FetchResult(status="failed", error=error, attempted_urls=attempted_urls,
+                                       failure_stage="FETCH", failure_code=code, retryable=retryable,
+                                       attempts=attempts)
                 attempted_urls.append(normalized_url)
                 normalization_reason = "tls_hostname_mismatch_www_variant"
                 try:
                     # The retry still uses httpx's default certificate checks.
                     response = await client.get(normalized_url)
-                except Exception:
+                except Exception as retry_exc:
+                    retry_error = _fetch_error_code(retry_exc)
+                    retry_code, retryable = failure_metadata(retry_error, "FETCH")
+                    attempts.append({"url": normalized_url, "outcome": retry_code})
                     return FetchResult(
                         status="failed",
-                        error=error,
+                        error=retry_error,
                         normalization_reason=normalization_reason,
                         attempted_urls=attempted_urls,
+                        failure_stage="FETCH",
+                        failure_code=retry_code,
+                        retryable=retryable,
+                        attempts=attempts,
                     )
     except Exception as exc:
-        return FetchResult(status="failed", error=_fetch_error_code(exc), attempted_urls=attempted_urls)
+        error = _fetch_error_code(exc)
+        code, retryable = failure_metadata(error, "FETCH")
+        attempts.append({"url": attempted_urls[-1], "outcome": code})
+        return FetchResult(status="failed", error=error, attempted_urls=attempted_urls,
+                           failure_stage="FETCH", failure_code=code, retryable=retryable,
+                           attempts=attempts)
 
     content_type = (response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     fetched_url = str(getattr(response, "url", url))
+    http_status = int(response.status_code)
+    response_bytes = len(response.content or b"")
     url_normalized = bool(normalized_url) or fetched_url != url
     if not normalization_reason and fetched_url != url:
         normalization_reason = "http_redirect"
     if response.status_code >= 400:
-        return FetchResult(status="failed", error=f"http_{response.status_code}", content_type=content_type,
+        error = f"http_{response.status_code}"
+        code, retryable = failure_metadata(error, "FETCH")
+        attempts.append({"url": fetched_url, "http_status": http_status, "outcome": code})
+        return FetchResult(status="failed", error=error, content_type=content_type,
                            fetched_url=fetched_url, url_normalized=url_normalized,
-                           normalization_reason=normalization_reason, attempted_urls=attempted_urls)
-    if content_type in PDF_CONTENT_TYPES:
+                           normalization_reason=normalization_reason, attempted_urls=attempted_urls,
+                           failure_stage="FETCH", failure_code=code, retryable=retryable,
+                           http_status=http_status, response_bytes=response_bytes, attempts=attempts)
+
+    detected_format = detect_document_format(content_type, response.content)
+    extractor = detected_format.lower() if detected_format != "UNKNOWN" else None
+    attempts.append({"url": fetched_url, "http_status": http_status, "response_bytes": response_bytes,
+                     "declared_content_type": content_type, "detected_format": detected_format,
+                     "outcome": "FETCH_OK"})
+    extraction_error = None
+    if detected_format == "PDF":
         if len(response.content) > PDF_MAX_BYTES:
-            return FetchResult(status="failed", error="pdf_too_large", content_type=content_type,
-                               fetched_url=fetched_url, url_normalized=url_normalized,
-                               normalization_reason=normalization_reason, attempted_urls=attempted_urls)
-        try:
-            text = extract_pdf_text(response.content)
-        except RuntimeError as exc:
-            return FetchResult(status="failed", error=str(exc), content_type=content_type,
-                               fetched_url=fetched_url, url_normalized=url_normalized,
-                               normalization_reason=normalization_reason, attempted_urls=attempted_urls)
-        except Exception:
-            return FetchResult(status="failed", error="pdf_text_extraction_failed", content_type=content_type,
-                               fetched_url=fetched_url, url_normalized=url_normalized,
-                               normalization_reason=normalization_reason, attempted_urls=attempted_urls)
-    elif content_type in HTML_CONTENT_TYPES:
+            extraction_error, text = "pdf_too_large", ""
+        else:
+            try:
+                text = extract_pdf_text(response.content)
+            except RuntimeError as exc:
+                extraction_error, text = str(exc), ""
+            except Exception:
+                extraction_error, text = "pdf_text_extraction_failed", ""
+            if not extraction_error and not text:
+                extraction_error = "pdf_no_text"
+    elif detected_format == "HTML":
         text = extract_main_text(response.text)
+        if not text:
+            extraction_error = "empty_body" if not response.content else "html_no_main_content"
+        elif block_page_code(text):
+            extraction_error, text = "block_page", ""
+    elif detected_format == "TEXT":
+        encoding = getattr(response, "encoding", None) or "utf-8"
+        try:
+            decoded = response.content.decode(encoding, errors="replace")
+        except LookupError:
+            decoded = response.content.decode("utf-8", errors="replace")
+        text = _clean_text(decoded)
+        if not text:
+            extraction_error = "text_empty"
     else:
-        return FetchResult(status="failed", error="non_html_content_type", content_type=content_type,
-                           fetched_url=fetched_url, url_normalized=url_normalized,
-                           normalization_reason=normalization_reason, attempted_urls=attempted_urls)
-    if not text:
-        return FetchResult(status="empty_text", content_type=content_type, fetched_url=fetched_url,
+        extraction_error, text = "non_html_content_type", ""
+
+    if extraction_error:
+        code, retryable = failure_metadata(extraction_error, "EXTRACTION")
+        attempts[-1]["outcome"] = code
+        legacy_status = "empty_text" if code in {
+            "BODY_EMPTY", "HTML_NO_MAIN_CONTENT", "PDF_NO_TEXT", "BLOCK_PAGE"
+        } else "failed"
+        return FetchResult(status=legacy_status,
+                           error=None if legacy_status == "empty_text" else extraction_error,
+                           content_type=content_type, fetched_url=fetched_url,
                            url_normalized=url_normalized, normalization_reason=normalization_reason,
-                           attempted_urls=attempted_urls)
+                           attempted_urls=attempted_urls, failure_stage="EXTRACTION",
+                           failure_code=code, retryable=retryable, http_status=http_status,
+                           response_bytes=response_bytes, detected_format=detected_format,
+                           extractor=extractor, attempts=attempts)
+
+    attempts[-1]["outcome"] = "EXTRACTED"
     return FetchResult(status="ok", text=text, content_type=content_type, fetched_url=fetched_url,
                        url_normalized=url_normalized, normalization_reason=normalization_reason,
-                       attempted_urls=attempted_urls)
+                       attempted_urls=attempted_urls, http_status=http_status,
+                       response_bytes=response_bytes, detected_format=detected_format,
+                       extractor=extractor, attempts=attempts)

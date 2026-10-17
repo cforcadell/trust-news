@@ -23,8 +23,15 @@ function clear(parent) { parent.replaceChildren(); return parent; }
 function matchesFilter(value, query) {
   return !query || String(value ?? "").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 }
-function filterHeader(label, key, filters, apply, className = "", sorting = null) {
-  const cell = el("th", className), input = el("input", "column-filter");
+function matchesColumnFilter(value, query, options = null) {
+  return options ? (!query || String(value ?? "") === query) : matchesFilter(value, query);
+}
+function tabulatedValues(values) {
+  return [...new Set(values.map(value => String(value ?? "—")))].sort((left, right) =>
+    left.localeCompare(right, "es", {numeric: true, sensitivity: "base"}));
+}
+function filterHeader(label, key, filters, apply, className = "", sorting = null, options = null) {
+  const cell = el("th", className);
   let labelNode = el("span", "column-label", label);
   if (sorting) {
     cell.dataset.sortKey = key;
@@ -34,6 +41,18 @@ function filterHeader(label, key, filters, apply, className = "", sorting = null
     }, "column-label column-sort");
     labelNode.setAttribute("aria-label", `Ordenar por ${label}`);
   }
+  if (options) {
+    const select = el("select", "column-filter column-filter-select");
+    select.setAttribute("aria-label", `Filtrar ${label}`);
+    const all = el("option", "", "Todos"); all.value = ""; add(select, all);
+    for (const value of options) {
+      const option = el("option", "", value); option.value = value; add(select, option);
+    }
+    select.value = filters[key] || "";
+    select.addEventListener("change", () => { filters[key] = select.value; apply(true); });
+    return add(cell, labelNode, select);
+  }
+  const input = el("input", "column-filter");
   input.type = "search"; input.placeholder = "Filtrar…"; input.value = filters[key] || "";
   input.setAttribute("aria-label", `Filtrar ${label}`);
   input.addEventListener("input", () => { filters[key] = input.value; apply(true); });
@@ -295,7 +314,8 @@ function renderCampaignIndex() {
   function applyFilters(resetPage = false) {
     if (resetPage) pagination.page = 1;
     const ordered = sortedEntries(entries, sorting); for (const entry of ordered) add(body, entry.node);
-    const visible = ordered.filter(entry => Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query)));
+    const visible = ordered.filter(entry => Object.entries(filters).every(([key, query]) =>
+      matchesColumnFilter(entry.values[key], query, filterOptions[key])));
     const range = pager.update(visible.length), shown = new Set(visible.slice(range.first, range.last));
     for (const entry of entries) entry.node.hidden = !shown.has(entry);
     noResults.hidden = Boolean(visible.length); updateSortHeaders(head, sorting);
@@ -303,7 +323,9 @@ function renderCampaignIndex() {
   const columns = [["Campaña", "campaign", "campaign-column"], ["Fecha", "date", "date-column"],
     ["Órdenes", "orders", "compact-column"], ["Estado", "status", "status-column"],
     ["Archivos con problemas", "errors", "compact-column"]];
-  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
+  const filterOptions = {status: tabulatedValues(state.campaigns.map(item => item.status))};
+  for (const [label, key, className] of columns)
+    add(head, filterHeader(label, key, filters, applyFilters, className, sorting, filterOptions[key]));
   for (const campaign of state.campaigns) {
     const values = {campaign: campaign.campaign_id, date: formatSavedDate(campaign.created_at),
       orders: campaign.order_count, status: campaign.status, errors: campaign.errors?.length || 0};
@@ -432,7 +454,8 @@ function campaignOrderTable(title = "Órdenes de la campaña") {
   function applyFilters(resetPage = false) {
     if (resetPage) pagination.page = 1;
     const ordered = sortedEntries(entries, sorting); for (const entry of ordered) add(body, entry.node);
-    const visible = ordered.filter(entry => Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query)));
+    const visible = ordered.filter(entry => Object.entries(filters).every(([key, query]) =>
+      matchesColumnFilter(entry.values[key], query, filterOptions[key])));
     const range = pager.update(visible.length), shown = new Set(visible.slice(range.first, range.last));
     for (const entry of entries) entry.node.hidden = !shown.has(entry);
     noResults.hidden = Boolean(visible.length); updateSortHeaders(head, sorting);
@@ -443,7 +466,15 @@ function campaignOrderTable(title = "Órdenes de la campaña") {
     ["Decisivos", "decisive", "compact-column"], ["Validaciones", "validations", "compact-column"],
     ["Avisos", "warnings", "compact-column"], ["Errores", "errors", "compact-column"],
     ["Estado", "status", "status-column"]];
-  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
+  const filterOptions = {
+    dataset: tabulatedValues(state.orderList.orders.map(item => item.dataset_id)),
+    repetition: tabulatedValues(state.orderList.orders.map(item => item.repetition)),
+    outcome: tabulatedValues(state.orderList.orders.map(item => outcomePresentation((item.summary || {}).outcome)[0])),
+    health: tabulatedValues(state.orderList.orders.map(item => healthPresentation((item.summary || {}).health)[0])),
+    status: tabulatedValues(state.orderList.orders.map(item => item.status)),
+  };
+  for (const [label, key, className] of columns)
+    add(head, filterHeader(label, key, filters, applyFilters, className, sorting, filterOptions[key]));
   for (const item of state.orderList.orders) {
     const orderSummary = item.summary || {};
     const [outcomeLabel, outcomeTone] = outcomePresentation(orderSummary.outcome);
@@ -484,7 +515,8 @@ function campaignIncidentTable() {
     let errors = 0, warnings = 0, visible = 0;
     const ordered = sortedEntries(entries, sorting); for (const entry of ordered) add(body, entry.node);
     for (const entry of ordered) {
-      const shown = Object.entries(filters).every(([key, query]) => matchesFilter(entry.values[key], query));
+      const shown = Object.entries(filters).every(([key, query]) =>
+        matchesColumnFilter(entry.values[key], query, filterOptions[key]));
       entry.node.hidden = !shown;
       if (shown) { visible += 1; errors += entry.values.type === "error"; warnings += entry.values.type === "warning"; }
     }
@@ -495,7 +527,15 @@ function campaignIncidentTable() {
     ["Rep.", "repetition", "compact-column"], ["Módulo", "stage", "module-column"],
     ["Validador", "validator", "validator-column"], ["Código", "code", "code-column"],
     ["Detalle", "detail", "detail-column"]];
-  for (const [label, key, className] of columns) add(head, filterHeader(label, key, filters, applyFilters, className, sorting));
+  const filterOptions = {
+    type: tabulatedValues(incidents.map(item => item.type)),
+    repetition: tabulatedValues(incidents.map(item => item.repetition)),
+    stage: tabulatedValues(incidents.map(item => STAGES.find(([key]) => key === item.stage)?.[1] || item.stage)),
+    validator: tabulatedValues(incidents.map(item => item.validator_id || "—")),
+    code: tabulatedValues(incidents.map(item => item.code)),
+  };
+  for (const [label, key, className] of columns)
+    add(head, filterHeader(label, key, filters, applyFilters, className, sorting, filterOptions[key]));
   for (const item of incidents) {
     const stageName = STAGES.find(([key]) => key === item.stage)?.[1] || item.stage;
     const values = {date: formatSavedDate(item.created_at), type: item.type, order: item.order_id, repetition: item.repetition, stage: stageName,

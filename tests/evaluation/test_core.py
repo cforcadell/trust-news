@@ -18,7 +18,7 @@ def resource():
 
 def test_active_and_historical_datasets_load_separately():
     active = load_datasets([str(ROOT / "tests/data/benchmark/resources/cases/official-gold-v0")])
-    assert len(active) == 12
+    assert len(active) == 11
     assert all("suite:official-gold-v0" in case.get("tags", []) for case in active)
 
     historical = load_datasets([

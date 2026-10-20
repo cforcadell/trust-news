@@ -1099,27 +1099,94 @@ function renderRouter(observations) {
 
 function renderEvidenceSearch(observations) {
   const block = el("section"); const trace = observations.evaluation_trace || {};
+  const providerTrace = observations.provider_trace || {};
   const sources = observations.evidences || observations.sources || [];
-  add(block, add(el("div", "summary"), metric(observations.cached == null ? "—" : observations.cached ? "Sí" : "No", "caché"),
-    metric(sources.length, "URLs conservadas"), metric(sources.reduce((n, source) => n + (source.chunks_total || 0), 0), "chunks"),
-    metric(trace.chunk_detail || "No registrada", "captura de chunks")));
+  const currentRequests = providerTrace.requests || trace.query_execution || [];
+  const cachedOriginRequests = providerTrace.cached_origin_requests || [];
+  const legacyRequests = !currentRequests.length && !cachedOriginRequests.length ?
+    (observations.queries_executed || observations.queries || []) : [];
+  const requests = currentRequests.length ? currentRequests : cachedOriginRequests.length ? cachedOriginRequests : legacyRequests;
+  const isCachedOrigin = !currentRequests.length && cachedOriginRequests.length > 0;
+  let inferredCallSequence = 0;
+  const renderedRequests = requests.map((item, index) => {
+    const actualCall = Boolean(item.provider_call_id) || ["EXECUTED", "FAILED"].includes(item.status);
+    if (actualCall) inferredCallSequence += 1;
+    return {...item, _index: index, _callSequence: item.call_sequence || (actualCall ? inferredCallSequence : null),
+      _callId: item.provider_call_id || (actualCall ? `${item.provider || providerTrace.provider || "provider"}-${inferredCallSequence}` : null)};
+  });
+  const actualCalls = renderedRequests.filter(item => item._callId);
+  const executed = actualCalls.filter(item => item.status === "EXECUTED").length;
+  const failed = actualCalls.filter(item => item.status === "FAILED").length;
+  const skipped = renderedRequests.filter(item => item.status === "SKIPPED").length;
+  const activeSummary = isCachedOrigin ? providerTrace.cached_origin_summary : providerTrace.summary;
+  const returned = activeSummary?.urls_returned ?? actualCalls.reduce((total, item) => total + (item.returned_urls || []).length, 0);
+  const uniqueReturned = activeSummary?.unique_urls_returned ?? new Set(actualCalls.flatMap(item => item.returned_urls || []).filter(Boolean)).size;
+  const callsValue = observations.cached ? 0 : providerTrace.capture_status === "NOT_RECORDED_LEGACY_CACHE" ? "—" :
+    actualCalls.length || (requests.length ? "No registrado" : "—");
+  add(block, add(el("div", "summary"),
+    metric(providerTrace.provider || actualCalls[0]?.provider || "No registrado", "proveedor"),
+    metric(callsValue, "llamadas en esta validación"),
+    metric(actualCalls.length ? `${executed} / ${failed}` : "—", isCachedOrigin ? "correctas / fallidas (origen)" : "correctas / fallidas"),
+    metric(skipped, "consultas omitidas"),
+    metric(returned, "URLs devueltas"), metric(uniqueReturned, "URLs únicas"),
+    metric(sources.length, "evidencias conservadas"),
+    metric(observations.cached == null ? "—" : observations.cached ? "Sí" : "No", "caché")));
+  if (observations.cached) add(block, el("p", "trace-note",
+    cachedOriginRequests.length ?
+      `Esta validación realizó 0 llamadas al proveedor. La procedencia mostrada corresponde a las ${actualCalls.length} llamadas de la recuperación que originó la entrada de caché.` :
+      "Esta validación realizó 0 llamadas al proveedor. La entrada de caché es antigua y no conserva la traza de su recuperación original."));
+  else if (!providerTrace.capture_status && !trace.query_execution) add(block,
+    el("p", "trace-note", "El número de llamadas no quedó registrado; las consultas mostradas son el plan de búsqueda y no prueban que se ejecutaran."));
   if (trace.limits) add(block, el("p", "muted", `Límites: ${trace.limits.max_results} URLs, ${trace.limits.max_contexts_per_source} contextos/fuente, ${trace.limits.max_contexts_total} contextos/global; ventana ±${trace.limits.window_before}/${trace.limits.window_after} chunks; tamaño ${trace.limits.chunk_size_chars}, solape ${trace.limits.chunk_overlap_chars} caracteres.`));
-  add(block, el("h3", "", "Consultas y URLs devueltas"));
-  const requests = trace.query_execution || observations.queries_executed || observations.queries || [];
-  if (!requests.length) add(block, el("p", "muted", "No hay consultas registradas en esta orden."));
+  add(block, el("h3", "", isCachedOrigin ? "Llamadas de la recuperación original" : "Llamadas al proveedor"));
+  if (!renderedRequests.length) add(block, el("p", "muted", "No hay consultas registradas en esta orden."));
   else {
     const wrap = el("div", "table-wrap"), table = el("table"), head = el("tr"), body = el("tbody");
-    for (const label of ["Consulta", "Modo / filtros", "Estado", "URLs y decisión"]) add(head, el("th", "", label));
-    for (const item of requests) {
-      const urls = el("td");
-      const decisions = item.result_decisions || (item.returned_urls || []).map(url => ({url, decision: "DEVUELTA"}));
-      if (!decisions.length) add(urls, el("span", "muted", "Sin URLs registradas"));
-      for (const result of decisions) add(urls, el("div", "", `${result.decision || "—"}: ${result.url || "—"}`));
+    for (const label of ["Llamada", "Proveedor", "Inicio", "Consulta", "Modo / filtros", "Estado", "Resultados", "Duración"]) add(head, el("th", "", label));
+    for (const item of renderedRequests) {
       const relaxation = item.relaxation_level ?
         ` · relajación ${item.relaxation_level}${item.removed_terms?.length ? ` · retirado: ${item.removed_terms.join(", ")}` : ""}` : "";
-      add(body, add(el("tr"), el("td", "", item.query || "—"),
+      const row = el("tr");
+      if (item._callId) row.id = `provider-call-${item._callId}`;
+      const callLabel = item._callSequence ? `#${item._callSequence}` : item.status === "SKIPPED" ? "— (omitida)" : "—";
+      add(body, add(row, el("td", item._callId ? "call-number" : "muted", callLabel),
+        el("td", "", item.provider || providerTrace.provider || "—"),
+        el("td", "", item.started_at ? formatSavedDate(item.started_at) : "—"), el("td", "", item.query || "—"),
         el("td", "", `${item.mode || item.provider || "—"} · ${(item.include_domains || []).join(", ") || item.external_source_policy || "sin filtro"}${relaxation}`),
-        el("td", "", item.status || (observations.cached ? "NO EJECUTADA (caché)" : "No registrado")), urls));
+        el("td", "", `${item.status || (observations.cached ? "NO EJECUTADA (caché)" : "No registrado")}${item.error_type ? ` · ${item.error_type}` : ""}`),
+        el("td", "", item.result_count == null ? (item.error_type || "—") : `${item.result_count} devueltas · ${item.retained_result_count ?? "—"} conservadas`),
+        el("td", "", item.duration_ms == null ? "—" : `${item.duration_ms} ms`)));
+    }
+    add(table, add(el("thead"), head), body); add(wrap, table); add(block, wrap);
+  }
+  const urls = new Map();
+  for (const item of actualCalls) {
+    const decisions = item.result_decisions || (item.returned_urls || []).map(url => ({url, decision: "DEVUELTA"}));
+    for (const result of decisions) {
+      const url = result.url || "";
+      if (!url) continue;
+      if (!urls.has(url)) urls.set(url, {url, appearances: []});
+      urls.get(url).appearances.push({callId: item._callId, callSequence: item._callSequence,
+        decision: result.decision, rank: result.provider_rank});
+    }
+  }
+  if (urls.size) {
+    add(block, el("h3", "", "URLs devueltas y llamadas de origen"));
+    const wrap = el("div", "table-wrap"), table = el("table", "provider-url-table"), head = el("tr"), body = el("tbody");
+    for (const label of ["URL", "Llamadas", "Primera aparición", "Decisiones"]) add(head, el("th", "", label));
+    for (const item of urls.values()) {
+      const calls = el("td", "call-links");
+      for (const appearance of item.appearances) {
+        const link = el("a", "call-chip", `#${appearance.callSequence}`);
+        link.href = `#provider-call-${appearance.callId}`;
+        link.title = appearance.callId;
+        add(calls, link);
+      }
+      const first = item.appearances[0];
+      add(body, add(el("tr"), el("td", "mono", item.url), calls,
+        el("td", "", first ? `#${first.callSequence}` : "—"),
+        el("td", "", item.appearances.map(entry =>
+          `#${entry.callSequence}${entry.rank ? ` rango ${entry.rank}` : ""}: ${entry.decision || "—"}`).join(" · "))));
     }
     add(table, add(el("thead"), head), body); add(wrap, table); add(block, wrap);
   }
@@ -1134,9 +1201,17 @@ function renderEvidenceSearch(observations) {
   if (!sources.length) add(block, el("p", "muted", "No se conservaron fuentes."));
   for (const source of sources) {
     const panel = el("details", "source-panel");
-    add(panel, el("summary", "", `${source.source_id || "—"} · ${source.url || "Sin URL"} · ${source.fetch_status || "descarga no registrada"} · ${source.chunks_total ?? "—"} chunks`));
+    const derivedCallIds = renderedRequests.filter(item =>
+      (item.returned_urls || []).includes(source.url)).map(item => item._callId).filter(Boolean);
+    const sourceCallIds = source.provider_call_ids?.length ? source.provider_call_ids : derivedCallIds;
+    const callLabels = sourceCallIds.map(callId => {
+      const request = renderedRequests.find(item => item._callId === callId);
+      return request?._callSequence ? `#${request._callSequence}` : callId;
+    });
+    add(panel, el("summary", "", `${source.source_id || "—"} · ${source.url || "Sin URL"} · llamadas ${callLabels.join(", ") || "no registradas"} · ${source.fetch_status || "descarga no registrada"} · ${source.chunks_total ?? "—"} chunks`));
     const info = add(el("div", "summary"), metric(source.document_length_chars ?? "—", "caracteres"),
       metric(source.content_type || "—", "tipo"), metric(source.relationship_to_origin || "—", "relación con origen"),
+      metric(callLabels.join(", ") || "No registradas", "llamadas de origen"),
       metric((source.contexts || []).length, "contextos"), metric(source.citation_status || "—", "citable"));
     add(panel, info);
     if (source.fetched_url && source.fetched_url !== source.url) {

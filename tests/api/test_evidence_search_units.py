@@ -18,6 +18,38 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 
 
+def test_provider_trace_summary_and_url_lineage_preserve_many_to_many_relationships():
+    requests = [
+        {"provider_call_id": "exa-1", "status": "EXECUTED",
+         "returned_urls": ["https://example.test/report", "https://example.test/other"],
+         "result_decisions": [
+             {"url": "https://example.test/report", "provider_rank": 1, "decision": "RETAINED"},
+             {"url": "https://example.test/other", "provider_rank": 2, "decision": "RETAINED"},
+         ]},
+        {"provider_call_id": "exa-2", "status": "EXECUTED",
+         "returned_urls": ["https://example.test/report"],
+         "result_decisions": [
+             {"url": "https://example.test/report", "provider_rank": 1, "decision": "DUPLICATE"},
+         ]},
+        {"provider_call_id": "exa-3", "status": "FAILED", "returned_urls": [], "result_decisions": []},
+        {"status": "SKIPPED", "returned_urls": [], "result_decisions": []},
+    ]
+    evidences = [{"url": "https://example.test/report"}]
+
+    evidence.attach_provider_lineage(evidences, requests)
+
+    assert evidences[0]["provider_call_ids"] == ["exa-1", "exa-2"]
+    assert evidences[0]["first_provider_call_id"] == "exa-1"
+    assert evidence.provider_trace_summary(requests) == {
+        "calls_attempted": 3,
+        "calls_succeeded": 2,
+        "calls_failed": 1,
+        "requests_skipped": 1,
+        "urls_returned": 3,
+        "unique_urls_returned": 2,
+    }
+
+
 def test_pdf_text_extraction_uses_each_page_and_normalizes_whitespace(monkeypatch):
     from app import document_fetcher
 
@@ -35,6 +67,99 @@ def test_pdf_text_extraction_uses_each_page_and_normalizes_whitespace(monkeypatc
 
     monkeypatch.setattr(document_fetcher, "PdfReader", Reader)
     assert document_fetcher.extract_pdf_text(b"pdf bytes") == "Primera página Segunda página"
+
+
+@pytest.mark.asyncio
+async def test_html_article_body_is_extracted_from_same_response_without_retry(monkeypatch):
+    from app import document_fetcher
+
+    html = ('<html><body><main></main><script type="application/ld+json">'
+            '{"@type":"NewsArticle","articleBody":"' + 'Dato oficial de población. ' * 8 + '"}'
+            '</script></body></html>')
+    calls = []
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "text/html"}
+        content = html.encode()
+        text = html
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.status == "ok"
+    assert result.text.startswith("Dato oficial de población.")
+    assert calls == ["https://example.test/report"]
+
+
+def test_html_extraction_preserves_official_content_wrapped_in_form_and_header():
+    from app import document_fetcher
+
+    eustat_style = """
+        <html><body><form id="aspnetForm">
+          <table><tr><th>Año</th><th>Cuota renovable</th></tr>
+          <tr><td>2023</td><td>25,8</td></tr></table>
+        </form></body></html>
+    """
+    elections_style = """
+        <html><body><header><div>Cabecera dañada
+          <main role="main"><h1>Resultados oficiales</h1>
+            <table><tr><th>Grupo</th><th>Escaños</th></tr>
+            <tr><td>PPE</td><td>188</td></tr></table>
+          </main>
+        </div></header></body></html>
+    """
+
+    eustat_text = document_fetcher.extract_main_text(eustat_style)
+    elections_text = document_fetcher.extract_main_text(elections_style)
+
+    assert "2023" in eustat_text and "25,8" in eustat_text
+    assert "Resultados oficiales" in elections_text
+    assert "PPE" in elections_text and "188" in elections_text
+
+
+@pytest.mark.asyncio
+async def test_http_202_empty_body_has_specific_failure_code_without_retry(monkeypatch):
+    from app import document_fetcher
+
+    calls = []
+
+    class Response:
+        status_code = 202
+        headers = {"content-type": "text/html"}
+        content = b""
+        text = ""
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    result = await document_fetcher.fetch_main_text("https://eur-lex.example/report")
+
+    assert result.status == "empty_text"
+    assert result.failure_code == "HTTP_202_EMPTY_BODY"
+    assert result.http_status == 202
+    assert result.response_bytes == 0
+    assert calls == ["https://eur-lex.example/report"]
 
 
 @pytest.mark.asyncio
@@ -559,6 +684,101 @@ def test_candidate_selection_round_robins_domains_and_caps_concentration():
     ]
 
 
+def test_recent_unusable_url_is_replaced_from_existing_candidate_pool(monkeypatch):
+    monkeypatch.setattr(evidence, "_recent_unusable_urls", {})
+    results = [
+        {"url": "https://a.example/broken"},
+        {"url": "https://b.example/good"},
+        {"url": "https://c.example/good"},
+    ]
+    evidence.remember_unusable_urls([{"url": results[0]["url"], "fetch_status": "failed",
+                                     "fetch_error": "http_404"}])
+
+    selected = evidence.diversify_search_results(results, max_sources=2)
+
+    assert [item["url"] for item in selected] == [
+        "https://b.example/good", "https://c.example/good",
+    ]
+    assert len(selected) == 2
+    assert evidence.diversify_search_results(results[:1], max_sources=2) == results[:1]
+    evidence.remember_unusable_urls([{"url": results[0]["url"], "fetch_status": "ok"}])
+    assert evidence.diversify_search_results(results, max_sources=2)[0]["url"] == results[0]["url"]
+
+
+@pytest.mark.asyncio
+async def test_shared_unusable_history_accepts_mongo_naive_utc_dates(monkeypatch):
+    broken_url = "https://a.example/broken"
+
+    class Cursor:
+        async def to_list(self, length):
+            return [{
+                "url": broken_url,
+                "expires_at": (
+                    evidence.utc_now() + evidence.timedelta(minutes=10)
+                ).replace(tzinfo=None),
+            }]
+
+    class Collection:
+        def find(self, *args, **kwargs):
+            return Cursor()
+
+    monkeypatch.setattr(evidence, "unusable_url_collection", Collection())
+    monkeypatch.setattr(evidence, "_recent_unusable_urls", {})
+    results = [{"url": broken_url}, {"url": "https://b.example/usable"}]
+
+    await evidence.hydrate_unusable_url_history(results)
+
+    assert evidence.diversify_search_results(results, max_sources=1) == [results[1]]
+
+
+@pytest.mark.asyncio
+async def test_unusable_fetch_is_replaced_from_same_provider_batch_without_new_search(monkeypatch):
+    search_calls = []
+    fetch_calls = []
+    document = " ".join(["La fuente alternativa confirma el dato oficial de 2024."] * 12)
+    results = [
+        {"url": "https://a.example/empty", "title": "A"},
+        {"url": "https://b.example/empty", "title": "B"},
+        {"url": "https://c.example/empty", "title": "C"},
+        {"url": "https://d.example/usable", "title": "D"},
+    ]
+
+    async def fake_search(*args, **kwargs):
+        search_calls.append((args, kwargs))
+        return {"results": results}
+
+    async def fake_fetch(url, **kwargs):
+        fetch_calls.append(url)
+        if url.endswith("/usable"):
+            return SimpleNamespace(
+                status="ok", error=None, text=document,
+                document_length_chars=len(document), attempts=[{"url": url}],
+            )
+        return SimpleNamespace(
+            status="empty_text", error=None, text="", document_length_chars=0,
+            failure_stage="EXTRACTION", failure_code="HTML_NO_MAIN_CONTENT",
+            retryable=True, attempts=[{"url": url}],
+        )
+
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "unusable_url_collection", None)
+    monkeypatch.setattr(evidence, "_recent_unusable_urls", {})
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+
+    response = await evidence.search_evidence(request("LOCAL", [preferred_source()]))
+
+    assert len(search_calls) == 1
+    assert fetch_calls == [item["url"] for item in results]
+    assert response["evidences"][-1]["url"] == "https://d.example/usable"
+    assert response["evidences"][-1]["citation_status"] == "available"
+    assert response["evidences"][-1]["retrieval_mode"] == (
+        "existing_provider_candidates_after_unusable_fetch"
+    )
+    assert response["domain_resolution"]["local_candidate_refill_count"] == 1
+
+
 def test_negative_cache_ttl_distinguishes_transient_and_permanent_failures(monkeypatch):
     monkeypatch.setattr(evidence, "EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS", 30)
     monkeypatch.setattr(evidence, "EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS", 300)
@@ -732,6 +952,10 @@ async def test_search_endpoint_raises_when_every_provider_call_fails(monkeypatch
         await evidence.search_evidence(request("EXT_ONLY_OFFICIAL"))
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail["code"] == "EVIDENCE_PROVIDER_FAILED"
+    provider_trace = exc_info.value.detail["provider_trace"]
+    assert provider_trace["summary"]["calls_attempted"] == 1
+    assert provider_trace["summary"]["calls_failed"] == 1
+    assert provider_trace["requests"][0]["provider_call_id"] == "exa-1"
 
 
 def test_evidence_search_does_not_call_source_router():
@@ -801,9 +1025,34 @@ async def test_evaluation_trace_keeps_all_chunks_out_of_shared_cache(monkeypatch
     assert all(chunk["context_ids"] for chunk in chunks if chunk["included_in_context"])
     assert response["evaluation_trace"]["query_execution"][0]["status"] == "EXECUTED"
     assert response["evaluation_trace"]["query_execution"][0]["returned_urls"] == ["https://ec.europa.eu/eurostat/report"]
+    provider_trace = response["provider_trace"]
+    assert provider_trace["capture_status"] == "CAPTURED"
+    assert provider_trace["summary"] == {
+        "calls_attempted": 1,
+        "calls_succeeded": 1,
+        "calls_failed": 0,
+        "requests_skipped": 0,
+        "urls_returned": 1,
+        "unique_urls_returned": 1,
+    }
+    provider_call = provider_trace["requests"][0]
+    expected_call_id = f"{evidence.SEARCH_PROVIDER or 'provider'}-1"
+    assert provider_call["provider_call_id"] == expected_call_id
+    assert provider_call["call_sequence"] == 1
+    assert provider_call["result_decisions"] == [{
+        "url": "https://ec.europa.eu/eurostat/report",
+        "provider_rank": 1,
+        "decision": "RETAINED",
+    }]
+    assert provider_call["started_at"]
+    assert provider_call["completed_at"]
+    assert provider_call["duration_ms"] >= 0
+    assert source["provider_call_ids"] == [expected_call_id]
+    assert source["first_provider_call_id"] == expected_call_id
     stored = cache.update_one.call_args.args[1]["$set"]["response"]
     assert "evaluation_chunks" not in stored["evidences"][0]
     assert "evaluation_trace" not in stored
+    assert stored["provider_trace"]["requests"][0]["provider_call_id"] == expected_call_id
 
 
 @pytest.mark.asyncio
@@ -818,6 +1067,43 @@ async def test_evaluation_cache_hit_does_not_claim_queries_or_chunks(monkeypatch
     http_request = Request({"type": "http", "headers": [(b"x-evaluation-run-id", b"123e4567-e89b-12d3-a456-426614174000")]})
     response = await evidence.search_evidence(request(), http_request)
     assert response["cached"] is True
+    assert response["provider_trace"]["capture_status"] == "NOT_RECORDED_LEGACY_CACHE"
+    assert response["provider_trace"]["summary"]["calls_attempted"] == 0
+    assert response["provider_trace"]["requests"] == []
     assert response["evaluation_trace"]["query_execution"] == []
     assert response["evaluation_trace"]["chunk_detail"] == "NOT_RECORDED_ON_CACHE_HIT"
+    search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_separates_current_calls_from_original_retrieval(monkeypatch):
+    from unittest.mock import AsyncMock
+    from starlette.requests import Request
+
+    origin_call = {
+        "provider_call_id": "exa-1", "call_sequence": 1, "provider": "exa",
+        "status": "EXECUTED", "returned_urls": ["https://ec.europa.eu/report"],
+        "result_decisions": [{"url": "https://ec.europa.eu/report", "provider_rank": 1,
+                              "decision": "RETAINED"}],
+    }
+    cached_response = {
+        "evidences": [{"url": "https://ec.europa.eu/report", "provider_call_ids": ["exa-1"],
+                       "first_provider_call_id": "exa-1"}],
+        "cached": False,
+        "provider_trace": {"provider": "exa", "cache_hit": False, "capture_status": "CAPTURED",
+                           "requests": [origin_call], "summary": evidence.provider_trace_summary([origin_call])},
+    }
+    cache = SimpleNamespace(find_one=AsyncMock(return_value={"response": cached_response}))
+    search = AsyncMock()
+    monkeypatch.setattr(evidence, "cache_collection", cache)
+    monkeypatch.setattr(evidence, "search_with_provider", search)
+
+    response = await evidence.search_evidence(request(), Request({"type": "http", "headers": []}))
+
+    assert response["cached"] is True
+    assert response["provider_trace"]["summary"]["calls_attempted"] == 0
+    assert response["provider_trace"]["requests"] == []
+    assert response["provider_trace"]["cached_origin_requests"] == [origin_call]
+    assert response["provider_trace"]["cached_origin_summary"]["calls_attempted"] == 1
+    assert response["evidences"][0]["provider_call_ids"] == ["exa-1"]
     search.assert_not_called()

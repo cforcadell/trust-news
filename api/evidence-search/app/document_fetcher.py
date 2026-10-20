@@ -1,3 +1,4 @@
+import json
 import re
 from io import BytesIO
 from dataclasses import dataclass
@@ -20,7 +21,15 @@ except Exception:  # pragma: no cover - dependency is installed in the service i
 HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
 PDF_CONTENT_TYPES = ("application/pdf", "application/x-pdf")
 TEXT_CONTENT_TYPES = ("text/plain", "text/csv", "application/json", "application/xml", "text/xml")
-REMOVE_SELECTORS = ("script", "style", "noscript", "svg", "form", "nav", "footer", "header")
+# Select the document container before removing descendants.  Some official
+# sites wrap the complete page in a form (ASP.NET) or expose malformed markup
+# where ``main`` is parsed below ``header``.  Removing those structural tags
+# from the whole soup can therefore delete the evidence itself.
+REMOVE_SELECTORS = (
+    "script", "style", "noscript", "svg", "template", "canvas",
+    "input", "button", "select", "textarea",
+)
+CONTAINER_SELECTORS = ("article", "main", '[role="main"]')
 PDF_MAX_BYTES = 15 * 1024 * 1024
 BLOCK_PAGE_MARKERS = (
     "access denied", "captcha", "checking your browser", "enable javascript",
@@ -69,11 +78,13 @@ def extract_main_text(html: str) -> str:
     except Exception:
         soup = BeautifulSoup(html or "", "html.parser")
 
-    for tag in soup.select(",".join(REMOVE_SELECTORS)):
-        tag.decompose()
+    # Some publisher pages render their article with JavaScript, but include
+    # the complete articleBody in the HTML response. Read it before removing
+    # script tags; this does not make another HTTP request.
+    structured_text = _structured_article_text(soup)
 
     candidates = []
-    for selector in ("article", "main", '[role="main"]'):
+    for selector in CONTAINER_SELECTORS:
         candidates.extend(soup.select(selector))
 
     if candidates:
@@ -81,18 +92,48 @@ def extract_main_text(html: str) -> str:
     else:
         best = soup.body or soup
 
-    return _clean_text(best.get_text(" "))
+    # Clean only inside the selected document.  In particular, do not remove
+    # form/header/footer containers: on several public-sector sites they are
+    # ancestors of the main content rather than disposable page chrome.
+    for tag in best.select(",".join(REMOVE_SELECTORS)):
+        tag.decompose()
+
+    return _clean_text(best.get_text(" ")) or structured_text
+
+
+def _structured_article_text(soup) -> str:
+    texts = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            payload = json.loads(script.string or script.get_text() or "")
+        except (TypeError, ValueError):
+            continue
+        pending = [payload]
+        inspected = 0
+        while pending and inspected < 100:
+            item = pending.pop()
+            inspected += 1
+            if isinstance(item, list):
+                pending.extend(item[:100])
+            elif isinstance(item, dict):
+                value = item.get("articleBody")
+                if isinstance(value, str):
+                    cleaned = _clean_text(value)
+                    if len(cleaned) >= 120:
+                        texts.append(cleaned)
+                pending.extend(value for value in item.values() if isinstance(value, (dict, list)))
+    return max(texts, key=len, default="")
 
 
 def _fallback_extract_text(html: str) -> str:
     text = html or ""
-    for tag in REMOVE_SELECTORS:
-        text = re.sub(rf"<\s*{tag}\b[^>]*>.*?<\s*/\s*{tag}\s*>", " ", text, flags=re.IGNORECASE | re.DOTALL)
     for selector in ("article", "main"):
         match = re.search(rf"<\s*{selector}\b[^>]*>(.*?)<\s*/\s*{selector}\s*>", text, flags=re.IGNORECASE | re.DOTALL)
         if match:
             text = match.group(1)
             break
+    for tag in REMOVE_SELECTORS:
+        text = re.sub(rf"<\s*{tag}\b[^>]*>.*?<\s*/\s*{tag}\s*>", " ", text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     return _clean_text(text)
 
@@ -279,6 +320,24 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
                            normalization_reason=normalization_reason, attempted_urls=attempted_urls,
                            failure_stage="FETCH", failure_code=code, retryable=retryable,
                            http_status=http_status, response_bytes=response_bytes, attempts=attempts)
+
+    if http_status == 202 and response_bytes == 0:
+        # A successful-looking 202 with no representation cannot be parsed.
+        # Keep it as an unusable source, but expose a precise reason so URL
+        # selection can replace it with another candidate from the same batch.
+        attempts.append({"url": fetched_url, "http_status": http_status, "response_bytes": 0,
+                         "declared_content_type": content_type,
+                         "outcome": "HTTP_202_EMPTY_BODY"})
+        return FetchResult(
+            status="empty_text", content_type=content_type, fetched_url=fetched_url,
+            url_normalized=url_normalized, normalization_reason=normalization_reason,
+            attempted_urls=attempted_urls, failure_stage="FETCH",
+            failure_code="HTTP_202_EMPTY_BODY", retryable=True,
+            http_status=http_status, response_bytes=0,
+            detected_format="HTML" if content_type in HTML_CONTENT_TYPES else None,
+            extractor="html" if content_type in HTML_CONTENT_TYPES else None,
+            attempts=attempts,
+        )
 
     detected_format = detect_document_format(content_type, response.content)
     extractor = detected_format.lower() if detected_format != "UNKNOWN" else None

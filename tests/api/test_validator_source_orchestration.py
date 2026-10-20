@@ -288,6 +288,30 @@ def test_rag_external_strategy_skips_router(validator, monkeypatch, strategy):
     assert calls[0][1]["search_policy"]["preferred_sources"] == []
 
 
+def test_evidence_provider_failure_preserves_provider_trace(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "EXT_ONLY_OFFICIAL")
+    provider_trace = {
+        "provider": "exa", "cache_hit": False, "capture_status": "CAPTURED",
+        "requests": [{"provider_call_id": "exa-1", "call_sequence": 1, "status": "FAILED"}],
+        "summary": {"calls_attempted": 1, "calls_succeeded": 0, "calls_failed": 1,
+                    "requests_skipped": 0, "urls_returned": 0, "unique_urls_returned": 0},
+    }
+    request = validator.httpx.Request("POST", "http://evidence-search/search/evidence")
+    response = validator.httpx.Response(
+        502, request=request,
+        json={"detail": {"code": "EVIDENCE_PROVIDER_FAILED", "provider_trace": provider_trace}},
+    )
+    monkeypatch.setattr(validator.httpx, "post", lambda *args, **kwargs: response)
+
+    with pytest.raises(validator.EvidenceSearchRequestError) as captured:
+        validator.fetch_evidences_for_payload(minimal_payload())
+
+    assert captured.value.status_code == 502
+    assert captured.value.evidence_response["provider_trace"] == provider_trace
+    assert captured.value.evidence_response["evidences"] == []
+
+
 def test_production_handoff_can_be_replayed_with_identical_prompt(validator, monkeypatch):
     from common.utils.evidence_bundle import evidence_bundle_hash
     from evaluation.core.execution import execute, validator_config

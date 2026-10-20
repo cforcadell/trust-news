@@ -200,6 +200,15 @@ class SourceRouterRequestError(RuntimeError):
         super().__init__(str(cause) or cause.__class__.__name__)
 
 
+class EvidenceSearchRequestError(RuntimeError):
+    def __init__(self, cause: Exception, evidence_response: Optional[Dict[str, Any]] = None):
+        self.response = getattr(cause, "response", None)
+        self.status_code = getattr(cause, "status_code", None) or getattr(self.response, "status_code", None)
+        self.detail = getattr(cause, "detail", None)
+        self.evidence_response = evidence_response
+        super().__init__(str(cause) or cause.__class__.__name__)
+
+
 def is_automatic_validator() -> bool:
     return VALIDATOR_TYPE in AUTOMATIC_VALIDATOR_TYPES
 
@@ -457,6 +466,8 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         evidences, evidence_response = fetch_evidences_for_payload(payload_v2)
     except SourceRouterRequestError as exc:
         raise ValidationExecutionFailure("SOURCE_ROUTER", exc, [], None) from exc
+    except EvidenceSearchRequestError as exc:
+        raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], exc.evidence_response) from exc
     except Exception as exc:
         raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], None) from exc
     if evidence_response is not None:
@@ -660,6 +671,26 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
         if route_response is not None:
             response["route"] = route_response
         return response.get("evidences", []) or [], response
+    except httpx.HTTPStatusError as exc:
+        detail = None
+        try:
+            detail = exc.response.json().get("detail")
+        except Exception:
+            pass
+        evidence_response = None
+        if isinstance(detail, dict) and isinstance(detail.get("provider_trace"), dict):
+            evidence_response = {
+                "schema_version": "evidence-search-response-v2",
+                "assertion_id": str(getattr(payload_v2.assertion, "assertion_id", "")),
+                "search_policy": search_policy,
+                "evidences": [],
+                "cached": False,
+                "provider_trace": detail["provider_trace"],
+            }
+            if route_response is not None:
+                evidence_response["route"] = route_response
+        logger.exception("Evidence search failed")
+        raise EvidenceSearchRequestError(exc, evidence_response) from exc
     except Exception:
         logger.exception("Evidence search failed")
         raise

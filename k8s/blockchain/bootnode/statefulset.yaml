@@ -5,7 +5,7 @@ metadata:
   namespace: blockchain
 spec:
   serviceName: geth-bootnode
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: geth-bootnode

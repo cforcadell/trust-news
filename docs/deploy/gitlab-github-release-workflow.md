@@ -68,15 +68,17 @@ git push origin postTFM
 
 ## 3. Pipeline manual deployment in GitLab
 
-The pipeline is defined in `.gitlab-ci.yml` and uses the `PROFILE` variable.
+The pipeline is defined in `.gitlab-ci.yml` and uses the `PROFILE` and
+`BLOCKCHAIN_ENABLED` variables. The latter defaults to `OFF`.
 
 Perfiles productivos habituales:
 
 | PROFILE | Uso |
 |---|---|
 | `infra-prod` | Dispatch MongoDB, Kafka, IPFS, Keycloak, Mongo-Express and log. |
-| `blockchain-prod` | Deploy the private geth network. |
-| `apis-frontend-prod` | Deploy APIs and frontend. It is the default value. |
+| `blockchain-prod` | Apply the private Geth manifests; they remain at zero replicas until mode ON. |
+| `news-chain-prod` | Deploy the blockchain integration; normally invoked by the mode script. |
+| `apis-frontend-prod` | Deploy APIs and frontend. It is the default value and controls the blockchain mode. |
 
 Normal procedure for updating APIs/frontend:
 
@@ -84,15 +86,24 @@ Normal procedure for updating APIs/frontend:
 2. Ir a `Build > Pipelines > Run pipeline`.
 3. Seleccionar branch `postTFM`.
 4. Definir `PROFILE=apis-frontend-prod`.
-5. Run the pipeline.
-6. Run the job `build` first if manual is left.
-7. Run the job `deploy` later.
+5. Definir `BLOCKCHAIN_ENABLED=OFF` para el flujo LIGHT, o `ON` para activar
+   la red y los flujos auditables.
+6. Run the pipeline.
+7. Run the job `build` first if manual is left.
+8. Run the job `deploy` later.
 
 The `build` job generates `build.json` with the exact images built and published in the GitLab Registry. The `deploy` job runs:
 
 ```bash
 skaffold deploy --build-artifacts=build.json --profile=$PROFILE
 ```
+
+Cuando `PROFILE=apis-frontend-prod`, el pipeline ejecuta después
+`scripts/k8s/set-blockchain-mode.sh`. Con `OFF` conserva Kafka y los servicios
+LIGHT, bloquea órdenes BLOCKCHAIN nuevas y escala Geth y `news-chain` a cero.
+Con `ON`, aplica los manifiestos de Geth si faltan, espera los nodos, despliega
+`news-chain-prod` y habilita las APIs. Si existen órdenes BLOCKCHAIN en curso,
+el apagado falla para no interrumpirlas.
 
 La verificación posterior del pipeline ejecuta
 `scripts/k8s/infra/reconcile-keycloak-web-prod.sh` cuando el perfil es
@@ -129,7 +140,8 @@ From an authorized client with a valid temporary mTLS certificate, verify `https
 - a secure Gateway route rejects without JWT and works with a valid JWT;
 - `/backend/docs`, Swagger, Redoc and OpenAPI return `403` or `404`;
 - administrative routes require mTLS and Keycloak authentication;
-- Light and Blockchain complete their journeys when they are released.
+- LIGHT completes its journey. Validate blockchain journeys only in a release
+  run with `BLOCKCHAIN_ENABLED=ON`.
 
 Do not disable TLS validation. As long as the time rule is still active, verification requests include `--cert <cert.pem>` and `--key <key.pem>`.
 

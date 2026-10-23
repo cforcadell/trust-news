@@ -23,3 +23,6 @@ spec:
         envFrom:
         - configMapRef:
             name: gateway-config
+        - configMapRef:
+            name: blockchain-mode
+            optional: true

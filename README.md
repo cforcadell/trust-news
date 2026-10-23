@@ -361,9 +361,39 @@ flowchart TD
 ```
 
 LIGHT validation results do not require blockchain or IPFS. The current local
-bootstrap may still use blockchain-backed validator registration, so follow
-the deployment runbook for the profiles required by the present
-implementation.
+deployment keeps Kafka, MongoDB, the validation workers and news-handler running.
+The validator catalog is persisted in MongoDB from Kafka registration events,
+so a fresh news-handler pod can resume LIGHT without news-chain or Geth.
+
+#### Optional blockchain deployment
+
+The API profiles omit `news-chain`, and the Geth manifests default to zero
+replicas. `BLOCKCHAIN_ENABLED=OFF` is the deployment default; Kafka stays up.
+The mode script owns the `apis/blockchain-mode` ConfigMap, which is optional
+in the pod specs so a first deployment boots in OFF. Skaffold does not reset
+this ConfigMap during later API updates.
+After deploying core infrastructure and APIs, apply the mode with:
+
+```bash
+BLOCKCHAIN_ENABLED=OFF bash scripts/k8s/set-blockchain-mode.sh
+```
+
+To enable blockchain, run:
+
+```bash
+BLOCKCHAIN_ENABLED=ON bash scripts/k8s/set-blockchain-mode.sh
+```
+
+The script applies the `blockchain` Skaffold profile locally (or `blockchain-prod`
+when `PROFILE=apis-frontend-prod`), starts Geth, deploys the separate
+`news-chain` profile, then restarts the API services with
+blockchain enabled. On OFF it blocks new auditable orders, checks MongoDB for
+in-progress BLOCKCHAIN orders, then scales the blockchain pods to zero. If
+orders are still in progress, it exits with the chain running and new orders
+blocked; finish or handle those orders and rerun it. Keep the Geth PVCs to
+preserve chain history. IPFS remains
+deployed so historical CIDs can still be read. GitLab deployments use the same
+`BLOCKCHAIN_ENABLED` variable, defaulting to `OFF`.
 
 ### Optional Auditable Mode
 
@@ -687,14 +717,18 @@ secrets must never be committed.
 
 Typical local flow:
 
+Run each Skaffold `dev` command in its own terminal; apply the mode switch
+after the API manifests exist.
+
 ```bash
 cd ./scripts/k8s
 ./create-namespaces.sh
 
 cd ../..
-./skaffold dev -p blockchain --namespace blockchain
 ./skaffold dev -p infra
 ./skaffold dev -p apis-frontend
+# En otra terminal, tras aplicar los manifiestos de APIs:
+BLOCKCHAIN_ENABLED=OFF bash scripts/k8s/set-blockchain-mode.sh
 ```
 
 Main local URLs:

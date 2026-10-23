@@ -141,7 +141,7 @@
             findBlock: "Buscar Bloque",
             validatorsKicker: "Validators",
             validators: "Validadores",
-            validatorsHelp: "Listado de validadores registrados en blockchain con configuración IPFS y detalle de validaciones.",
+            validatorsHelp: "Listado de validadores activos y detalle de sus validaciones.",
             refreshValidators: "Refrescar Validadores",
             postId: "Introduce post Id",
             findPost: "Buscar Post"
@@ -499,7 +499,7 @@
             findBlock: "Search Block",
             validatorsKicker: "Validators",
             validators: "Validators",
-            validatorsHelp: "List of validators registered on blockchain with IPFS configuration and validation details.",
+            validatorsHelp: "List of active validators and details of their validations.",
             refreshValidators: "Refresh Validators",
             postId: "Enter post Id",
             findPost: "Search Post"

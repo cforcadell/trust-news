@@ -74,6 +74,17 @@ NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain.apis.svc.cluster
 IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.local:8060")
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
 ADMIN_URL = os.getenv("ADMIN_URL", "http://admin-service.apis.svc.cluster.local:8400")
+BLOCKCHAIN_ENABLED = os.getenv("BLOCKCHAIN_ENABLED", "false").strip().lower() in {"1", "true", "on", "yes"}
+
+
+@app.get("/capabilities", tags=["Capabilities"])
+async def capabilities():
+    return {"blockchain_enabled": BLOCKCHAIN_ENABLED}
+
+
+def require_blockchain_enabled() -> None:
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
 
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "TrustNews")
 KEYCLOAK_ISSUER_URL = os.getenv(
@@ -368,6 +379,7 @@ async def proxy_get_ipfs(cid: str, request: Request):
 
 @router.get("/blockchain/tx/{hash}", tags=["Blockchain"])
 async def proxy_get_tx(hash: str, request: Request):
+    require_blockchain_enabled()
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/tx/{hash}")
 
 @router.get("/blockchain/block/{block_id}", tags=["Blockchain"])
@@ -375,6 +387,7 @@ async def proxy_get_block(block_id: int, request: Request):
     """
     Obtiene información detallada de un bloque específico y sus transacciones.
     """
+    require_blockchain_enabled()
     # Cambia NEWS_CHAIN_URL por la URL de tu microservicio de blockchain
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/block/{block_id}")
 
@@ -384,6 +397,7 @@ async def proxy_get_blockchain_post(post_id: int, request: Request):
     Recupera la información completa de un Post directamente desde el Smart Contract,
     incluyendo su CID de IPFS, aserciones y todas las validaciones asociadas.
     """
+    require_blockchain_enabled()
     # Se redirige al microservicio que maneja la lógica de web3 (news-chain)
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/blockchain/post/{post_id}")
 
@@ -462,6 +476,7 @@ async def proxy_check_order_consistency(
     """
     Enruta la petición para comprobar la consistencia de una orden (Order -> IPFS -> Blockchain).
     """
+    require_blockchain_enabled()
     client_id = get_computed_client_id(auth_payload)
     admin = str(is_admin_user(auth_payload)).lower()
     

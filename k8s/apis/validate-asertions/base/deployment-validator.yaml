@@ -16,6 +16,13 @@ spec:
       initContainers:
       - name: wait-for-dependencies
         image: busybox:latest
+        env:
+        - name: BLOCKCHAIN_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: blockchain-mode
+              key: BLOCKCHAIN_ENABLED
+              optional: true
         command:
           - /bin/sh
           - -c
@@ -24,14 +31,16 @@ spec:
               echo "Esperando a Kafka..."
               sleep 2
             done
-            until nc -z ipfs-fastapi.apis.svc.cluster.local 8060; do
-              echo "Esperando a IPFS API..."
-              sleep 2
-            done
-            until nc -z geth-rpc-endpoint.blockchain.svc.cluster.local 8555; do
-              echo "Esperando a blockchain RPC..."
-              sleep 2
-            done
+            if [ "$BLOCKCHAIN_ENABLED" = "true" ]; then
+              until nc -z ipfs-fastapi.apis.svc.cluster.local 8060; do
+                echo "Esperando a IPFS API..."
+                sleep 2
+              done
+              until nc -z geth-rpc-endpoint.blockchain.svc.cluster.local 8555; do
+                echo "Esperando a blockchain RPC..."
+                sleep 2
+              done
+            fi
       containers:
       - name: worker
         image: validate-asertions
@@ -40,6 +49,9 @@ spec:
         envFrom:
         - configMapRef:
             name: validate-common-config
+        - configMapRef:
+            name: blockchain-mode
+            optional: true
         env:
         - name: PRIVATE_KEY
           valueFrom: { secretKeyRef: { name: validator-secret, key: PRIVATE_KEY } }

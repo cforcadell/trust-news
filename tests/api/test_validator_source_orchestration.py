@@ -53,6 +53,23 @@ def minimal_payload():
     return SimpleNamespace(assertion=assertion, origin_document=origin)
 
 
+def test_light_worker_import_does_not_open_contract(monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("BLOCKCHAIN_ENABLED", "false")
+    monkeypatch.setenv("ACCOUNT_ADDRESS", "0x0000000000000000000000000000000000000001")
+    monkeypatch.setenv("CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000002")
+    monkeypatch.setenv("CONTRACT_ABI_PATH", "/missing/blockchain-contract.json")
+    monkeypatch.setenv("VALIDATOR_TYPE", "4")
+    monkeypatch.setenv("AI_PROVIDER", "none")
+    spec = importlib.util.spec_from_file_location(
+        "light_worker_without_chain", root / "api/validate-asertions/main.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.w3 is None
+    assert module.contract is None
+
+
 def test_source_router_payload_forwards_contextual_discovery_terms(validator):
     payload = minimal_payload()
     payload.assertion.context.entities = [
@@ -265,6 +282,17 @@ def test_source_router_http_status_is_preserved_as_retryable(validator, monkeypa
     assert details.status_code == 500
     assert details.retryable is True
     assert details.message == "classification failed"
+
+
+def test_evidence_search_timeout_is_classified_as_retryable(validator):
+    cause = validator.httpx.ReadTimeout("timed out")
+    failure = validator.ValidationExecutionFailure("EVIDENCE_SEARCH", cause, [], None)
+
+    details = validator.validation_error_details(failure)
+
+    assert details.code == "EVIDENCE_SEARCH_TIMEOUT"
+    assert details.retryable is True
+    assert details.status_code is None
 
 
 @pytest.mark.parametrize("strategy", ["EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])

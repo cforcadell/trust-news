@@ -174,6 +174,28 @@ function getSelectedValidationMode() {
     return document.getElementById("validationMode")?.checked ? "BLOCKCHAIN" : "LIGHT";
 }
 
+async function loadCapabilities() {
+    try {
+        const response = await fetch(`${BACKEND_BASE}/capabilities`, {
+            headers: { Authorization: `Bearer ${keycloak.token}` }
+        });
+        if (!response.ok) return;
+        const { blockchain_enabled: enabled } = await response.json();
+        if (enabled) return;
+        const modeCheckbox = document.getElementById("validationMode");
+        if (modeCheckbox) {
+            modeCheckbox.checked = false;
+            modeCheckbox.closest(".validation-mode-panel").style.display = "none";
+        }
+        for (const section of ["tx", "blocks", "contract", "consistency"]) {
+            document.querySelectorAll(`button[onclick="showSection('${section}')"]`)
+                .forEach(button => { button.style.display = "none"; });
+        }
+    } catch (error) {
+        console.warn("No se pudieron cargar las capacidades del servicio", error);
+    }
+}
+
 function isLightOrder(order) {
     return String(order?.validation_mode || "BLOCKCHAIN").toUpperCase() === "LIGHT";
 }
@@ -3500,6 +3522,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Extraemos la lógica original a una función aparte
 function initializeApp() {
+    loadCapabilities();
     // 1. Mostrar quién está logueado (Opcional pero recomendado)
     console.log("User:", keycloak.tokenParsed.preferred_username);
 

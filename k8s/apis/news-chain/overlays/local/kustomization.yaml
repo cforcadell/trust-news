@@ -7,6 +7,10 @@ resources:
   - ../../service.yaml
   - ../../deployment.yaml
 
+replicas:
+  - name: news-chain
+    count: 1
+
 # Reemplaza el comando manual: kubectl create configmap news-chain-contract --from-file=...
 configMapGenerator:
 - name: news-chain-contract

@@ -1,6 +1,9 @@
+import asyncio
 import json
+import os
 import re
 from io import BytesIO
+from itertools import islice
 from dataclasses import dataclass
 from typing import List, Optional
 from urllib.parse import urlparse, urlunparse
@@ -31,6 +34,7 @@ REMOVE_SELECTORS = (
 )
 CONTAINER_SELECTORS = ("article", "main", '[role="main"]')
 PDF_MAX_BYTES = 15 * 1024 * 1024
+PDF_MAX_PAGES = int(os.getenv("EVIDENCE_PDF_MAX_PAGES", "80"))
 BLOCK_PAGE_MARKERS = (
     "access denied", "captcha", "checking your browser", "enable javascript",
     "just a moment", "too many requests", "verify you are human",
@@ -144,7 +148,9 @@ def extract_pdf_text(content: bytes) -> str:
         raise RuntimeError("pdf_parser_unavailable")
 
     reader = PdfReader(BytesIO(content))
-    return _clean_text(" ".join(page.extract_text() or "" for page in reader.pages))
+    return _clean_text(
+        " ".join(page.extract_text() or "" for page in islice(reader.pages, PDF_MAX_PAGES))
+    )
 
 
 def detect_document_format(content_type: str, content: bytes) -> str:
@@ -350,7 +356,9 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
             extraction_error, text = "pdf_too_large", ""
         else:
             try:
-                text = extract_pdf_text(response.content)
+                # PDF parsing is CPU-bound. Keep it off the ASGI event loop so
+                # health probes and concurrent searches remain responsive.
+                text = await asyncio.to_thread(extract_pdf_text, response.content)
             except RuntimeError as exc:
                 extraction_error, text = str(exc), ""
             except Exception:
@@ -358,7 +366,9 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
             if not extraction_error and not text:
                 extraction_error = "pdf_no_text"
     elif detected_format == "HTML":
-        text = extract_main_text(response.text)
+        # BeautifulSoup/lxml parsing is synchronous as well and can be costly
+        # for large public-sector pages.
+        text = await asyncio.to_thread(extract_main_text, response.text)
         if not text:
             extraction_error = "empty_body" if not response.content else "html_no_main_content"
         elif block_page_code(text):

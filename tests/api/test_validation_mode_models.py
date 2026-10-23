@@ -13,9 +13,9 @@ from common.models.async_models import (
 from common.models.veredicto import Validacion
 
 
-def test_publish_request_defaults_to_blockchain():
+def test_publish_request_defaults_to_light():
     req = PublishRequest(text="news")
-    assert req.validation_mode == ValidationMode.BLOCKCHAIN
+    assert req.validation_mode == ValidationMode.LIGHT
 
 
 def test_publish_request_accepts_light():
@@ -28,7 +28,7 @@ def test_publish_request_rejects_invalid_mode():
         PublishRequest(text="news", validation_mode="FAST")
 
 
-def test_publish_with_assertions_defaults_to_blockchain():
+def test_publish_with_assertions_defaults_to_light():
     req = PublishWithAssertionsRequest(
         text="news",
         assertions=[{
@@ -41,7 +41,7 @@ def test_publish_with_assertions_defaults_to_blockchain():
             },
         }],
     )
-    assert req.validation_mode == ValidationMode.BLOCKCHAIN
+    assert req.validation_mode == ValidationMode.LIGHT
     assert req.assertions[0].taxonomy_version == "routing-taxonomy-v1"
 
 

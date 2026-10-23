@@ -24,7 +24,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
-from readability import Document
 from common.models.veredicto import Validacion
 from common.models.async_models import (
     GenerateAssertionsRequest,
@@ -113,6 +112,7 @@ TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", DEFAULT_TOPIC_RESPONSES)
 TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS)
 TOPIC_LIGHT_VALIDATION_RESPONSES = os.getenv("TOPIC_LIGHT_VALIDATION_RESPONSES", DEFAULT_TOPIC_RESPONSES)
 LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS = float(os.getenv("LIGHT_VALIDATOR_HEALTH_TIMEOUT_SECONDS", "2.0"))
+BLOCKCHAIN_ENABLED = os.getenv("BLOCKCHAIN_ENABLED", "false").strip().lower() in {"1", "true", "on", "yes"}
 
 MONGO_URI = build_mongo_uri_from_env()
 MONGO_DBNAME = os.getenv("MONGO_DBNAME", "newsdb")
@@ -120,6 +120,7 @@ MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "orders")
 MONGO_EVENTS_COLLECTION = os.getenv("MONGO_EVENTS_COLLECTION", "events")
 MONGO_VALIDATIONS_COLLECTION = os.getenv("MONGO_VALIDATIONS_COLLECTION", "validations")
 MONGO_CONFIG_COLLECTION = os.getenv("MONGO_CONFIG_COLLECTION", "config")
+MONGO_VALIDATOR_REGISTRY_COLLECTION = os.getenv("MONGO_VALIDATOR_REGISTRY_COLLECTION", "validator_registry")
 VALIDATOR_TYPE_WEIGHTS_CONFIG_ID = "validator_type_weights"
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
@@ -154,6 +155,7 @@ orders_collection = None
 events_collection = None
 validations_collection = None
 config_collection = None
+validator_registry_collection = None
 validator_type_weights = default_validator_type_weights()
 
 
@@ -266,6 +268,32 @@ async def fetch_validators_from_chain() -> list[dict]:
     return data["validators"]
 
 
+async def load_validators_cache_from_registry() -> bool:
+    """Restore validators without contacting blockchain services."""
+    global validators_cache
+    if validator_registry_collection is None:
+        return False
+    records = await validator_registry_collection.find({}).to_list(length=None)
+    restored = {
+        str(record["_id"]).lower(): record["data"]
+        for record in records
+        if isinstance(record.get("data"), dict) and record["data"].get("validator")
+    }
+    if not restored:
+        return False
+    async with validators_cache_lock:
+        validators_cache = {**restored, **validators_cache}
+    logger.info("Loaded %s validators from MongoDB registry", len(restored))
+    return True
+
+
+async def persist_validator_registry_entry(key: str, entry: dict) -> None:
+    if validator_registry_collection is not None:
+        await validator_registry_collection.replace_one(
+            {"_id": key}, {"_id": key, "data": entry}, upsert=True
+        )
+
+
 def merge_refreshed_validator(previous: dict, refreshed: dict) -> dict:
     """Keep a newer event update when the chain snapshot has not caught up yet."""
     previous_updated_at = parse_iso_datetime(previous.get("updated_at"))
@@ -334,6 +362,8 @@ async def load_validators_cache_from_chain(*, only_if_empty: bool = False) -> bo
                 refreshed_cache[validator_hash] = previous
 
         validators_cache = refreshed_cache
+        for key, entry in refreshed_cache.items():
+            await persist_validator_registry_entry(key, entry)
         logger.info(f"✅ Validators cache loaded from news-chain: {len(validators_cache)} validators")
         return True
 
@@ -345,7 +375,7 @@ async def update_validator_cache_from_event(payload: dict):
     if not validator:
         return
 
-    if not validators_cache:
+    if not validators_cache and BLOCKCHAIN_ENABLED:
         loaded = await load_validators_cache_from_chain(only_if_empty=True)
         if loaded:
             logger.info("✅ Validators cache initialized before applying validator config event")
@@ -363,7 +393,7 @@ async def update_validator_cache_from_event(payload: dict):
         updated_validator = {
             **existing,
             "validator": validator,
-            "ipfs_hash": payload.get("ipfs_hash", existing.get("ipfs_hash")),
+            "ipfs_hash": payload.get("ipfs_hash") or existing.get("ipfs_hash"),
             "config": config,
             "categories": incoming_categories or [],
             "validator_type": validator_type,
@@ -373,6 +403,7 @@ async def update_validator_cache_from_event(payload: dict):
             "source": payload.get("source") or existing.get("source") or "validator-event",
             "_cache_origin": "validator-event",
         }
+        await persist_validator_registry_entry(validator_key, updated_validator)
         validators_cache = {**current_cache, validator_key: updated_validator}
     logger.info(
         f"✅ Validators cache updated from event | validator={validator} "
@@ -521,6 +552,13 @@ def normalize_validation_mode(value) -> ValidationMode:
     if isinstance(value, ValidationMode):
         return value
     return ValidationMode(str(value or ValidationMode.BLOCKCHAIN.value).upper())
+
+
+def require_available_validation_mode(value) -> ValidationMode:
+    mode = normalize_validation_mode(value)
+    if mode == ValidationMode.BLOCKCHAIN and not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE: blockchain disabled")
+    return mode
 
 
 def get_light_validators_for_category(category_id: int) -> List[dict]:
@@ -1887,6 +1925,7 @@ def normalize_api_timestamp(value: Any) -> str:
 
 @app.post("/publishNew", status_code=202)
 async def publish_new(req: PublishRequest, client_id: str):
+    validation_mode = require_available_validation_mode(req.validation_mode)
     # 1. Comprobación de cuota "news_generation"
     quotas = await fetch_client_quotas(client_id)
     consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
@@ -1905,7 +1944,7 @@ async def publish_new(req: PublishRequest, client_id: str):
         "text": req.text,
         "client_id": client_id, # 🔑 Guardar el client_id para luego
         "status": "CREATED",
-        "validation_mode": normalize_validation_mode(req.validation_mode).value,
+        "validation_mode": validation_mode.value,
         "source_url": req.source_url,
         "source_domain": req.source_domain,
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -1938,6 +1977,7 @@ async def publish_new(req: PublishRequest, client_id: str):
 
 @app.post("/publishWithAssertions", status_code=202)
 async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
+    validation_mode = require_available_validation_mode(req.validation_mode)
     # 1. Comprobación de cuota "blockchain_validation"
     quotas = await fetch_client_quotas(client_id)
     consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
@@ -1947,7 +1987,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
 
     
     # Opcional: También podemos verificar si (consumed_val + len(req.assertions)) supera el límite
-    if consumed_val + len(req.assertions) >= limits_val:
+    if validation_mode == ValidationMode.BLOCKCHAIN and consumed_val + len(req.assertions) >= limits_val:
          raise HTTPException(
             status_code=429, 
             detail=f"Quota validations exceded. Limit: {limits_val}, Consumed: {consumed_val}"
@@ -1964,7 +2004,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         "assertions": [a.dict() for a in req.assertions],
         "client_id": client_id, # 🔑
         "status": "ASSERTIONS_REQUESTED",
-        "validation_mode": normalize_validation_mode(req.validation_mode).value,
+        "validation_mode": validation_mode.value,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await save_order_doc(order_doc)
@@ -2088,7 +2128,7 @@ async def list_validators_cache(
     recover_ipfs: bool = Query(True, description="Refresh from blockchain/news-chain before returning cache")
 ):
     """New list validators cache endpoint that gets blockchain validators and recovers IPFS data."""
-    if recover_ipfs:
+    if recover_ipfs and BLOCKCHAIN_ENABLED:
         await load_validators_cache_from_chain()
     validators = [validator_summary_for_ui(v) for v in validators_cache.values()]
     return {"validators": validators}
@@ -2097,7 +2137,7 @@ async def list_validators_cache(
 @app.get("/validators/cache/{validator_hash}")
 async def get_validator_cache(validator_hash: str):
     validator = get_cached_validator_config(validator_hash)
-    if not validator:
+    if not validator and BLOCKCHAIN_ENABLED:
         await load_validators_cache_from_chain()
         validator = get_cached_validator_config(validator_hash)
     if not validator:
@@ -2119,7 +2159,7 @@ async def get_validator_with_validations_cache(
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="Identidad del cliente vacía")
     validator = get_cached_validator_config(validator_hash)
-    if not validator:
+    if not validator and BLOCKCHAIN_ENABLED:
         await load_validators_cache_from_chain()
         validator = get_cached_validator_config(validator_hash)
     if not validator:
@@ -2369,6 +2409,7 @@ def extract_text_from_url(request: ExtractTextRequest):
     Recupera una página web, elimina contenido no esencial (anuncios, menús) 
     y retorna el título y el texto del artículo principal usando Readability.
     """
+    from readability import Document
     
     url = str(request.url)
     
@@ -2490,7 +2531,7 @@ async def check_order_consistency(
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
-    global producer, consumer, mongo_client, db, orders_collection, events_collection, validations_collection, config_collection, validators_cache
+    global producer, consumer, mongo_client, db, orders_collection, events_collection, validations_collection, config_collection, validator_registry_collection, validators_cache
 
     # MongoDB
     mongo_client = AsyncIOMotorClient(MONGO_URI)
@@ -2499,6 +2540,7 @@ async def startup_event():
     events_collection = db[MONGO_EVENTS_COLLECTION]
     validations_collection = db[MONGO_VALIDATIONS_COLLECTION]
     config_collection = db[MONGO_CONFIG_COLLECTION]
+    validator_registry_collection = db[MONGO_VALIDATOR_REGISTRY_COLLECTION]
     logger.info(f"MongoDB connected at {MONGO_COLLECTION}")
 
     # Crear índices útiles
@@ -2514,7 +2556,9 @@ async def startup_event():
         logger.warning(f"Could not create indexes: {e}")
 
     await load_validator_type_weights()
-    await load_validators_cache_from_chain()
+    await load_validators_cache_from_registry()
+    if BLOCKCHAIN_ENABLED:
+        await load_validators_cache_from_chain()
 
     # Kafka producer
     producer = AIOKafkaProducer(

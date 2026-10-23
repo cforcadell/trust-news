@@ -69,6 +69,30 @@ def test_pdf_text_extraction_uses_each_page_and_normalizes_whitespace(monkeypatc
     assert document_fetcher.extract_pdf_text(b"pdf bytes") == "Primera página Segunda página"
 
 
+def test_pdf_text_extraction_respects_page_budget(monkeypatch):
+    from app import document_fetcher
+
+    extracted = []
+
+    class Page:
+        def __init__(self, index):
+            self.index = index
+
+        def extract_text(self):
+            extracted.append(self.index)
+            return f"page {self.index}"
+
+    class Reader:
+        def __init__(self, content):
+            self.pages = [Page(index) for index in range(100)]
+
+    monkeypatch.setattr(document_fetcher, "PdfReader", Reader)
+    monkeypatch.setattr(document_fetcher, "PDF_MAX_PAGES", 3)
+
+    assert document_fetcher.extract_pdf_text(b"pdf bytes") == "page 0 page 1 page 2"
+    assert extracted == [0, 1, 2]
+
+
 @pytest.mark.asyncio
 async def test_html_article_body_is_extracted_from_same_response_without_retry(monkeypatch):
     from app import document_fetcher
@@ -219,6 +243,41 @@ async def test_document_format_uses_payload_signature_before_content_type(monkey
     assert result.detected_format == "PDF"
     assert result.extractor == "pdf"
     assert result.text == "Texto PDF recuperado"
+
+
+@pytest.mark.asyncio
+async def test_pdf_extraction_is_offloaded_from_event_loop(monkeypatch):
+    from app import document_fetcher
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "application/pdf"}
+        content = b"pdf bytes"
+        text = "not used"
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            return Response()
+
+    offloaded = []
+
+    async def to_thread(function, *args):
+        offloaded.append((function, args))
+        return "Texto PDF recuperado"
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    monkeypatch.setattr(document_fetcher.asyncio, "to_thread", to_thread)
+
+    result = await document_fetcher.fetch_main_text("https://example.test/report.pdf")
+
+    assert result.status == "ok"
+    assert offloaded == [(document_fetcher.extract_pdf_text, (b"pdf bytes",))]
 
 
 @pytest.mark.asyncio

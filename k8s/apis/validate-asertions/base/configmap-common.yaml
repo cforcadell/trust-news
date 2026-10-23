@@ -12,6 +12,7 @@ data:
 
   VALIDATOR_TYPE: "1"
   EVIDENCE_SEARCH_URL: "http://evidence-search.apis.svc.cluster.local:8074"
+  EVIDENCE_SEARCH_TIMEOUT_SECONDS: "90"
   SOURCE_ROUTER_URL: "http://source-router.apis.svc.cluster.local:8075"
   ADMIN_URL: "http://admin-service.apis.svc.cluster.local:8400"
   OPENROUTER_API_URL: "https://openrouter.ai/api/v1/chat/completions"

@@ -25,7 +25,8 @@ Perfiles locales:
 | Perfil | Scope |
 | --- | --- |
 | `traefik` | Traefik local, chart `41.0.2` |
-| `blockchain` | Red privada Geth local |
+| `blockchain` | Manifiestos de la red privada Geth; inicia a cero réplicas |
+| `news-chain` | Integración blockchain; se aplica al activar el modo ON |
 | `infra-basic` | Basic infrastructure without monitoring |
 | `infra` | Complete infrastructure with Kafdrop, Fluent Bit, Loki and Grafana |
 | `apis-frontend` | APIs, Gateway, frontend e Ingress local |
@@ -58,14 +59,14 @@ Orden:
 
 1. Create or check the Kind cluster.
 2. Crear namespaces.
-3. Desplegar `blockchain`.
-4. Deploy or verify the contract.
-5. Choose `infra-basic` or `infra`.
-6. Run MongoDB bootstrap.
-7. Desplegar `traefik`.
-8. Desplegar `apis-frontend`.
-9. Configure Keycloak, quotas and functional data.
-10. Run the local validation matrix.
+3. Choose `infra-basic` or `infra`.
+4. Run MongoDB bootstrap.
+5. Desplegar `traefik`.
+6. Desplegar `apis-frontend` en LIGHT.
+7. Configure Keycloak, quotas and functional data.
+8. Activar blockchain solo si se va a probar un flujo auditable; desplegar o
+   verificar el contrato entonces.
+9. Run the local validation matrix.
 
 ---
 
@@ -104,13 +105,30 @@ Additional cleaning of Docker images or volumes is executed separately and only 
 
 ---
 
-## 4. Blockchain and contract
+## 4. Blockchain and contract (optional)
 
-Unlock the local network:
+LIGHT starts without this profile. A direct Skaffold deployment of the
+blockchain profile leaves its StatefulSets at zero replicas.
+
+Tras tener `infra`/`infra-basic` y `apis-frontend` activos, habilita el modo:
 
 ```bash
-./skaffold dev -p blockchain --namespace blockchain
+BLOCKCHAIN_ENABLED=ON bash scripts/k8s/set-blockchain-mode.sh
 ```
+
+El script aplica `blockchain`, escala los tres StatefulSets de Geth, despliega
+`news-chain` y reinicia las APIs afectadas cuando la red está lista. Kafka,
+los workers LIGHT y `news-handler` siguen activos en ambos modos. Para volver
+a LIGHT, bloquea nuevas órdenes auditables, verifica que no queden órdenes
+BLOCKCHAIN en curso y escala los pods accesorios a cero:
+
+```bash
+BLOCKCHAIN_ENABLED=OFF bash scripts/k8s/set-blockchain-mode.sh
+```
+
+No uses `skaffold dev -p blockchain` ni escalados manuales como cambio de
+modo: el perfil por diseño conserva Geth en cero réplicas hasta que el script
+lo active.
 
 Check nodes and logs:
 
@@ -193,7 +211,7 @@ The listener is accessible from the host according to the private network model 
 
 With either of the two profiles, then run the common bootstrap:
 
-- [`k8s-common.md - MongoDB bootstrap`](k8s-common.md#6-mongodb-bootstrap).
+- [`k8s-common.md - MongoDB bootstrap`](k8s-common.md#7-mongodb-bootstrap).
 
 ---
 
@@ -271,12 +289,12 @@ kubectl get secrets -n apis
 
 The shared configuration of Keycloak and quotas is in:
 
-- [`k8s-common.md - Keycloak y cuotas`](k8s-common.md#7-keycloak-y-cuotas).
+- [`k8s-common.md - Keycloak y cuotas`](k8s-common.md#8-keycloak-and-assessed-contributions).
 
 The functional configuration and operations of MongoDB are in:
 
-- [`k8s-common.md - Evidence Search`](k8s-common.md#8-evidence-search);
-- [`k8s-common.md - MongoDB`](k8s-common.md#9-mongodb-consultas-y-limpieza).
+- [`k8s-common.md - Evidence Search`](k8s-common.md#9-source-router-and-evidence-search);
+- [`k8s-common.md - MongoDB`](k8s-common.md#10-mongodb-consultations-and-cleaning).
 
 The frontend does not finish TLS or proxify `/backend` or `/auth`. Traefik publishes these routes through the Ingress manifests.
 
@@ -293,7 +311,7 @@ The table uses `localhost` as a canonical reference. For frontend and Keycloak i
 | Gateway Swagger | `http://localhost:8500/docs` | `apis-frontend` |
 | Evidence Search Swagger | `http://localhost:8074/docs` | `apis-frontend` |
 | News Handler Swagger | `http://localhost:8072/docs` | `apis-frontend` |
-| News Chain Swagger | `http://localhost:8073/docs` | `apis-frontend` |
+| News Chain Swagger | `http://localhost:8073/docs` | `news-chain`, solo con blockchain ON |
 | IPFS FastAPI Swagger | `http://localhost:8060/docs` | `apis-frontend` |
 | Assertion Generator Swagger | `http://localhost:8071/docs` | `apis-frontend` |
 | Validator Worker 1 Swagger | `http://localhost:8070/docs` | `apis-frontend` |
@@ -344,7 +362,7 @@ Validation should cover:
 - exclusive entry by `/gui/` and logout return to `/gui/`;
 - navigation and role authorization;
 - Polling and quotas;
-- Light and Blockchain flows;
+- LIGHT flows and, when `BLOCKCHAIN_ENABLED=ON`, blockchain flows;
 - valid and invalid methods;
 - authentication absent, expired or manipulated;
 - body within 5 MiB and above the limit;

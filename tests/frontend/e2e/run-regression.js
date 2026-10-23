@@ -9,16 +9,17 @@ const path = require("node:path");
 
 const TEST_DIR = __dirname;
 const REPO_ROOT = path.resolve(TEST_DIR, "..", "..", "..");
+const E2E_DATA_DIR = path.join(REPO_ROOT, "tests", "data", "frontend-e2e");
 const UI_RUNNER = path.join(TEST_DIR, "ui-smoke-test.js");
 const DEFAULT_CASES = [
-  path.join(TEST_DIR, "resources", "cases", "light.json"),
-  path.join(TEST_DIR, "resources", "cases", "blockchain.json"),
+  path.join(E2E_DATA_DIR, "resources", "cases", "light.json"),
+  path.join(E2E_DATA_DIR, "resources", "cases", "blockchain.json"),
 ];
 const RUN_ID = process.env.ASSERMETRY_RUN_ID
   || `reg-${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}`;
 const ARTIFACTS_DIR = path.resolve(
   process.env.ASSERMETRY_ARTIFACTS_DIR
-  || path.join(TEST_DIR, "artifacts", RUN_ID),
+  || path.join(E2E_DATA_DIR, "artifacts", RUN_ID),
 );
 const CASE_FILES = parseCaseFiles();
 const SETUP_HOOK = optionalPath("ASSERMETRY_SETUP_HOOK");

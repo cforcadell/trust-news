@@ -32,10 +32,14 @@ kubectl get ns blockchain infra apis frontend
 |---|---|---|
 | Namespaces/setup | script local | `setup` |
 | Infraestructura | `infra`, `infra-basic` | `infra-prod` |
-| Blockchain | `blockchain` | `blockchain-prod` |
+| Recursos Geth | `blockchain` | `blockchain-prod` |
+| Integración de cadena | `news-chain` | `news-chain-prod` |
 | APIs and frontend | `apis-frontend` | `apis-frontend-prod` |
 
 `infra` and `infra-basic` are local alternatives. `infra-basic` omits monitoring for a lightweight deployment and has no productive equivalent.
+
+Los perfiles de APIs no incluyen `news-chain`. Los manifiestos de Geth tienen
+`replicas: 0`; por tanto, aplicar sus perfiles por sí solo no activa la cadena.
 
 ---
 
@@ -78,9 +82,59 @@ kubectl logs -n infra -f kafka-0
 
 ---
 
-## 4. Blockchain
+## 4. Modo blockchain bajo demanda
 
-### 4.1 Node State
+`BLOCKCHAIN_ENABLED=OFF` es el estado inicial y operativo normal. Mantiene
+Kafka, MongoDB, IPFS, `news-handler`, Gateway y los workers de validación. Las
+órdenes LIGHT siguen funcionando y el catálogo de validadores se recupera de
+MongoDB a partir de los eventos de registro en Kafka.
+
+El único procedimiento para cambiar el modo es el script desde la raíz del
+repositorio, una vez desplegadas la infraestructura y las APIs:
+
+```bash
+# Mantener LIGHT y detener news-chain y los tres nodos Geth.
+BLOCKCHAIN_ENABLED=OFF bash scripts/k8s/set-blockchain-mode.sh
+
+# Arrancar Geth, desplegar news-chain y habilitar las APIs tras esperar los rollouts.
+BLOCKCHAIN_ENABLED=ON bash scripts/k8s/set-blockchain-mode.sh
+```
+
+En local, el script usa `./skaffold` del repositorio cuando Skaffold no está
+instalado en el `PATH`. Puede forzarse otro binario con `SKAFFOLD_BIN=/ruta/a/skaffold`.
+
+Para producción se conserva el mismo comando, con el perfil de la aplicación:
+
+```bash
+PROFILE=apis-frontend-prod BLOCKCHAIN_ENABLED=ON \
+  bash scripts/k8s/set-blockchain-mode.sh
+```
+
+Al apagar, el script primero bloquea nuevas órdenes auditables y comprueba que
+MongoDB no tenga órdenes BLOCKCHAIN en curso. Si las encuentra, termina con
+error y deja la cadena activa. Espera a que esas órdenes concluyan antes de
+reintentar. No escales manualmente Geth o `news-chain` para sustituir este
+procedimiento.
+
+Comprobación del modo y de los pods:
+
+```bash
+kubectl get configmap blockchain-mode -n apis \
+  -o jsonpath='{.data.BLOCKCHAIN_ENABLED}{"\\n"}'
+kubectl get deployment/news-chain -n apis
+kubectl get statefulset -n blockchain
+```
+
+Con OFF, `news-chain` y `geth-bootnode`, `geth-miner` y
+`geth-rpc-endpoint` deben tener cero réplicas. Las rutas y el selector de GUI
+de blockchain se deshabilitan mediante `/backend/capabilities`; no se aceptan
+nuevas órdenes BLOCKCHAIN.
+
+---
+
+## 5. Operación de blockchain habilitada
+
+### 5.1 Node State
 
 ```bash
 kubectl get pods -n blockchain -o wide
@@ -99,7 +153,7 @@ kubectl exec -it geth-rpc-endpoint-0 -n blockchain -- geth attach --exec 'txpool
 kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'txpool.status'
 ```
 
-### 4.2 Peers and manual connection
+### 5.2 Peers and manual connection
 
 Check real peer without arrow functions, because some geth consoles don't support them:
 
@@ -124,17 +178,16 @@ kubectl exec -it geth-miner-0 -n blockchain -- geth attach --exec 'admin.addPeer
 
 `admin.addPeer()` is temporary. If blockchain pods are restarted, you may miss it.
 
-### 4.3 Reinicio conservando volumenes
+### 5.3 Reinicio conservando volumenes
 
 ```bash
-kubectl scale statefulset --all --replicas=0 -n blockchain
-kubectl scale statefulset --all --replicas=1 -n blockchain
-kubectl get pods -n blockchain
+BLOCKCHAIN_ENABLED=OFF bash scripts/k8s/set-blockchain-mode.sh
+BLOCKCHAIN_ENABLED=ON bash scripts/k8s/set-blockchain-mode.sh
 ```
 
 ---
 
-## 5. Smart contract
+## 6. Smart contract
 
 If a new contract is deployed, `postId` returns to `0`. If there are previous data, delete or adjust MongoDB to avoid inconsistencies:
 
@@ -168,7 +221,7 @@ The second execution must show categories such as `unchanged`. If there is `mism
 
 ---
 
-## 6. MongoDB bootstrap
+## 7. MongoDB bootstrap
 
 After lifting MongoDB, run the bootstrap and check the schema:
 
@@ -194,7 +247,7 @@ scripts/k8s/realign-source-routing-mongodb.sh --check
 
 ---
 
-## 7. Keycloak and assessed contributions
+## 8. Keycloak and assessed contributions
 
 Minima configuration:
 
@@ -296,7 +349,7 @@ Keycloak uses this value on the authentication screen (e.g. `Sign in to Assermet
 
 ---
 
-## 8. Source Router and Evidence Search
+## 9. Source Router and Evidence Search
 
 `source-router` mantiene rutas dinámicas en `source_routes_v2` y propiedades
 estables en `domain_profiles_v1`. En MISS/STALE usa el proveedor de búsqueda y
@@ -323,7 +376,7 @@ kubectl logs deployment/source-router -n apis
 
 ---
 
-## 9. MongoDB: consultations and cleaning
+## 10. MongoDB: consultations and cleaning
 
 Entrar a MongoDB:
 
@@ -361,7 +414,7 @@ Colecciones principales:
 
 ---
 
-## 10. Operacion comun
+## 11. Operacion comun
 
 Reiniciar APIs:
 

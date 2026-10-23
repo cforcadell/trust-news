@@ -24,7 +24,7 @@ Do not record here chronologies of tests, attempts of pipeline, identifiers, IP 
 | Origin TLS | Cloudflare Origin CA in `kube-system/trustnews-origin-tls` |
 | Identity | Keycloak, realm `TrustNews` and display name `Assermetry` |
 | Issuer | `https://assermetry.com/auth/realms/TrustNews` |
-| Perfiles | `setup`, `traefik-prod`, `infra-prod`, `blockchain-prod` and `apis-frontend-prod` |
+| Perfiles | `setup`, `traefik-prod`, `infra-prod`, `blockchain-prod`, `news-chain-prod` and `apis-frontend-prod` |
 | Overlays productivos | Keycloak, Gateway e Ingress usan `prod-domain` |
 | Entry to origin | `TCP/443` only from the verified Cloudflare networks |
 | Puertos cerrados | `80/tcp`, `6443/tcp` and the rest of public application ports |
@@ -211,7 +211,7 @@ apply_tls_secret kube-system trustnews-origin-tls \
   "$HOME/trustnews-origin-ca/tls-origin.env"
 ```
 
-`MONGO_APP_USER` and `MONGO_APP_PWD` must match the user created by MongoDB's bootstrap. After lifting MongoDB the [`k8s-common.md`](k8s-common.md#6-mongodb-bootstrap)'s idepotent procedure is executed.
+`MONGO_APP_USER` and `MONGO_APP_PWD` must match the user created by MongoDB's bootstrap. After lifting MongoDB the [`k8s-common.md`](k8s-common.md#7-mongodb-bootstrap)'s idepotent procedure is executed.
 
 ### 3.3 Pull secret
 
@@ -415,7 +415,8 @@ Action: `Block`. Comparison remains capital sensitive. Keep URL Normalization, F
 | `setup` | Namespaces |
 | `traefik-prod` | Traefik productivo |
 | `infra-prod` | MongoDB, Kafka, IPFS, Keycloak and observability |
-| `blockchain-prod` | Red privada Geth |
+| `blockchain-prod` | Recursos de Geth (cero réplicas hasta `BLOCKCHAIN_ENABLED=ON`) |
+| `news-chain-prod` | Integración blockchain, desplegada por el script de modo ON |
 | `apis-frontend-prod` | APIs, Gateway, Frontend and Domain Log-ins |
 
 No `infra-basic` in production.
@@ -428,10 +429,13 @@ Orden:
 2. Create Secrets and pull secrets.
 3. Instalar `traefik-prod`.
 4. Unfold `infra-prod` and run MongoDB bootstrap.
-5. Desplegar `blockchain-prod`.
-6. Check contract and categories.
-7. Desplegar `apis-frontend-prod`.
-8. Run the complete check.
+5. Desplegar `apis-frontend-prod` con `BLOCKCHAIN_ENABLED=OFF` para LIGHT. La CI
+   mantiene Geth y `news-chain` a cero réplicas y conserva Kafka.
+6. Para habilitar blockchain, ejecutar el pipeline con
+   `PROFILE=apis-frontend-prod` y `BLOCKCHAIN_ENABLED=ON`. La CI aplica
+   `blockchain-prod`, inicia Geth y `news-chain`, y después habilita las APIs.
+7. Si se habilitó blockchain, comprobar contrato y categorías; ejecutar la
+   verificación completa del modo elegido.
 
 Pipelines manuales:
 
@@ -439,6 +443,7 @@ Pipelines manuales:
 PROFILE=traefik-prod
 PROFILE=infra-prod
 PROFILE=blockchain-prod
+PROFILE=news-chain-prod
 PROFILE=apis-frontend-prod
 ```
 
@@ -470,7 +475,14 @@ In GitLab, the pipeline is run over `postTFM` with the profile corresponding to 
 
 ```dotenv
 PROFILE=apis-frontend-prod
+BLOCKCHAIN_ENABLED=OFF
 ```
+
+`BLOCKCHAIN_ENABLED=OFF` es el valor normal. Con `ON`, la fase posterior al
+despliegue usa `set-blockchain-mode.sh`: espera Geth, despliega
+`news-chain-prod` con las imágenes de `build.json` y reinicia las APIs. Con
+`OFF`, bloquea nuevas órdenes auditables, exige que no haya órdenes BLOCKCHAIN
+pendientes y deja Geth y `news-chain` a cero réplicas. Kafka no se detiene.
 
 The initial migration to `/gui` also modifies Trafik. With the lock enabled, run `PROFILE=traefik-prod` first and then `PROFILE=apis-frontend-prod`. Later deployments that do not change Traefik return to only the application profile.
 
@@ -536,7 +548,7 @@ With the lock disabled and a valid temporary certificate:
 - the issuer is exactly the canonical;
 - login, refresh and logout work;
 - Gateway rejects without JWT and accepts a valid JWT;
-- Light and Blockchain complete their flows;
+- LIGHT completes its flow; validate blockchain only when `BLOCKCHAIN_ENABLED=ON`;
 - `/backend/docs`, Swagger, Redoc and OpenAPI return `404` or are blocked in
 the edge;
 - Administrative routes require Keycloak certificate and authentication.
@@ -547,8 +559,8 @@ In the temporary certificate withdrawal window, the following is added:
 - `/wp-admin/`, `/.env`, `/phpmyadmin/` and a random path return `403`;
 - `/gui-malicious`, `/backend-malicious` and `/auth-malicious` return `403`;
 - `/gui/`, `/backend/*` and `/auth/*` continue to reach their own controls;
-- login, refresh, logout, Light and Blockchain run without certificate of
-user;
+- login, refresh, logout and LIGHT run without certificate of user; validate
+  blockchain in a deployment with `BLOCKCHAIN_ENABLED=ON`;
 - administrative routes continue to reject customers without a certificate.
 
 From an external network it must also be verified that the direct IP of the source and the ports `80` and `6443` do not allow access.
@@ -606,8 +618,8 @@ Active PVC destructive restorations are prohibited. Backups and complete isolate
 reconciliation of `TrustNewsWeb` and revalidate the IODC issuer.
 - Confirm the coexistence of the lock, the temporary mTLS and the mTLS
   administrativo.
-- Validate from another network with temporary certificate frontend, OIDC, Light and
-  Blockchain.
+- Validate from another network with temporary certificate frontend, OIDC and
+  LIGHT; include blockchain only with `BLOCKCHAIN_ENABLED=ON`.
 - Check Gateway with and without JWT.
 - Verify the attribution and access of administrative routes.
 - Prove that the lock blocks the entire hostname and leaves it in the operating state

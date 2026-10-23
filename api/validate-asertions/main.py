@@ -83,6 +83,7 @@ logger = logging.getLogger("validate-asertions")
 # Config blockchain y AI
 # =========================================================
 RPC_URL = os.getenv("RPC_URL")
+BLOCKCHAIN_ENABLED = os.getenv("BLOCKCHAIN_ENABLED", "false").strip().lower() in {"1", "true", "on", "yes"}
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 ACCOUNT_ADDRESS = Web3.to_checksum_address(os.getenv("ACCOUNT_ADDRESS"))
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
@@ -126,6 +127,7 @@ RAG_EVIDENCE_VALIDATION_PROMPT = os.getenv("RAG_EVIDENCE_VALIDATION_PROMPT", "")
 VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.LLM_MEMORY_VALIDATION)))))
 EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
+EVIDENCE_SEARCH_TIMEOUT_SECONDS = float(os.getenv("EVIDENCE_SEARCH_TIMEOUT_SECONDS", "90"))
 SOURCE_ROUTER_URL = os.getenv("SOURCE_ROUTER_URL", "http://source-router.apis.svc.cluster.local:8075")
 AUTOMATIC_VALIDATOR_TYPES = {
     ValidatorType.LLM_MEMORY_VALIDATION,
@@ -440,6 +442,8 @@ def validation_error_details(failure: ValidationExecutionFailure) -> ValidationE
         code = "SOURCE_ROUTER_FAILED"
     elif failure.stage == "EVIDENCE_SEARCH" and status_code:
         code = f"EVIDENCE_SEARCH_HTTP_{status_code}"
+    elif failure.stage == "EVIDENCE_SEARCH" and isinstance(cause, httpx.TimeoutException):
+        code = "EVIDENCE_SEARCH_TIMEOUT"
     elif failure.stage == "EVIDENCE_SEARCH":
         code = "EVIDENCE_SEARCH_FAILED"
     elif failure.stage == "LLM_REQUEST" and status_code:
@@ -448,7 +452,11 @@ def validation_error_details(failure: ValidationExecutionFailure) -> ValidationE
         code = "LLM_INVALID_RESPONSE"
     else:
         code = "VALIDATION_EXECUTION_ERROR"
-    retryable = status_code in {408, 429} or bool(status_code and status_code >= 500)
+    retryable = (
+        isinstance(cause, (httpx.TimeoutException, httpx.NetworkError))
+        or status_code in {408, 429}
+        or bool(status_code and status_code >= 500)
+    )
     return ValidationErrorDetails(
         stage=failure.stage,
         code=code,
@@ -660,7 +668,7 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
     }
     try:
         logger.info(f"[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling evidence-search")
-        request_options = {"timeout": 30.0}
+        request_options = {"timeout": EVIDENCE_SEARCH_TIMEOUT_SECONDS}
         headers = evaluation_headers_for_payload(payload_v2)
         if headers:
             request_options["headers"] = headers
@@ -948,7 +956,11 @@ async def consume_light_validation_requests():
 # =========================================================
 # Web3 + contrato
 # =========================================================
-reload_blockchain_client()
+if BLOCKCHAIN_ENABLED:
+    reload_blockchain_client()
+else:
+    w3 = None
+    contract = None
 
 # =========================================================
 # FastAPI app
@@ -1195,6 +1207,8 @@ def endpoint_verificar(body: VerifyInputModel):
 
 @app.get("/tx/status/{tx_hash}")
 async def endpoint_tx_status(tx_hash: str):
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
     receipt = w3.eth.get_transaction_receipt(tx_hash)
     if receipt is None:
         return {"status": "pending", "result": False, "tx_hash": tx_hash}
@@ -1204,6 +1218,8 @@ async def endpoint_tx_status(tx_hash: str):
 # ✅ Usando ValidatorRegistrationInput
 async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
     """Registra validador (usa VALIDATOR_CATEGORIES si no se pasan). Espera minado."""
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
     categorias = input.categories if input.categories is not None else VALIDATOR_CATEGORIES
     try:
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered)
@@ -1221,6 +1237,8 @@ async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
 # ✅ Usando ValidatorRegistrationInput
 async def endpoint_desregistrar_validador():
     """Desregistra validador. Espera minado."""
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
     try:
         end_date = datetime.now(timezone.utc).isoformat()
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Unregistered, end_date=end_date, updated_date=end_date)
@@ -1308,7 +1326,7 @@ async def update_admin_config(config: AdminConfigUpdate):
     metrics_reset_at = datetime.now(timezone.utc).isoformat() if public_config_changed else None
     blockchain_receipts = {}
 
-    if public_config_changed:
+    if public_config_changed and BLOCKCHAIN_ENABLED:
         updated_date = datetime.now(timezone.utc).isoformat()
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered, updated_date=updated_date)
         current_ipfs_hash = validator_config_ipfs_hash_from_chain()
@@ -1324,7 +1342,10 @@ async def update_admin_config(config: AdminConfigUpdate):
             blockchain_receipts["ipfs_config_hash"] = ipfs_config_hash
             logger.info("✅ Configuración IPFS ya registrada en blockchain; no se actualiza.")
 
-    event_ipfs_hash = blockchain_receipts.get("ipfs_config_hash") if blockchain_receipts else validator_config_ipfs_hash_from_chain()
+    event_ipfs_hash = (
+        blockchain_receipts.get("ipfs_config_hash") if blockchain_receipts
+        else validator_config_ipfs_hash_from_chain() if BLOCKCHAIN_ENABLED else None
+    )
     await publish_validator_config_event(event_ipfs_hash, source="admin_config", metrics_reset_at=metrics_reset_at)
 
     return {
@@ -1480,16 +1501,21 @@ async def startup_event():
         except Exception as exc:
             logger.warning("Invalid persisted LLM override; using deployment defaults: %s", exc.__class__.__name__)
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
-    if is_automatic_validator():
+    if is_automatic_validator() and BLOCKCHAIN_ENABLED:
         agent = BlockchainEventAgent(w3, contract, ACCOUNT_ADDRESS, ipfs_api_url)
         asyncio.create_task(agent.start())
         logger.info("🟢 Blockchain Event Agent iniciado")
+    if is_automatic_validator():
         asyncio.create_task(consume_light_validation_requests())
         logger.info("[LIGHT] Kafka validation request listener started")
     else:
         logger.info(f"Validator type {VALIDATOR_TYPE.name}; automatic blockchain/Kafka validation listeners disabled")
     
         # registrar validador en startup (si no está registrado)
+
+    if not BLOCKCHAIN_ENABLED:
+        await publish_validator_config_event(None, source="startup_light")
+        return
 
     try:
         # Comprobar registro existente (si la llamada falla, procedemos a registrar)

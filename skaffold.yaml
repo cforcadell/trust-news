@@ -81,6 +81,18 @@ profiles:
         paths:
           - k8s/blockchain/overlays/local
 
+  - name: news-chain
+    build:
+      artifacts:
+        - image: news-chain
+          context: api
+          docker: {dockerfile: news-chain/Dockerfile}
+    manifests:
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
+          - k8s/apis/news-chain/overlays/local
+
   # ---------------------------------------------------------
   # PERFIL: INFRA BASIC
   # ---------------------------------------------------------
@@ -200,7 +212,6 @@ profiles:
           - k8s/apis/evidence-search/overlays/local
           - k8s/apis/source-router/overlays/local
           - k8s/apis/news-handler/overlays/local
-          - k8s/apis/news-chain/overlays/local
           - k8s/apis/gateway/overlays/local
           - k8s/apis/admin/overlays/local
           - k8s/frontend
@@ -213,7 +224,6 @@ profiles:
       - {resourceType: service, resourceName: news-handler, namespace: apis, port: 8072, localPort: 8072}
       - {resourceType: service, resourceName: evidence-search, namespace: apis, port: 8074, localPort: 8074}
       - {resourceType: service, resourceName: source-router, namespace: apis, port: 8075, localPort: 8075}
-      - {resourceType: service, resourceName: news-chain, namespace: apis, port: 8073, localPort: 8073}
       - {resourceType: service, resourceName: ipfs-fastapi, namespace: apis, port: 8060, localPort: 8060}
       - {resourceType: service, resourceName: admin-service, namespace: apis, port: 8400, localPort: 8400, address: "0.0.0.0"}
       - {resourceType: service, resourceName: gateway, namespace: apis, port: 8500, localPort: 8500}
@@ -228,6 +238,18 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/blockchain/overlays/prod
+
+  - name: news-chain-prod
+    build:
+      artifacts:
+        - image: news-chain
+          context: api
+          docker: {dockerfile: news-chain/Dockerfile}
+    manifests:
+      kustomize:
+        buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
+        paths:
+          - k8s/apis/news-chain/overlays/prod
 
   # ---------------------------------------------------------
   # PERFIL: INFRA PROD
@@ -312,7 +334,6 @@ profiles:
           - k8s/apis/evidence-search/overlays/prod
           - k8s/apis/source-router/overlays/prod
           - k8s/apis/news-handler/overlays/prod
-          - k8s/apis/news-chain/overlays/prod
           - k8s/apis/gateway/overlays/prod-domain
           - k8s/apis/admin/overlays/prod
           - k8s/frontend

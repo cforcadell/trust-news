@@ -15,15 +15,17 @@ The runner is designed for the local/Kind environment served in `https://localho
 tests/frontend/e2e/
 ├── run-regression.js
 ├── ui-smoke-test.js
+tests/data/frontend-e2e/
 ├── artifacts/                  # salidas fechadas, ignoradas por Git
 └── resources/
-    ├── identities.example.json
     └── cases/
         ├── light.json
         ├── light-news.txt
         ├── blockchain.json
         └── blockchain-news.txt
 ```
+
+`identities.example.json` permanece en `tests/frontend/e2e/`.
 
 The texts are synthetic. The expected results are structural and operational invariants; the text produced by an LLM is not literally compared.
 

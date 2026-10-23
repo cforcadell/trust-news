@@ -855,14 +855,19 @@ pre, .event-payload-pre {
   right: 22px;
   top: 92px;
   z-index: 9999;
-  transform: translateX(140%);
-  transition: transform .24s ease;
+  max-width: min(420px, calc(100vw - 44px));
+  transform: translateY(calc(-100% - 120px));
+  transition: transform .24s ease, opacity .24s ease;
   border-radius: 999px;
   padding: 12px 18px;
   font-weight: 900;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
   box-shadow: var(--shadow);
 }
-.status-toast.show { transform: translateX(0); }
+.status-toast.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
 
 @media (max-width: 1180px) {
   :root { --sidebar-width: 232px; }
@@ -888,7 +893,9 @@ pre, .event-payload-pre {
   body { display: block; }
   #sidebar { position: relative; width: 100%; height: auto; }
   #main { margin-left: 0; width: 100%; }
+  .status-toast { left: 16px; right: 16px; max-width: none; border-radius: 14px; }
   .top-header { height: auto; padding: 16px; flex-direction: column; align-items: flex-start; }
+  .header-actions { width: 100%; flex-wrap: wrap; }
   .content-wrapper { padding: 16px; }
   .page-head, .search-row, .news-import-container { flex-direction: column; align-items: stretch; }
   .pricing-grid { grid-template-columns: 1fr; }

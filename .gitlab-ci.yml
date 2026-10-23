@@ -8,6 +8,9 @@ variables:
   PROFILE:
     value: "apis-frontend-prod"
     description: "Perfil de Skaffold"
+  BLOCKCHAIN_ENABLED:
+    value: "OFF"
+    description: "ON habilita Geth/news-chain y órdenes auditables; OFF deja solo LIGHT"
   SKAFFOLD_VERSION: "v2.17.3"
   HELM_VERSION: "v3.21.0"
   HELM_LINUX_AMD64_SHA256: "0093eb572e3d2380f094df162ddb525e219249de88957afe24cfbb19632acd36"
@@ -182,9 +185,17 @@ deploy:
         echo "Realineando Source Router y Evidence Search antes del rollout"
         scripts/k8s/realign-source-routing-mongodb.sh --apply
         scripts/k8s/realign-source-routing-mongodb.sh --check
+        if [ "$BLOCKCHAIN_ENABLED" = "OFF" ] && kubectl get deployment/news-handler -n apis >/dev/null 2>&1; then
+          bash scripts/k8s/set-blockchain-mode.sh --gate
+          bash scripts/k8s/set-blockchain-mode.sh --check-pending
+        fi
       fi
     - echo "Deploy con Skaffold $SKAFFOLD_VERSION"
     - skaffold deploy --build-artifacts=build.json --profile="$PROFILE"
+    - |
+      if [ "$PROFILE" = "apis-frontend-prod" ]; then
+        bash scripts/k8s/set-blockchain-mode.sh
+      fi
 
     - echo "Verificando rollout"
     - |

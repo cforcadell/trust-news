@@ -4,6 +4,7 @@ import os
 import sys
 
 import pytest
+from fastapi import HTTPException
 
 
 def load_news_handler_module():
@@ -30,6 +31,78 @@ def validator(identifier, *, name=None, updated_at=None, source=None):
     if source is not None:
         item["source"] = source
     return item
+
+
+class InMemoryValidatorRegistry:
+    def __init__(self):
+        self.records = {}
+
+    async def replace_one(self, query, document, upsert=False):
+        self.records[query["_id"]] = document
+
+    def find(self, query):
+        return self
+
+    async def to_list(self, length=None):
+        return list(self.records.values())
+
+
+class SingleOrderCollection:
+    def __init__(self, order):
+        self.order = order
+
+    async def find_one(self, query):
+        if query.get("order_id") == self.order.get("order_id"):
+            return dict(self.order)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_light_order_remains_readable_when_blockchain_is_disabled():
+    module = load_news_handler_module()
+    module.BLOCKCHAIN_ENABLED = False
+    module.orders_collection = SingleOrderCollection({
+        "order_id": "light-order",
+        "client_id": "client-a",
+        "status": "PENDING",
+        "validation_mode": "LIGHT",
+        "created_at": "2026-10-23T00:00:00+00:00",
+    })
+    module.config_collection = None
+
+    order = await module.get_order("light-order", client_id="client-a", admin=False)
+
+    assert order["order_id"] == "light-order"
+    assert order["validation_mode"] == "LIGHT"
+
+
+@pytest.mark.asyncio
+async def test_light_registry_survives_restart_without_news_chain(monkeypatch):
+    module = load_news_handler_module()
+    module.BLOCKCHAIN_ENABLED = False
+    module.validators_cache = {}
+    registry = InMemoryValidatorRegistry()
+    module.validator_registry_collection = registry
+
+    async def unexpected_chain_request():
+        raise AssertionError("LIGHT must not call news-chain")
+
+    monkeypatch.setattr(module, "fetch_validators_from_chain", unexpected_chain_request)
+    await module.update_validator_cache_from_event({
+        "validator": "validator-light",
+        "config": {"name": "LIGHT", "status": 1, "type": 1,
+                   "service_url": "http://validator.apis.svc.cluster.local:8070"},
+        "categories": [1],
+    })
+    module.validators_cache = {}
+
+    assert await module.load_validators_cache_from_registry() is True
+    assert len(module.get_light_validators_for_category(1)) == 1
+    assert len((await module.list_validators_cache(recover_ipfs=True))["validators"]) == 1
+    assert module.require_available_validation_mode("LIGHT") == module.ValidationMode.LIGHT
+    with pytest.raises(HTTPException) as error:
+        module.require_available_validation_mode("BLOCKCHAIN")
+    assert error.value.status_code == 503
 
 
 @pytest.mark.asyncio

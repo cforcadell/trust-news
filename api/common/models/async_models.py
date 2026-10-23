@@ -279,14 +279,14 @@ class TextoEntrada(BaseModel):
 
 class PublishRequest(BaseModel):
     text: str
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    validation_mode: ValidationMode = ValidationMode.LIGHT
     source_url: Optional[str] = None
     source_domain: Optional[str] = None
 
 
 class GenerateAssertionsPayload(BaseModel):
     text: str
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    validation_mode: ValidationMode = ValidationMode.LIGHT
     source_url: Optional[str] = None
     source_domain: Optional[str] = None
 
@@ -364,7 +364,7 @@ class PreGeneratedAssertion(Assertion):
 class PublishWithAssertionsRequest(BaseModel):
     text: str
     assertions: List[PreGeneratedAssertion]
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    validation_mode: ValidationMode = ValidationMode.LIGHT
     source_url: Optional[str] = None
     source_domain: Optional[str] = None
 

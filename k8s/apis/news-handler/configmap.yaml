@@ -4,6 +4,7 @@ metadata:
   name: news-handler-config
   namespace: apis
 data:
+  MONGO_VALIDATOR_REGISTRY_COLLECTION: "validator_registry"
   # --- Kafka ---
   KAFKA_BROKER: "kafka.infra.svc.cluster.local:9092"
   KAFKA_SECURITY_PROTOCOL: "PLAINTEXT"

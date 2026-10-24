@@ -9,8 +9,10 @@ from .models import CaseResult
 
 def results_from_order(dataset, order, run_id=None):
     generated = collect_assertions(order)
-    matched = match_assertions(dataset, generated)
+    candidates = match_assertions(dataset, generated)
+    matched = [item for item in candidates if item.get("match_status") != "INCOMPATIBLE"]
     matches = {m["expected_id"]: m for m in matched}
+    incompatible = {m["expected_id"]: m for m in candidates if m.get("match_status") == "INCOMPATIBLE"}
     results = []
 
     def append_results(expected, actual, aid, match, *, scoring_eligible):
@@ -34,11 +36,26 @@ def results_from_order(dataset, order, run_id=None):
                     pass
             row.provenance = {"parent_run_id": run_id, "correlation_id": validation.get("correlation_id"),
                               "origin": "persisted_order", "scoring_eligible": scoring_eligible}
-            row.extraction = {"status": ("INCOMPATIBLE_GENERATED_ASSERTION" if match else
-                                         "UNMATCHED_GENERATED_ASSERTION") if not scoring_eligible else
-                              "NOT_EVALUATED" if not evaluated else
-                              "EXTRACTION_PASS" if match and match.get("category_match") is not False else "EXTRACTION_ERROR",
-                              "method": "required_terms_and_category", "match": match}
+            if not scoring_eligible:
+                extraction_status = ("INCOMPATIBLE_GENERATED_ASSERTION" if match else
+                                     "UNMATCHED_GENERATED_ASSERTION")
+            elif not evaluated:
+                extraction_status = "NOT_EVALUATED"
+            elif not match or match.get("match_status") == "INCOMPATIBLE":
+                extraction_status = "EXTRACTION_ERROR"
+            elif match.get("category_match") is False:
+                extraction_status = "TAXONOMY_MISMATCH"
+            else:
+                extraction_status = "EXTRACTION_PASS"
+            row.extraction = {
+                "status": extraction_status,
+                "method": "required_terms_anchor_and_category",
+                "match": match,
+                "assertion_match": "PASS" if extraction_status in {"EXTRACTION_PASS", "TAXONOMY_MISMATCH"} else (
+                    "FAIL" if extraction_status == "EXTRACTION_ERROR" else "NOT_EVALUATED"),
+                "taxonomy": "FAIL" if extraction_status == "TAXONOMY_MISMATCH" else (
+                    "PASS" if match and match.get("category_match") is True else "NOT_EVALUATED"),
+            }
             response = deepcopy(validation.get("evidence_search_response") or {})
             if response:
                 route = response.pop("route", None)
@@ -68,7 +85,7 @@ def results_from_order(dataset, order, run_id=None):
                     if details.get(key) not in (None, ""):
                         error[key] = details[key]
                 row.errors = [error]
-            if not records and match and scoring_eligible:
+            if not records and aid and scoring_eligible:
                 row.errors = [{"stage": "VALIDATION", "code": "TECHNICAL_ERROR", "reason": "No validator responses"}]
             row.timings = {"validation_seconds": validation.get("response_time_seconds")}
             aggregate = result_for_assertion(order, aid) if aid else None
@@ -80,8 +97,7 @@ def results_from_order(dataset, order, run_id=None):
         match = matches.get(expected["id"])
         actual = deepcopy(generated[match["generated_index"]]) if match else {"text": expected.get("text", "")}
         aid = match["generated_id"] if match else None
-        append_results(expected, actual, aid, match,
-                       scoring_eligible=not match or match.get("match_status") != "INCOMPATIBLE")
+        append_results(expected, actual, aid, match or incompatible.get(expected["id"]), scoring_eligible=True)
 
     matched_indexes = {match["generated_index"] for match in matched}
     for index, assertion in enumerate(generated):

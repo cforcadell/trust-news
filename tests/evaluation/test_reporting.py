@@ -272,6 +272,44 @@ def test_handoff_failure_is_not_an_end_to_end_success():
     assert report["end_to_end_incorrect"] == 1
 
 
+def test_taxonomy_mismatch_is_separate_from_decision_correctness():
+    dataset = case()
+    dataset["assertions"][0]["category_ids"] = [9]
+    order = {
+        "order_id": "taxonomy-order",
+        "assertions": [{"idAssertion": "1", "text": dataset["assertions"][0]["text"], "categoryId": 1}],
+        "validations": {"1": {"validator": {"execution_status": "COMPLETED", "approval": "TRUE"}}},
+        "assertion_results": {"1": {"status": "COMPLETED", "verdict": "TRUE"}},
+    }
+
+    row = results_from_order(dataset, order)[0].to_dict()
+    report = pipeline_report([row])
+
+    assert row["extraction"]["status"] == "TAXONOMY_MISMATCH"
+    assert row["extraction"]["assertion_match"] == "PASS"
+    assert row["extraction"]["taxonomy"] == "FAIL"
+    assert row["root_cause"]["code"] == "TAXONOMY_MISMATCH"
+    assert report["decision_correct"] == 1
+    assert report["strict_pipeline_fail"] == 1
+    assert report["taxonomy_mismatches"] == 1
+    assert report["failures"]["taxonomy"] == 1
+
+
+def test_validator_error_with_valid_consensus_is_quorum_degraded():
+    row = run().to_dict()
+    row["execution_mode"] = "FULL_PIPELINE"
+    row["errors"] = [{"stage": "SOURCE_ROUTER", "code": "TECHNICAL_ERROR"}]
+    row["consensus"] = {"status": "COMPLETED", "verdict": "TRUE"}
+    evaluated(row)
+
+    report = pipeline_report([row])
+
+    assert report["decision_correct"] == 1
+    assert report["strict_pipeline_fail"] == 1
+    assert report["quorum_degraded"] == 1
+    assert report["operational"] == {"pass": 0, "degraded": 1, "fail": 0}
+
+
 def test_unmatched_generated_validation_is_visible_but_not_scored():
     dataset = case()
     order = {"assertions": [{"idAssertion": "extra", "text": "Texto ajeno al caso gold."}],

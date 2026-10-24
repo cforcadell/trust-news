@@ -6,7 +6,7 @@ from evaluation import ROOT
 from evaluation.core.artifacts import EvaluationError, write_json
 from evaluation.core.datasets import load_datasets, validate_case
 from evaluation.core.models import CaseResult
-from evaluation.core.common_metrics import match_assertions
+from evaluation.core.common_metrics import match_assertions, missing_expected_numbers
 from evaluation.core.orders import results_from_order
 
 
@@ -50,6 +50,15 @@ def test_approximate_value_annotations_are_validated():
         validate_case(case)
 
 
+def test_missing_expected_numbers_parses_grouped_spanish_number():
+    expected = {"text": "La población de España fue de 49.128.297 habitantes."}
+
+    assert missing_expected_numbers(expected, expected["text"]) == []
+    assert missing_expected_numbers(expected, "La población de España fue de 49.128.296 habitantes.") == [
+        "49.128.297"
+    ]
+
+
 def test_numeric_conflict_is_linked_but_not_scored_as_same_assertion():
     case = {"schema_version": 2, "id": "dates", "news": "La norma se aplica desde 2018.",
             "assertions": [{"id": "wrong-date", "text": "La norma se aplica desde 2020.",
@@ -58,13 +67,64 @@ def test_numeric_conflict_is_linked_but_not_scored_as_same_assertion():
 
     match = match_assertions(case, generated)[0]
     assert match["match_status"] == "INCOMPATIBLE"
-    assert match["incompatibility_reasons"] == ["NUMERIC_OR_TEMPORAL_VALUE_CONFLICT"]
+    assert match["incompatibility_reasons"] == ["YEAR_CONFLICT"]
 
-    row = results_from_order(case, {"order_id": "order", "assertions": generated})[0].to_dict()
-    assert row["provenance"]["scoring_eligible"] is False
-    assert row["extraction"]["status"] == "INCOMPATIBLE_GENERATED_ASSERTION"
-    assert row["metrics"]["validation"]["status"] == "NOT_EVALUATED"
-    assert row["metrics"]["consensus"]["status"] == "NOT_EVALUATED"
+    rows = [row.to_dict() for row in results_from_order(case, {"order_id": "order", "assertions": generated})]
+    scored = next(row for row in rows if row["provenance"]["scoring_eligible"] is True)
+    observed = next(row for row in rows if row["provenance"]["scoring_eligible"] is False)
+    assert scored["extraction"]["status"] == "EXTRACTION_ERROR"
+    assert scored["extraction"]["match"]["anchor_match"] is False
+    assert scored["metrics"]["validation"]["status"] == "NOT_EVALUATED"
+    assert observed["extraction"]["status"] == "UNMATCHED_GENERATED_ASSERTION"
+
+
+def test_full_date_conflict_is_detected_even_when_day_and_month_match():
+    case = {"schema_version": 2, "id": "gdpr-date", "news": "RGPD", "assertions": [{
+        "id": "wrong-date",
+        "text": "El RGPD comenzó a aplicarse el 25 de mayo de 2020.",
+        "expected_verdict": "FALSE",
+        "required_terms": ["RGPD", "25 de mayo", "2020"],
+    }]}
+    generated = [{"idAssertion": "1", "text": "El RGPD comenzó a aplicarse el 25 de mayo de 2018."}]
+
+    match = match_assertions(case, generated)[0]
+
+    assert match["match_status"] == "INCOMPATIBLE"
+    assert match["anchor_conflicts"] == ["DATE_CONFLICT"]
+    assert match["expected_anchors"]["dates"] == ["2020-05-25"]
+    assert match["generated_anchors"]["dates"] == ["2018-05-25"]
+
+
+@pytest.mark.parametrize(("expected", "actual", "reason"), [
+    ("La Directiva 2023/2413 fija un 42,5 % en 2030.",
+     "La Directiva 2023/2413 fija un 45 % en 2030.", "PERCENTAGE_CONFLICT"),
+    ("El Parlamento tiene 720 diputados elegidos en 27 Estados.",
+     "Los diputados fueron elegidos en 27 Estados.", "REQUIRED_QUANTITY_MISSING:diputados"),
+])
+def test_typed_critical_anchors_prevent_unsafe_gold_inheritance(expected, actual, reason):
+    case = {"schema_version": 2, "id": "anchors", "news": expected, "assertions": [{
+        "id": "assertion", "text": expected, "expected_verdict": "TRUE",
+        "required_terms": expected.split(),
+    }]}
+
+    match = match_assertions(case, [{"idAssertion": "1", "text": actual}])[0]
+
+    assert match["match_status"] == "INCOMPATIBLE"
+    assert reason in match["anchor_conflicts"]
+
+
+def test_absolute_quantifier_is_compatible_with_one_hundred_percent_anchor():
+    case = {"schema_version": 2, "id": "share", "news": "El 100 % fue renovable.", "assertions": [{
+        "id": "assertion", "text": "El 100 % de la electricidad fue renovable.",
+        "expected_verdict": "FALSE", "required_terms": ["100", "electricidad", "renovable"],
+    }]}
+
+    match = match_assertions(case, [{
+        "idAssertion": "1", "text": "Toda la electricidad fue renovable."
+    }])[0]
+
+    assert match["match_status"] == "HEURISTIC_MATCH"
+    assert match["anchor_match"] is True
 
 
 @pytest.mark.parametrize("change", [

@@ -62,32 +62,57 @@ def pipeline_report(rows):
     groups = {}
     for row in rows:
         groups.setdefault((row.get("dataset_id"), row["case_id"], row.get("provenance", {}).get("repetition", 1)), []).append(row)
-    correct = incorrect = not_evaluated = 0
+    strict_pass = strict_fail = strict_not_evaluated = 0
+    decision_correct = decision_incorrect = decision_not_evaluated = 0
+    taxonomy_mismatches = quorum_degraded = 0
+    operational_pass = operational_degraded = operational_fail = 0
     causes = Counter()
     for items in groups.values():
         full = [r for r in items if r["execution_mode"] == "FULL_PIPELINE"]
         for code in {r["root_cause"]["code"] for r in (full or items)} - {None}:
             causes[code] += 1
         if not full:
-            not_evaluated += 1
+            strict_not_evaluated += 1
+            decision_not_evaluated += 1
             continue
         consensus = next((r["metrics"]["consensus"] for r in full if r["metrics"]["consensus"]["status"] != "NOT_EVALUATED"), None)
         observed = [r["metrics"]["validation"]["correct"] for r in full]
         if consensus:
-            passed = consensus["status"] == "CONSENSUS_PASS"
+            decision_passed = consensus["status"] == "CONSENSUS_PASS"
         elif len(full) == 1:
-            passed = observed[0]
+            decision_passed = observed[0]
         else:
-            passed = None  # Multiple validators without an observed consensus.
-        if any(r["errors"] or r["metrics"]["extraction"]["status"] == "EXTRACTION_ERROR"
+            decision_passed = None  # Multiple validators without an observed consensus.
+        if decision_passed is None:
+            decision_not_evaluated += 1
+        elif decision_passed:
+            decision_correct += 1
+        else:
+            decision_incorrect += 1
+
+        has_errors = any(r["errors"] for r in full)
+        has_taxonomy_mismatch = any(
+            r["metrics"]["extraction"]["status"] == "TAXONOMY_MISMATCH" for r in full)
+        if has_taxonomy_mismatch:
+            taxonomy_mismatches += 1
+        if has_errors and consensus:
+            quorum_degraded += 1
+            operational_degraded += 1
+        elif has_errors:
+            operational_fail += 1
+        else:
+            operational_pass += 1
+
+        strict_passed = decision_passed
+        if any(r["errors"] or r["metrics"]["extraction"]["status"] in {"EXTRACTION_ERROR", "TAXONOMY_MISMATCH"}
                or r["metrics"]["handoff"]["status"] == "HANDOFF_EVIDENCE_MISMATCH" for r in full):
-            passed = False
-        if passed is None:
-            not_evaluated += 1
-        elif passed:
-            correct += 1
+            strict_passed = False
+        if strict_passed is None:
+            strict_not_evaluated += 1
+        elif strict_passed:
+            strict_pass += 1
         else:
-            incorrect += 1
+            strict_fail += 1
     observation_causes = Counter(row.get("root_cause", {}).get("code") for row in observation_only
                                  if row.get("root_cause", {}).get("code"))
     observed_causes = causes + observation_causes
@@ -108,11 +133,21 @@ def pipeline_report(rows):
                 item["affected_cases"].append(row.get("case_id"))
     return {"report": "pipeline-evaluation", "total_cases": len(groups), "executions": len(all_rows),
             "scored_executions": len(rows), "observation_only_executions": len(observation_only),
-            "end_to_end_correct": correct, "end_to_end_incorrect": incorrect, "not_evaluated": not_evaluated,
+            # Backward-compatible aliases retain the historical strict gate.
+            "end_to_end_correct": strict_pass, "end_to_end_incorrect": strict_fail,
+            "not_evaluated": strict_not_evaluated,
+            "decision_correct": decision_correct, "decision_incorrect": decision_incorrect,
+            "decision_not_evaluated": decision_not_evaluated,
+            "strict_pipeline_pass": strict_pass, "strict_pipeline_fail": strict_fail,
+            "strict_pipeline_not_evaluated": strict_not_evaluated,
+            "taxonomy_mismatches": taxonomy_mismatches, "quorum_degraded": quorum_degraded,
+            "operational": {"pass": operational_pass, "degraded": operational_degraded,
+                            "fail": operational_fail},
             "root_causes": dict(observed_causes), "observation_only_root_causes": dict(observation_causes),
             "execution_failures": list(grouped_failures.values()),
             "failures": {name: sum(n for code, n in observed_causes.items() if code.startswith(prefix)) for name, prefix in (
-                ("extraction", "EXTRACTION_"), ("routing", "ROUTER_"), ("retrieval", "RETRIEVAL_"),
+                ("extraction", "EXTRACTION_"), ("taxonomy", "TAXONOMY_"),
+                ("routing", "ROUTER_"), ("retrieval", "RETRIEVAL_"),
                 ("handoff", "HANDOFF_"), ("validator", "LLM_"), ("grounding", "GROUNDING_"),
                 ("consensus", "CONSENSUS_"), ("technical", "TECHNICAL_"),
                 ("evidence_coherence", "VERDICT_EVIDENCE_"), ("undetermined", "UNDETERMINED"))}}
@@ -137,14 +172,15 @@ def persist(directory: Path, rows: list[dict], kind: str, manifest: dict, *, ini
                          ", ".join(failure.get("affected_cases") or []), failure.get("reason")]
                 lines.append("| " + " | ".join(str(c if c is not None else "—").replace("|", "\\|").replace("\n", " ") for c in cells) + " |")
             lines += [""]
-        lines += ["| Case | Scope | Mode | Validator | Expected | Verdict | Routing | Retrieval | Handoff | Grounding | Root cause |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|"]
+        lines += ["| Case | Scope | Mode | Validator | Expected | Verdict | Extraction | Routing | Retrieval | Handoff | Grounding | Root cause |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for row in rows:
             m = row["metrics"]
             scope = "OBSERVATION_ONLY" if row.get("provenance", {}).get("scoring_eligible") is False else "SCORED"
             cells = [row["case_id"], scope, row["execution_mode"], row["validator"].get("id"),
                      row["expected"]["expected_verdict"] if scope == "SCORED" else None,
-                     m["validation"]["verdict"], m["routing"]["status"], m["retrieval"]["status"], m["handoff"]["status"],
+                     m["validation"]["verdict"], m["extraction"]["status"], m["routing"]["status"],
+                     m["retrieval"]["status"], m["handoff"]["status"],
                      m["grounding"]["status"], row["root_cause"]["code"]]
             lines.append("| " + " | ".join(str(c if c is not None else "—").replace("|", "\\|").replace("\n", " ") for c in cells) + " |")
     (directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

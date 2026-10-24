@@ -11,7 +11,7 @@ from common.utils.validation_prompt import build_rag_prompt
 from evaluation.core.artifacts import EvaluationError
 from evaluation.core.evidence import gold_bundle, replay_bundle
 from evaluation.core.execution import execute, validator_config
-from evaluation.pipeline.metrics import evaluate, handoff_metrics, routing_metrics
+from evaluation.pipeline.metrics import evaluate, handoff_metrics, retrieval_metrics, routing_metrics
 from evaluation.pipeline.root_cause import diagnose
 
 
@@ -158,6 +158,46 @@ def test_routing_recall_handles_subdomains_duplicates_and_impostors():
     assert result["status"] == "PASS"
     assert result["domain_recall_at_k"] == 0.5
     assert result["first_acceptable_domain_rank"] == 2
+
+
+def test_retrieval_availability_is_not_exact_lexical_coverage():
+    expected = {
+        "reference_facts": ["El valor oficial completo fue 42,5 por ciento en 2030."],
+        "reference_sources": [{"url": "https://official.example/reference"}],
+    }
+    bundle = [{
+        "domain": "other.example", "fetch_status": "ok",
+        "contexts": [{"citation_eligible": True, "text": "El valor fue 42,5 % en 2030."}],
+    }]
+
+    partial = retrieval_metrics({"status": "COMPLETED"}, expected, bundle)
+    unavailable = retrieval_metrics({"status": "COMPLETED"}, expected, [])
+
+    assert partial["status"] == "PARTIAL"
+    assert partial["lexical_reference_coverage"] < 1
+    assert partial["lexical_reference_complete"] is False
+    assert unavailable["status"] == "NO_CITABLE_EVIDENCE"
+
+
+def test_retrieval_reports_citable_reference_not_only_selected_domain():
+    expected = {"reference_sources": [{"url": "https://official.example/reference"}]}
+    selected_but_empty = [{"domain": "official.example", "fetch_status": "empty_text", "contexts": []}, {
+        "domain": "other.example", "fetch_status": "ok",
+        "contexts": [{"citation_eligible": True, "text": "Contexto alternativo"}],
+    }]
+    reference = [{
+        "domain": "official.example", "fetch_status": "ok",
+        "contexts": [{"citation_eligible": True, "text": "Contexto oficial"}],
+    }]
+
+    partial = retrieval_metrics({"status": "COMPLETED"}, expected, selected_but_empty)
+    complete = retrieval_metrics({"status": "COMPLETED"}, expected, reference)
+
+    assert partial["reference_source_found"] is True
+    assert partial["reference_source_citable"] is False
+    assert partial["status"] == "PARTIAL"
+    assert complete["reference_source_citable"] is True
+    assert complete["status"] == "REFERENCE_CITABLE"
 
 
 def test_frozen_failure_never_attributed_to_router_from_other_mode():

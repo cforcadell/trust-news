@@ -683,6 +683,8 @@ Skaffold profiles currently defined in `skaffold.yaml`:
 
 Primary deployment documentation:
 
+- [Local quick start](docs/quick_start_local.md)
+- [Hetzner quick start](docs/quick_start_hetzner.md)
 - [Common Kubernetes procedures](docs/deploy/k8s-common.md)
 - [Local Skaffold deployment](docs/deploy/skaffold-local.md)
 - [Server/Hetzner deployment](docs/deploy/skaffold-server.md)

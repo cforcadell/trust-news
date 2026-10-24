@@ -39,15 +39,35 @@ def retrieval_metrics(retrieval, expected, bundle):
     references = [normalize_domain(s.get("domain") or s.get("url")) for s in expected.get("reference_sources", [])]
     references = [r for r in references if r]
     statuses = [s.get("fetch_status") for s in bundle]
+    reference_source_found = any(domain_matches(d, r) for d in domains for r in references) if references else None
+    reference_source_citable = (
+        any(
+            any(domain_matches(source.get("domain") or source.get("url"), reference) for reference in references)
+            and any(context.get("citation_eligible") is True and str(context.get("text") or "").strip()
+                    for context in source.get("contexts", []))
+            for source in bundle
+        ) if references else None
+    )
     # Missing fetch status is unknown, not a failed download (e.g. GOLD bundles).
     failed = sum(s in {"failed", "empty_text"} for s in statuses)
-    return {"status": "NOT_EVALUATED" if retrieval.get("status") != "COMPLETED" or not facts else
-            ("PASS" if coverage and min(coverage) == 1 else "FAIL"),
+    if retrieval.get("status") != "COMPLETED":
+        status = "NOT_EVALUATED"
+    elif not contexts:
+        status = "NO_CITABLE_EVIDENCE"
+    elif references and reference_source_citable:
+        status = "REFERENCE_CITABLE"
+    elif references or facts:
+        status = "PARTIAL"
+    else:
+        status = "AVAILABLE"
+    return {"status": status,
             "result_count": len(bundle), "successful_source_count": sum(s == "ok" for s in statuses),
             "failed_source_count": failed, "unknown_fetch_status_count": sum(s is None for s in statuses),
             "contexts_count": len(contexts),
-            "reference_source_found": any(domain_matches(d, r) for d in domains for r in references) if references else None,
+            "reference_source_found": reference_source_found,
+            "reference_source_citable": reference_source_citable,
             "lexical_reference_coverage": sum(coverage) / len(coverage) if coverage else None,
+            "lexical_reference_complete": bool(coverage) and min(coverage) == 1,
             "reference_coverage_method": "max_per_context_word_overlap; lexical only"}
 
 

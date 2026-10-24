@@ -14,7 +14,9 @@ def diagnose(row, counterfactuals=()):
     if m["handoff"]["status"] == "HANDOFF_EVIDENCE_MISMATCH":
         return result("HANDOFF_EVIDENCE_MISMATCH", "Recorded boundary hashes differ")
     if m["extraction"]["status"] == "EXTRACTION_ERROR":
-        return result("EXTRACTION_ERROR", "Deterministic required_terms/category match failed")
+        return result("EXTRACTION_ERROR", "Deterministic assertion identity match failed")
+    if m["extraction"]["status"] == "TAXONOMY_MISMATCH":
+        return result("TAXONOMY_MISMATCH", "Assertion identity matched but generated category differs from gold")
     if m["validation"]["status"] == "INVALID_RESPONSE":
         return result("LLM_INVALID_RESPONSE", "Production response contract rejected the response")
     if m["grounding"]["status"] in {"LLM_CITATION_ERROR", "GROUNDING_ERROR"}:

@@ -66,15 +66,19 @@ def _diagnose(row, order_errors):
     extraction = metrics.get("extraction") or row.get("extraction") or {}
     extraction_status = extraction.get("status", "NOT_EVALUATED")
     status = "PASS" if extraction_status == "EXTRACTION_PASS" else (
+        "PARTIAL" if extraction_status == "TAXONOMY_MISMATCH" else
         "FAIL" if extraction_status == "EXTRACTION_ERROR" else "NOT_EVALUATED")
     match = extraction.get("match") or {}
     checks["extraction"] = _check(status, extraction_status, expected_text=expected.get("text"),
         generated_text=match.get("generated_text") or (row.get("assertion") or {}).get("text"),
         expected_category_ids=expected.get("category_ids") or [],
         generated_category_id=match.get("generated_category_id"), match_score=match.get("match_score"))
-    if status == "FAIL":
+    if extraction_status == "TAXONOMY_MISMATCH":
+        findings.append({"stage": "extraction", "code": "TAXONOMY_MISMATCH",
+                         "detail": "The assertion matched, but its generated category differs from the dataset."})
+    elif status == "FAIL":
         findings.append({"stage": "extraction", "code": "EXTRACTION_ERROR",
-                         "detail": "The generated assertion or category did not match the dataset expectation."})
+                         "detail": "The generated assertion did not match the dataset expectation."})
 
     sources = route.get("sources") or []
     selected = list(dict.fromkeys(_domain(source) for source in sources if isinstance(source, dict) and _domain(source)))
@@ -121,7 +125,7 @@ def _diagnose(row, order_errors):
     elif not citable:
         retrieval_status, detail = "FAIL", "Retrieval delivered no citable contexts."
     elif references and not reference_matches:
-        retrieval_status, detail = "FAIL", "No reference domain produced a citable context."
+        retrieval_status, detail = "PARTIAL", "No reference domain produced a citable context."
     elif failed:
         retrieval_status, detail = "PARTIAL", "Some sources failed to provide text."
     elif facts and lexical is not None and lexical < 1:

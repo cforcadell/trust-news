@@ -186,7 +186,7 @@ def _generation(dataset, order, generated):
     used_expected, used_generated = set(), set()
     matches = []
     for score, ei, gi, reasons in sorted(candidates, key=lambda row: (bool(row[3]), -row[0], row[1], row[2])):
-        if score < threshold or ei in used_expected or gi in used_generated:
+        if reasons or score < threshold or ei in used_expected or gi in used_generated:
             continue
         used_expected.add(ei)
         used_generated.add(gi)
@@ -197,6 +197,26 @@ def _generation(dataset, order, generated):
     checks = []
     for ei, item in enumerate(expected):
         if ei not in used_expected:
+            incompatible = next((row for row in sorted(
+                candidates, key=lambda candidate: -candidate[0])
+                if row[1] == ei and row[0] >= threshold and row[3] and row[2] not in used_generated), None)
+            if incompatible:
+                score, _, gi, reasons = incompatible
+                actual = observed[gi]
+                ref = f"/order/generation/observations/generated_assertions/{gi}"
+                matches.append({"case_id": item["id"], "assertion_id": actual["assertion_id"],
+                                "score": round(score, 6), "method": "required_terms_coverage",
+                                "status": "INCOMPATIBLE", "incompatibility_reasons": reasons})
+                checks.append(_check(
+                    "GOLD_MATCH_INCOMPATIBLE", "PARTIAL",
+                    f"El caso {item['id']} y la afirmación generada comparten vocabulario, pero no son "
+                    f"semánticamente puntuables: {', '.join(reasons)}. "
+                    f"Esperado: {item.get('text') or '—'}; generado: {actual['text'] or '—'}. "
+                    "No se heredará el veredicto gold.", ref, issue_type="warning",
+                    root_cause_id=f"gold-match:{item['id']}",
+                    recommended_action="Revisar el caso gold o el emparejamiento antes de puntuar validadores."
+                ))
+                continue
             best = max((score for score, expected_index, _, _ in candidates if expected_index == ei), default=0.0)
             checks.append(_check("EXPECTED_ASSERTION_MISSING", "FAIL",
                                  f"No se emparejó el caso {item['id']}: la mejor cobertura léxica fue {best:.3f}, "
@@ -207,17 +227,6 @@ def _generation(dataset, order, generated):
         gi = next(i for i, a in enumerate(observed) if a["assertion_id"] == match["assertion_id"])
         actual = observed[gi]
         ref = f"/order/generation/observations/generated_assertions/{gi}"
-        if match["status"] == "INCOMPATIBLE":
-            checks.append(_check(
-                "GOLD_MATCH_INCOMPATIBLE", "PARTIAL",
-                f"El caso {item['id']} y la afirmación generada comparten vocabulario, pero no son "
-                f"semánticamente puntuables: {', '.join(match['incompatibility_reasons'])}. "
-                f"Esperado: {item.get('text') or '—'}; generado: {actual['text'] or '—'}. "
-                "No se heredará el veredicto gold.", ref, issue_type="warning",
-                root_cause_id=f"gold-match:{item['id']}",
-                recommended_action="Revisar el caso gold o el emparejamiento antes de puntuar validadores."
-            ))
-            continue
         lost_numbers = missing_expected_numbers(item, actual["text"])
         if lost_numbers:
             checks.append(_check("NUMBER_OR_DATE_MISSING", "PARTIAL",

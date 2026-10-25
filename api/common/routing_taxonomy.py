@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 
 
-TAXONOMY_VERSION = "routing-taxonomy-v1"
+TAXONOMY_VERSION = "routing-taxonomy-v2"
 
 
 class TopicCode(str, Enum):
@@ -114,6 +114,7 @@ class SourceType(str, Enum):
     COMPANY = "COMPANY"
     ORGANIZATION = "ORGANIZATION"
     SPORTS_GOVERNING_BODY = "SPORTS_GOVERNING_BODY"
+    INFRASTRUCTURE_OPERATOR = "INFRASTRUCTURE_OPERATOR"
     NEWS_AGENCY = "NEWS_AGENCY"
     MEDIA = "MEDIA"
     FACT_CHECKER = "FACT_CHECKER"
@@ -179,7 +180,7 @@ TOPIC_CATEGORY_IDS: dict[TopicCode, frozenset[int]] = {
 
 
 EVIDENCE_SOURCE_TYPES: dict[EvidenceKind, frozenset[SourceType]] = {
-    EvidenceKind.STATISTICAL_DATA: frozenset({SourceType.STATISTICAL_OFFICE, SourceType.CENTRAL_BANK, SourceType.GOVERNMENT_AGENCY, SourceType.INTERGOVERNMENTAL_ORGANIZATION}),
+    EvidenceKind.STATISTICAL_DATA: frozenset({SourceType.STATISTICAL_OFFICE, SourceType.CENTRAL_BANK, SourceType.GOVERNMENT_AGENCY, SourceType.INTERGOVERNMENTAL_ORGANIZATION, SourceType.INFRASTRUCTURE_OPERATOR}),
     EvidenceKind.LEGAL_TEXT: frozenset({SourceType.OFFICIAL_GAZETTE, SourceType.LEGISLATURE, SourceType.GOVERNMENT_AGENCY}),
     EvidenceKind.REGULATORY_DECISION: frozenset({SourceType.REGULATOR}),
     EvidenceKind.JUDICIAL_DECISION: frozenset({SourceType.COURT}),

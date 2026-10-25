@@ -46,7 +46,7 @@ class Assertion(BaseModel):
     assertion_index: Optional[int] = None
     topic_code: TopicCode
     evidence_kind: EvidenceKind
-    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    taxonomy_version: Literal["routing-taxonomy-v2"] = TAXONOMY_VERSION
     context: AssertionContext
     search_hints: SearchHints = Field(default_factory=SearchHints)
     context_confidence: ContextConfidence = Field(default_factory=ContextConfidence)

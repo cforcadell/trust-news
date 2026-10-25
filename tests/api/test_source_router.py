@@ -87,7 +87,7 @@ def route_document(*sources, stale=False):
 
 def test_route_key_contains_only_normalized_stable_dimensions():
     signature = signatures.build_route_signature(request())
-    assert signatures.route_key(signature) == "route-v2|routing-taxonomy-v1|DEMOGRAPHY|STATISTICAL_DATA|REGION:ES:ES-CT"
+    assert signatures.route_key(signature) == "route-v2|routing-taxonomy-v2|DEMOGRAPHY|STATISTICAL_DATA|REGION:ES:ES-CT"
     assert signatures.route_key(signature) == signatures.route_key(signatures.build_route_signature(request(language="es")))
 
 
@@ -108,7 +108,7 @@ def test_discovery_query_localizes_country_name_without_changing_route_key():
     signature = signatures.build_route_signature(req)
 
     assert signatures.route_key(signature) == (
-        "route-v2|routing-taxonomy-v1|HEALTH_PUBLIC_HEALTH|GOVERNMENT_RECORD|COUNTRY:SE"
+        "route-v2|routing-taxonomy-v2|HEALTH_PUBLIC_HEALTH|GOVERNMENT_RECORD|COUNTRY:SE"
     )
     assert query_builder.build_discovery_queries(signature, req) == [
         "official government record health public health Sweden Sverige"
@@ -134,7 +134,7 @@ def test_contextual_discovery_uses_entities_and_hints_and_separates_cache_keys()
         "official law legislation gazette politics government",
     ]
     assert signatures.route_key(signature).startswith(
-        "route-v2|routing-taxonomy-v1|POLITICS_GOVERNMENT|LEGAL_TEXT|UNKNOWN|CTX:"
+        "route-v2|routing-taxonomy-v2|POLITICS_GOVERNMENT|LEGAL_TEXT|UNKNOWN|CTX:"
     )
     other = request(
         topic_code="POLITICS_GOVERNMENT",
@@ -292,6 +292,44 @@ def test_eligibility_requires_route_matches_authority_and_jurisdiction():
     assert eligibility.is_eligible(signature, european)
 
 
+def test_infrastructure_operator_is_generic_statistical_source_with_normal_guards():
+    source_data = classified(
+        "operator.example", {"scope": "COUNTRY", "country_code": "ES"},
+        "NATIONAL_PRIMARY",
+    ).model_dump()
+    source_data.update({
+        "source_type": "INFRASTRUCTURE_OPERATOR",
+        "topic_codes": ["ENERGY"],
+        "reason": "Operates infrastructure and publishes first-party operational measurements",
+    })
+    source = models.SourceClassification.model_validate(source_data)
+    energy_signature = signatures.build_route_signature(request(
+        topic_code="ENERGY",
+        jurisdiction={"scope": "COUNTRY", "country_code": "ES"},
+    ))
+
+    assert eligibility.is_eligible(energy_signature, source)
+
+    mismatched_topic = models.SourceClassification.model_validate(
+        source.model_dump() | {"topic_match": "NONE"},
+    )
+    assert not eligibility.is_eligible(energy_signature, mismatched_topic)
+    wrong_jurisdiction = models.SourceClassification.model_validate(source.model_dump() | {
+        "jurisdictions": [{"scope": "COUNTRY", "country_code": "NZ"}],
+    })
+    assert not eligibility.is_eligible(energy_signature, wrong_jurisdiction)
+    non_primary = models.SourceClassification.model_validate(
+        source.model_dump() | {"authority_level": "UNKNOWN"},
+    )
+    assert not eligibility.is_eligible(energy_signature, non_primary)
+
+    unrelated_evidence = signatures.build_route_signature(request(
+        topic_code="ENERGY", evidence_kind="LEGAL_TEXT",
+        jurisdiction={"scope": "COUNTRY", "country_code": "ES"},
+    ))
+    assert not eligibility.is_eligible(unrelated_evidence, source)
+
+
 def test_ranking_joins_route_candidates_with_domain_profiles():
     signature = signatures.build_route_signature(request())
     regional = classified()
@@ -348,6 +386,31 @@ async def test_repository_does_not_create_parallel_array_index():
     assert ("topic_codes", {"name": "profile_topic_codes_v1"}) in profiles.indexes
     assert ("evidence_kinds", {"name": "profile_evidence_kinds_v1"}) in profiles.indexes
     assert not any(isinstance(keys, list) and len(keys) > 1 for keys, _ in profiles.indexes)
+
+
+@pytest.mark.asyncio
+async def test_repository_ignores_profiles_from_previous_taxonomy_version():
+    class Cursor:
+        def __aiter__(self):
+            async def rows():
+                if False:
+                    yield {}
+            return rows()
+
+    class Profiles:
+        query = None
+
+        def find(self, query, projection):
+            self.query = query
+            return Cursor()
+
+    profiles = Profiles()
+    repo = repository_module.SourceRouteRepository(IndexCollection(), profiles)
+    assert await repo.get_profiles(["operator.example"]) == {}
+    assert profiles.query == {
+        "domain": {"$in": ["operator.example"]},
+        "taxonomy_version": "routing-taxonomy-v2",
+    }
 
 
 def settings():

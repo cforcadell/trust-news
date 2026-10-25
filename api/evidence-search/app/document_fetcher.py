@@ -1,12 +1,18 @@
 import asyncio
 import json
 import os
+import random
+import ipaddress
 import re
+import socket
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from io import BytesIO
 from itertools import islice
 from dataclasses import dataclass
 from typing import List, Optional
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -34,7 +40,21 @@ REMOVE_SELECTORS = (
 )
 CONTAINER_SELECTORS = ("article", "main", '[role="main"]')
 PDF_MAX_BYTES = 15 * 1024 * 1024
+MAX_REDIRECTS = 5
 PDF_MAX_PAGES = int(os.getenv("EVIDENCE_PDF_MAX_PAGES", "80"))
+FETCH_MAX_ATTEMPTS = max(1, int(os.getenv("EVIDENCE_FETCH_MAX_ATTEMPTS", "2")))
+FETCH_RETRY_BASE_SECONDS = max(0.0, float(os.getenv("EVIDENCE_FETCH_RETRY_BASE_SECONDS", "0.5")))
+FETCH_RETRY_MAX_SECONDS = max(
+    FETCH_RETRY_BASE_SECONDS,
+    float(os.getenv("EVIDENCE_FETCH_RETRY_MAX_SECONDS", "3")),
+)
+FETCH_RETRY_JITTER_RATIO = min(
+    1.0, max(0.0, float(os.getenv("EVIDENCE_FETCH_RETRY_JITTER_RATIO", "0.2"))),
+)
+FETCH_RETRY_BUDGET_SECONDS = max(
+    0.0, float(os.getenv("EVIDENCE_FETCH_RETRY_BUDGET_SECONDS", "15")),
+)
+RETRYABLE_OUTCOMES = {"PENDING", "RATE_LIMITED", "SERVER_FAILURE", "NETWORK_FAILURE"}
 BLOCK_PAGE_MARKERS = (
     "access denied", "captcha", "checking your browser", "enable javascript",
     "just a moment", "too many requests", "verify you are human",
@@ -62,10 +82,74 @@ class FetchResult:
     detected_format: Optional[str] = None
     extractor: Optional[str] = None
     attempts: Optional[List[dict]] = None
+    retry_after_seconds: Optional[float] = None
+    retry_trace: Optional[List[dict]] = None
 
     @property
     def document_length_chars(self) -> int:
         return len(self.text)
+
+    @property
+    def outcome(self) -> str:
+        """Return the stable, transport-independent fetch classification."""
+        return classify_fetch_outcome(
+            status=self.status,
+            failure_code=self.failure_code,
+            http_status=self.http_status,
+        )
+
+    @property
+    def diagnostics(self) -> dict:
+        """Expose additive diagnostics without changing the legacy status contract."""
+        return {
+            "outcome": self.outcome,
+            "stage": self.failure_stage or ("COMPLETE" if self.status == "ok" else "FETCH"),
+            "retryable": bool(self.retryable),
+            "http_response_received": self.http_status is not None,
+            "http_success": self.http_status is not None and 200 <= self.http_status < 300,
+            "extracted": self.status == "ok",
+            "retry_count": sum(action.get("action") == "RETRY" for action in self.retry_trace or []),
+        }
+
+
+def classify_fetch_outcome(*, status: str, failure_code: Optional[str],
+                           http_status: Optional[int]) -> str:
+    """Map legacy fetch details to a small, stable operational taxonomy."""
+    if status == "ok":
+        return "EXTRACTED"
+    if failure_code == "HTTP_202_EMPTY_BODY":
+        return "PENDING"
+    if http_status in {401, 403} or failure_code == "BLOCK_PAGE":
+        return "ACCESS_DENIED"
+    if http_status in {404, 410}:
+        return "NOT_FOUND"
+    if http_status == 429 or failure_code == "HTTP_RATE_LIMITED":
+        return "RATE_LIMITED"
+    if (http_status is not None and http_status >= 500) or failure_code == "HTTP_SERVER_ERROR":
+        return "SERVER_FAILURE"
+    if failure_code in {"TIMEOUT", "NETWORK_ERROR", "TLS_HOSTNAME_MISMATCH"}:
+        return "NETWORK_FAILURE"
+    if failure_code in {"BODY_EMPTY", "HTML_NO_MAIN_CONTENT", "PDF_NO_TEXT"}:
+        return "EMPTY_CONTENT"
+    if failure_code == "FORMAT_UNSUPPORTED":
+        return "UNSUPPORTED_CONTENT"
+    if failure_code in {"EXTRACTOR_ERROR", "DOCUMENT_TOO_LARGE"}:
+        return "EXTRACTION_FAILURE"
+    if http_status is not None and 400 <= http_status < 500:
+        return "CLIENT_FAILURE"
+    return "FETCH_FAILURE"
+
+
+def classify_attempt_outcome(attempt: dict) -> str:
+    """Classify one recorded HTTP/network attempt using the same taxonomy."""
+    raw = str(attempt.get("outcome") or "")
+    status = attempt.get("http_status")
+    legacy_status = "ok" if raw == "EXTRACTED" else "failed"
+    return classify_fetch_outcome(
+        status=legacy_status,
+        failure_code=raw or None,
+        http_status=status if isinstance(status, int) else None,
+    )
 
 
 def _clean_text(text: str) -> str:
@@ -200,7 +284,7 @@ def failure_metadata(error: str, stage: str) -> tuple[str, bool]:
         "html_no_main_content": ("HTML_NO_MAIN_CONTENT", True),
         "pdf_no_text": ("PDF_NO_TEXT", False),
         "text_empty": ("BODY_EMPTY", True),
-        "block_page": ("BLOCK_PAGE", True),
+        "block_page": ("BLOCK_PAGE", False),
     }
     return mapping.get(error, ("FETCH_ERROR" if stage == "FETCH" else "EXTRACTOR_ERROR", True))
 
@@ -218,6 +302,82 @@ def _fetch_error_code(exc: Exception) -> str:
     if isinstance(exc, httpx.ConnectError):
         return "connect_error"
     return exc.__class__.__name__
+
+
+async def _validate_fetch_url(url: str) -> Optional[str]:
+    """Reject malformed or non-public HTTP destinations before connecting."""
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return "REDIRECT_INVALID_URL"
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443 if parsed.scheme == "https" else 80)
+    ):
+        return "REDIRECT_UNSAFE_TARGET"
+    hostname = parsed.hostname.rstrip(".").lower()
+    try:
+        addresses = {ipaddress.ip_address(hostname)}
+    except ValueError:
+        try:
+            records = await asyncio.to_thread(
+                socket.getaddrinfo, hostname, port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+            addresses = {ipaddress.ip_address(record[4][0]) for record in records}
+        except (OSError, ValueError):
+            return "REDIRECT_DNS_FAILURE"
+    if not addresses or any(not address.is_global for address in addresses):
+        return "REDIRECT_UNSAFE_TARGET"
+    return None
+
+
+async def _get_following_validated_redirects(client, url: str, attempted_urls: List[str],
+                                              attempts: List[dict]):
+    """Fetch a URL while validating every redirect destination before use."""
+    current = url
+    visited = set()
+    redirects = 0
+    while True:
+        reason = await _validate_fetch_url(current)
+        if reason:
+            attempts.append({"url": current, "outcome": reason})
+            return None, reason
+        if current in visited:
+            attempts.append({"url": current, "outcome": "REDIRECT_LOOP"})
+            return None, "REDIRECT_LOOP"
+        visited.add(current)
+        response = await client.get(current, follow_redirects=False)
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            return response, None
+        location = response.headers.get("location")
+        if not location:
+            attempts.append({"url": current, "http_status": response.status_code,
+                             "outcome": "REDIRECT_MISSING_LOCATION"})
+            return None, "REDIRECT_MISSING_LOCATION"
+        if redirects >= MAX_REDIRECTS:
+            attempts.append({"url": current, "http_status": response.status_code,
+                             "outcome": "REDIRECT_LIMIT_EXCEEDED"})
+            return None, "REDIRECT_LIMIT_EXCEEDED"
+        target = urljoin(current, location)
+        target_reason = await _validate_fetch_url(target)
+        if target_reason:
+            attempts.append({"url": target, "http_status": response.status_code,
+                             "outcome": target_reason})
+            return None, target_reason
+        if urlparse(current).scheme == "https" and urlparse(target).scheme != "https":
+            attempts.append({"url": target, "http_status": response.status_code,
+                             "outcome": "REDIRECT_HTTPS_DOWNGRADE"})
+            return None, "REDIRECT_HTTPS_DOWNGRADE"
+        attempted_urls.append(target)
+        attempts.append({"url": current, "http_status": response.status_code,
+                         "redirect_to": target, "outcome": "HTTP_REDIRECT"})
+        current = target
+        redirects += 1
 
 
 def www_hostname_variant(url: str) -> Optional[str]:
@@ -253,7 +413,120 @@ def www_hostname_variant(url: str) -> Optional[str]:
     return urlunparse(parsed._replace(netloc=netloc))
 
 
-async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "TrustNewsEvidenceBot/1.0") -> FetchResult:
+def parse_retry_after(value: Optional[str], now: Optional[datetime] = None) -> Optional[float]:
+    """Parse Retry-After delta seconds or HTTP date without exceeding policy caps."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        target = parsedate_to_datetime(value)
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=timezone.utc)
+        current = now or datetime.now(timezone.utc)
+        return max(0.0, (target - current).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def should_retry_fetch(result: FetchResult) -> bool:
+    """Retry only transient transport outcomes, never stable access/extraction failures."""
+    if not result.retryable or result.outcome not in RETRYABLE_OUTCOMES:
+        return False
+    # A pending representation without a server-supplied delay is unlikely to
+    # materialize during an immediate second request. Connection and TLS
+    # failures likewise need a different candidate, not the same URL again.
+    if result.outcome == "PENDING":
+        return result.retry_after_seconds is not None
+    if result.outcome == "NETWORK_FAILURE":
+        return result.failure_code == "TIMEOUT"
+    return True
+
+
+def retry_delay_seconds(result: FetchResult, retry_number: int) -> float:
+    """Return a bounded Retry-After/backoff delay with proportional jitter."""
+    if result.retry_after_seconds is not None:
+        base = result.retry_after_seconds
+    else:
+        base = min(
+            FETCH_RETRY_BASE_SECONDS * (2 ** max(0, retry_number - 1)),
+            FETCH_RETRY_MAX_SECONDS,
+        )
+    if not base or not FETCH_RETRY_JITTER_RATIO:
+        return base
+    spread = base * FETCH_RETRY_JITTER_RATIO
+    return max(0.0, random.uniform(base - spread, base + spread))
+
+
+def _merge_attempt_urls(target: List[str], source: Optional[List[str]]) -> None:
+    for item in source or []:
+        if item not in target:
+            target.append(item)
+
+
+async def fetch_main_text(url: str, timeout: float = 10.0,
+                          user_agent: str = "TrustNewsEvidenceBot/1.0") -> FetchResult:
+    """Fetch with a bounded, outcome-driven retry policy."""
+    started = time.monotonic()
+    all_attempts: List[dict] = []
+    all_urls: List[str] = []
+    retry_trace: List[dict] = []
+    result: Optional[FetchResult] = None
+
+    for attempt_number in range(1, FETCH_MAX_ATTEMPTS + 1):
+        elapsed = time.monotonic() - started
+        remaining = FETCH_RETRY_BUDGET_SECONDS - elapsed
+        if attempt_number > 1 and remaining <= 0:
+            break
+        effective_timeout = min(timeout, remaining) if FETCH_RETRY_BUDGET_SECONDS else timeout
+        result = await _fetch_main_text_once(
+            url,
+            timeout=max(0.001, effective_timeout),
+            user_agent=user_agent,
+        )
+        for attempt in result.attempts or []:
+            all_attempts.append({**attempt, "attempt_number": attempt_number})
+        _merge_attempt_urls(all_urls, result.attempted_urls)
+
+        if attempt_number >= FETCH_MAX_ATTEMPTS or not should_retry_fetch(result):
+            break
+        delay = retry_delay_seconds(result, attempt_number)
+        elapsed = time.monotonic() - started
+        if delay > FETCH_RETRY_MAX_SECONDS or (
+            FETCH_RETRY_BUDGET_SECONDS and elapsed + delay >= FETCH_RETRY_BUDGET_SECONDS
+        ):
+            retry_trace.append({
+                "after_attempt": attempt_number,
+                "outcome": result.outcome,
+                "action": "RETRY_SKIPPED_BUDGET",
+                "delay_seconds": round(delay, 3),
+                "reason": "RETRY_AFTER_TOO_LONG" if delay > FETCH_RETRY_MAX_SECONDS else "TIME_BUDGET",
+            })
+            break
+        retry_trace.append({
+            "after_attempt": attempt_number,
+            "outcome": result.outcome,
+            "action": "RETRY",
+            "delay_seconds": round(delay, 3),
+            "retry_after_observed": result.retry_after_seconds is not None,
+        })
+        if delay:
+            await asyncio.sleep(delay)
+
+    if result is None:  # Defensive: FETCH_MAX_ATTEMPTS is clamped to at least one.
+        return FetchResult(status="failed", error="retry_budget_exhausted",
+                           failure_stage="FETCH", failure_code="TIMEOUT", retryable=True)
+    result.attempts = all_attempts
+    result.attempted_urls = all_urls or [url]
+    result.retry_trace = retry_trace
+    return result
+
+
+async def _fetch_main_text_once(url: str, timeout: float = 10.0,
+                                user_agent: str = "TrustNewsEvidenceBot/1.0") -> FetchResult:
     """Download and extract a document while retaining structured diagnostics."""
     parsed = urlparse(url or "")
     if parsed.scheme not in {"http", "https"}:
@@ -268,12 +541,20 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
     normalization_reason = None
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=timeout,
             headers={"User-Agent": user_agent},
         ) as client:
             try:
-                response = await client.get(url)
+                response, redirect_error = await _get_following_validated_redirects(
+                    client, url, attempted_urls, attempts,
+                )
+                if redirect_error:
+                    return FetchResult(
+                        status="failed", error=redirect_error, attempted_urls=attempted_urls,
+                        failure_stage="FETCH", failure_code=redirect_error, retryable=False,
+                        attempts=attempts,
+                    )
             except Exception as exc:
                 error = _fetch_error_code(exc)
                 code, retryable = failure_metadata(error, "FETCH")
@@ -287,7 +568,16 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
                 normalization_reason = "tls_hostname_mismatch_www_variant"
                 try:
                     # The retry still uses httpx's default certificate checks.
-                    response = await client.get(normalized_url)
+                    response, redirect_error = await _get_following_validated_redirects(
+                        client, normalized_url, attempted_urls, attempts,
+                    )
+                    if redirect_error:
+                        return FetchResult(
+                            status="failed", error=redirect_error,
+                            normalization_reason=normalization_reason,
+                            attempted_urls=attempted_urls, failure_stage="FETCH",
+                            failure_code=redirect_error, retryable=False, attempts=attempts,
+                        )
                 except Exception as retry_exc:
                     retry_error = _fetch_error_code(retry_exc)
                     retry_code, retryable = failure_metadata(retry_error, "FETCH")
@@ -314,6 +604,7 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
     fetched_url = str(getattr(response, "url", url))
     http_status = int(response.status_code)
     response_bytes = len(response.content or b"")
+    retry_after_seconds = parse_retry_after(response.headers.get("retry-after"))
     url_normalized = bool(normalized_url) or fetched_url != url
     if not normalization_reason and fetched_url != url:
         normalization_reason = "http_redirect"
@@ -325,7 +616,8 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
                            fetched_url=fetched_url, url_normalized=url_normalized,
                            normalization_reason=normalization_reason, attempted_urls=attempted_urls,
                            failure_stage="FETCH", failure_code=code, retryable=retryable,
-                           http_status=http_status, response_bytes=response_bytes, attempts=attempts)
+                           http_status=http_status, response_bytes=response_bytes, attempts=attempts,
+                           retry_after_seconds=retry_after_seconds)
 
     if http_status == 202 and response_bytes == 0:
         # A successful-looking 202 with no representation cannot be parsed.
@@ -342,6 +634,7 @@ async def fetch_main_text(url: str, timeout: float = 10.0, user_agent: str = "Tr
             http_status=http_status, response_bytes=0,
             detected_format="HTML" if content_type in HTML_CONTENT_TYPES else None,
             extractor="html" if content_type in HTML_CONTENT_TYPES else None,
+            retry_after_seconds=retry_after_seconds,
             attempts=attempts,
         )
 

@@ -65,7 +65,7 @@ class ResolveRouteRequest(BaseModel):
 
 class RouteSignature(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    taxonomy_version: Literal["routing-taxonomy-v2"] = TAXONOMY_VERSION
     topic_code: TopicCode
     evidence_kind: EvidenceKind
     jurisdiction: JurisdictionContext
@@ -153,7 +153,7 @@ class DomainProfile(BaseModel):
     languages: list[str]
     classification_confidence: float = Field(ge=0, le=1)
     reason: str
-    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    taxonomy_version: Literal["routing-taxonomy-v2"] = TAXONOMY_VERSION
     profile_version: str
     classification_model: str
     classification_config_version: int = 0
@@ -241,7 +241,7 @@ class ResolveRouteResponse(BaseModel):
     route_state: Literal["FRESH", "MISSING", "STALE"]
     sources: list[RoutedSource] = Field(default_factory=list)
     router_version: str
-    taxonomy_version: Literal["routing-taxonomy-v1"] = TAXONOMY_VERSION
+    taxonomy_version: Literal["routing-taxonomy-v2"] = TAXONOMY_VERSION
     stale_route_used: bool = False
     degraded: bool = False
     diagnostic_code: RouteDiagnosticCode | None = None

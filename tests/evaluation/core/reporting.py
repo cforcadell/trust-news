@@ -116,6 +116,46 @@ def pipeline_report(rows):
     observation_causes = Counter(row.get("root_cause", {}).get("code") for row in observation_only
                                  if row.get("root_cause", {}).get("code"))
     observed_causes = causes + observation_causes
+    full_pipeline_rows = [row for row in rows if row["execution_mode"] == "FULL_PIPELINE"]
+    retrieval_metrics = [row.get("metrics", {}).get("retrieval", {}) for row in full_pipeline_rows]
+    documents_attempted = sum(metric.get("documents_attempted") or 0 for metric in retrieval_metrics)
+    documents_extracted = sum(metric.get("documents_extracted") or 0 for metric in retrieval_metrics)
+    documents_citable = sum(metric.get("documents_citable") or 0 for metric in retrieval_metrics)
+    http_requests = sum(metric.get("http_requests") or 0 for metric in retrieval_metrics)
+    http_responses = sum(metric.get("http_responses") or 0 for metric in retrieval_metrics)
+    http_successes = sum(metric.get("http_successes") or 0 for metric in retrieval_metrics)
+    retry_actions = sum(metric.get("retry_actions") or 0 for metric in retrieval_metrics)
+    candidate_substitutions = sum(
+        metric.get("candidate_substitutions") or 0 for metric in retrieval_metrics
+    )
+    fetch_outcomes = Counter()
+    for metric in retrieval_metrics:
+        fetch_outcomes.update(metric.get("fetch_outcome_counts") or {})
+    retrieval_observability = {
+        "responses": sum(metric.get("response_present", metric.get("status") != "NOT_EVALUATED")
+                         for metric in retrieval_metrics),
+        "cached_responses": sum(metric.get("response_cached") is True for metric in retrieval_metrics),
+        "documents_attempted": documents_attempted,
+        "documents_extracted": documents_extracted,
+        "documents_citable": documents_citable,
+        "usable_download_percent": (
+            documents_extracted / documents_attempted * 100 if documents_attempted else None
+        ),
+        "citable_document_percent": (
+            documents_citable / documents_attempted * 100 if documents_attempted else None
+        ),
+        "http_requests": http_requests,
+        "http_responses": http_responses,
+        "http_successes": http_successes,
+        "http_success_percent": http_successes / http_requests * 100 if http_requests else None,
+        "retry_actions": retry_actions,
+        "retry_recovered": sum(metric.get("retry_recovered") or 0 for metric in retrieval_metrics),
+        "retry_exhausted": sum(metric.get("retry_exhausted") or 0 for metric in retrieval_metrics),
+        "candidate_substitutions": candidate_substitutions,
+        "substitution_recovered": sum(metric.get("substitution_recovered") or 0 for metric in retrieval_metrics),
+        "substitution_exhausted": sum(metric.get("substitution_exhausted") or 0 for metric in retrieval_metrics),
+        "fetch_outcomes": dict(fetch_outcomes),
+    }
     grouped_failures = {}
     for row in all_rows:
         parent_run_id = row.get("provenance", {}).get("parent_run_id")
@@ -143,6 +183,7 @@ def pipeline_report(rows):
             "taxonomy_mismatches": taxonomy_mismatches, "quorum_degraded": quorum_degraded,
             "operational": {"pass": operational_pass, "degraded": operational_degraded,
                             "fail": operational_fail},
+            "retrieval_observability": retrieval_observability,
             "root_causes": dict(observed_causes), "observation_only_root_causes": dict(observation_causes),
             "execution_failures": list(grouped_failures.values()),
             "failures": {name: sum(n for code, n in observed_causes.items() if code.startswith(prefix)) for name, prefix in (

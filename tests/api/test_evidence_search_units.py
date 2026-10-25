@@ -18,6 +18,133 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 
 
+@pytest.fixture(autouse=True)
+def no_real_fetch_retry_delay(monkeypatch):
+    """Keep retry behavior in unit tests without paying production backoff time."""
+    from app import document_fetcher
+
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_BASE_SECONDS", 0)
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_JITTER_RATIO", 0)
+
+    async def public_test_destination(_url):
+        return None
+
+    monkeypatch.setattr(document_fetcher, "_validate_fetch_url", public_test_destination)
+
+    async def run_extractor_inline(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(document_fetcher.asyncio, "to_thread", run_extractor_inline)
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_validation_rejects_local_and_credentialed_destinations(monkeypatch):
+    from app import document_fetcher
+
+    async def public_dns(*args, **kwargs):
+        return [(None, None, None, None, ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(document_fetcher.asyncio, "to_thread", public_dns)
+    assert await document_fetcher._validate_fetch_url("https://127.0.0.1/private") == "REDIRECT_UNSAFE_TARGET"
+    assert await document_fetcher._validate_fetch_url("https://user@example.com/") == "REDIRECT_UNSAFE_TARGET"
+    assert await document_fetcher._validate_fetch_url("file:///etc/passwd") == "REDIRECT_UNSAFE_TARGET"
+    assert await document_fetcher._validate_fetch_url("https://example.com/") is None
+
+    async def mixed_dns(*args, **kwargs):
+        return [
+            (None, None, None, None, ("93.184.216.34", 443)),
+            (None, None, None, None, ("10.0.0.8", 443)),
+        ]
+
+    monkeypatch.setattr(document_fetcher.asyncio, "to_thread", mixed_dns)
+    assert await document_fetcher._validate_fetch_url("https://mixed.example/") == "REDIRECT_UNSAFE_TARGET"
+
+
+@pytest.mark.asyncio
+async def test_redirect_rejects_private_target_before_request(monkeypatch):
+    from app import document_fetcher
+
+    requested = []
+
+    class Response:
+        status_code = 302
+        headers = {"location": "http://127.0.0.1/admin"}
+
+    class Client:
+        async def get(self, url):
+            requested.append(url)
+            return Response()
+
+    async def validate(url):
+        return "REDIRECT_UNSAFE_TARGET" if "127.0.0.1" in url else None
+
+    monkeypatch.setattr(document_fetcher, "_validate_fetch_url", validate)
+    attempts = []
+    response, error = await document_fetcher._get_following_validated_redirects(
+        Client(), "https://public.example/start", ["https://public.example/start"], attempts,
+    )
+    assert response is None
+    assert error == "REDIRECT_UNSAFE_TARGET"
+    assert requested == ["https://public.example/start"]
+
+
+@pytest.mark.asyncio
+async def test_redirect_follows_relative_public_location_and_records_hops(monkeypatch):
+    from app import document_fetcher
+
+    async def public_destination(_url):
+        return None
+
+    monkeypatch.setattr(document_fetcher, "_validate_fetch_url", public_destination)
+
+    class Client:
+        async def get(self, url):
+            if url.endswith("/start"):
+                return SimpleNamespace(status_code=302, headers={"location": "documents/latest"})
+            return SimpleNamespace(status_code=200, headers={}, url=url)
+
+    requested = ["https://public.example/start"]
+    attempts = []
+    response, error = await document_fetcher._get_following_validated_redirects(
+        Client(), requested[0], requested, attempts,
+    )
+    assert error is None
+    assert response.url == "https://public.example/documents/latest"
+    assert requested == ["https://public.example/start", "https://public.example/documents/latest"]
+    assert attempts[0]["outcome"] == "HTTP_REDIRECT"
+
+
+@pytest.mark.asyncio
+async def test_redirect_rejects_https_downgrade_and_limits_hops(monkeypatch):
+    from app import document_fetcher
+
+    async def public_destination(_url):
+        return None
+
+    monkeypatch.setattr(document_fetcher, "_validate_fetch_url", public_destination)
+
+    class DowngradeClient:
+        async def get(self, url):
+            return SimpleNamespace(status_code=302, headers={"location": "http://public.example/plain"})
+
+    _, error = await document_fetcher._get_following_validated_redirects(
+        DowngradeClient(), "https://public.example/start", [], [],
+    )
+    assert error == "REDIRECT_HTTPS_DOWNGRADE"
+
+    class LoopingClient:
+        hops = 0
+
+        async def get(self, url):
+            self.hops += 1
+            return SimpleNamespace(status_code=302, headers={"location": f"/hop-{self.hops}"})
+
+    _, error = await document_fetcher._get_following_validated_redirects(
+        LoopingClient(), "https://public.example/start", [], [],
+    )
+    assert error == "REDIRECT_LIMIT_EXCEEDED"
+
+
 def test_provider_trace_summary_and_url_lineage_preserve_many_to_many_relationships():
     requests = [
         {"provider_call_id": "exa-1", "status": "EXECUTED",
@@ -154,7 +281,7 @@ def test_html_extraction_preserves_official_content_wrapped_in_form_and_header()
 
 
 @pytest.mark.asyncio
-async def test_http_202_empty_body_has_specific_failure_code_without_retry(monkeypatch):
+async def test_http_202_empty_body_without_retry_after_is_not_retried(monkeypatch):
     from app import document_fetcher
 
     calls = []
@@ -176,6 +303,8 @@ async def test_http_202_empty_body_has_specific_failure_code_without_retry(monke
             calls.append(url)
             return Response()
 
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_BASE_SECONDS", 0)
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_JITTER_RATIO", 0)
     monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
     result = await document_fetcher.fetch_main_text("https://eur-lex.example/report")
 
@@ -183,7 +312,320 @@ async def test_http_202_empty_body_has_specific_failure_code_without_retry(monke
     assert result.failure_code == "HTTP_202_EMPTY_BODY"
     assert result.http_status == 202
     assert result.response_bytes == 0
+    assert result.outcome == "PENDING"
+    assert result.diagnostics == {
+        "outcome": "PENDING",
+        "stage": "FETCH",
+        "retryable": True,
+        "http_response_received": True,
+        "http_success": True,
+        "extracted": False,
+        "retry_count": 0,
+    }
+    assert result.retry_trace == []
     assert calls == ["https://eur-lex.example/report"]
+
+
+@pytest.mark.asyncio
+async def test_retry_after_pending_can_recover_without_exceeding_policy(monkeypatch):
+    from app import document_fetcher
+
+    calls = []
+    sleeps = []
+    html = "<html><main>" + "Dato oficial recuperado. " * 8 + "</main></html>"
+
+    class Response:
+        def __init__(self, status_code, content, headers):
+            self.status_code = status_code
+            self.content = content
+            self.text = content.decode()
+            self.headers = headers
+            self.url = "https://example.test/report"
+
+    responses = [
+        Response(202, b"", {"content-type": "text/html", "retry-after": "2"}),
+        Response(200, html.encode(), {"content-type": "text/html"}),
+    ]
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            return responses.pop(0)
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_JITTER_RATIO", 0)
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_MAX_SECONDS", 3)
+    monkeypatch.setattr(document_fetcher.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.status == "ok"
+    assert result.outcome == "EXTRACTED"
+    assert len(result.attempts) == 2
+    assert [attempt["attempt_number"] for attempt in result.attempts] == [1, 2]
+    assert result.retry_trace[0]["outcome"] == "PENDING"
+    assert result.retry_trace[0]["retry_after_observed"] is True
+    assert sleeps == [2]
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_response_retries_and_recovers(monkeypatch):
+    """429 is transient and may use the next bounded fetch attempt."""
+    from app import document_fetcher
+
+    calls = []
+    html = "<html><main>" + "Dato oficial recuperado. " * 8 + "</main></html>"
+
+    class Response:
+        def __init__(self, status_code, content, headers):
+            self.status_code = status_code
+            self.content = content
+            self.text = content.decode()
+            self.headers = headers
+            self.url = "https://example.test/report"
+
+    responses = [
+        Response(429, b"Too many requests", {"content-type": "text/html", "retry-after": "1"}),
+        Response(200, html.encode(), {"content-type": "text/html"}),
+    ]
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            return responses.pop(0)
+
+    async def fake_sleep(delay):
+        return None
+
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_JITTER_RATIO", 0)
+    monkeypatch.setattr(document_fetcher.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.status == "ok"
+    assert result.outcome == "EXTRACTED"
+    assert len(calls) == 2
+    assert result.retry_trace[0]["outcome"] == "RATE_LIMITED"
+    assert result.retry_trace[0]["retry_after_observed"] is True
+
+
+@pytest.mark.asyncio
+async def test_access_denied_is_not_retried_on_the_same_url(monkeypatch):
+    """403 is stable for this operation and must advance to another candidate."""
+    from app import document_fetcher
+
+    calls = []
+
+    class Response:
+        status_code = 403
+        headers = {"content-type": "text/html"}
+        content = b"Forbidden"
+        text = "Forbidden"
+        url = "https://example.test/report"
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.outcome == "ACCESS_DENIED"
+    assert result.retry_trace == []
+    assert calls == ["https://example.test/report"]
+
+
+@pytest.mark.asyncio
+async def test_retry_is_skipped_when_its_delay_would_exceed_budget(monkeypatch):
+    """The retry wait and request share one bounded per-document budget."""
+    from app import document_fetcher
+
+    calls = []
+
+    class Response:
+        status_code = 202
+        headers = {"content-type": "text/html", "retry-after": "30"}
+        content = b""
+        text = ""
+        url = "https://example.test/report"
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            return Response()
+
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_JITTER_RATIO", 0)
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_MAX_SECONDS", 10)
+    monkeypatch.setattr(document_fetcher, "FETCH_RETRY_BUDGET_SECONDS", 1)
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert calls == ["https://example.test/report"]
+    assert result.retry_trace == [{
+        "after_attempt": 1,
+        "outcome": "PENDING",
+        "action": "RETRY_SKIPPED_BUDGET",
+        "delay_seconds": 30,
+        "reason": "RETRY_AFTER_TOO_LONG",
+    }]
+    assert result.diagnostics["retry_count"] == 0
+
+
+@pytest.mark.parametrize(("http_status", "failure_code", "expected"), [
+    (403, "HTTP_CLIENT_ERROR", "ACCESS_DENIED"),
+    (404, "HTTP_CLIENT_ERROR", "NOT_FOUND"),
+    (429, "HTTP_RATE_LIMITED", "RATE_LIMITED"),
+    (503, "HTTP_SERVER_ERROR", "SERVER_FAILURE"),
+    (None, "NETWORK_ERROR", "NETWORK_FAILURE"),
+    (200, "HTML_NO_MAIN_CONTENT", "EMPTY_CONTENT"),
+    (200, "FORMAT_UNSUPPORTED", "UNSUPPORTED_CONTENT"),
+    (200, "EXTRACTOR_ERROR", "EXTRACTION_FAILURE"),
+])
+def test_fetch_outcome_taxonomy_is_stable(http_status, failure_code, expected):
+    from app.document_fetcher import FetchResult
+
+    result = FetchResult(
+        status="empty_text" if http_status == 200 else "failed",
+        failure_code=failure_code,
+        http_status=http_status,
+    )
+
+    assert result.outcome == expected
+
+
+def test_retry_policy_excludes_connection_and_undelayed_pending_failures():
+    from app.document_fetcher import FetchResult, should_retry_fetch
+
+    assert not should_retry_fetch(FetchResult(
+        status="failed", failure_code="NETWORK_ERROR", retryable=True,
+    ))
+    assert not should_retry_fetch(FetchResult(
+        status="empty_text", failure_code="HTTP_202_EMPTY_BODY", retryable=True,
+        http_status=202,
+    ))
+    assert should_retry_fetch(FetchResult(
+        status="failed", failure_code="TIMEOUT", retryable=True,
+    ))
+
+
+def test_retrieval_summary_separates_transport_extraction_and_citability():
+    evidences = [
+        {
+            "fetch_status": "ok",
+            "fetch_outcome": "EXTRACTED",
+            "citation_status": "available",
+            "contexts": [{"citation_eligible": True}],
+            "fetch_attempts": [{"http_status": 200, "outcome": "EXTRACTED"}],
+        },
+        {
+            "fetch_status": "empty_text",
+            "fetch_outcome": "PENDING",
+            "citation_status": "unavailable",
+            "contexts": [],
+            "failure": {"code": "HTTP_202_EMPTY_BODY"},
+            "fetch_attempts": [{"http_status": 202, "outcome": "HTTP_202_EMPTY_BODY"}],
+        },
+        {
+            "fetch_status": "failed",
+            "fetch_outcome": "ACCESS_DENIED",
+            "citation_status": "unavailable",
+            "contexts": [],
+            "failure": {"code": "HTTP_CLIENT_ERROR"},
+            "fetch_attempts": [{"http_status": 403, "outcome": "HTTP_CLIENT_ERROR"}],
+        },
+        {"fetch_status": "context_limit_reached", "contexts": [], "fetch_attempts": []},
+    ]
+
+    summary = evidence.retrieval_summary(
+        evidences, candidates_considered=7, target_documents=2, fallback_rounds=1,
+    )
+
+    assert summary == {
+        "target_documents": 2,
+        "candidates_considered": 7,
+        "fetch_attempts": 4,
+        "http_requests": 3,
+        "http_responses": 3,
+        "http_successes": 2,
+        "documents_scheduled": 4,
+        "documents_attempted": 3,
+        "documents_extracted": 1,
+        "documents_citable": 1,
+        "outcome_counts": {"EXTRACTED": 1, "PENDING": 1, "ACCESS_DENIED": 1},
+        "retry_actions": 0,
+        "retry_recovered": 0,
+        "retry_exhausted": 0,
+        "candidate_substitutions": 0,
+        "substitution_recovered": 0,
+        "substitution_exhausted": 0,
+        "fallback_rounds": 1,
+        "failure_counts": {"HTTP_202_EMPTY_BODY": 1, "HTTP_CLIENT_ERROR": 1},
+        "stop_reason": "BUDGET_EXHAUSTED",
+    }
+
+
+def test_retrieval_summary_counts_recovered_and_exhausted_actions():
+    recovered = {
+        "fetch_status": "ok", "fetch_outcome": "EXTRACTED",
+        "citation_status": "available", "contexts": [{"citation_eligible": True}],
+        "fetch_retry_trace": [{"action": "RETRY"}],
+        "fetch_attempts": [{"http_status": 503}, {"http_status": 200}],
+    }
+    exhausted = {
+        "fetch_status": "failed", "fetch_outcome": "NETWORK_FAILURE",
+        "citation_status": "unavailable", "contexts": [],
+        "fetch_retry_trace": [{"action": "RETRY"}],
+        "fetch_attempts": [{"outcome": "NETWORK_ERROR"}, {"outcome": "NETWORK_ERROR"}],
+        "retrieval_mode": "existing_provider_candidates_after_unusable_fetch",
+    }
+    substituted = {
+        "fetch_status": "ok", "fetch_outcome": "EXTRACTED",
+        "citation_status": "available", "contexts": [{"citation_eligible": True}],
+        "fetch_attempts": [{"http_status": 200}],
+        "retrieval_mode": "existing_provider_candidates_after_unusable_fetch",
+    }
+
+    summary = evidence.retrieval_summary(
+        [recovered, exhausted, substituted], candidates_considered=5,
+        target_documents=2, fallback_rounds=1,
+    )
+
+    assert summary["retry_actions"] == 2
+    assert summary["retry_recovered"] == 1
+    assert summary["retry_exhausted"] == 1
+    assert summary["candidate_substitutions"] == 2
+    assert summary["substitution_recovered"] == 1
+    assert summary["substitution_exhausted"] == 1
 
 
 @pytest.mark.asyncio
@@ -425,7 +867,7 @@ def assertion():
         "categoryId": 1,
         "topic_code": "EMPLOYMENT",
         "evidence_kind": "STATISTICAL_DATA",
-        "taxonomy_version": "routing-taxonomy-v1",
+        "taxonomy_version": "routing-taxonomy-v2",
         "context": {
             "locations": [{"name": "Barcelona", "scope": "REGION", "country_code": "ES", "region_code": "ES-CT", "origin": "explicit", "confidence": 1}],
             "entities": [{"name": "INE", "type": "GOVERNMENT_BODY", "role": "AUTHORITY", "origin": "inferred", "confidence": 0.8}],
@@ -798,7 +1240,6 @@ async def test_unusable_fetch_is_replaced_from_same_provider_batch_without_new_s
     results = [
         {"url": "https://a.example/empty", "title": "A"},
         {"url": "https://b.example/empty", "title": "B"},
-        {"url": "https://c.example/empty", "title": "C"},
         {"url": "https://d.example/usable", "title": "D"},
     ]
 
@@ -836,6 +1277,43 @@ async def test_unusable_fetch_is_replaced_from_same_provider_batch_without_new_s
         "existing_provider_candidates_after_unusable_fetch"
     )
     assert response["domain_resolution"]["local_candidate_refill_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_replacement_and_fallback_share_max_results_budget(monkeypatch):
+    """A bad provider batch cannot expand five allowed documents into dozens."""
+    search_calls = []
+    fetch_calls = []
+
+    async def fake_search(*args, **kwargs):
+        search_calls.append(1)
+        return {"results": [
+            {"url": f"https://example.test/document-{index}", "title": str(index)}
+            for index in range(20)
+        ]}
+
+    async def fake_fetch(url, **kwargs):
+        fetch_calls.append(url)
+        return SimpleNamespace(
+            status="failed", error="connect_error", text="", document_length_chars=0,
+            failure_stage="FETCH", failure_code="NETWORK_ERROR", retryable=True,
+            attempts=[{"url": url, "outcome": "NETWORK_ERROR"}],
+        )
+
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "unusable_url_collection", None)
+    monkeypatch.setattr(evidence, "_recent_unusable_urls", {})
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+
+    response = await evidence.search_evidence(request("EXT_OFFICIAL_FIRST"))
+
+    assert len(fetch_calls) == response["search_policy"]["max_results"]
+    assert len(set(fetch_calls)) == len(fetch_calls)
+    assert len(search_calls) == 1
+    assert response["retrieval_summary"]["candidate_substitutions"] == 1
+    assert response["retrieval_summary"]["stop_reason"] == "BUDGET_EXHAUSTED"
 
 
 def test_negative_cache_ttl_distinguishes_transient_and_permanent_failures(monkeypatch):

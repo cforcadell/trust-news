@@ -98,7 +98,7 @@ kubectl get svc -A
 Dentro de la VM, abrir Traefik únicamente en loopback:
 
 ```bash
-kubectl port-forward --address 127.0.0.1 \
+kubectl port-forward --address 0.0.0.0 \
   -n kube-system svc/traefik 7443:443
 ```
 
@@ -238,7 +238,7 @@ Iniciar el viewer dentro de la VM desde la raíz del repositorio:
 ```bash
 PYTHONPATH=tests:api .venv/bin/python -m evaluation.viewer.server \
   --artifacts-root tests/data/evaluation/artifacts \
-  --host 127.0.0.1 \
+  --host 0.0.0.0 \
   --port 8765
 ```
 

@@ -1,262 +1,480 @@
-# Plan priorizado de estabilización E2E y Evidence Search
+# Plan de mejora de Evidence Search
 
-**Campaña de referencia:** `e2e-20261024-093320` (24 de octubre de 2026).
+## Objetivo
 
-**Estado:** el código del antiguo punto 1 está implementado localmente; faltan homologación del gold y campañas publicadas. El resto son propuestas pendientes.
+Este documento organiza la mejora del tratamiento de descargas incompletas, respuestas HTTP `202` sin cuerpo, bloqueos de acceso y trabajo duplicado en Evidence Search.
 
-**Criterio de orden:** impacto observado, urgencia, coste de implementación y riesgo. La puntuación es una decisión de prioridad (sobre 10), no una predicción estadística.
+La solución debe ser genérica. Ningún bloque puede introducir excepciones, listas de URLs o ramas de código específicas para uno o varios dominios. Los dominios observados en las campañas sirven como casos de regresión, no como configuración funcional embebida en el código.
 
-## Línea base y significado de los porcentajes
+El trabajo se divide en cuatro bloques con límites funcionales claros:
 
-El [informe de la campaña](../tests/data/evaluation/artifacts/e2e-20261024-093320/report.md) registra **21/33 unidades E2E correctas (63,6 %)**, **100 ejecuciones**, de las que **97 son puntuables**, y **tres errores técnicos en Source Router**. La revisión del consenso da 30/33 decisiones correctas (90,9 %), pero esa cifra y la puntuación E2E miden cosas distintas. Evidence Search obtuvo al menos una fuente citable en las 97 ejecuciones completadas; **293/435 fuentes seleccionadas tuvieron descarga `ok` (67,4 %)** y **44/94 referencias fueron citables (46,8 %)**.
+| Bloque | Estado | Resultado principal |
+| --- | --- | --- |
+| 1. Clasificación y observabilidad | Implementado y probado | Saber qué ocurrió en cada intento y calcular tasas con denominadores inequívocos |
+| 2. Reintentos y sustitución de candidatos | Implementado y medido; cierre condicionado | Menos solicitudes y mejor extracción por intento; falta alcanzar el umbral agregado y cerrar DNS rebinding |
+| 3. Historial compartido y caché por resultado | Parcial: primitivas existentes; evolución pendiente | Evitar repetir fallos conocidos entre validadores, procesos y réplicas |
+| 4. Singleflight y visualización | Pendiente | Evitar descargas concurrentes duplicadas y hacer visible el embudo completo en el viewer |
 
-Los porcentajes de cada punto son **objetivos de verificación**, salvo cuando se indica expresamente un máximo aritmético. No se suman: un mismo caso puede verse afectado por varios cambios. Usaremos puntos porcentuales (pp) para diferencias entre tasas, y reducción relativa (%) para intentos, latencia o coste. Una mejora de clasificación del informe nunca se presentará como mejora de exactitud factual.
+La secuencia recomendada es `1 → 2 → 3 → 4`. Cada bloque tendrá pruebas unitarias e integración durante el desarrollo y terminará con una campaña E2E completa comparable. No se ejecutará una campaña completa después de cada cambio pequeño dentro de un bloque.
+
+## Qué obtendremos al completar los cuatro bloques
+
+Al final del plan tendremos:
+
+- Una taxonomía estable que diferencia transporte, respuesta HTTP, extracción y citabilidad.
+- Reintentos limitados y dirigidos por la clase de fallo, con presupuesto total y sin bucles.
+- Sustitución de candidatos fallidos usando resultados ya descubiertos antes de realizar nuevas búsquedas.
+- Memoria compartida y temporal de resultados positivos y negativos, con TTL apropiado para cada clase.
+- Supresión de trabajo concurrente duplicado para una misma identidad documental.
+- Métricas de intentos, respuestas, documentos extraídos y documentos citables reconstruibles desde los artefactos.
+- Un viewer que permita comparar campañas y localizar dónde se pierde cada fuente.
+- Una implementación independiente del dominio, gobernada por clases de resultado y límites operativos.
+
+Estos bloques mejoran recuperación, coste y capacidad de diagnóstico. No garantizan por sí solos una mejora del veredicto: la generación de aserciones, Source Router, los modelos validadores y el consenso continúan siendo componentes separados.
+
+## Reglas comunes de diseño
+
+1. No implementar lógica por dominio, host o proveedor de contenido.
+2. Clasificar antes de decidir si se reintenta, sustituye, recuerda o bloquea una operación.
+3. Aplicar límites de intentos, tiempo, bytes y candidatos a toda operación.
+4. Mantener TLS, protección SSRF y validación de redirecciones en todas las variantes.
+5. Separar siempre estos conceptos:
+   - Solicitud HTTP realizada.
+   - Respuesta HTTP recibida.
+   - Respuesta HTTP 2xx.
+   - Documento con contenido extraído.
+   - Documento con al menos un contexto citable.
+6. Conservar compatibilidad con artefactos y respuestas anteriores mediante campos aditivos y valores por defecto.
+7. No interpretar un `202` vacío como una descarga útil: es una respuesta aceptada o pendiente, no un documento recuperado.
+8. No reintentar ciegamente un acceso denegado sobre la misma URL. Se debe avanzar a otro candidato o acción permitida.
 
-Se calcularán siempre los denominadores por unidad E2E, validador, intento, recurso, fuente y referencia; no se intercambiarán. Para atribuir cambios, se compararán campañas con mismos casos y hashes, configuración efectiva, estrategia, modelos y condiciones de caché, variando un componente por vez cuando sea posible. Con solo 33 unidades, los umbrales de aceptación son señales operativas y se acompañarán de los conteos brutos y de revisión de casos.
+## Estrategia de pruebas por bloque
 
-### Orden de inversión
+Cada bloque se valida en tres niveles:
 
-| Orden | Trabajo | Prioridad | Mejora que se verificará |
-| ---: | --- | ---: | --- |
-| 1 | Homologar y publicar el evaluador corregido | 10/10 | 7/33 (21,2 %) dejan de figurar falsamente como error de extracción; sin prometer más aciertos |
-| 2 | Resolver los timeouts de Source Router | 9/10 | errores técnicos 3/33 → 0/33; hasta 9,1 pp de unidades dejan de fallar por esta causa |
-| 3 | Medir el embudo de Evidence Search | 9/10 | 100 % de ejecuciones con contadores, denominadores y motivo de parada reconstruibles |
-| 4 | Aclarar el contrato de citas | 8,5/10 | 2/97 errores de cita observados → 0 en repetición comparable; atribuir la causa de cada uno |
-| 5 | Recuperación genérica mínima | 8/10 | descargas útiles 67,4 % → ≥ 75 % (+7,6 pp); ≥ 80 % como objetivo posterior |
-| 6 | Caché negativa compartida | 7,5/10 | ≥ 30 % menos intentos repetidos sobre fallos persistentes, sin pérdida de fuentes citables |
-| 7 | Coherencia explícita del veredicto | 7/10 | 100 % de contradicciones inequívocas del conjunto de prueba detectadas; falso positivo ≤ 1 % |
-| 8 | Suficiencia de evidencia en observación | 6/10 | +15 pp de búsquedas con dos fuentes independientes entre las que tienen candidatos viables, antes de activarla |
-| 9 | Experimento Ollama con evidencia congelada | 6/10 como experimento | medir paridad: diferencia de decisión ≤ 5 pp e invalidez JSON ≤ 2 %; sin mejora presupuesta |
-| 10 | Circuit breaker distribuido | 5/10, condicionado | ≥ 50 % menos intentos durante degradaciones demostradas, sin bloquear recursos sanos |
-| 11 | Aritmética declarada y configuración avanzada | 5/10, condicionado | 100 % de cálculos declarados erróneos detectados en fixtures; coste/beneficio por medir |
-| 12 | Autoconfiguración de políticas | 2/10 ahora | ninguna activación automática; medir propuestas útiles antes de invertir |
+1. **Pruebas unitarias e integración:** se ejecutan durante la implementación y cubren las ramas nuevas, compatibilidad y límites.
+2. **Prueba E2E dirigida:** usa fixtures o casos que ejercitan explícitamente las clases afectadas.
+3. **Campaña E2E completa:** se ejecuta al terminar el bloque con los mismos casos, repetición, configuración y condiciones de caché que la línea base.
 
-**Regla de arquitectura:** la configuración funcional y la persistencia operativa de Evidence Search viven en MongoDB. El repositorio contiene código, esquemas, migraciones y fixtures, pero no políticas efectivas por dominio; ConfigMaps y variables de entorno solo aportan el bootstrap técnico y los secretos siguen en el mecanismo de secretos de la plataforma. Una réplica nueva necesita configuración activa válida en MongoDB para estar ready. Los pods en ejecución pueden conservar temporalmente el último snapshot válido durante una incidencia de MongoDB.
+La comparación de campañas debe conservar:
 
-Los dominios de la campaña son casos de prueba. El motor y sus evaluadores deben seguir siendo genéricos: incorporar una fuente nueva equivale a registrar datos validados en MongoDB, no a introducir condicionales por host.
+- Los mismos 11 casos gold y sus hashes.
+- Una repetición por caso mientras la campaña base siga usando una repetición.
+- Los mismos tres validadores y configuración de modelos.
+- El mismo modo `FULL_PIPELINE` publicado.
+- Caché de Evidence Search vacía al inicio.
+- El mismo commit o una relación de cambios documentada.
+- Ausencia de despliegues mientras la campaña está en curso.
 
-## 1. Homologar el evaluador y la línea base — 10/10
+En desarrollo local se debe ejecutar el evaluador con `PYTHONDONTWRITEBYTECODE=1`. De lo contrario, la creación de `__pycache__` dentro de `api/` puede activar el watcher de Skaffold y provocar un rollout durante la campaña.
 
-Queremos que el informe distinga identidad de la aserción, taxonomía, decisión y salud operativa. El código de este punto ya está preparado localmente; su valor se materializa al revisar el gold y publicar una campaña comparable, porque una métrica corregida no demuestra por sí misma que el producto haya mejorado.
+---
 
-### Diseño de implementación
+## Bloque 1. Clasificación y observabilidad
 
-1. Conservar cuatro resultados independientes: `assertion_match`, `taxonomy`, `decision` y `operational`. Publicar `decision_correct` y `strict_pipeline_pass` con reglas explícitas y esquema versionado.
-2. Revisar el matcher de `tests/evaluation/core/common_metrics.py`: fechas, años, cifras normalizadas, unidades, identificadores legales, negaciones y cuantificadores absolutos son anclas críticas. Un conflicto produce `INCOMPATIBLE` y deja la aserción sin emparejar aunque el texto restante sea parecido.
-3. En `tests/evaluation/core/orders.py`, separar `TAXONOMY_MISMATCH` de `EXTRACTION_ERROR`. Un desacuerdo de categoría seguirá fallando la puerta estricta, pero no convertirá un consenso correcto en decisión incorrecta.
-4. En reporting y viewer, expresar retrieval como `NO_CITABLE_EVIDENCE`, `PARTIAL`, `REFERENCE_CITABLE` o `AVAILABLE`; mantener la cobertura léxica como métrica continua. Comprobar que se leen artefactos antiguos.
-5. Homologar humanamente los once JSON de `official-gold-v0`, en especial el falso GDPR de 2020 frente a la aserción de 2018. Documentar procedencia y fecha efectiva antes de regenerar hashes; no cambiar un gold para hacerlo coincidir con el sistema.
-6. Reconstruir offline la campaña histórica y después publicar casos dirigidos y una campaña completa sobre el mismo despliegue. Registrar el estado Git sucio existente y no mezclarlo con cambios nuevos de otro punto.
+**Estado:** implementado, desplegado y probado el 24 de octubre de 2026.
 
-### Comprobación y mejora
+### Propósito
 
-- Pruebas de anclas: 2020/2018, 42,5 %/45 %, 705/720, negación, unidades e identificadores. Prueba de quorum degradado con dos votos válidos.
-- Objetivo: reclasificar los **siete falsos `EXTRACTION_ERROR`** como `TAXONOMY_MISMATCH` cuando el texto realmente coincida: **7/33 = 21,2 %** de unidades cambian de diagnóstico, **0 pp de mejora factual atribuible**.
-- La reconstrucción debe mostrar por separado 30/33 decisiones correctas y 21/33 pases estrictos históricos, o explicar cada diferencia con el artefacto correspondiente. Ningún contexto citable puede producir `Retrieval=FAIL` solo por cobertura léxica incompleta.
+Convertir los estados históricos del descargador en resultados operativos estables y separar los contadores del embudo. Este bloque no cambia la política de reintentos, el orden de candidatos ni la selección de fuentes.
 
-## 2. Corregir los timeouts de Source Router — 9/10
+Su beneficio funcional directo es poder responder sin ambigüedad a preguntas como:
 
-Queremos que una ruta lenta no convierta una orden con evidencia y quorum posibles en un fallo técnico. Primero necesitamos saber en qué fase se consume el tiempo y si cliente y servidor aplican límites incompatibles; luego corregiremos la causa que indiquen las trazas.
+- ¿Cuántos documentos se intentaron descargar?
+- ¿Cuántas solicitudes recibieron respuesta HTTP?
+- ¿Cuántas respuestas fueron 2xx pero no contenían un documento utilizable?
+- ¿Cuántos documentos se extrajeron correctamente?
+- ¿Cuántos terminaron siendo citables?
+- ¿Qué proporción falló por acceso denegado, pendiente, red, extracción o recurso inexistente?
 
-### Diseño de implementación
+### Taxonomía implementada
 
-1. Persistir por invocación `started_at`, fase (`cache`, descubrimiento, clasificación, MongoDB, proveedor), duración, timeout configurado, resultado y excepción sanitizada en el artefacto de la orden.
-2. Instrumentar p50/p95/p99 y ratio de timeout por fase, estrategia, proveedor y estado de caché, con etiquetas de baja cardinalidad.
-3. Trazar el presupuesto extremo a extremo desde `validate-asertions` hasta Source Router. Asegurar que el timeout del cliente deja margen para la respuesta y que los reintentos consumen un presupuesto total, con máximo de intentos.
-4. Reintentar solo errores clasificados como transitorios. Si MongoDB contiene una ruta anterior todavía válida bajo una política activa, permitir su uso como `stale_route_used` con versión y antigüedad registradas; nunca usarla sin condiciones de validez.
-5. Distinguir `quorum_degraded` de ausencia de consenso cuando falle un validador. Añadir prueba de timeout inyectado y recuperación sin doble publicación ni bucle de reintentos.
-
-### Comprobación y mejora
-
-- Base: **3/33 unidades (9,1 %) afectadas por fallo técnico en Source Router**. Objetivo: **0/33** en dos campañas completas comparables; 9,1 pp es el máximo de unidades que podrían dejar de fallar por esta causa, no una predicción de exactitud.
-- Se aceptará solo si el p95, los reintentos y los usos de ruta stale quedan dentro del presupuesto registrado, sin introducir rutas incorrectas nuevas.
-
-## 3. Reconstruir el embudo de Evidence Search — 9/10
-
-Queremos saber exactamente dónde se pierden las fuentes: descubrimiento, programación, descarga, extracción, citabilidad o selección de referencia. Esta instrumentación debe permitir decidir si los puntos 5, 6 y 8 compensan su coste y comparar modelos sin confundir calidad del LLM con calidad del corpus.
-
-### Diseño de implementación
-
-1. Definir un evento/registro por ejecución con `execution_id`, versión de esquema, estrategia, política activa de MongoDB y contadores para `provider_calls`, `urls_returned`, `candidates_retained`, `documents_scheduled`, `fetch_attempts`, `downloads_nonempty`, `documents_extracted`, `documents_citable`, `references_selected`, `references_citable` y `evidence_delivered`.
-2. Registrar para cada intento clase de fallo, estado HTTP si existe, bytes, tiempo, URL normalizada en artefacto protegido, identidad canónica y decisión de caché. Las métricas agregadas usarán `policy_id`, clase y `scope_bucket` controlados; no URL ni host libre como etiqueta.
-3. Versionar el contrato de `retrieval_summary` y persistir los contadores por assertion, orden y campaña. El informe offline recalculará los totales desde eventos y señalará discrepancias.
-4. Definir tasas con denominador visible: descarga útil = `downloads_nonempty/fetch_attempts` para intentos; éxito de fuente seleccionada = fuentes `fetch_status=ok`/fuentes seleccionadas; referencia citable = referencias citables/referencias seleccionadas. No reutilizar un nombre para tasas distintas.
-5. Crear un panel o informe compacto que muestre el embudo por estrategia y comparación frío/caliente, además de p50/p95, bytes y coste del proveedor cuando esté disponible.
-
-### Comprobación y mejora
-
-- Objetivo de cobertura: **100 % de ejecuciones** con contadores y `stop_reason`, y **100 % de totales** del informe reproducibles desde artefactos, admitiendo solo una diferencia documentada por redondeo.
-- El beneficio directo esperado en tasa de descarga es **0 pp**: este punto mide y atribuye; no mejora el fetch por sí mismo.
-
-## 4. Aclarar la relación de las citas con la aserción — 8,5/10
-
-Queremos que `TRUE` cite apoyo y `FALSE` cite contradicción sin depender de un booleano ambiguo. La relación debe referirse siempre a la aserción, y el servidor debe validar los identificadores de fragmento sobre el corpus entregado.
-
-### Diseño de implementación
-
-1. Versionar `validator-response-v2` en `api/common/models/async_models.py`: cada cita declara `context_id`, `relation_to_assertion` (`SUPPORTS`, `CONTRADICTS`, `NEUTRAL`) y una razón breve.
-2. Actualizar schema y prompt en `api/common/utils/validation_prompt.py` y `api/validate-asertions/main.py`. El modelo declara IDs y relaciones; URL, texto y origen se reconstruyen del corpus en el servidor.
-3. En `api/common/utils/evidence.py`, exigir `SUPPORTS` para un `TRUE` concluyente y `CONTRADICTS` para un `FALSE` concluyente; preservar `UNKNOWN` cuando falte soporte suficiente. Registrar errores diferenciados.
-4. Durante la transición aceptar v1 y v2, registrar `legacy_supports_converted`, y evitar inferir semántica de un `supports=false` ambiguo cuando no pueda saberse si significa contradicción o ausencia de apoyo: clasificarlo como legacy no concluyente.
-5. Actualizar artefactos y viewer; retirar v1 cuando el contador de clientes legacy sea cero durante dos campañas completas.
-
-### Comprobación y mejora
-
-- Probar toda la matriz veredicto × relación, IDs inexistentes, duplicados, fragmentos no citables y compatibilidad v1. Base: **dos errores de cita entre 97 ejecuciones puntuables (2,1 %)**, sin atribuir ambos a la ambigüedad del contrato; objetivo: **0/97** en repetición comparable, sin aumentar citas aceptadas sin soporte real.
-- Este cambio mejora el contrato y la auditabilidad. Un descenso de errores no se contará automáticamente como aumento de decisiones correctas.
-
-## 5. Implementar la recuperación genérica mínima — 8/10
-
-Queremos recuperar más documentos útiles mediante un conjunto pequeño de acciones reutilizables. Las fuentes institucionales observadas sirven para comprobar patrones de fallo; una fuente nueva se describirá con datos en MongoDB sin añadir lógica por dominio.
-
-### Diseño de implementación
-
-1. En `api/evidence-search/app/document_fetcher.py`, separar normalización, clasificación del resultado, plan de acciones y validación. Clases iniciales: `usable`, `empty`, `pending`, `rate_limited`, `forbidden`, `not_found`, `transient`, `tls_error` e `invalid_content`.
-2. Implementar solo cuatro acciones al inicio: URL original, redirección HTTP permitida, enlace `canonical`/`alternate` presente en la respuesta y reintento transitorio con `Retry-After`, backoff y jitter. Añadir otras acciones cuando una métrica demuestre necesidad.
-3. Crear en MongoDB `evidence_fetch_policies_v1` con política global, versión inmutable, selectores declarativos y límites. `evidence_config_activations_v1` apunta a la versión activa; el motor toma un snapshot validado al arrancar y refresca por versión. Los esquemas y fixtures viven en Git; la configuración funcional, en MongoDB.
-4. Validar cada URL tras redirección o enlace contra SSRF, DNS y origen permitido. Mantener TLS. Una variante solo se acepta si la relación documental o un identificador canónico demuestra equivalencia; un parecido textual aislado no basta.
-5. Acotar variantes, intentos, tiempo total, bytes y enlaces por documento. Registrar `requested_url`, `canonical_resource_id`, política, acciones, estados, URL final y motivo de rechazo en `resolution_trace` persistida con la ejecución.
-6. Conservar el descargador actual como acción global. Añadir una fuente sintética por documento MongoDB y fixture para demostrar que no se modifica el motor.
-
-### Comprobación y mejora
-
-- Fixtures para 202 vacío, 403, 429, 5xx, timeout, PDF sin texto, redirección insegura y documento cambiado. Los casos EUR-Lex, Parlamento, Consejo y Red Eléctrica son regresiones, no implementaciones particulares.
-- Base: **293/435 fuentes seleccionadas con descarga `ok` (67,4 %)**. Primera puerta: **≥ 75 % (+7,6 pp)** en campañas comparables, sin aceptar equivalencias falsas; **≥ 80 % (+12,6 pp)** queda como objetivo posterior condicionado a resultados. Se reportará también la tasa de contenido citable: descargar no implica citar.
-
-## 6. Evitar reintentos inútiles con caché negativa — 7,5/10
-
-Queremos que un fallo estable no consuma de nuevo tiempo y presupuesto en cada validador, sin bloquear otros documentos sanos. MongoDB compartirá el estado entre réplicas y cada penalización expirará o se invalidará tras un éxito.
-
-### Diseño de implementación
-
-1. Normalizar `resource_key` y `canonical_resource_id` sin fusionar documentos diferentes. Separar la caché positiva de contenido validado, la de consulta y el estado negativo; persistirlos en colecciones MongoDB con índices únicos y TTL.
-2. Evolucionar `evidence_unusable_urls_v1` con alcance, clave, `failure_class`, intentos, `first_seen_at`, `last_seen_at`, `retry_after`, versión de política y resultado exitoso posterior.
-3. Aplicar TTL por clase mediante política versionada en MongoDB. Como hipótesis inicial: minutos para transitorios/429/pendiente, más tiempo para fallo estable de recurso; respetar `Retry-After` y limitar siempre los máximos.
-4. Hacer atómicas las actualizaciones; `positive cache` solo guardará contenido útil. Una variante distinta se podrá intentar cuando no esté penalizada por la misma identidad y la misma causa.
-5. Si MongoDB falla durante una ejecución ya iniciada, continuar con la política activa cargada y sin penalización compartida, emitir `cache_degraded` y limitar los reintentos localmente. Un pod nuevo sin configuración válida no estará ready.
-
-### Comprobación y mejora
-
-- Probar dos búsquedas y dos réplicas, expiración, invalidación tras éxito y ausencia temporal de MongoDB. Medir `attempts_saved` y tiempo ahorrado sin contarlo como descarga exitosa.
-- Objetivo: **≥ 30 % menos intentos repetidos** sobre el conjunto de fallos persistentes en la segunda/tercera repetición; `documents_citable` no debe bajar. El dato histórico de cero cache hits no permite inferir aún el porcentaje de ahorro global.
-
-## 7. Detectar contradicciones explícitas del veredicto — 7/10
-
-Queremos impedir que un voto concluyente contradiga inequívocamente su propia explicación. La primera versión debe detectar únicamente señales claras y registrar una abstención auditada; ampliar la interpretación de lenguaje natural sin evidencia de precisión crearía falsos positivos.
-
-### Diseño de implementación
-
-1. Tras validar JSON y citas, identificar conclusiones explícitas del tipo «la afirmación es falsa/verdadera» referidas a la aserción. Mantener una lista pequeña de patrones y negaciones probados, con ámbito lingüístico declarado.
-2. Si la conclusión contradice `resultado`, conservar la respuesta original, emitir `VERDICT_EXPLANATION_CONTRADICTION` y producir resultado efectivo `UNKNOWN`. Registrar el motivo en `excluded_validators` cuando altere el consenso.
-3. Procesar la regla después del contrato de citas v2 para no confundir «la cita contradice la aserción» con una explicación contradictoria. Versionar la política de exclusión en MongoDB si se configura en tiempo de ejecución.
-4. Dejar la verificación de cálculos y la semántica de agregados fuera de esta primera entrega. Revisar manualmente los casos de divergencia antes de ampliar patrones.
-
-### Comprobación y mejora
-
-- Corpus de fixtures positivos, negativos y frases citadas ajenas a la conclusión. Objetivo: **100 % de contradicciones inequívocas detectadas** en ese corpus y **≤ 1 % de falsos positivos** en respuestas históricas revisadas.
-- Base observada: al menos un voto incoherente. No hay denominador suficiente para prometer una mejora porcentual de exactitud E2E; informar cuántos votos cambian a `UNKNOWN` y su efecto en quorum.
-
-## 8. Evaluar suficiencia antes de exigir dos fuentes — 6/10
-
-Queremos saber cuántas búsquedas podrían terminar con dos fuentes citables e independientes y cuánto tiempo adicional costaría. La exigencia empezará en observación; solo se activará cuando el corpus de candidatos y la latencia demuestren que ayuda.
-
-### Diseño de implementación
-
-1. Distinguir `search_candidates`, `attempted_resources`, `downloaded_sources`, `citable_sources` y `independent_groups` en el contrato de resultado.
-2. Almacenar un perfil versionado en `evidence_quality_profiles_v1` de MongoDB. Requisitos iniciales: dos fuentes citables y dos grupos independientes **cuando haya al menos dos candidatos viables**; conservar el límite de tiempo, documentos, bytes y llamadas al proveedor.
-3. Usar por defecto el dominio registrable para independencia. `evidence_source_catalog_v1` podrá agrupar organizaciones, espejos o fuentes sindicadas; el algoritmo leerá esos metadatos sin condicionales por dominio.
-4. Tras cada resultado, estimar ganancia marginal de candidatos restantes por relevancia, autoridad declarada, cobertura, probabilidad de descarga útil, diversidad y coste. Seguir con candidatos locales antes de llamar de nuevo al proveedor; detener cuando se cumpla la política o no haya ganancia positiva.
-5. Exponer `policy_id`, versión, requisitos cumplidos, candidatos viables, presupuesto y `stop_reason`. Diferenciar `complete`, `partial`, `insufficient` y `cancelled`.
-6. Ejecutar primero el evaluador en observación sin variar el flujo. Activar luego para una fracción de órdenes y permitir revertir desde MongoDB al perfil previo.
-
-### Comprobación y mejora
-
-- Base de dos fuentes independientes: **no medida** en la campaña; no se inventará. Medirla primero por estrategia y sobre búsquedas con dos candidatos viables.
-- Objetivo experimental: **+15 pp** en la tasa de búsquedas que entregan dos grupos independientes citables frente al control, sin subir p95 ni coste por orden más del **20 %**. Si no se cumple, conservar la política en observación y revisar el cuello de botella del punto 5.
-
-## 9. Probar Ollama con evidencia congelada — 6/10 como experimento
-
-Queremos medir si un modelo local aporta privacidad, independencia o menor coste manteniendo una calidad comparable. La comparación debe recibir las mismas aserciones y fragmentos que los validadores actuales; un cambio de recuperación de fuentes invalidaría la comparación de modelos.
-
-### Diseño de implementación
-
-1. Añadir un proveedor `ollama` a `api/common/llm`, reutilizando la interfaz existente y el endpoint compatible con OpenAI. Validar localmente el JSON contra el modelo Pydantic aunque el servidor anuncie salida estructurada.
-2. Mantener URL y nombre de modelo en la configuración funcional de modelos de MongoDB; el secreto o mecanismo de acceso al servidor se gestionará como secreto de plataforma. Registrar versión exacta, cuantización, contexto y recursos del servidor.
-3. Empezar por clasificación de Source Router o extracción acotada. Para RAG, usar `gold-evidence`/replay con corpus congelado y comparar decisiones, `UNKNOWN`, citas verificadas, JSON inválido, p50/p95, memoria y coste de infraestructura.
-4. Ejecutar el experimento en un host con recursos suficientes. La máquina inspeccionada tiene cuatro CPU, 10 GiB de RAM total, aproximadamente 2,9 GiB disponibles y ninguna GPU NVIDIA visible; aquí una prueba de rendimiento RAG sería poco representativa.
-5. Mantener la prueba aislada de las campañas de aceptación hasta que pase el mismo contrato de citas y los umbrales de calidad.
-
-### Comprobación y mejora
-
-- Umbrales de exploración, **no mejoras esperadas**: diferencia de acierto de decisión **≤ 5 pp** respecto al control con el mismo corpus; respuestas JSON inválidas **≤ 2 %**; ninguna cita falsa adicional; p95 dentro del presupuesto del servicio.
-- El ahorro en euros o dólares queda **sin porcentaje previo**: calcular coste total de hardware, energía y operación frente a la factura de API después de medir throughput. Si falla calidad o latencia, cerrar el experimento sin sustituir el proveedor.
-
-## 10. Añadir circuit breaker distribuido solo si se justifica — 5/10
-
-Queremos reducir tráfico durante degradaciones reales de un origen compartido sin convertir un fallo de documento en bloqueo de todo el origen. La caché negativa del punto 6 cubre primero los fallos de recurso; el circuit breaker se justifica cuando las métricas muestren incidentes agregados y costosos.
-
-### Diseño de implementación
-
-1. Definir en una política MongoDB cuándo varios `failure_class` de transporte abren un circuito para `origin_key` o `authority_group`. Errores de extracción y `404` individuales no abrirán circuitos de origen.
-2. Persistir contadores, ventana, estado `CLOSED`/`OPEN`/`HALF_OPEN` y lease de sonda en `evidence_circuit_state_v1`; usar operaciones atómicas e índice TTL.
-3. Permitir una sonda exclusiva al expirar la apertura. Un éxito cierra el circuito; un fallo lo reabre con límite y jitter. Registrar cada transición, alcance y versión de política.
-4. Probar con dos réplicas y fallos inyectados. Medir bloqueo injustificado de recursos sanos por separado del ahorro de intentos.
-
-### Comprobación y mejora
-
-- Condición de entrada: la observabilidad debe acreditar degradaciones repetidas de origen y al menos **10 % del presupuesto de fetch** perdido en ellas. Si no ocurre, no implementar.
-- En incidencias simuladas equivalentes a las reales, objetivo **≥ 50 % menos intentos fallidos** mientras el circuito esté abierto y **0 fuentes sanas** bloqueadas fuera del alcance configurado.
-
-## 11. Validar aritmética declarada y ampliar gobierno de configuración — 5/10
-
-Queremos detectar cálculos explícitos erróneos cuando esos cálculos influyan en el veredicto. La infraestructura avanzada de políticas solo merece trabajo adicional si las políticas MongoDB reales ya exigen activación frecuente, auditoría más profunda o rollback operativo.
-
-### Diseño de implementación
-
-1. Ofrecer un campo opcional `calculations` con expresión, resultado, unidad y `context_ids`. Evaluar únicamente una gramática segura de números, `+`, `-`, `*`, `/` y paréntesis, sin `eval`; comprobar operandos en los fragmentos citados.
-2. Si el cálculo decisivo falla, registrar `CALCULATION_MISMATCH` y producir `UNKNOWN`; no corregir automáticamente el número ni introducir ontologías por temática.
-3. Medir cuántos validadores emiten cálculos y cuántos casos de error real se capturan antes de exigir ese campo a todos.
-4. Para configuración, añadir activación atómica, historial de actor/motivo, snapshots y rollback únicamente sobre las colecciones del punto 5 cuando haya varias versiones reales. Las versiones publicadas serán inmutables y las inválidas no reemplazarán la última válida.
-
-### Comprobación y mejora
-
-- Objetivo de cálculo: **100 % de expresiones erróneas declaradas** detectadas en fixtures y **0 ejecuciones de código** desde el campo. La mejora en veredictos E2E permanece sin estimación por falta de frecuencia base.
-- Condición de entrada para el gobierno avanzado: al menos dos políticas activas con cambios operativos repetidos o un rollback manual que haya resultado inseguro. Medir tiempo de cambio y recuperación; buscar **≥ 50 % menos tiempo de rollback**, sin afectar exactitud.
-
-## 12. Proponer políticas a partir de fallos, sin autoactivación — 2/10 ahora
-
-Queremos aprovechar patrones repetidos para sugerir ajustes sin dejar que contenido externo cambie las reglas de recuperación. Este trabajo será útil cuando existan trazas suficientes y un proceso de revisión; en esta campaña aún no sabemos cuántas sugerencias serían correctas.
-
-### Diseño de implementación
-
-1. Agrupar en MongoDB fallos por `failure_class`, acción, alcance y resultado, con límites de cardinalidad y retención.
-2. Generar propuestas `DRAFT` con casos afectados, regla sugerida, beneficio estimado y contraejemplos; no activarlas automáticamente.
-3. Reproducir cada propuesta contra fixtures y trazas históricas, después ejecutarla en modo observación. Registrar tasa de acierto, falsos positivos y coste.
-4. La aprobación y activación seguirá el mismo mecanismo versionado de MongoDB. TLS, SSRF, identidad documental y agrupación de autoridades no serán variables aprendidas del contenido descargado.
-
-### Comprobación y mejora
-
-- Condición de entrada: al menos **20 incidentes repetidos** del mismo patrón y trazas suficientes para replay. Objetivo exploratorio: **≥ 70 % de propuestas útiles** según revisión humana y **0 activaciones automáticas**; no prometer mejora de descarga antes de medirlas.
-
-## Campañas, despliegue y cierre
-
-1. Cerrar puntos 1–4 con pruebas unitarias y casos dirigidos. Publicar una campaña completa antes de cambiar el fetch, de modo que la nueva línea base refleje la medición corregida.
-2. Activar el punto 5 sobre políticas MongoDB versionadas, probar hosts sintéticos y los casos afectados, y repetir la campaña. Activar el punto 6 por separado para atribuir el ahorro de intentos.
-3. Ejecutar los puntos 7 y 8 en observación, revisar falsos positivos y costes, y activar solo la política que cumpla su puerta. El punto 9 transcurre como benchmark aislado sobre evidencia congelada.
-4. Ejecutar dos campañas gold completas consecutivas con mismo commit desplegado, hashes de casos, modelos, políticas MongoDB y estrategia fijados. Primera campaña con caché fría y segunda con estado documentado; reportar por separado las tasas para evitar atribución falsa.
-5. Guardar `manifest.json`, `report.json`, `report.md`, órdenes, eventos y viewer sin sobrescribir campañas. Registrar versión y hash de cada política activa, así como su actor de activación; nunca secretos.
-
-### Puertas de aceptación del ciclo
-
-| Dimensión | Base observada | Puerta después de los puntos prioritarios |
+| Resultado | Significado |
+| --- | --- |
+| `EXTRACTED` | El documento se descargó y se extrajo |
+| `PENDING` | La respuesta indica procesamiento pendiente; incluye `202` sin cuerpo |
+| `ACCESS_DENIED` | Acceso denegado o página de bloqueo |
+| `NOT_FOUND` | El recurso no existe o ya no está disponible |
+| `RATE_LIMITED` | El origen ha limitado temporalmente las solicitudes |
+| `SERVER_FAILURE` | Error 5xx del servidor remoto |
+| `NETWORK_FAILURE` | Timeout, error de red o problema TLS clasificado |
+| `EMPTY_CONTENT` | Hubo respuesta, pero no se extrajo contenido suficiente |
+| `UNSUPPORTED_CONTENT` | El formato no está soportado |
+| `EXTRACTION_FAILURE` | El extractor falló o el documento excedió límites |
+| `CLIENT_FAILURE` | Otro error HTTP 4xx |
+| `FETCH_FAILURE` | Fallo residual que todavía no puede clasificarse mejor |
+
+### Cambios implementados
+
+- `api/evidence-search/app/document_fetcher.py`
+  - Añade `FetchResult.outcome` y `FetchResult.diagnostics`.
+  - Centraliza la clasificación estable del resultado y de cada intento.
+- `api/evidence-search/main.py`
+  - Persiste `fetch_outcome` y `fetch_diagnostics` en cada evidencia intentada.
+  - Añade `classification` a cada elemento de `fetch_attempts`.
+  - Marca por separado si hubo respuesta, si fue HTTP 2xx, si se extrajo contenido y si terminó siendo citable.
+  - Amplía `retrieval_summary` con `http_requests`, `http_responses`, `http_successes`, `documents_attempted` y `outcome_counts`.
+- `api/common/models/evidence_models.py`
+  - Amplía el contrato de `EvidenceRetrievalSummary` con campos aditivos y valores compatibles con respuestas antiguas.
+- `tests/evaluation/pipeline/metrics.py`
+  - Calcula métricas desde el resumen nuevo y mantiene un fallback para artefactos históricos.
+  - Distingue si existió realmente una respuesta de recuperación.
+- `tests/evaluation/core/reporting.py`
+  - Agrega el embudo de descarga y sus porcentajes al informe de campaña.
+
+### Contrato de métricas
+
+Las principales tasas quedan definidas así:
+
+```text
+descarga útil (%) = documents_extracted / documents_attempted × 100
+respuesta HTTP (%) = http_responses / http_requests × 100
+éxito HTTP (%) = http_successes / http_requests × 100
+documento citable (%) = documents_citable / documents_attempted × 100
+```
+
+Una respuesta `202` cuenta como respuesta HTTP y como HTTP 2xx, pero no como documento extraído ni citable. Esta separación evita presentar un `202 Empty Body` como éxito de descarga.
+
+### Pruebas del bloque 1
+
+Se añadieron pruebas para:
+
+- Clasificación de `202`, `403`, `404`, `429`, `5xx`, errores de red, contenido vacío, formato no soportado y error de extracción.
+- Separación entre solicitudes, respuestas HTTP, éxitos HTTP, documentos intentados, extraídos y citables.
+- Compatibilidad con mocks y adaptadores antiguos que no exponen las propiedades nuevas.
+- Agregación de métricas en el informe E2E.
+- Exclusión de ejecuciones que no llegaron a producir una respuesta de Evidence Search.
+
+Resultado de la regresión:
+
+```text
+186 passed, 2 warnings
+```
+
+También se verificó dentro del pod desplegado que `HTTP_202_EMPTY_BODY` se clasifica como `PENDING`.
+
+### Campañas utilizadas
+
+| Campaña | Uso | Estado |
+| --- | --- | --- |
+| `e2e-20261024-191753` | Línea base anterior | Válida |
+| `e2e-20261024-200452` | Primer intento del bloque 1 | Excluida: Skaffold redesplegó los servicios durante la ejecución y produjo 32 fallos 502 |
+| `e2e-20261024-200711` | Segundo intento | Excluida: comenzó antes de que los validadores se registrasen tras el rollout |
+| `e2e-20261024-200925` | Campaña final del bloque 1 | Comparable, terminada con errores funcionales registrados |
+
+Las dos campañas excluidas se conservan como evidencia del incidente, pero no se usan para calcular cambios de calidad.
+
+### Resultados de recuperación
+
+La comparación se limita a las ejecuciones gold; las aserciones adicionales generadas se excluyen del denominador.
+
+| Métrica | `e2e-20261024-191753` | `e2e-20261024-200925` | Variación |
+| --- | ---: | ---: | ---: |
+| Respuestas de Evidence Search | 33 | 28 | −5 |
+| Documentos intentados | 149 | 124 | −25 |
+| Documentos extraídos | 94 | 90 | −4 |
+| Documentos citables | 94 | 90 | −4 |
+| Descarga útil | 63,09 % | 72,58 % | +9,49 pp |
+| Respuestas HTTP recibidas | 142 | 121 | — |
+| Respuestas HTTP 2xx | 113 | 101 | — |
+| Éxito HTTP sobre intentos | 75,84 % | 81,45 % | +5,61 pp |
+
+El porcentaje de descargas exitosas de la primera fase es, por tanto, **72,58 %: 90 documentos extraídos de 124 intentados**.
+
+El desglose normalizado por la taxonomía nueva es:
+
+| Resultado | Campaña anterior | Bloque 1 |
 | --- | ---: | ---: |
-| Decisión correcta | 30/33 | ≥ 30/33, con cada desacierto restante explicado; 33/33 es aspiración, no supuesto |
-| Pase E2E estricto | 21/33 | ≥ 31/33 tras homologación del gold y sin falsos fallos de medición |
-| Errores técnicos de Source Router | 3/33 | 0/33 en dos campañas |
-| Descarga `ok` de fuentes seleccionadas | 293/435 = 67,4 % | ≥ 75 % en primera iteración; ≥ 80 % condicionado |
-| Referencia citable | 44/94 = 46,8 % | ≥ 70 %, atribuyendo por separado selección, descarga y citabilidad |
-| Handoff de evidencia | 100 % de ejecuciones completadas | 100 % |
-| Errores de contrato de cita | 2/97 | 0 en campañas comparables |
-| Contadores reconstruibles | No contractualmente garantizado | 100 % de ejecuciones |
+| `EXTRACTED` | 94 | 90 |
+| `ACCESS_DENIED` | 25 | 19 |
+| `PENDING` | 18 | 9 |
+| `NETWORK_FAILURE` | 6 | 3 |
+| `NOT_FOUND` | 3 | 1 |
+| `EMPTY_CONTENT` | 1 | 2 |
+| `RATE_LIMITED` | 1 | 0 |
+| `FETCH_FAILURE` | 1 | 0 |
 
-Ninguna puerta porcentual se considerará pasada si el denominador es insuficiente, cambian los casos sin anotarlo o aumenta el número de fuentes incorrectas aceptadas. Los puntos 10–12 quedan fuera de la ruta crítica hasta cumplir sus condiciones de entrada.
+En la campaña nueva, `ACCESS_DENIED` y `PENDING` representan 28 de los 34 documentos no extraídos. Son, por tanto, las dos clases principales que debe abordar el bloque 2.
+
+La subida de 63,09 % a 72,58 % no se atribuye al bloque 1: este bloque mide, pero no cambia el comportamiento del fetch. La diferencia puede proceder de variación en consultas, candidatos y servicios externos. La métrica sí queda ahora calculada directamente por el informe, sin reconstrucción manual.
+
+### Cobertura de la instrumentación
+
+La campaña final produjo:
+
+- 124/124 documentos intentados con `fetch_outcome`.
+- 124/124 documentos intentados con `fetch_diagnostics`.
+- 124/124 intentos HTTP con `classification`.
+- 28/28 respuestas reales de Evidence Search con los contadores nuevos.
+- 0 respuestas recuperadas desde caché durante la medición.
+
+El objetivo principal del bloque 1 —clasificación y denominadores reconstruibles— queda cumplido.
+
+### Resultados globales de la campaña
+
+La campaña final terminó como `COMPLETED_WITH_ERRORS`. Esto no invalida la instrumentación, pero impide considerarla una mejora global de calidad:
+
+| Métrica de pipeline | Campaña anterior | Bloque 1 |
+| --- | ---: | ---: |
+| Casos gold | 11 | 11 |
+| Ejecuciones puntuables | 33 | 31 |
+| Ejecuciones de observación | 0 | 6 |
+| Pase E2E estricto | 11/11 | 6/11 |
+| Decisión de caso correcta | 11/11 | 8 correctas, 2 incorrectas y 1 no evaluada |
+| Validaciones individuales | 29 correctas de 33 | 25 correctas, 3 incorrectas y 3 no evaluadas |
+| Quorum degradado | 0 | 2 |
+
+Problemas observados:
+
+- Dos timeouts de Source Router afectaron a `ES_RENEWABLE_GENERATION_2024_TRUE` y `EU_RENEWABLE_TARGET_2030_TRUE`.
+- `EU_RENEWABLE_TARGET_2030_FALSE` terminó con consenso incorrecto.
+- `EU_GDPR_APPLICATION_FALSE` no produjo una aserción emparejable y quedó como error de extracción.
+- `EU_RENEWABLE_SHARE_2023_TRUE` produjo un `TAXONOMY_MISMATCH`.
+- El generador produjo dos aserciones adicionales no gold, que originaron seis ejecuciones `OBSERVATION_ONLY`.
+
+Estos problemas pertenecen a Source Router, generación, taxonomía o consenso; no fueron introducidos por la clasificación de descargas. Deben seguirse por separado y no mezclarse con la tasa de descarga útil.
+
+### Criterio de cierre del bloque 1
+
+El bloque se considera implementado porque:
+
+- La taxonomía está centralizada y cubierta por pruebas.
+- Las métricas distinguen correctamente HTTP, extracción y citabilidad.
+- Los artefactos nuevos contienen los diagnósticos necesarios.
+- El informe calcula automáticamente la tasa de descarga útil.
+- La regresión afectada está verde.
+- Se ejecutó y analizó una campaña E2E completa comparable.
+
+No se considera cumplida todavía ninguna meta de mejora de descarga, porque el bloque no modifica la recuperación.
+
+---
+
+## Bloque 2. Reintentos y sustitución de candidatos
+
+**Estado:** implementado y medido en `e2e-20261025-102837`; mejora la eficiencia por documento y corrige la selección del Source Router en el caso energético. **No cerrar todavía:** la descarga útil agregada queda en 68,04 % (por debajo del objetivo inicial del 75 %) y la defensa ante DNS rebinding de las redirecciones aún necesita una barrera de conexión o de egreso.
+
+### Propósito
+
+Usar la clasificación del bloque 1 para actuar de forma diferente según el fallo y aumentar el número de documentos extraídos sin lógica específica por dominio.
+
+### Cambios previstos
+
+1. Definir una matriz genérica `outcome → action`:
+   - `PENDING`: reintento diferido y limitado; respetar `Retry-After` cuando exista.
+   - `RATE_LIMITED`: espera con backoff y jitter dentro del presupuesto total.
+   - `SERVER_FAILURE` y `NETWORK_FAILURE`: reintento transitorio acotado.
+   - `ACCESS_DENIED`, `NOT_FOUND`, `UNSUPPORTED_CONTENT` y fallos estables: no repetir ciegamente la misma URL.
+2. Consumir primero candidatos adicionales ya devueltos por la búsqueda cuando un documento no sea utilizable.
+3. Realizar una nueva búsqueda solamente cuando el lote actual no pueda alcanzar el objetivo de fuentes citables.
+4. Mantener límites globales de intentos, tiempo, bytes y candidatos por ejecución.
+5. Registrar en la traza la acción elegida, su motivo, espera aplicada, candidato sustituido y resultado final.
+6. Conservar el mismo modelo de seguridad para todas las URLs, incluidas redirecciones y variantes.
+
+### Implementación realizada
+
+- `document_fetcher.fetch_main_text` reintenta timeouts, errores 5xx y límites 429 dentro del presupuesto. Solo reintenta `PENDING` si existe `Retry-After` y cabe íntegro en el máximo configurado. Los fallos de conexión y TLS avanzan a otro candidato.
+- `ACCESS_DENIED`, `NOT_FOUND`, contenido no compatible y fallos de extracción no se repiten sobre la misma URL.
+- Evidence Search reserva hasta dos posiciones de `max_results` para sustituciones. La programación inicial, las sustituciones y el fallback comparten ese máximo. Cada sustitución queda en `recovery_trace`; el informe cuenta acciones, recuperaciones y agotamientos.
+- La configuración desplegable declara explícitamente los límites de reintento (`EVIDENCE_FETCH_*`).
+- Las pruebas cubren `202 → 200` con espera indicada por el servidor, `429 → 200`, `403` sin reintento, espera superior al presupuesto, sustitución dentro del lote y límite total de documentos.
+
+El presupuesto temporal de reintento es por documento. `max_results` limita los documentos intentados en toda la solicitud; el multiplicador de candidatos solo limita lo que se retiene del proveedor. El límite de tamaño existente se aplica a PDF. Sigue pendiente un límite agregado de bytes y tiempo para toda la solicitud.
+
+### Comparación de campañas `e2e-20261025-093335` y `e2e-20261025-102837`
+
+Ambos manifiestos tienen los mismos 11 casos y hashes gold, el mismo commit (`c92c20184430de7764b1c7fb0d567e80d9acc2fd`), `git_dirty=true` y cero respuestas de Evidence Search servidas desde caché. La campaña de las 10:28 registra `routing-taxonomy-v2`; por tanto, la corrección genérica del Source Router estaba activa. Como los manifiestos no incluyen un snapshot del diff dirty, la atribución del resto de cambios locales al descargador es menos exacta.
+
+| Métrica de Evidence Search | `09:33` | `10:28` | Variación |
+| --- | ---: | ---: | ---: |
+| Respuestas | 32 | 33 | +1 |
+| Documentos intentados | 156 | 97 | −37,8 % |
+| Documentos extraídos/citables | 83 | 66 | −20,5 % |
+| Extracción por documento intentado | 53,21 % | 68,04 % | +14,84 pp |
+| Solicitudes HTTP | 195 | 158 | −19,0 % |
+| Respuestas HTTP | 147 (75,38 % de solicitudes) | 155 (98,10 %) | +8 respuestas; +22,72 pp en tasa de respuesta |
+| Respuestas HTTP exitosas | 116 (59,49 % de solicitudes) | 80 (50,63 %) | −36; −8,86 pp |
+| Acciones de retry | 39 | 1 | −97,4 % |
+| Sustituciones de candidatos | 13 | 2 | −84,6 % |
+| Recuperaciones por retry / sustitución | No registradas como recuperadas | 0 / 0 | Sin recuperación medida |
+
+La tasa de extracción por intento sube mientras baja el volumen total (83 → 66). Es compatible con la selección de un conjunto menor de candidatos más recuperables, pero las campañas no aíslan una sola variable y los manifiestos no fijan el diff dirty; no debe tratarse como estimación causal del efecto del retry. Además, cae la tasa de HTTP 2xx, aunque casi todas las solicitudes de la campaña nueva reciben alguna respuesta. Son métricas distintas: no presentar la mayor tasa de respuesta como mayor tasa de HTTP exitoso. El umbral de descarga útil del 75 % todavía no se alcanza.
+
+### Resultado de Source Router
+
+| Métrica del router | `09:33` (taxonomía v1) | `10:28` (taxonomía v2) |
+| --- | ---: | ---: |
+| Ejecuciones con router | 10 | 11 |
+| Evaluación `PASS` / `PARTIAL` | 8 / 2 | 10 / 1 |
+| Coincidencia con dominio esperado | 8/10 (80 %) | 10/11 (90,9 %) |
+| Coincidencia en los 10 casos comunes | 8/10 | 9/10 |
+| Dominios descubiertos / clasificados | 77 / 74 | 78 / 78 |
+| Fuentes seleccionadas acumuladas | 45 | 42 |
+
+La mejora más clara se da en `ES_RENEWABLE_GENERATION_2024_TRUE`: en la primera campaña el router descartó `ree.es` por `SOURCE_TYPE_INELIGIBLE`, seleccionó `comercio.gob.es` y la ruta quedó `PARTIAL`. En la segunda, clasificó `ree.es` como `INFRASTRUCTURE_OPERATOR`, la seleccionó en primer lugar (puntuación 0,975), mantuvo `libreria.miteco.gob.es` como segunda fuente y obtuvo `PASS`. Es una corrección de taxonomía y elegibilidad genérica, no una regla por dominio.
+
+El efecto aguas abajo es visible en esa misma ruta local: `17` documentos intentados, `0` extraídos y `34` solicitudes HTTP en `09:33`; frente a `3` intentados, `3` extraídos/citables y `5` solicitudes en `10:28`. Es un avance muy fuerte en eficiencia para el caso afectado, aunque no explica por sí solo los totales de toda la campaña.
+
+El resultado E2E global pasa de 10/11 a 9/11 casos correctos. La campaña nueva registra errores de retrieval/citación, consenso y casos indeterminados. Por tanto, se confirma la mejora del router y de la recuperación local del caso energético, pero no una mejora global del veredicto.
+
+Informes: [campaña `e2e-20261025-093335`](../tests/data/evaluation/artifacts/e2e-20261025-093335/report.md) y [campaña `e2e-20261025-102837`](../tests/data/evaluation/artifacts/e2e-20261025-102837/report.md).
+
+### Qué obtendremos
+
+- Menos `202` vacíos tratados como resultado final.
+- Sustitución de accesos denegados por candidatos alternativos sin insistir en el mismo recurso.
+- Mejor aprovechamiento de los resultados ya pagados al proveedor de búsqueda.
+- Una política reproducible y comprobable por clase de fallo.
+
+### Pruebas realizadas y pendiente de cierre
+
+- Cubiertas en unitarios: secuencias `202 → 200` con `Retry-After`, `429 → 200`, `403` sin reintento, omisión de `202` sin espera y error de conexión, agotamiento del presupuesto, sustitución desde el mismo lote y máximo global de documentos.
+- Implementado: seguimiento manual de redirecciones con validación de cada destino, límite de saltos, rechazo de bucles, destinos no públicos y degradación HTTPS→HTTP; las pruebas unitarias de estas reglas son simuladas.
+- Pendiente de seguridad: la comprobación DNS y la conexión HTTP no están fijadas a la misma IP, por lo que aún existe riesgo de DNS rebinding. Antes de cerrar la auditoría hay que fijar la IP validada a la conexión o aplicar una política de egreso que bloquee destinos internos, y validar esa barrera en el despliegue.
+- Campaña completa ya ejecutada: `e2e-20261025-102837`. No alcanza el objetivo agregado de descarga útil del 75 % y no sustituye la validación de seguridad de redirecciones.
+
+### Puerta de aceptación
+
+- Ningún bucle ni exceso del presupuesto configurado.
+- Ningún descenso de documentos citables por sustituciones incorrectas.
+- Mantener límites de intentos y documentos, sin regresión en documentos citables en una comparación controlada.
+- Objetivo inicial de descarga útil: **al menos 75 %**, acompañado siempre de conteos brutos; resultado actual **68,04 %**.
+- Cerrar la mitigación de DNS rebinding antes de aprobar la puerta de seguridad.
+
+---
+
+## Bloque 3. Historial compartido y caché por resultado
+
+**Estado:** parcial; existen caché de respuesta y memoria compartida de URLs no utilizables, pero faltan identidad documental, TTL por resultado y métricas de intentos evitados.
+
+### Propósito
+
+Evitar que distintos validadores o réplicas repitan inmediatamente una descarga que ya produjo un resultado conocido, sin convertir un fallo temporal en un bloqueo permanente.
+
+El repositorio ya contiene primitivas de caché y memoria de URLs no utilizables. Este bloque debe auditarlas y evolucionarlas sobre la taxonomía del bloque 1; no debe crear un segundo mecanismo incompatible.
+
+### Cambios previstos
+
+1. Definir una identidad documental canónica que no fusione recursos distintos accidentalmente.
+2. Separar:
+   - Caché positiva de contenido extraído y validado.
+   - Historial negativo o pendiente por identidad documental.
+   - Caché de respuesta de búsqueda.
+3. Persistir en MongoDB clase, primer y último intento, contador, expiración, política aplicada y éxito posterior.
+4. Aplicar TTL por clase:
+   - Corto para `PENDING`, `RATE_LIMITED`, red y errores 5xx.
+   - Intermedio para accesos denegados y contenido vacío.
+   - Positivo según frescura del documento y política activa.
+5. Invalidar o rebajar el historial negativo cuando exista un éxito posterior.
+6. Permitir continuar de forma degradada y limitada cuando MongoDB no esté disponible.
+7. Registrar `cache_hit`, `negative_history_hit`, intentos evitados y antigüedad de la entrada.
+
+### Qué obtendremos
+
+- Menos intentos repetidos sobre el mismo fallo.
+- Menor latencia y consumo de proveedor en validadores sucesivos.
+- Comportamiento compartido entre pods y reinicios.
+- Expiración explícita que permite volver a probar recursos recuperables.
+
+### Pruebas previstas
+
+- Dos validadores secuenciales sobre la misma identidad.
+- Dos réplicas compartiendo historial.
+- Expiración por TTL y reintento posterior.
+- Invalidación tras éxito.
+- MongoDB temporalmente no disponible.
+- Campaña E2E fría seguida de una campaña caliente documentada.
+
+### Puerta de aceptación
+
+- Al menos **30 % menos intentos repetidos** sobre fallos persistentes en la campaña caliente.
+- Sin reducción de `documents_citable` respecto a la campaña fría.
+- Cero reutilizaciones de contenido no validado como caché positiva.
+- Todos los ahorros de intentos reconstruibles desde artefactos.
+
+---
+
+## Bloque 4. Singleflight y viewer del embudo
+
+**Estado:** pendiente.
+
+### Propósito
+
+Evitar que peticiones concurrentes descarguen el mismo recurso al mismo tiempo y presentar las métricas de los bloques anteriores de forma operable.
+
+### Cambios previstos: singleflight
+
+1. Coordinar por identidad documental las descargas simultáneas.
+2. La primera petición adquiere un lease y ejecuta el fetch; las demás esperan el resultado dentro de su presupuesto.
+3. Persistir el lease o usar un mecanismo compartido que funcione entre réplicas, no solo dentro de un proceso.
+4. Añadir expiración y recuperación del lease si el propietario muere.
+5. No compartir resultados entre políticas o identidades documentales incompatibles.
+6. Medir `leader_fetches`, `joined_requests`, tiempo esperado, leases expirados y fetches evitados.
+
+### Cambios previstos: viewer
+
+1. Mostrar el embudo:
+
+```text
+candidatos → documentos intentados → respuestas HTTP → HTTP 2xx
+           → documentos extraídos → documentos citables
+```
+
+2. Mostrar distribución por `fetch_outcome` y evolución entre campañas.
+3. Separar campañas frías y calientes.
+4. Señalar respuestas de caché, historial negativo y peticiones unidas por singleflight.
+5. Mostrar denominadores y conteos junto a cada porcentaje.
+6. Permitir inspeccionar la traza de una evidencia sin presentar URLs como etiquetas métricas agregadas.
+
+### Qué obtendremos
+
+- Una única descarga efectiva cuando varios validadores soliciten el mismo recurso simultáneamente.
+- Menor carga sobre servicios remotos y menor probabilidad de rate limiting provocado por el propio sistema.
+- Diagnóstico visual de dónde se pierde cada candidato.
+- Comparación directa entre campañas y entre estado frío/caliente.
+
+### Pruebas previstas
+
+- Varias coroutines y varias réplicas solicitando la misma identidad.
+- Fallo del líder y recuperación tras expirar el lease.
+- Espera que excede el presupuesto del consumidor.
+- Identidades y políticas distintas que no deben agruparse.
+- Contrato y snapshot del viewer.
+- Campaña E2E completa y prueba concurrente dirigida.
+
+### Puerta de aceptación
+
+- Una sola descarga remota para solicitudes concurrentes equivalentes.
+- Cero deadlocks y recuperación demostrada de leases abandonados.
+- Ninguna mezcla de documentos o políticas incompatibles.
+- El viewer reproduce exactamente los totales de `report.json`.
+- Reducción medible de solicitudes HTTP sin pérdida de documentos citables.
+
+---
+
+## Orden de ejecución y campañas
+
+| Hito | Implementación | Campaña de cierre | Decisión posterior |
+| --- | --- | --- | --- |
+| Línea base | Estado anterior | `e2e-20261024-191753` | Medir el problema |
+| Bloque 1 | Clasificación y métricas | `e2e-20261024-200925` | Taxonomía disponible; pasar a acciones |
+| Bloque 2 | Reintentos, sustitución y validación manual de redirecciones | `e2e-20261025-102837` | 68,04 % de descarga útil; Source Router ya recupera `ree.es`; cerrar DNS rebinding y revisar la tasa HTTP 2xx |
+| Bloque 3 | Historial y caché | Una fría y otra caliente | Medir intentos evitados y ausencia de regresión |
+| Bloque 4 | Singleflight y viewer | Campaña completa más prueba concurrente | Cerrar el ciclo y fijar nueva línea base |
+
+No se deben agrupar los bloques 1 y 2 en una única medición, porque perderíamos la línea base observada antes de cambiar el comportamiento. Los bloques 3 y 4 pueden desarrollarse en proximidad, pero deben mantener pruebas y métricas separadas: el bloque 3 ahorra repeticiones temporales y el bloque 4 evita concurrencia duplicada.
+
+## Métricas que se publicarán en todas las campañas siguientes
+
+- Casos, ejecuciones puntuables y ejecuciones de observación.
+- Decisión correcta, pase E2E estricto y quorum degradado.
+- Respuestas reales de Evidence Search y cache hits.
+- Llamadas al proveedor y candidatos retornados.
+- Documentos programados e intentados.
+- Solicitudes HTTP, respuestas y respuestas 2xx.
+- Documentos extraídos y citables.
+- Distribución completa de `fetch_outcome`.
+- Reintentos, sustituciones y motivo de parada.
+- Intentos evitados por historial, caché o singleflight.
+- Latencia p50/p95 y presupuesto agotado cuando estén disponibles.
+
+Cada porcentaje se acompañará de numerador y denominador. Ninguna mejora se atribuirá a un bloque si cambiaron simultáneamente los casos, modelos, políticas o condiciones de caché sin quedar documentado.

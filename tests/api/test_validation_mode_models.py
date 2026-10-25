@@ -34,7 +34,7 @@ def test_publish_with_assertions_defaults_to_light():
         assertions=[{
             "idAssertion": "1", "text": "claim", "categoryId": 1,
             "topic_code": "EMPLOYMENT", "evidence_kind": "STATISTICAL_DATA",
-            "taxonomy_version": "routing-taxonomy-v1",
+            "taxonomy_version": "routing-taxonomy-v2",
             "context": {
                 "locations": [], "entities": [], "temporal_context": [], "language": "en",
                 "jurisdiction": {"scope": "UNKNOWN"},
@@ -42,7 +42,7 @@ def test_publish_with_assertions_defaults_to_light():
         }],
     )
     assert req.validation_mode == ValidationMode.LIGHT
-    assert req.assertions[0].taxonomy_version == "routing-taxonomy-v1"
+    assert req.assertions[0].taxonomy_version == "routing-taxonomy-v2"
 
 
 def test_light_kafka_contracts_include_correlation_fields():

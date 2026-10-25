@@ -62,6 +62,59 @@ def test_models_modes_and_unevaluated_e2e_not_mixed():
     assert summary["end_to_end_correct"] == 0
 
 
+def test_pipeline_report_aggregates_download_observability():
+    row = evaluated(run().to_dict())
+    row["execution_mode"] = "FULL_PIPELINE"
+    row["metrics"]["retrieval"].update({
+        "response_present": True,
+        "response_cached": False,
+        "documents_attempted": 3,
+        "documents_extracted": 2,
+        "documents_citable": 1,
+        "http_requests": 3,
+        "http_responses": 3,
+        "http_successes": 2,
+        "retry_actions": 1,
+        "retry_recovered": 1,
+        "retry_exhausted": 0,
+        "candidate_substitutions": 1,
+        "substitution_recovered": 1,
+        "substitution_exhausted": 0,
+        "fetch_outcome_counts": {"EXTRACTED": 2, "ACCESS_DENIED": 1},
+    })
+
+    observed = pipeline_report([row])["retrieval_observability"]
+
+    assert observed == {
+        "responses": 1,
+        "cached_responses": 0,
+        "documents_attempted": 3,
+        "documents_extracted": 2,
+        "documents_citable": 1,
+        "usable_download_percent": pytest.approx(66.6666666667),
+        "citable_document_percent": pytest.approx(33.3333333333),
+        "http_requests": 3,
+        "http_responses": 3,
+        "http_successes": 2,
+        "http_success_percent": pytest.approx(66.6666666667),
+        "retry_actions": 1,
+        "retry_recovered": 1,
+        "retry_exhausted": 0,
+        "candidate_substitutions": 1,
+        "substitution_recovered": 1,
+        "substitution_exhausted": 0,
+        "fetch_outcomes": {"EXTRACTED": 2, "ACCESS_DENIED": 1},
+    }
+
+    missing = evaluated(run().to_dict())
+    missing["execution_mode"] = "FULL_PIPELINE"
+    missing["metrics"]["retrieval"].update({
+        "status": "NOT_EVALUATED",
+        "response_present": False,
+    })
+    assert pipeline_report([row, missing])["retrieval_observability"]["responses"] == 1
+
+
 def test_consensus_uses_production_abstention_policy():
     a, b = run().to_dict(), run().to_dict()
     for row in (a, b):

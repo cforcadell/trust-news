@@ -62,6 +62,11 @@ Return one classification for each candidate and only candidates in the input. N
 Do not decide eligibility, selection, ranking, or truth. Do not add domains.
 Classify stable domain properties (source_type, authority_level, jurisdictions, topics,
 evidence kinds and languages) separately from this route's match fields.
+Use INFRASTRUCTURE_OPERATOR for entities whose enduring institutional role is operating
+shared physical or digital infrastructure and publishing first-party operational data.
+Do not use it merely because a company owns infrastructure or reports about it.
+This is an organization type, not a subject-area label; determine topic and evidence
+matches independently from the candidate's actual content and the requested route.
 The only allowed authority_level values are: {authority_levels}.
 Use these exact authority_level values. For example, use NATIONAL_PRIMARY, never NATIONAL.
 Use only enum values exposed by the JSON schema for every other taxonomy field. Never invent taxonomy values.

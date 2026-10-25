@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from typing import Any
 
+from common.routing_taxonomy import TAXONOMY_VERSION
+
 from .models import DomainProfile, RouteDocument
 
 
@@ -39,7 +41,10 @@ class SourceRouteRepository:
     async def get_profiles(self, domains: list[str]) -> dict[str, DomainProfile]:
         if not domains:
             return {}
-        cursor = self.profiles_collection.find({"domain": {"$in": domains}}, {"_id": 0})
+        cursor = self.profiles_collection.find(
+            {"domain": {"$in": domains}, "taxonomy_version": TAXONOMY_VERSION},
+            {"_id": 0},
+        )
         profiles = [DomainProfile.model_validate(item) async for item in cursor]
         return {profile.domain: profile for profile in profiles}
 

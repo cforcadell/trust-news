@@ -42,7 +42,7 @@ def minimal_payload():
         model_dump=lambda mode=None: {
             "assertion_id": "1", "assertion_index": 0, "text": "Population", "categoryId": 10,
             "topic_code": "DEMOGRAPHY", "evidence_kind": "STATISTICAL_DATA",
-            "taxonomy_version": "routing-taxonomy-v1",
+            "taxonomy_version": "routing-taxonomy-v2",
             "context": {"locations": [], "entities": [], "temporal_context": [], "language": "ca", "jurisdiction": {"scope": "REGION", "country_code": "ES", "region_code": "ES-CT"}},
             "search_hints": {}, "context_confidence": {},
         },

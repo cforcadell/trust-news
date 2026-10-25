@@ -19,15 +19,15 @@ RouteSignature -> source_routes_v2 -> FRESH -> unir DomainProfile -> ranking
 `POST /routes/resolve` accepts `topic_code`, `evidence_kind`, `jurisdiction`,
 `language` and an optional `discovery_context` containing bounded
 `entity_terms` and `search_terms`. All taxonomy fields use the
-`routing-taxonomy-v1` closed vocabulary. It returns `route_key`, `route_state`,
+`routing-taxonomy-v2` closed vocabulary. It returns `route_key`, `route_state`,
 `router_version` and `sources[]` with domain, type, authority, jurisdictions,
 score, and profile version. A `FRESH` path does not make external calls.
 
 The key is:
 
 ```text
-route-v2|routing-taxonomy-v1|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY
-route-v2|routing-taxonomy-v1|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY|CTX:FINGERPRINT
+route-v2|routing-taxonomy-v2|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY
+route-v2|routing-taxonomy-v2|TOPIC_CODE|EVIDENCE_KIND|JURISDICTION_KEY|CTX:FINGERPRINT
 ```
 
 The first form remains compatible with requests without discovery context. The
@@ -85,6 +85,14 @@ The `route_score` combines authority (30%), geographic specificity (25%), match 
 Evidence Search recopy this metadata in every evidence: `source_type`, `authority_level`, `route_score`, `why_selected` and `profile_version`. It also calculates `relationship_to_origin` (`ORIGINAL`, `INDEPENDENT` or `UNKNOWN`), so that evidence and decision of routing remain auditable from end to end.
 
 The classifier cannot add domains or decide truthfulness. A candidate with the theme or evidence `NONE`, desconocida/no authority admitted or incompatible jurisdiction is ruled out. A failed refresh can reuse a `STALE` path; a failed `MISSING` does not manufacture domains.
+
+In taxonomy v2, `INFRASTRUCTURE_OPERATOR` is a reusable institutional type for
+entities whose enduring role is operating shared physical or digital
+infrastructure and publishing first-party operational measurements. It is
+eligible for `STATISTICAL_DATA`, but topic match, jurisdiction and authority
+remain independent eligibility checks. It does not mean that every
+infrastructure-owning company, press article or secondary report qualifies.
+Routes and stored profiles from taxonomy v1 are not reused under v2.
 
 ## Partial classification and recovery
 

@@ -39,6 +39,28 @@ def retrieval_metrics(retrieval, expected, bundle):
     references = [normalize_domain(s.get("domain") or s.get("url")) for s in expected.get("reference_sources", [])]
     references = [r for r in references if r]
     statuses = [s.get("fetch_status") for s in bundle]
+    summary = retrieval.get("retrieval_summary") or {}
+    attempts = [attempt for source in bundle for attempt in source.get("fetch_attempts") or []]
+    outcome_counts = {}
+    for source in bundle:
+        outcome = source.get("fetch_outcome")
+        if outcome:
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+    documents_attempted = summary.get("documents_attempted")
+    if documents_attempted is None:
+        documents_attempted = sum(bool(source.get("fetch_attempts")) for source in bundle)
+    http_requests = summary.get("http_requests")
+    if http_requests is None:
+        http_requests = len(attempts)
+    http_responses = summary.get("http_responses")
+    if http_responses is None:
+        http_responses = sum(attempt.get("http_status") is not None for attempt in attempts)
+    http_successes = summary.get("http_successes")
+    if http_successes is None:
+        http_successes = sum(
+            isinstance(attempt.get("http_status"), int) and 200 <= attempt["http_status"] < 300
+            for attempt in attempts
+        )
     reference_source_found = any(domain_matches(d, r) for d in domains for r in references) if references else None
     reference_source_citable = (
         any(
@@ -64,6 +86,47 @@ def retrieval_metrics(retrieval, expected, bundle):
             "result_count": len(bundle), "successful_source_count": sum(s == "ok" for s in statuses),
             "failed_source_count": failed, "unknown_fetch_status_count": sum(s is None for s in statuses),
             "contexts_count": len(contexts),
+            "response_present": bool(retrieval),
+            "response_cached": bool(retrieval.get("cached")),
+            "documents_attempted": documents_attempted,
+            "http_requests": http_requests,
+            "http_responses": http_responses,
+            "http_successes": http_successes,
+            "documents_extracted": summary.get("documents_extracted", sum(s == "ok" for s in statuses)),
+            "documents_citable": summary.get("documents_citable", sum(
+                any(context.get("citation_eligible") is True and str(context.get("text") or "").strip()
+                    for context in source.get("contexts", []))
+                for source in bundle
+            )),
+            "fetch_outcome_counts": summary.get("outcome_counts", outcome_counts),
+            "retry_actions": summary.get("retry_actions", sum(
+                action.get("action") == "RETRY"
+                for source in bundle for action in source.get("fetch_retry_trace", [])
+            )),
+            "retry_recovered": summary.get("retry_recovered", sum(
+                source.get("fetch_status") == "ok" and any(
+                    action.get("action") == "RETRY" for action in source.get("fetch_retry_trace") or []
+                ) for source in bundle
+            )),
+            "retry_exhausted": summary.get("retry_exhausted", sum(
+                source.get("fetch_status") != "ok" and any(
+                    action.get("action") == "RETRY" for action in source.get("fetch_retry_trace") or []
+                ) for source in bundle
+            )),
+            "candidate_substitutions": summary.get("candidate_substitutions", sum(
+                source.get("retrieval_mode") == "existing_provider_candidates_after_unusable_fetch"
+                for source in bundle
+            )),
+            "substitution_recovered": summary.get("substitution_recovered", sum(
+                source.get("retrieval_mode") == "existing_provider_candidates_after_unusable_fetch"
+                and source.get("citation_status") == "available" and bool(source.get("contexts"))
+                for source in bundle
+            )),
+            "substitution_exhausted": summary.get("substitution_exhausted", sum(
+                source.get("retrieval_mode") == "existing_provider_candidates_after_unusable_fetch"
+                and not (source.get("citation_status") == "available" and source.get("contexts"))
+                for source in bundle
+            )),
             "reference_source_found": reference_source_found,
             "reference_source_citable": reference_source_citable,
             "lexical_reference_coverage": sum(coverage) / len(coverage) if coverage else None,

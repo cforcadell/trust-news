@@ -22,7 +22,7 @@ def sample_assertion():
         "categoryId": 1,
         "topic_code": "EMPLOYMENT",
         "evidence_kind": "STATISTICAL_DATA",
-        "taxonomy_version": "routing-taxonomy-v1",
+        "taxonomy_version": "routing-taxonomy-v2",
         "context": {
             "locations": [{"name": "Espana", "scope": "COUNTRY", "country_code": "ES", "origin": "explicit", "confidence": 0.98}],
             "entities": [{"name": "INE", "type": "GOVERNMENT_BODY", "role": "AUTHORITY", "origin": "inferred", "confidence": 0.75}],

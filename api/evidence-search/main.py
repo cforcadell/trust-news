@@ -25,7 +25,7 @@ from common.utils.mongo import build_mongo_uri_from_env
 sys.path.append(os.path.dirname(__file__))
 from app.chunk_ranker import rank_chunks
 from app.chunker import build_context_windows, chunk_text
-from app.document_fetcher import fetch_main_text
+from app.document_fetcher import classify_attempt_outcome, classify_fetch_outcome, fetch_main_text
 from common.search import search_with_provider
 
 load_dotenv()
@@ -596,7 +596,7 @@ def search_backend_for_cache() -> Dict[str, Any]:
         "provider_trace_contract": "v1",
         # Refill never widens LOCAL or EXT_ONLY_OFFICIAL beyond their active policy.
         "policy_safe_refill": "v1",
-        "resilient_retrieval": "v2",
+        "resilient_retrieval": "v3",
     }
 
 
@@ -730,7 +730,30 @@ async def build_evidences_with_optional_contexts(
         evidence["normalization_reason"] = getattr(fetch_result, "normalization_reason", None)
         evidence["fetch_attempted_urls"] = getattr(fetch_result, "attempted_urls", None) or [url]
         evidence["fetch_attempts"] = getattr(fetch_result, "attempts", None) or []
-        evidence["http_status"] = getattr(fetch_result, "http_status", None)
+        evidence["fetch_retry_trace"] = getattr(fetch_result, "retry_trace", None) or []
+        for attempt in evidence["fetch_attempts"]:
+            attempt["classification"] = classify_attempt_outcome(attempt)
+        http_status = getattr(fetch_result, "http_status", None)
+        fetch_outcome = getattr(fetch_result, "outcome", None) or classify_fetch_outcome(
+            status=fetch_result.status,
+            failure_code=getattr(fetch_result, "failure_code", None),
+            http_status=http_status,
+        )
+        fetch_diagnostics = getattr(fetch_result, "diagnostics", None) or {
+            "outcome": fetch_outcome,
+            "stage": getattr(fetch_result, "failure_stage", None)
+            or ("COMPLETE" if fetch_result.status == "ok" else "FETCH"),
+            "retryable": bool(getattr(fetch_result, "retryable", False)),
+            "http_response_received": http_status is not None,
+            "http_success": http_status is not None and 200 <= http_status < 300,
+            "extracted": fetch_result.status == "ok",
+            "retry_count": sum(
+                action.get("action") == "RETRY" for action in evidence["fetch_retry_trace"]
+            ),
+        }
+        evidence["fetch_outcome"] = fetch_outcome
+        evidence["fetch_diagnostics"] = {**fetch_diagnostics, "citable": False}
+        evidence["http_status"] = http_status
         evidence["response_bytes"] = int(getattr(fetch_result, "response_bytes", 0) or 0)
         evidence["extraction"] = {
             "detected_format": getattr(fetch_result, "detected_format", None),
@@ -808,6 +831,7 @@ async def build_evidences_with_optional_contexts(
 
         evidence["contexts"] = make_contexts_citable(contexts)
         evidence["citation_status"] = "available"
+        evidence["fetch_diagnostics"]["citable"] = bool(evidence["contexts"])
         evidence["chunks_metadata"] = chunks_metadata(ranked, contexts)
         total_contexts += len(contexts)
         evidences.append(evidence)
@@ -1015,6 +1039,39 @@ def retrieval_summary(
     citable = sum(bool(item.get("citation_status") == "available" and item.get("contexts")) for item in evidences)
     extracted = sum(item.get("fetch_status") == "ok" for item in evidences)
     attempts = sum(max(1, len(item.get("fetch_attempts") or [])) for item in evidences)
+    http_requests = sum(len(item.get("fetch_attempts") or []) for item in evidences)
+    http_responses = sum(
+        attempt.get("http_status") is not None
+        for item in evidences for attempt in item.get("fetch_attempts") or []
+    )
+    http_successes = sum(
+        isinstance(attempt.get("http_status"), int) and 200 <= attempt["http_status"] < 300
+        for item in evidences for attempt in item.get("fetch_attempts") or []
+    )
+    attempted_documents = sum(bool(item.get("fetch_attempts")) for item in evidences)
+    outcome_counts: Dict[str, int] = {}
+    for item in evidences:
+        outcome = item.get("fetch_outcome")
+        if outcome:
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+    retry_actions = sum(
+        action.get("action") == "RETRY"
+        for item in evidences for action in item.get("fetch_retry_trace") or []
+    )
+    candidate_substitutions = sum(
+        item.get("retrieval_mode") == "existing_provider_candidates_after_unusable_fetch"
+        for item in evidences
+    )
+    retry_recovered = sum(
+        any(action.get("action") == "RETRY" for action in item.get("fetch_retry_trace") or [])
+        and item.get("fetch_status") == "ok"
+        for item in evidences
+    )
+    substitution_recovered = sum(
+        item.get("retrieval_mode") == "existing_provider_candidates_after_unusable_fetch"
+        and item.get("citation_status") == "available" and bool(item.get("contexts"))
+        for item in evidences
+    )
     failures: Dict[str, int] = {}
     for item in evidences:
         code = (item.get("failure") or {}).get("code")
@@ -1024,9 +1081,23 @@ def retrieval_summary(
         "target_documents": target_documents,
         "candidates_considered": candidates_considered,
         "fetch_attempts": attempts,
+        "http_requests": http_requests,
+        "http_responses": http_responses,
+        "http_successes": http_successes,
         "documents_scheduled": len(evidences),
+        "documents_attempted": attempted_documents,
         "documents_extracted": extracted,
         "documents_citable": citable,
+        "outcome_counts": outcome_counts,
+        "retry_actions": retry_actions,
+        "retry_recovered": retry_recovered,
+        "retry_exhausted": sum(
+            any(action.get("action") == "RETRY" for action in item.get("fetch_retry_trace") or [])
+            and item.get("fetch_status") != "ok" for item in evidences
+        ),
+        "candidate_substitutions": candidate_substitutions,
+        "substitution_recovered": substitution_recovered,
+        "substitution_exhausted": candidate_substitutions - substitution_recovered,
         "fallback_rounds": fallback_rounds,
         "failure_counts": failures,
         "stop_reason": "TARGET_REACHED" if citable >= target_documents else "BUDGET_EXHAUSTED",
@@ -1325,7 +1396,10 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
     await hydrate_unusable_url_history(raw_results)
     scheduled_results = diversify_search_results(
         raw_results,
-        max_sources=effective_search_policy["max_results"],
+        max_sources=min(
+            effective_search_policy["max_results"],
+            max(2, target_citable_sources, effective_search_policy["max_results"] - 2),
+        ),
     )
     evidences = await build_evidences_with_optional_contexts(
         assertion,
@@ -1357,6 +1431,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         EVIDENCE_FETCH_FULL_TEXT
         and initial_citable < target_citable_sources
         and remaining_candidates
+        and len(evidences) < effective_search_policy["max_results"]
     ):
         next_candidates = diversify_search_results(remaining_candidates, max_sources=1)
         if not next_candidates:
@@ -1384,6 +1459,11 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         for item in refill_evidences:
             item["retrieval_mode"] = "existing_provider_candidates_after_unusable_fetch"
             item["fallback_reason"] = "EXISTING_CANDIDATES_AFTER_UNUSABLE_FETCH"
+            item["recovery_trace"] = {
+                "action": "SUBSTITUTE_CANDIDATE",
+                "reason": "INSUFFICIENT_CITABLE_SOURCES",
+                "candidate_source": "EXISTING_PROVIDER_BATCH",
+            }
         evidences.extend(refill_evidences)
         await persist_unusable_url_outcomes(refill_evidences)
         initial_citable = sum(
@@ -1402,6 +1482,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
     if (
         EVIDENCE_FETCH_FULL_TEXT
         and initial_citable < target_citable_sources
+        and len(evidences) < effective_search_policy["max_results"]
     ):
         fallback_rounds += 1
         fallback_reason = (
@@ -1530,13 +1611,16 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             fallback_resolution["fallback_excluded_domains"] = fallback_excluded_domains
             fallback_scheduled = diversify_search_results(
                 fallback_raw_results,
-                max_sources=max(1, effective_search_policy["max_results"] - initial_citable),
+                max_sources=min(
+                    effective_search_policy["max_results"] - len(evidences),
+                    max(1, target_citable_sources - initial_citable),
+                ),
             )
             fallback_evidences = await build_evidences_with_optional_contexts(
                 assertion,
                 fallback_scheduled,
                 fallback_resolution,
-                max_results=effective_search_policy["max_results"],
+                max_results=effective_search_policy["max_results"] - len(evidences),
                 origin_document=origin_document,
                 capture_chunks=bool(run_id),
                 rank_offset=len(evidences),

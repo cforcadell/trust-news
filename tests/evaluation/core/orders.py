@@ -74,6 +74,8 @@ def results_from_order(dataset, order, run_id=None):
             row.grounding = {"validation": audit} if audit else {}
             if validation.get("execution_status") == "COMPLETED":
                 row.validator_output = {"resultado": audit.get("original_verdict"),
+                    "usage": validation.get("llm_usage"),
+                    "resolved_model": validation.get("resolved_model"),
                     "effective_verdict": normalize_verdict(validation.get("approval")),
                     "evidence_used": validation.get("evidence_used", []),
                     "evaluation_citation_trace": validation.get("evaluation_citation_trace")}

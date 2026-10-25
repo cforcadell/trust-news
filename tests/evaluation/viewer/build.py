@@ -291,6 +291,7 @@ def _generation(dataset, order, generated):
                     "config_version": trace.get("config_version", generator.get("config_version")),
                     "temperature": trace.get("temperature"),
                     "structured_attempts": trace.get("structured_attempts"),
+                    "usage": deepcopy(trace.get("usage") or []),
                     "repair_used": trace.get("repair_used"),
                     "duration_seconds": trace.get("duration_seconds"),
                     "error_type": trace.get("error_type"),

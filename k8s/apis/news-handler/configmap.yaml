@@ -7,6 +7,7 @@ data:
   MONGO_VALIDATOR_REGISTRY_COLLECTION: "validator_registry"
   # --- Kafka ---
   KAFKA_BROKER: "kafka.infra.svc.cluster.local:9092"
+  KAFKA_MAX_MESSAGE_BYTES: "4194304"
   KAFKA_SECURITY_PROTOCOL: "PLAINTEXT"
   KAFKA_MECHANISM: "PLAIN"
   

@@ -225,6 +225,7 @@ class RouteDocument(BaseModel):
     candidates: list[RouteCandidate] = Field(default_factory=list)
     router_version: str
     discovery_provider: str
+    discovery_config: dict[str, Any] | None = None
     classification_model: str
     classification_config_version: int = 0
     created_at: datetime

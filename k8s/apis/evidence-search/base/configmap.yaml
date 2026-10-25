@@ -21,13 +21,13 @@ data:
   EVIDENCE_SEARCH_CACHE_TTL_SECONDS: "86400"
   EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS: "300"
   EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS: "1800"
-  SEARCH_PROVIDER: "exa" #tavily || exa
-  #SEARCH_API_URL: "https://api.tavily.com/search"
-  SEARCH_API_URL: "https://api.exa.ai/search"
-  SEARCH_DEPTH: "advanced"
+  SEARCH_PROVIDER: "exa" # Any provider registered in common.search
+  EXA_PRIMARY_MODE: "lite"
+  EXA_FALLBACK_MODE: "auto"
+  TAVILY_PRIMARY_DEPTH: "advanced"
   SEARCH_INCLUDE_ANSWER: "false"
   SEARCH_INCLUDE_RAW_CONTENT: "true"
-  SEARCH_PROVIDER_MAX_RESULTS: "50"
+  SEARCH_PROVIDER_MAX_RESULTS: "10"
   SEARCH_TIMEOUT: "30"
   EVIDENCE_FETCH_FULL_TEXT: "true"
   # Bounded, outcome-driven retries. Stable access/content failures are never

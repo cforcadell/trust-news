@@ -6,6 +6,7 @@ import asyncio
 import time
 import math
 import hashlib
+import threading
 
 from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -38,7 +39,7 @@ from common.utils.ipfs_client import (
 )
 from common.utils.llm_json import strip_json_markdown
 from common.utils.llm_runtime import fetch_llm_runtime_override
-from common.llm import LLMRequest, complete_structured
+from common.llm import LLMRequest, complete, complete_structured, parse_response
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.evidence import evaluate_evidence_grounding
 from common.utils.evidence_bundle import evidence_bundle_hash
@@ -128,6 +129,20 @@ VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.LLM_MEMORY_VALIDATION)))))
 EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
 EVIDENCE_SEARCH_TIMEOUT_SECONDS = float(os.getenv("EVIDENCE_SEARCH_TIMEOUT_SECONDS", "90"))
+EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS = max(1, int(os.getenv("EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS", "2")))
+EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS = max(
+    EVIDENCE_SEARCH_TIMEOUT_SECONDS,
+    float(os.getenv("EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS", "120")),
+)
+EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS = max(
+    0.0, float(os.getenv("EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS", "0.25")),
+)
+EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD = max(
+    1, int(os.getenv("EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD", "3")),
+)
+EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS = max(
+    0.0, float(os.getenv("EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS", "30")),
+)
 SOURCE_ROUTER_URL = os.getenv("SOURCE_ROUTER_URL", "http://source-router.apis.svc.cluster.local:8075")
 AUTOMATIC_VALIDATOR_TYPES = {
     ValidatorType.LLM_MEMORY_VALIDATION,
@@ -140,6 +155,7 @@ TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
 LLM_CONFIG_VERSION = int(os.getenv("LLM_CONFIG_VERSION", "0"))
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP))
+KAFKA_MAX_MESSAGE_BYTES = int(os.getenv("KAFKA_MAX_MESSAGE_BYTES", str(4 * 1024 * 1024)))
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
 KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
 KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
@@ -148,6 +164,8 @@ TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", D
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES))
 light_consumer: Optional[AIOKafkaConsumer] = None
 light_producer: Optional[AIOKafkaProducer] = None
+_evidence_search_circuit_lock = threading.Lock()
+_evidence_search_circuit = {"failures": 0, "open_until": 0.0}
 
 # =========================================================
 # Parsear categorías
@@ -421,6 +439,33 @@ def router_no_source_result(payload_v2: AssertionValidationPayloadV2) -> tuple[V
     )
 
 
+def evaluation_citation_claims(claimed_evidence: Any, canonical_evidence: Any) -> list[Dict[str, Any]]:
+    """Build evaluation citations with server-resolved IDs without masking claims."""
+    canonical_by_context = {
+        str(item.get("context_id")): item
+        for item in canonical_evidence if isinstance(item, dict) and item.get("context_id")
+    } if isinstance(canonical_evidence, list) else {}
+    claims: list[Dict[str, Any]] = []
+    for item in claimed_evidence if isinstance(claimed_evidence, list) else []:
+        if not isinstance(item, dict):
+            claims.append({"invalid_item_type": type(item).__name__})
+            continue
+        context_id = item.get("context_id")
+        canonical = canonical_by_context.get(str(context_id)) if context_id else None
+        source_id = item.get("source_id")
+        # The RAG contract asks the model for context_id only. Fill the missing
+        # source_id from the server-owned canonical evidence, but retain any
+        # non-empty model-provided ID so invented IDs remain diagnosable.
+        if not source_id and canonical:
+            source_id = canonical.get("source_id")
+        claims.append({
+            "source_id": source_id,
+            "context_id": context_id,
+            "supports": item.get("supports"),
+        })
+    return claims
+
+
 def validation_error_details(failure: ValidationExecutionFailure) -> ValidationErrorDetails:
     cause = failure.cause
     response = getattr(cause, "response", None)
@@ -507,17 +552,23 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         verdict, description, extras = no_citable_evidence_result(payload_v2)
         return verdict, description, extras, evidence_response
     try:
-        result_text = ai_validator.verificar_asercion(
-            payload_v2.assertion.text,
-            payload_context_for_prompt(payload_v2),
-            evidences,
-        )
+        if isinstance(ai_validator, ConfiguredAIValidator):
+            result_text, llm_usage, resolved_model = ai_validator.verificar_asercion_con_uso(
+                payload_v2.assertion.text, payload_context_for_prompt(payload_v2), evidences)
+        else:
+            result_text = ai_validator.verificar_asercion(
+                payload_v2.assertion.text, payload_context_for_prompt(payload_v2), evidences)
+            llm_usage, resolved_model = None, None
     except Exception as exc:
         raise ValidationExecutionFailure("LLM_REQUEST", exc, evidences, evidence_response) from exc
     try:
         verdict, description, extras = parse_validator_api_response(result_text)
     except Exception as exc:
         raise ValidationExecutionFailure("LLM_RESPONSE_PARSE", exc, evidences, evidence_response) from exc
+    if llm_usage is not None:
+        extras["llm_usage"] = llm_usage
+    if resolved_model:
+        extras["resolved_model"] = resolved_model
 
     # A prompt is not a security boundary: verify documentary citations on the
     # server and never infer that every retrieved source was used by the model.
@@ -531,13 +582,6 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         claimed_evidence = declared_sources
     elif not documentary_validator:
         claimed_evidence = claimed_evidence or declared_sources
-    if evaluation_headers_for_payload(payload_v2):
-        extras["evaluation_citation_trace"] = {"claims": [
-            {"source_id": item.get("source_id"), "context_id": item.get("context_id"),
-             "supports": item.get("supports")}
-            if isinstance(item, dict) else {"invalid_item_type": type(item).__name__}
-            for item in claimed_evidence
-        ] if isinstance(claimed_evidence, list) else []}
     grounding = evaluate_evidence_grounding(
         verdict,
         claimed_evidence,
@@ -551,8 +595,11 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
     extras["sources_declared"] = declared_sources if uses_online_search() else []
     extras["evidence_used"] = grounding["evidence_used"]
     extras["evidence_validation"] = grounding["validation"]
-    if "evaluation_citation_trace" in extras:
-        extras["evaluation_citation_trace"]["issues"] = grounding["validation"].get("issues", [])
+    if evaluation_headers_for_payload(payload_v2):
+        extras["evaluation_citation_trace"] = {
+            "claims": evaluation_citation_claims(claimed_evidence, grounding["evidence_used"]),
+            "issues": grounding["validation"].get("issues", []),
+        }
     effective_verdict = Validacion[grounding["effective_verdict"]]
     if effective_verdict == Validacion.UNKNOWN and verdict in {Validacion.TRUE, Validacion.FALSE}:
         extras["evidence_validation"].update({
@@ -650,6 +697,88 @@ def resolve_local_sources(payload_v2: AssertionValidationPayloadV2) -> tuple[Lis
     return route.get("sources") or [], route
 
 
+class EvidenceSearchCircuitOpenError(RuntimeError):
+    """The local process is temporarily shedding a repeatedly failing dependency."""
+
+
+def _is_retryable_evidence_search_error(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)) or (
+        isinstance(status_code, int) and (status_code in {408, 429} or status_code >= 500)
+    )
+
+
+def _evidence_search_circuit_is_open(now: float) -> bool:
+    with _evidence_search_circuit_lock:
+        return _evidence_search_circuit["open_until"] > now
+
+
+def _record_evidence_search_success() -> None:
+    with _evidence_search_circuit_lock:
+        _evidence_search_circuit.update(failures=0, open_until=0.0)
+
+
+def _record_evidence_search_failure(now: float) -> None:
+    with _evidence_search_circuit_lock:
+        failures = _evidence_search_circuit["failures"] + 1
+        _evidence_search_circuit["failures"] = failures
+        if failures >= EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD:
+            _evidence_search_circuit["open_until"] = now + EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS
+
+
+def request_evidence_search(request_payload: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+    """Call Evidence Search with a bounded retry budget and local circuit breaker.
+
+    The budget covers all HTTP attempts and backoff.  This prevents a transient
+    upstream outage from making every queued validation wait for a full timeout.
+    """
+    started_at = time.monotonic()
+    deadline = started_at + EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS
+    attempts = 0
+    last_error = None
+    while attempts < EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS:
+        now = time.monotonic()
+        if _evidence_search_circuit_is_open(now):
+            raise EvidenceSearchCircuitOpenError("Evidence Search circuit is open after repeated retryable failures")
+        remaining = deadline - now
+        if remaining <= 0:
+            break
+        attempts += 1
+        request_options: Dict[str, Any] = {"timeout": min(EVIDENCE_SEARCH_TIMEOUT_SECONDS, remaining)}
+        if headers:
+            request_options["headers"] = headers
+        try:
+            response = httpx.post(
+                f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, **request_options,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if not isinstance(body, dict):
+                raise ValueError("Evidence Search returned a non-object response")
+            if attempts > 1:
+                body["request_recovery"] = {"attempts": attempts, "recovered": True}
+            _record_evidence_search_success()
+            return body
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_evidence_search_error(exc):
+                raise
+            now = time.monotonic()
+            if attempts >= EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS:
+                break
+            delay = min(
+                EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS * (2 ** (attempts - 1)),
+                max(0.0, deadline - now),
+            )
+            if delay:
+                time.sleep(delay)
+    _record_evidence_search_failure(time.monotonic())
+    if last_error is not None:
+        raise last_error
+    raise httpx.TimeoutException("Evidence Search request budget exhausted")
+
+
 def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if not uses_evidence_search():
         return [], None
@@ -668,13 +797,8 @@ def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tup
     }
     try:
         logger.info(f"[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling evidence-search")
-        request_options = {"timeout": EVIDENCE_SEARCH_TIMEOUT_SECONDS}
         headers = evaluation_headers_for_payload(payload_v2)
-        if headers:
-            request_options["headers"] = headers
-        resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, **request_options)
-        resp.raise_for_status()
-        response = resp.json()
+        response = request_evidence_search(request_payload, headers)
         response.setdefault("search_policy", search_policy)
         if route_response is not None:
             response["route"] = route_response
@@ -726,6 +850,15 @@ class ConfiguredAIValidator(AIValidator):
             response_model=validation_response_model(),
         )
         return complete_structured(self.provider, request)
+
+    def verificar_asercion_con_uso(self, texto: str, contexto: Optional[str] = None,
+                                  evidences: Optional[List[Dict[str, Any]]] = None):
+        model = openrouter_model_for_current_type(self.model) if self.provider == "openrouter" else self.model
+        request = LLMRequest(prompt=build_prompt_content(texto, contexto, evidences), model=model,
+                             temperature=self.temperature, response_model=validation_response_model())
+        response = complete(self.provider, request)
+        usage = response.usage.model_dump(mode="json") if response.usage else None
+        return parse_response(request, response), usage, response.model
     
 def build_ai_validator() -> Optional[AIValidator]:
     if not is_automatic_validator():
@@ -813,6 +946,7 @@ async def publish_validator_config_event(
     try:
         producer = AIOKafkaProducer(
             bootstrap_servers=KAFKA_BROKER,
+            max_request_size=KAFKA_MAX_MESSAGE_BYTES,
             **kafka_security_kwargs()
         )
         await producer.start()
@@ -901,6 +1035,8 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "evidence_used": extras.get("evidence_used", []),
             "evidence_validation": extras.get("evidence_validation"),
             "evaluation_citation_trace": extras.get("evaluation_citation_trace"),
+            "llm_usage": extras.get("llm_usage"),
+            "resolved_model": extras.get("resolved_model"),
             "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
             "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
@@ -930,6 +1066,7 @@ async def consume_light_validation_requests():
     )
     light_producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BROKER,
+        max_request_size=KAFKA_MAX_MESSAGE_BYTES,
         **kafka_security_kwargs()
     )
 
@@ -1054,6 +1191,8 @@ async def registrar_validacion_internal(
             "sources_declared": extras.get("sources_declared", []),
             "evidence_used": extras.get("evidence_used", []),
             "evidence_validation": extras.get("evidence_validation"),
+            "llm_usage": extras.get("llm_usage"),
+            "resolved_model": extras.get("resolved_model"),
             "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
         }
@@ -1399,6 +1538,7 @@ async def publish_blockchain_validation_error(
     )
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BROKER,
+        max_request_size=KAFKA_MAX_MESSAGE_BYTES,
         **kafka_security_kwargs(),
     )
     await producer.start()

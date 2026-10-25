@@ -292,6 +292,39 @@ def test_eligibility_requires_route_matches_authority_and_jurisdiction():
     assert eligibility.is_eligible(signature, european)
 
 
+def test_supranational_primary_intergovernmental_records_are_eligible_by_capability():
+    signature = signatures.build_route_signature(request(
+        topic_code="POLITICS_GOVERNMENT",
+        evidence_kind="LEGAL_TEXT",
+        jurisdiction={"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"},
+    ))
+    source_data = classified(
+        "official.eu.example",
+        {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"},
+        "SUPRANATIONAL_PRIMARY",
+    ).model_dump()
+    source_data.update({
+        "source_type": "INTERGOVERNMENTAL_ORGANIZATION",
+        "topic_codes": ["POLITICS_GOVERNMENT"],
+        "evidence_kinds": ["LEGAL_TEXT"],
+    })
+    source = models.SourceClassification.model_validate(source_data)
+
+    assert eligibility.is_eligible(signature, source)
+
+    not_primary = models.SourceClassification.model_validate(
+        source.model_dump() | {"authority_level": "SECONDARY_AUTHORITATIVE"},
+    )
+    assert not eligibility.is_eligible(signature, not_primary)
+
+    unrelated_kind = signatures.build_route_signature(request(
+        topic_code="POLITICS_GOVERNMENT",
+        evidence_kind="COMPANY_DISCLOSURE",
+        jurisdiction={"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"},
+    ))
+    assert not eligibility.is_eligible(unrelated_kind, source)
+
+
 def test_infrastructure_operator_is_generic_statistical_source_with_normal_guards():
     source_data = classified(
         "operator.example", {"scope": "COUNTRY", "country_code": "ES"},
@@ -442,6 +475,122 @@ async def test_missing_route_builds_profiles_and_fresh_route_reuses_them(monkeyp
     assert second.route_state == "FRESH"
     assert calls == ["search", "llm"]
     assert list(repo.profiles) == ["idescat.cat"]
+
+
+@pytest.mark.asyncio
+async def test_exa_auto_discovery_runs_only_when_lite_has_no_eligible_source(monkeypatch):
+    repo = MemoryRepository()
+    router = service_module.SourceRouterService(repo, settings())
+    calls = []
+
+    async def fake_search(provider, query, limit, **kwargs):
+        tier = "auto" if kwargs.get("search_profile") == "fallback" else "lite"
+        calls.append(tier)
+        if tier == "lite":
+            return {"results": []}
+        return {"results": [{"url": "https://idescat.cat/data", "score": 0.9}]}
+
+    async def fake_classify(*args, **kwargs):
+        return [classified()] if args[2] else []
+
+    monkeypatch.setenv("EXA_SEARCH_TYPE_PRIMARY", "lite")
+    monkeypatch.setenv("EXA_SEARCH_TYPE_FALLBACK", "auto")
+    monkeypatch.setattr(service_module, "search_with_provider", fake_search)
+    monkeypatch.setattr(service_module, "classify_candidates", fake_classify)
+    trace = {}
+    result = await router.resolve(request(), evaluation_trace=trace)
+
+    assert [item.domain for item in result.sources] == ["idescat.cat"]
+    assert calls == ["lite", "auto"]
+    assert [row["search_type"] for row in trace["query_execution"]] == calls
+
+
+@pytest.mark.asyncio
+async def test_exa_auto_discovery_is_skipped_for_eligible_lite_source(monkeypatch):
+    router = service_module.SourceRouterService(MemoryRepository(), settings())
+    calls = []
+
+    async def fake_search(provider, query, limit, **kwargs):
+        calls.append("auto" if kwargs.get("search_profile") == "fallback" else "lite")
+        return {"results": [{"url": "https://idescat.cat/data", "score": 0.9}]}
+
+    async def fake_classify(*args, **kwargs):
+        return [classified()]
+
+    monkeypatch.setenv("EXA_SEARCH_TYPE_PRIMARY", "lite")
+    monkeypatch.setenv("EXA_SEARCH_TYPE_FALLBACK", "auto")
+    monkeypatch.setattr(service_module, "search_with_provider", fake_search)
+    monkeypatch.setattr(service_module, "classify_candidates", fake_classify)
+    result = await router.resolve(request())
+
+    assert result.sources
+    assert calls == ["lite"]
+
+
+@pytest.mark.asyncio
+async def test_switching_provider_does_not_reuse_or_preserve_old_route(monkeypatch):
+    old = route_document(classified())
+    repo = MemoryRepository(old, {"idescat.cat": profile(classified())})
+    config = settings()
+    config.search_provider = "tavily"
+    router = service_module.SourceRouterService(repo, config)
+    calls = []
+
+    async def fake_search(provider, query, limit):
+        calls.append(provider)
+        return {"results": [{"url": "https://ine.es/data"}]}
+
+    async def fake_classify(*args):
+        return [classified("ine.es")]
+
+    monkeypatch.setattr(service_module, "search_with_provider", fake_search)
+    monkeypatch.setattr(service_module, "classify_candidates", fake_classify)
+    result = await router.resolve(request())
+
+    assert calls == ["tavily"]
+    assert result.route_state == "MISSING"
+    assert [item.domain for item in result.sources] == ["ine.es"]
+    assert repo.route.discovery_provider == "tavily"
+    assert repo.route.discovery_config["provider"] == "tavily"
+
+
+@pytest.mark.asyncio
+async def test_router_uses_fallback_profile_of_registered_provider(monkeypatch):
+    import common.search.factory as search_factory
+    from common.search import SearchProvider
+
+    class TwoProfileProvider(SearchProvider):
+        name = "two-profile-test"
+
+        def default_mode(self):
+            return "quick"
+
+        def profile_mode(self, profile):
+            return {"primary": "quick", "fallback": "thorough"}[profile]
+
+        async def search(self, request):
+            raise AssertionError("search call is replaced by the router test double")
+
+    monkeypatch.setitem(search_factory._providers, "two-profile-test", TwoProfileProvider())
+    config = settings()
+    config.search_provider = "two-profile-test"
+    router = service_module.SourceRouterService(MemoryRepository(), config)
+    calls = []
+
+    async def fake_search(provider, query, limit, **kwargs):
+        calls.append(kwargs.get("search_profile", "primary"))
+        return {"results": []} if calls[-1] == "primary" else {
+            "results": [{"url": "https://idescat.cat/data"}]}
+
+    async def fake_classify(*args):
+        return [classified()] if args[2] else []
+
+    monkeypatch.setattr(service_module, "search_with_provider", fake_search)
+    monkeypatch.setattr(service_module, "classify_candidates", fake_classify)
+    result = await router.resolve(request())
+
+    assert [item.domain for item in result.sources] == ["idescat.cat"]
+    assert calls == ["primary", "fallback"]
 
 
 @pytest.mark.asyncio

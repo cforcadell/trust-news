@@ -201,3 +201,34 @@ Para capturar modelo, intentos y reparación de Generate Assertions en órdenes 
 La corrección semántica de una afirmación, el apoyo real de una evidencia y la idoneidad de un dominio sin anotación revisada siguen siendo juicios humanos. El visor distingue esos huecos como `NOT_EVALUATED`; una cita con ID válido solo acredita identidad y elegibilidad. La tabla de consenso resume votos, pesos y motivos que ya constan en la orden. No modifica ni anota los artefactos originales.
 
 En Router, la traza de evaluación diferencia consultas previstas y ejecutadas, URLs devueltas, deduplicación, rechazo por elegibilidad y ranking por candidato. Una ruta `FRESH` reutilizada no contiene búsqueda nueva: el visor muestra las listas históricas como tales y deja sin reconstruir URLs o motivos individuales que no se guardaron en el documento de ruta. La captura detallada de Router se activa con el mismo `EVALUATION_CAPTURE_PIPELINE=true` del validador LIGHT; las peticiones normales mantienen su respuesta sin `evaluation_trace`.
+
+## Costes por validación, orden y campaña
+
+El viewer tiene una pestaña **Costes** en campaña y orden. Reconstruye un registro por llamada observada desde los snapshots: tokens del LLM validador, intentos de generación, clasificación de Router y peticiones de búsqueda de Router/Evidence Search. Cada evento conserva `run_id`, componente, proveedor/modelo, unidades, tarifa aplicada e importe USD. Las sumas se deduplican por ID de evento. Una respuesta desde caché sin llamada nueva no genera coste de proveedor.
+
+Las tarifas se facilitan mediante `--cost-rates RUTA` al iniciar la evaluación. La CLI valida el archivo y guarda una copia `cost-rates.json` en la campaña; `launch_e2e.sh` admite `EVALUATION_COST_RATES_FILE=RUTA`. Formato:
+
+```json
+{
+  "schema_version": "evaluation-cost-rates-v1",
+  "currency": "USD",
+  "llm": [{
+    "provider": "PROVEEDOR", "model": "MODELO",
+    "input_usd_per_million_tokens": "0.00",
+    "output_usd_per_million_tokens": "0.00"
+  }],
+  "search": [{"provider": "BUSCADOR", "usd_per_call": "0.00"}]
+}
+```
+
+Sustituye los nombres e importes por las tarifas contratadas. Las filas ausentes quedan `RATE_MISSING`. Si un proveedor no entrega tokens, queda `USAGE_MISSING`; una búsqueda fallida con tarifa positiva queda `BILLING_UNKNOWN` porque su facturación no está demostrada. Si falta la traza de una búsqueda ejecutada, aparece `TRACE_MISSING`. `known_usd` es la suma calculable y `total_usd` vale `null` si existe al menos un evento sin coste calculable o no hay eventos. Se registran las respuestas y búsquedas observadas; reintentos internos sin traza, créditos o descuentos comerciales y costes de alojamiento, almacenamiento y red local quedan fuera. Campañas antiguas se pueden inspeccionar sin tarifas y conservarán sus consumos como desconocidos.
+
+`launch_e2e.sh` usa por defecto `tests/evaluation/rates/local-2026-10-25.json`. Es una fotografía de precios públicos consultados el 25-10-2026, no una factura ni un contrato: hay que revisar el modelo efectivo y las tarifas antes de una campaña posterior, o sustituirla con `EVALUATION_COST_RATES_FILE`. La tarjeta cubre los modelos configurados para generación, Source Router y los tres workers locales; si Admin cambió un modelo en caliente, aparecerá `RATE_MISSING` hasta añadirlo. Los precios LLM son por millón de tokens de entrada/salida y no descuentan caché, promociones o créditos. Fuentes: [GPT-5 Nano](https://openrouter.ai/openai/gpt-5-nano/pricing), [Gemini 2.5 Flash Lite](https://openrouter.ai/google/gemini-2.5-flash-lite/pricing), [Llama 3.1 8B](https://openrouter.ai/meta-llama/llama-3.1-8b-instruct/overview), [Qwen3 30B Instruct 2507](https://openrouter.ai/qwen/qwen3-30b-a3b-instruct-2507), [Mistral Small 3](https://openrouter.ai/mistralai/mistral-small-24b-instruct-2501/pricing) y [Exa](https://exa.ai/pricing).
+
+La tarifa de búsqueda admite opcionalmente `search_type`, `included_results` y `usd_per_additional_result` junto a `usd_per_call`. En las trazas nuevas, `search_profile` indica `primary` o `fallback` y `search_type` conserva el modo efectivo del adaptador para el cálculo de tarifas y para leer campañas antiguas. La tarjeta local diferencia Exa Lite (0,004 USD) y Auto (0,007 USD) por búsqueda hasta 10 resultados; el precio genérico Exa se aplica a trazas anteriores sin nivel. Cada resultado adicional observado se estima en 0,001 USD. Si una traza no guarda el número de URLs devueltas, ese evento queda `RESULT_COUNT_MISSING` en lugar de aplicar solo la base. La [documentación de Exa](https://exa.ai/docs/contents/quickstart) indica que texto y highlights de hasta 10 resultados de Search van incluidos. La tarifa de la tarjeta estima precio de lista; la facturación efectiva puede variar según descuentos, modalidad y el detalle registrado por Exa.
+
+El resumen distingue `priced_events` y `unknown_reasons`; muestra «—» como coste conocido si no se ha podido valorar ningún evento, nunca 0 USD. Los validadores LIGHT y BLOCKCHAIN guardan `llm_usage` y `resolved_model` de la respuesta real y el importador los conserva en la etapa LLM. Hay que desplegar estos servicios antes de lanzar una nueva campaña para registrar el consumo. Las campañas ya ejecutadas no pueden recuperar tokens o trazas ausentes a partir del veredicto. Para obtener importes hace falta además una tarjeta de tarifas con los precios contratados; no se infieren precios del proveedor ni se presentan estimaciones como costes reales.
+
+Los agregados de campaña, orden, validador y componente proceden del mismo registro de llamadas, sin sumar dos veces los eventos compartidos. Incluyen tokens de entrada/salida observados, sus costes separados y los costes de búsqueda (Exa u otro proveedor tarifado). En una orden, la primera fila agrega todos los componentes; las filas de validador se pueden desplegar para consultar las llamadas individuales. Una búsqueda se atribuye al validador que la solicitó, aunque su proveedor no sea un LLM. Un componente sin precio/uso conserva `total_usd=null`; el coste conocido no debe confundirse con el total facturado.
+
+La configuración Kubernetes del generador activa `EVALUATION_CAPTURE_GENERATION=true` y la común de validadores activa `EVALUATION_CAPTURE_PIPELINE=true`. Deben desplegarse antes de publicar órdenes nuevas. En rutas frescas, Router informa también del uso de clasificación; en rutas reutilizadas desde caché no hay una nueva llamada al LLM. Los reintentos internos que fallen antes de devolver una respuesta con uso y los descuentos reales del proveedor no pueden estimarse a partir de estas trazas.

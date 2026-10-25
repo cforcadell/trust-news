@@ -380,7 +380,7 @@ function renderEmptyCampaign() {
 }
 function campaignTabs() {
   const tabs = el("div", "view-tabs");
-  for (const [key, label] of [["summary", "Resumen"], ["orders", "Órdenes"], ["incidents", "Incidencias"]]) {
+  for (const [key, label] of [["summary", "Resumen"], ["orders", "Órdenes"], ["costs", "Costes"], ["incidents", "Incidencias"]]) {
     const node = button(label, () => { state.campaignView = key; renderCampaignOverview(); },
       state.campaignView === key ? "active" : "");
     node.setAttribute("role", "tab"); node.setAttribute("aria-selected", String(state.campaignView === key));
@@ -441,6 +441,89 @@ function campaignSummaryView() {
     add(table, add(el("thead"), head), body); add(wrap, table); add(card, wrap);
   }
   return add(block, card);
+}
+
+function money(value) {
+  return value === null || value === undefined ? "—" :
+    `${new Intl.NumberFormat("es-ES", {minimumFractionDigits: 2, maximumFractionDigits: 8}).format(Number(value))} USD`;
+}
+function costStatus(costs) {
+  return !costs.events ? "No hay consumos registrados" :
+    costs.unknown_events ? `${costs.unknown_events} eventos sin coste calculable` : "Cobertura completa";
+}
+function knownMoney(costs) {
+  return costs.priced_events ? money(costs.known_usd) : "—";
+}
+function tokenSummary(costs) {
+  if (!costs.llm_events_with_usage) return "—";
+  return `${costs.input_tokens ?? 0} / ${costs.output_tokens ?? 0}`;
+}
+function llmMoney(costs, field) {
+  return costs.llm_priced_events ? money(costs[field]) : "—";
+}
+function searchMoney(costs) {
+  return costs.search_priced_events ? money(costs.search_cost_usd) : "—";
+}
+function missingCostDetail(costs) {
+  const reasons = costs.unknown_reasons || {};
+  const labels = {RATE_MISSING: "sin tarifa", USAGE_MISSING: "sin tokens registrados",
+    BILLING_UNKNOWN: "facturación de llamada fallida desconocida", TRACE_MISSING: "sin traza",
+    RESULT_COUNT_MISSING: "sin número de resultados"};
+  return Object.entries(reasons).map(([reason, count]) => `${count} ${labels[reason] || reason}`).join(" · ");
+}
+function campaignCostView() {
+  const costs = state.orderList.costs || {};
+  const block = el("div", "stack");
+  add(block, add(el("section", "summary overview-metrics"),
+    metric(knownMoney(costs), "coste conocido"),
+    metric(!costs.events ? "Sin datos" : costs.total_usd === null ? "Incompleto" : money(costs.total_usd), "total de campaña"),
+    metric(costs.events ?? 0, "eventos medidos"),
+    metric(costs.unknown_events ?? 0, "eventos sin coste"),
+    metric(tokenSummary(costs), "tokens entrada / salida")));
+  add(block, add(el("p", "muted"),
+    `${costStatus(costs)}${missingCostDetail(costs) ? ` (${missingCostDetail(costs)})` : ""}. Tarifas ${costs.rates_configured ? "guardadas en la campaña" : "no configuradas"}. ` +
+    "Los importes se calculan con tarifas USD de la campaña; cómputo, alojamiento, descuentos y reintentos internos sin traza quedan fuera."));
+  const breakdown = add(el("section", "card"), el("h2", "", "Por componente"));
+  const componentTable = el("table"), componentBody = el("tbody");
+  add(componentTable, add(el("thead"), add(el("tr"), ...["Componente", "Eventos", "Sin coste", "Tokens E / S", "Coste entrada", "Coste salida", "Coste conocido", "Total"].map(v => el("th", "", v)))), componentBody);
+  for (const [name, row] of Object.entries(costs.components || {})) {
+    add(componentBody, add(el("tr"), el("td", "", name), el("td", "", row.events),
+      el("td", "", row.unknown_events), el("td", "", tokenSummary(row)),
+      el("td", "", llmMoney(row, "input_cost_usd")), el("td", "", llmMoney(row, "output_cost_usd")),
+      el("td", "", knownMoney(row)), el("td", "", money(row.total_usd))));
+  }
+  if (!componentBody.children.length) add(breakdown, el("p", "muted", "No hay consumos registrados."));
+  else add(breakdown, add(el("div", "table-wrap"), componentTable));
+  add(block, breakdown);
+  const orders = add(el("section", "card"), el("h2", "", "Órdenes y validaciones"));
+  const table = el("table"), body = el("tbody");
+  add(table, add(el("thead"), add(el("tr"), ...["Orden / validación", "Desglose", "Eventos", "Sin coste", "Tokens E / S", "Coste entrada", "Coste salida", "Búsquedas", "Conocido", "Total"].map(v => el("th", "", v)))), body);
+  add(body, add(el("tr", "cost-order-row"), el("th", "", "CAMPAÑA"), el("td", "", "Todos los componentes"),
+    el("td", "", costs.events ?? 0), el("td", "", costs.unknown_events ?? 0),
+    el("td", "", tokenSummary(costs)), el("td", "", llmMoney(costs, "input_cost_usd")),
+    el("td", "", llmMoney(costs, "output_cost_usd")), el("td", "", searchMoney(costs)),
+    el("td", "", knownMoney(costs)), el("td", "", money(costs.total_usd))));
+  for (const item of state.orderList.orders) {
+    const value = item.costs || {};
+    const open = button(item.order_id, () => openOrder(item.file, {view: "costs"}), "mono");
+    add(body, add(el("tr", "cost-order-row"), add(el("td"), open), el("td", "", `Repetición ${item.repetition}`),
+      el("td", "", value.events ?? 0), el("td", "", value.unknown_events ?? 0),
+      el("td", "", tokenSummary(value)), el("td", "", llmMoney(value, "input_cost_usd")),
+      el("td", "", llmMoney(value, "output_cost_usd")), el("td", "", searchMoney(value)),
+      el("td", "", knownMoney(value)), el("td", "", money(value.total_usd))));
+    for (const validation of value.validations || []) {
+      const openValidation = button(`${validation.assertion_id} · ${validation.validator_id}`,
+        () => openOrder(item.file, {view: "costs", run_id: validation.run_id, assertion_id: validation.assertion_id}), "mono");
+      add(body, add(el("tr"), add(el("td", "cost-validation-row"), openValidation),
+        el("td", "", `${validation.provider || "—"}${validation.model ? ` / ${validation.model}` : ""}`), el("td", "", validation.events),
+        el("td", "", validation.unknown_events), el("td", "", tokenSummary(validation)),
+        el("td", "", llmMoney(validation, "input_cost_usd")), el("td", "", llmMoney(validation, "output_cost_usd")),
+        el("td", "", searchMoney(validation)), el("td", "", knownMoney(validation)),
+        el("td", "", money(validation.total_usd))));
+    }
+  }
+  add(orders, add(el("div", "table-wrap"), table)); add(block, orders);
+  return block;
 }
 function campaignOrderTable(title = "Órdenes de la campaña") {
   const card = add(el("section", "card"), el("h2", "", title));
@@ -560,7 +643,8 @@ function renderCampaignOverview() {
     el("p", "muted", `${state.orderList.orders.length} órdenes · ${state.orderList.status}`), campaignTabs());
   const problems = errorBlock(state.orderList.errors); if (problems) add(main, problems);
   add(main, state.campaignView === "summary" ? campaignSummaryView() :
-    state.campaignView === "incidents" ? campaignIncidentTable() : campaignOrderTable());
+    state.campaignView === "incidents" ? campaignIncidentTable() :
+    state.campaignView === "costs" ? campaignCostView() : campaignOrderTable());
 }
 async function openOrder(file, focus = null) {
   try {
@@ -568,7 +652,7 @@ async function openOrder(file, focus = null) {
     state.diagnostic = await api(`/api/campaigns/${enc(state.campaign)}/orders/${enc(file)}`);
     state.assertionId = focus?.assertion_id || state.diagnostic.order.assertions[0]?.assertion_id || null;
     state.runId = focus?.run_id || state.diagnostic.validations.find(v => v.assertion_id === state.assertionId)?.run_id || null;
-    state.stage = focus?.stage || "generation"; state.view = focus ? "detail" : "summary"; renderNavigation(); renderDetail();
+    state.stage = focus?.stage || "generation"; state.view = focus?.view || (focus ? "detail" : "summary"); renderNavigation(); renderDetail();
   } catch (error) { showError(error.message); }
 }
 function metric(value, label) { return add(el("div", "metric"), el("strong", "", value), el("span", "", label)); }
@@ -756,10 +840,70 @@ function renderViewTabs() {
   const summary = button("Resumen", () => { state.view = "summary"; renderDetail(); }, state.view === "summary" ? "active" : "");
   const detail = button("Detalle", () => { state.view = "detail"; renderDetail(); }, state.view === "detail" ? "active" : "");
   const failures = button("Diagnóstico", () => { state.view = "failures"; renderDetail(); }, state.view === "failures" ? "active" : "");
-  for (const [node, selected] of [[summary, state.view === "summary"], [detail, state.view === "detail"], [failures, state.view === "failures"]]) {
+  const costs = button("Costes", () => { state.view = "costs"; renderDetail(); }, state.view === "costs" ? "active" : "");
+  for (const [node, selected] of [[summary, state.view === "summary"], [detail, state.view === "detail"], [failures, state.view === "failures"], [costs, state.view === "costs"]]) {
     node.setAttribute("role", "tab"); node.setAttribute("aria-selected", String(selected));
   }
-  return add(tabs, summary, detail, failures);
+  return add(tabs, summary, detail, failures, costs);
+}
+
+function renderOrderCosts(diagnostic) {
+  const costs = diagnostic.costs || {};
+  const block = el("div", "stack");
+  add(block, add(el("section", "summary overview-metrics"),
+    metric(knownMoney(costs), "coste conocido"),
+    metric(!costs.events ? "Sin datos" : costs.total_usd === null ? "Incompleto" : money(costs.total_usd), "total de orden"),
+    metric(costs.events ?? 0, "eventos"), metric(costs.unknown_events ?? 0, "sin coste"),
+    metric(tokenSummary(costs), "tokens entrada / salida")));
+  const card = add(el("section", "card"), el("h2", "", "Registro de consumos"),
+    el("p", "muted", "Una fila por llamada observada. Las filas sin uso o tarifa quedan pendientes de valorar."));
+  const table = el("table"), body = el("tbody");
+  add(table, add(el("thead"), add(el("tr"), ...["Orden / validador / llamada", "Componente", "Proveedor / modelo", "Tokens E / S", "Tarifa", "Coste entrada", "Coste salida", "Búsqueda", "Coste", "Estado"].map(v => el("th", "", v)))), body);
+  function aggregateRow(label, summary, className = "") {
+    return add(el("tr", className), el("th", "", label), el("td", "", `${summary.events ?? 0} eventos`),
+      el("td", "", `${summary.unknown_events ?? 0} sin coste`), el("td", "", tokenSummary(summary)), el("td", "", "—"),
+      el("td", "", llmMoney(summary, "input_cost_usd")), el("td", "", llmMoney(summary, "output_cost_usd")),
+      el("td", "", searchMoney(summary)), el("td", "", knownMoney(summary)),
+      el("td", "", summary.total_usd === null ? "Incompleto" : money(summary.total_usd)));
+  }
+  add(body, aggregateRow("ORDEN · todos los componentes", costs, "cost-order-row"));
+  function eventRow(event) {
+    const used = event.usage ? `${event.usage.input_tokens} entrada · ${event.usage.output_tokens} salida` :
+      `${event.quantity} ${event.unit}`;
+    const rate = event.rate?.usd_per_call !== undefined ?
+      `${event.rate.usd_per_call} USD/llamada${event.rate.usd_per_additional_result !== undefined ?
+        ` + ${event.rate.usd_per_additional_result} USD/resultado > ${event.rate.included_results}` : ""}` :
+      event.rate?.input_usd_per_million_tokens !== undefined ?
+        `${event.rate.input_usd_per_million_tokens} / ${event.rate.output_usd_per_million_tokens} USD/M tokens` : "—";
+    return add(el("tr", event.run_id === state.runId ? "selected-row" : ""),
+      el("td", "mono", event.run_id ? `${event.assertion_id} · ${event.validator_id}` : "Orden"),
+      el("td", "", event.component), el("td", "", `${event.provider || "—"}${event.model ? ` / ${event.model}` : ""}`),
+      el("td", "", used), el("td", "", rate), el("td", "", money(event.input_cost_usd)), el("td", "", money(event.output_cost_usd)),
+      el("td", "", event.component.endsWith("_llm") ? "—" : money(event.cost_usd)),
+      el("td", "", money(event.cost_usd)), el("td", "", event.reason || event.basis));
+  }
+  const generationEvents = (costs.ledger || []).filter(event => !event.validator_id);
+  if (generationEvents.length) {
+    add(body, aggregateRow("Generación", costs.generation, "cost-order-row"));
+    for (const event of generationEvents) add(body, eventRow(event));
+  }
+  for (const group of costs.validators || []) {
+    const children = (costs.ledger || []).filter(event => event.validator_id === group.validator_id).map(eventRow);
+    const label = button(`▸ Validador ${group.validator_id} · ${group.validations.length} validaciones`, () => {
+      const expanded = children.some(row => row.hidden);
+      for (const row of children) row.hidden = !expanded;
+      label.textContent = `${expanded ? "▾" : "▸"} Validador ${group.validator_id} · ${group.validations.length} validaciones`;
+      label.setAttribute("aria-expanded", String(expanded));
+    }, "mono");
+    label.setAttribute("aria-expanded", "false");
+    const summary = aggregateRow("", group, "cost-order-row");
+    summary.firstChild.replaceWith(add(el("th"), label));
+    add(body, summary);
+    for (const row of children) { row.hidden = true; add(body, row); }
+  }
+  add(card, add(el("div", "table-wrap"), table));
+  if (!body.children.length) add(card, el("p", "muted", "No hay consumos registrados en esta orden."));
+  return add(block, card);
 }
 
 function openFailure(row) {
@@ -828,6 +972,7 @@ function renderDetail() {
   add(main, metrics, renderViewTabs());
   const problems = errorBlock(state.orderList?.errors); if (problems) add(main, problems);
   if (state.view === "summary") { add(main, renderOrderSummary(d)); return; }
+  if (state.view === "costs") { add(main, renderOrderCosts(d)); return; }
   add(main, renderFilters());
   if (state.view === "failures") { add(main, renderFailureSummary(d)); return; }
   const layout = el("div", "grid"); const left = el("div", "stack");
@@ -929,10 +1074,14 @@ function renderStage() {
 function renderGeneration(observations) {
   const block = el("section");
   const info = el("div", "summary");
+  const usages = (observations.usage || []).filter(item =>
+    Number.isInteger(item?.prompt_tokens) && Number.isInteger(item?.completion_tokens));
   add(info, metric(recorded(observations.model), "modelo"),
     metric(recorded(observations.structured_attempts), "llamadas estructuradas"),
     metric(observations.repair_used == null ? "No registrado" : observations.repair_used ? "Sí" : "No", "reparación"),
-    metric(recorded(observations.duration_seconds), "segundos"));
+    metric(recorded(observations.duration_seconds), "segundos"),
+    metric(usages.length ? usages.reduce((sum, item) => sum + item.prompt_tokens, 0) : "No registrado", "tokens entrada"),
+    metric(usages.length ? usages.reduce((sum, item) => sum + item.completion_tokens, 0) : "No registrado", "tokens salida"));
   if ([observations.structured_attempts, observations.repair_used, observations.duration_seconds].some(value => value == null))
     add(block, el("p", "muted", "La orden no contiene la traza completa de Generate Assertions. Estos valores no pueden reconstruirse de forma fiable."));
   add(block, info, el("h3", "", "Esperadas y generadas"));

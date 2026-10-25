@@ -6,7 +6,7 @@ from dataclasses import is_dataclass, replace
 from datetime import timedelta
 
 from common.llm import LLMProviderError, LLMResponseError
-from common.search import search_with_provider
+from common.search import get_search_plan, search_with_provider
 from common.search.normalization import normalize_domain
 from common.routing_taxonomy import MatchLevel
 
@@ -102,7 +102,9 @@ class SourceRouterService:
         effective.llm_temperature = self.llm_temperature
         return effective
 
-    async def _discover(self, request: ResolveRouteRequest, trace: dict | None = None) -> list[CandidateSource]:
+    async def _discover(self, request: ResolveRouteRequest, trace: dict | None = None,
+                        search_profile: str = "primary", search_mode: str | None = None,
+                        select_profile: bool = False) -> list[CandidateSource]:
         signature = build_route_signature(request)
         candidates: dict[str, CandidateSource] = {}
         generic_query = build_generic_discovery_query(signature, request)
@@ -117,9 +119,15 @@ class SourceRouterService:
                 query_trace = {"query": query, "provider": self.settings.search_provider,
                                "requested_results": self.settings.discovery_max_results,
                                "status": "EXECUTED", "returned_urls": [], "result_decisions": []}
+                if search_mode:
+                    query_trace["search_type"] = search_mode
+                    query_trace["search_mode"] = search_mode
+                query_trace["search_profile"] = search_profile
                 trace.setdefault("query_execution", []).append(query_trace)
             try:
-                response = await search_with_provider(self.settings.search_provider, query, self.settings.discovery_max_results)
+                response = await search_with_provider(
+                    self.settings.search_provider, query, self.settings.discovery_max_results,
+                    **({"search_profile": search_profile} if select_profile else {}))
             except Exception as exc:
                 if query_trace is not None:
                     query_trace.update(status="FAILED", error_type=type(exc).__name__)
@@ -249,6 +257,14 @@ class SourceRouterService:
         key = route_key(signature)
         now = utc_now()
         previous = None if force_refresh else await self.repository.get(key)
+        search_plan = get_search_plan(self.settings.search_provider)
+        discovery_config = search_plan["cache_config"]
+        # Routes from another backend or search policy must not be served as
+        # fresh, preserved during refresh, or reused after a failed refresh.
+        if previous and (previous.discovery_provider != self.settings.search_provider
+                         or previous.discovery_config is not None
+                         and previous.discovery_config != discovery_config):
+            previous = None
         if evaluation_trace is not None:
             evaluation_trace.update(cache_lookup="BYPASSED_COLD" if force_refresh else
                                     "FRESH" if previous and previous.refresh_after > now else
@@ -256,7 +272,7 @@ class SourceRouterService:
                                     previous_route_present=previous is not None,
                                     query_execution=[], classification=[], rejected_domains=[],
                                     ranking=[], preserved_domains=[])
-        if previous and previous.refresh_after > now:
+        if previous and previous.router_version == self.settings.router_version and previous.refresh_after > now:
             sources = await self._rank_route(previous, request, evaluation_trace)
             return ResolveRouteResponse(
                 route_key=key, route_state="FRESH", sources=sources, router_version=previous.router_version,
@@ -266,17 +282,46 @@ class SourceRouterService:
 
         initial_state = "STALE" if previous else "MISSING"
         try:
-            candidates = await self._discover(request, evaluation_trace)
+            primary_search_type = search_plan["primary_mode"]
+            fallback_search_type = search_plan["fallback_mode"]
+            candidates = await self._discover(
+                request, evaluation_trace,
+                search_mode=primary_search_type,
+                select_profile=search_plan["primary_requires_selection"])
             diagnostics = RouteDiagnostics(discovered_domains=[item.domain for item in candidates])
+            if evaluation_trace is not None and candidates:
+                evaluation_trace["classification_provider"] = self.llm_provider
+                evaluation_trace["classification_model"] = self.llm_model
             try:
                 classified = await classify_candidates(signature, request, candidates, self.classifier_settings())
                 diagnostics.failed_domains = list(getattr(classified, "failed_domains", []))
+                if evaluation_trace is not None and candidates:
+                    evaluation_trace["classification_usage"] = getattr(classified, "usage", [])
             except (LLMProviderError, LLMResponseError):
                 logger.warning("Classification failed route_key=%s; checking prior profiles", key, exc_info=True)
                 classified = []
                 diagnostics.failed_domains = diagnostics.discovered_domains.copy()
                 if evaluation_trace is not None:
                     evaluation_trace["classification_error_type"] = "LLM_CLASSIFICATION_ERROR"
+            if (fallback_search_type and not eligible_sources(signature, classified)):
+                try:
+                    tier_candidates = await self._discover(
+                        request, evaluation_trace, search_profile="fallback",
+                        search_mode=fallback_search_type, select_profile=True)
+                    known_domains = {item.domain for item in candidates}
+                    new_candidates = [item for item in tier_candidates if item.domain not in known_domains]
+                    if new_candidates:
+                        auto_classified = await classify_candidates(
+                            signature, request, new_candidates, self.classifier_settings())
+                        candidates.extend(new_candidates)
+                        classified.extend(auto_classified)
+                        diagnostics.failed_domains.extend(getattr(auto_classified, "failed_domains", []))
+                        if evaluation_trace is not None:
+                            evaluation_trace.setdefault("classification_usage", []).extend(
+                                getattr(auto_classified, "usage", []))
+                except Exception as exc:
+                    logger.warning("Discovery fallback failed route_key=%s error=%s", key, exc)
+            diagnostics.discovered_domains = [item.domain for item in candidates]
             diagnostics.classified_domains = [item.domain for item in classified]
             classifications = eligible_sources(signature, classified)
             eligible_domains = {item.domain for item in classifications}
@@ -360,6 +405,7 @@ class SourceRouterService:
                 candidates=list(current.values()),
                 router_version=self.settings.router_version,
                 discovery_provider=self.settings.search_provider,
+                discovery_config=discovery_config,
                 classification_model=self.llm_model,
                 classification_config_version=self.llm_config_version,
                 created_at=previous.created_at if previous else now,

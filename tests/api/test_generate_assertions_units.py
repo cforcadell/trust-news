@@ -102,8 +102,11 @@ async def test_evaluation_trace_records_structured_repair_without_response_body(
     monkeypatch.setattr(generate, "build_assertions_llm_request", lambda text, model: object())
     monkeypatch.setattr(generate, "parse_assertions_content", lambda content: ["assertion"])
 
-    async def fake_completion(provider, request, repair_builder):
+    async def fake_completion(provider, request, repair_builder, usage_observer=None):
         repair_builder('{"assertions":[]}', "invalid schema")
+        if usage_observer:
+            usage_observer(SimpleNamespace(usage=SimpleNamespace(model_dump=lambda **kwargs: {
+                "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120})))
         return SimpleNamespace(model_dump=lambda **kwargs: {"assertions": []})
 
     monkeypatch.setattr(generate, "acomplete_structured_with_repair", fake_completion)
@@ -115,4 +118,5 @@ async def test_evaluation_trace_records_structured_repair_without_response_body(
     assert trace["repair_used"] is True
     assert trace["assertion_count"] == 1
     assert trace["validation_issues"] == []
+    assert trace["usage"] == [{"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}]
     assert "response" not in str(trace)

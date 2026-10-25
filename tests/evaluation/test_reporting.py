@@ -43,6 +43,17 @@ def test_old_order_missing_handoff_not_passed():
     assert evaluate(result)["handoff"]["status"] == "NOT_EVALUATED"
 
 
+def test_imported_order_preserves_validator_usage_for_costs():
+    dataset = case()
+    order = {"order_id": "order", "assertions": [{"idAssertion": "1", "text": dataset["assertions"][0]["text"]}],
+             "validations": {"1": {"v": {"execution_status": "COMPLETED", "approval": "TRUE",
+                 "llm_usage": {"prompt_tokens": 120, "completion_tokens": 40},
+                 "resolved_model": "model-a"}}}}
+    result = results_from_order(dataset, order)[0]
+    assert result.validator_output["usage"] == {"prompt_tokens": 120, "completion_tokens": 40}
+    assert result.validator_output["resolved_model"] == "model-a"
+
+
 def test_extraction_missing_and_unevaluable_are_distinct():
     dataset = case()
     result = results_from_order(dataset, {"assertions": []})[0].to_dict()

@@ -15,6 +15,7 @@ TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "fake_news_requests")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
 TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", "trustnews.validation.requests")
 TOPIC_LIGHT_VALIDATION_RESPONSES = os.getenv("TOPIC_LIGHT_VALIDATION_RESPONSES", "trustnews.validation.responses")
+KAFKA_MAX_MESSAGE_BYTES = int(os.getenv("KAFKA_MAX_MESSAGE_BYTES", str(4 * 1024 * 1024)))
 
 def create_topics():
     admin_client = KafkaAdminClient(
@@ -23,9 +24,19 @@ def create_topics():
 
     topics = [
         NewTopic(name=TOPIC_REQUESTS, num_partitions=1, replication_factor=1),
-        NewTopic(name=TOPIC_RESPONSES, num_partitions=1, replication_factor=1),
+        NewTopic(
+            name=TOPIC_RESPONSES,
+            num_partitions=1,
+            replication_factor=1,
+            topic_configs={"max.message.bytes": str(KAFKA_MAX_MESSAGE_BYTES)},
+        ),
         NewTopic(name=TOPIC_LIGHT_VALIDATION_REQUESTS, num_partitions=3, replication_factor=1),
-        NewTopic(name=TOPIC_LIGHT_VALIDATION_RESPONSES, num_partitions=3, replication_factor=1)
+        NewTopic(
+            name=TOPIC_LIGHT_VALIDATION_RESPONSES,
+            num_partitions=3,
+            replication_factor=1,
+            topic_configs={"max.message.bytes": str(KAFKA_MAX_MESSAGE_BYTES)},
+        )
     ]
 
     try:

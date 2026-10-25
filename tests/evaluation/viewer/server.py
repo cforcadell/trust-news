@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlsplit
 
 from evaluation.viewer_contract import ContractError, validate_order_diagnostic
 from evaluation.viewer.summary import summarize_campaign, summarize_order
+from evaluation.viewer.costs import order_costs, summarize_events, validate_rates
 
 
 STATIC = Path(__file__).parent / "static"
@@ -116,6 +117,15 @@ def _date_key(value: str | None) -> float:
         return float("-inf")
 
 
+def _campaign_rates(directory: Path) -> dict:
+    path = directory / "cost-rates.json"
+    if not path.exists():
+        return {"schema_version": "evaluation-cost-rates-v1", "currency": "USD", "llm": [], "search": []}
+    if not path.is_file() or path.resolve().parent != directory.resolve():
+        raise ValueError("cost-rates.json must be a regular file inside the campaign")
+    return validate_rates(json.loads(path.read_text(encoding="utf-8")))
+
+
 def index_campaign(root: Path, campaign: str) -> dict:
     directory = _within(root, campaign)
     if not directory.is_dir() or directory.parent != root.resolve():
@@ -132,7 +142,12 @@ def index_campaign(root: Path, campaign: str) -> dict:
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
     except (OSError, ValueError) as exc:
         report, report_error = {}, f"report.json: {type(exc).__name__}"
-    orders, errors, incidents, order_summaries = [], [], [], []
+    orders, errors, incidents, order_summaries, cost_events = [], [], [], [], []
+    try:
+        rates = _campaign_rates(directory)
+    except (OSError, ValueError, TypeError) as exc:
+        errors.append(f"cost-rates.json: {type(exc).__name__}: {exc}")
+        rates = {"schema_version": "evaluation-cost-rates-v1", "currency": "USD", "llm": [], "search": []}
     if manifest_error:
         errors.append(manifest_error)
     if report_error:
@@ -146,6 +161,7 @@ def index_campaign(root: Path, campaign: str) -> dict:
             order = diagnostic["order"]
             validations = diagnostic["validations"]
             summary = summarize_order(diagnostic)
+            costs = order_costs(diagnostic, rates)
             order_summaries.append(summary)
             created_at, updated_at = _saved_order_dates(directory, diagnostic)
             order_incidents = _diagnostic_incidents(diagnostic, path.name)
@@ -161,7 +177,9 @@ def index_campaign(root: Path, campaign: str) -> dict:
                            "status": order["status"], "assertions": len(order["assertions"]),
                            "validations": len(validations), "correct_validations": correct,
                            "warnings": warnings, "errors": technical_errors,
-                           "findings": warnings + technical_errors, "summary": summary})
+                           "findings": warnings + technical_errors, "summary": summary,
+                           "costs": {key: value for key, value in costs.items() if key != "ledger"}})
+            cost_events.extend(costs["ledger"])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             errors.append(f"{path.name}: {type(exc).__name__}: {exc}")
     orders.sort(key=lambda item: _date_key(item.get("created_at")), reverse=True)
@@ -170,6 +188,8 @@ def index_campaign(root: Path, campaign: str) -> dict:
             "created_at": manifest.get("created_at"), "has_manifest": manifest_path.exists(),
             "orders": orders, "report": report,
             "summary": summarize_campaign(order_summaries),
+            "costs": {**summarize_events(cost_events), "rates_version": rates["schema_version"],
+                      "rates_configured": (directory / "cost-rates.json").exists()},
             "incidents": incidents, "errors": errors}
 
 
@@ -227,7 +247,9 @@ def make_handler(root: Path):
                         diagnostic = _read_diagnostic(file)
                         if diagnostic["identity"]["campaign_id"] != campaign:
                             raise ContractError("campaign_id does not match directory")
-                        return self._send(200, diagnostic | {"viewer_summary": summarize_order(diagnostic)})
+                        rates = _campaign_rates(directory)
+                        return self._send(200, diagnostic | {"viewer_summary": summarize_order(diagnostic),
+                                                              "costs": order_costs(diagnostic, rates)})
                     if len(parts) == 5 and parts[3] == "artifacts":
                         name = parts[4]
                         file = _within(directory, name)

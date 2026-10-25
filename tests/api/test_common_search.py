@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from common.search import SearchProvider, SearchProviderError, SearchResult, search_with_provider
+from common.search import SearchProvider, SearchProviderError, SearchResult, get_search_plan, search_with_provider
 from common.search.errors import SearchConfigurationError
 from common.search.exa import ExaSearchProvider
 from common.search.factory import get_search_provider
@@ -23,6 +23,102 @@ class FlakySearch(SearchProvider):
         if self.calls == 1:
             raise SearchProviderError(self.name, "timeout", status_code=503)
         return [SearchResult(url="https://www.idescat.cat/data", title="Data")]
+
+
+@pytest.mark.asyncio
+async def test_new_provider_selects_generic_profiles_without_consumer_changes(monkeypatch):
+    import common.search.factory as factory
+
+    class ProfiledSearch(SearchProvider):
+        name = "profiled-test"
+
+        def __init__(self):
+            self.calls = []
+
+        def default_mode(self):
+            return "fast"
+
+        def profile_mode(self, profile):
+            return {"primary": "fast", "fallback": "deep"}[profile]
+
+        async def search(self, request):
+            self.calls.append((request.search_profile, request.search_mode))
+            return [SearchResult(url="https://example.org/report")]
+
+    provider = ProfiledSearch()
+    monkeypatch.setitem(factory._providers, provider.name, provider)
+    plan = get_search_plan(provider.name)
+    assert plan["primary_mode"] == "fast"
+    assert plan["fallback_mode"] == "deep"
+    first = await search_with_provider(provider.name, "statistics", 3)
+    second = await search_with_provider(provider.name, "statistics", 3, search_profile="fallback")
+    assert provider.calls == [("primary", "fast"), ("fallback", "deep")]
+    assert [first["search_mode"], second["search_mode"]] == ["fast", "deep"]
+
+
+def test_tavily_plan_ignores_exa_modes_and_has_provider_specific_cache(monkeypatch):
+    monkeypatch.setenv("EXA_PRIMARY_MODE", "lite")
+    monkeypatch.setenv("EXA_FALLBACK_MODE", "auto")
+    tavily = get_search_plan("tavily")
+    assert tavily["primary_mode"] == "advanced"
+    assert tavily["fallback_mode"] is None
+    assert tavily["primary_requires_selection"] is False
+    before = tavily["cache_config"]
+    monkeypatch.setenv("EXA_PRIMARY_MODE", "auto")
+    assert get_search_plan("tavily")["cache_config"] == before
+    assert get_search_plan("exa")["cache_config"] != before
+
+
+@pytest.mark.asyncio
+async def test_legacy_exa_type_cannot_leak_into_tavily():
+    with pytest.raises(SearchConfigurationError):
+        await search_with_provider("tavily", "statistics", 2, search_type="lite")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider, module_name, key_name, url_name, expected_url", [
+    (ExaSearchProvider(), "common.search.exa", "EXA_API_KEY", "EXA_API_URL", "https://exa.example/search"),
+    (TavilySearchProvider(), "common.search.tavily", "TAVILY_API_KEY", "TAVILY_API_URL", "https://tavily.example/search"),
+])
+async def test_provider_specific_endpoint_and_key_override_legacy(monkeypatch, provider, module_name,
+                                                                  key_name, url_name, expected_url):
+    import importlib
+
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"results": []}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, **kwargs):
+            captured.update(url=url, kwargs=kwargs)
+            return Response()
+
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(module.httpx, "AsyncClient", Client)
+    monkeypatch.setenv("API_KEY_PROVIDER", "legacy-key")
+    monkeypatch.setenv("SEARCH_API_URL", "https://legacy.example/search")
+    monkeypatch.setenv(key_name, "specific-key")
+    monkeypatch.setenv(url_name, expected_url)
+    await provider.search(SearchRequest(query="data", max_results=2))
+    assert captured["url"] == expected_url
+    if provider.name == "exa":
+        assert captured["kwargs"]["headers"]["x-api-key"] == "specific-key"
+    else:
+        assert captured["kwargs"]["json"]["api_key"] == "specific-key"
 
 
 def test_search_provider_selection_and_url_normalization():
@@ -124,6 +220,12 @@ async def test_exa_keeps_official_policy_out_of_semantic_query(monkeypatch):
 
     assert captured["query"] == "inflación Alemania 2025"
     assert captured["category"] == "official source"
+    assert captured["type"] == "auto"
+
+    await ExaSearchProvider().search(SearchRequest(
+        query="inflación Alemania 2025", max_results=5, search_type="lite",
+    ))
+    assert captured["type"] == "lite"
 
 
 @pytest.mark.asyncio
@@ -143,5 +245,5 @@ def test_search_consumers_use_shared_layer():
     api = Path(__file__).resolve().parents[2] / "api"
     evidence = (api / "evidence-search" / "main.py").read_text()
     router = (api / "source-router" / "app" / "service.py").read_text()
-    assert "from common.search import search_with_provider" in evidence
-    assert "from common.search import search_with_provider" in router
+    assert "from common.search import get_search_plan, search_with_provider" in evidence
+    assert "from common.search import get_search_plan, search_with_provider" in router

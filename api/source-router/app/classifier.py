@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 class ClassificationResults(list):
     """Valid classifications plus unresolved domains for retries and auditing."""
 
-    def __init__(self, values, failed_domains):
+    def __init__(self, values, failed_domains, usage=None):
         super().__init__(values)
         self.failed_domains = sorted(failed_domains)
+        self.usage = usage or []
 
 
 def normalize_classification(row):
@@ -107,6 +108,7 @@ async def classify_candidates(
     allowed = {normalize_domain(candidate.domain) for candidate in candidates}
     provider_scores = {normalize_domain(candidate.domain): candidate.provider_score for candidate in candidates}
     accepted: dict[str, SourceClassification] = {}
+    usage = []
     key = route_key(signature)
     for attempt in range(CLASSIFICATION_MAX_ATTEMPTS):
         try:
@@ -122,6 +124,8 @@ async def classify_candidates(
                     strict_response_validation=False,
                 ),
             )
+            reported_usage = getattr(response, "usage", None)
+            usage.append(reported_usage.model_dump(mode="json") if reported_usage else {})
         except (LLMProviderError, LLMResponseError):
             if not accepted:
                 raise
@@ -166,4 +170,4 @@ async def classify_candidates(
         raise LLMResponseError(
             f"Source classification failed for domains: {', '.join(sorted(missing))}"
         )
-    return ClassificationResults(accepted.values(), missing)
+    return ClassificationResults(accepted.values(), missing, usage)

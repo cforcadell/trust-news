@@ -168,6 +168,47 @@ def test_configured_rag_validator_uses_shared_strict_schema(validator, monkeypat
     assert captured["request"].response_schema == validator.RAGValidatorAPIResponse.model_json_schema()
 
 
+def test_configured_validator_captures_actual_response_usage(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    expected = validator.RAGValidatorAPIResponse(
+        resultado="UNKNOWN", descripcion="Insufficient evidence", confidence="LOW", evidence_used=[])
+    captured = {}
+
+    def fake_complete(provider, request):
+        captured.update(provider=provider, request=request)
+        return SimpleNamespace(usage=SimpleNamespace(model_dump=lambda **kwargs: {
+            "prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}), model=request.model)
+
+    monkeypatch.setattr(validator, "complete", fake_complete)
+    monkeypatch.setattr(validator, "parse_response", lambda request, response: expected)
+    client = validator.ConfiguredAIValidator("openrouter", "current-model", 0)
+    result, usage, model = client.verificar_asercion_con_uso("claim", "context", [])
+
+    assert result is expected
+    assert usage == {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}
+    assert model == "current-model"
+    assert captured["provider"] == "openrouter"
+    assert captured["request"].response_model is validator.RAGValidatorAPIResponse
+
+
+def test_evaluation_citation_trace_resolves_missing_source_id_from_server_evidence(validator):
+    claims = [{"source_id": None, "context_id": "source-1-context-1", "supports": True}]
+    canonical = [{"source_id": "source-1", "context_id": "source-1-context-1", "supports": True}]
+
+    assert validator.evaluation_citation_claims(claims, canonical) == [{
+        "source_id": "source-1",
+        "context_id": "source-1-context-1",
+        "supports": True,
+    }]
+
+
+def test_evaluation_citation_trace_keeps_nonempty_claimed_source_id(validator):
+    claims = [{"source_id": "invented", "context_id": "source-1-context-1", "supports": True}]
+    canonical = [{"source_id": "source-1", "context_id": "source-1-context-1", "supports": True}]
+
+    assert validator.evaluation_citation_claims(claims, canonical)[0]["source_id"] == "invented"
+
+
 def test_rag_response_contract_rejects_unsupported_decisive_verdicts(validator):
     with pytest.raises(ValidationError, match="at least one evidence_used"):
         validator.RAGValidatorAPIResponse(
@@ -293,6 +334,51 @@ def test_evidence_search_timeout_is_classified_as_retryable(validator):
     assert details.code == "EVIDENCE_SEARCH_TIMEOUT"
     assert details.retryable is True
     assert details.status_code is None
+
+
+def test_evidence_search_retries_once_with_a_shared_budget(validator, monkeypatch):
+    attempts = []
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS", 5)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS", 0)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD", 10)
+    validator._evidence_search_circuit.update(failures=0, open_until=0.0)
+
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"evidences": []}
+
+    def post(*args, **kwargs):
+        attempts.append(kwargs["timeout"])
+        if len(attempts) == 1:
+            raise validator.httpx.ReadTimeout("temporary timeout")
+        return Response()
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    body = validator.request_evidence_search({"request": True}, {})
+
+    assert len(attempts) == 2
+    assert all(timeout <= validator.EVIDENCE_SEARCH_TIMEOUT_SECONDS for timeout in attempts)
+    assert body["request_recovery"] == {"attempts": 2, "recovered": True}
+
+
+def test_evidence_search_circuit_opens_after_repeated_retryable_failures(validator, monkeypatch):
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD", 2)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS", 60)
+    validator._evidence_search_circuit.update(failures=0, open_until=0.0)
+
+    def post(*args, **kwargs):
+        raise validator.httpx.ConnectError("service unavailable")
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    with pytest.raises(validator.httpx.ConnectError):
+        validator.request_evidence_search({}, {})
+    with pytest.raises(validator.httpx.ConnectError):
+        validator.request_evidence_search({}, {})
+    with pytest.raises(validator.EvidenceSearchCircuitOpenError):
+        validator.request_evidence_search({}, {})
+    validator._evidence_search_circuit.update(failures=0, open_until=0.0)
 
 
 @pytest.mark.parametrize("strategy", ["EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])

@@ -8,6 +8,9 @@ class SearchRequest(BaseModel):
     max_results: int = Field(default=5, ge=1, le=50)
     include_domains: list[str] = Field(default_factory=list)
     external_source_policy: str = "none"
+    search_profile: str = "primary"
+    search_mode: str | None = None
+    search_type: str | None = None
 
 
 class SearchResult(BaseModel):

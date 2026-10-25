@@ -1,8 +1,8 @@
 """Read-only descriptions of Router decisions for evaluation responses."""
 
-from common.routing_taxonomy import AuthorityLevel, EVIDENCE_SOURCE_TYPES, MatchLevel
+from common.routing_taxonomy import AuthorityLevel, MatchLevel
 
-from .eligibility import jurisdiction_is_eligible
+from .eligibility import jurisdiction_is_eligible, source_type_is_eligible
 from .ranking import AUTHORITY, MATCH, _specificity
 
 
@@ -13,7 +13,7 @@ def rejection_reasons(signature, source):
         reasons.append("TOPIC_MISMATCH")
     if source.evidence_kind_match == MatchLevel.NONE:
         reasons.append("EVIDENCE_KIND_MISMATCH")
-    if source.source_type not in EVIDENCE_SOURCE_TYPES[signature.evidence_kind]:
+    if not source_type_is_eligible(signature, source):
         reasons.append("SOURCE_TYPE_INELIGIBLE")
     if not jurisdiction_is_eligible(signature, source):
         reasons.append("JURISDICTION_MISMATCH")

@@ -96,6 +96,7 @@ async def acomplete_structured_with_repair(
     provider_name: str,
     request: LLMRequest,
     repair_prompt_builder: Callable[[str, str], str],
+    usage_observer: Callable[[LLMResponse], None] | None = None,
 ):
     """Parse a structured response and make one guided repair when it is invalid.
 
@@ -108,6 +109,8 @@ async def acomplete_structured_with_repair(
         update={"strict_response_validation": False}
     )
     response = await acomplete(provider_name, unvalidated_request)
+    if usage_observer:
+        usage_observer(response)
     try:
         return parse_response(request, response)
     except LLMResponseError as exc:
@@ -118,6 +121,8 @@ async def acomplete_structured_with_repair(
             provider_name,
             repaired_request.model_copy(update={"strict_response_validation": False}),
         )
+        if usage_observer:
+            usage_observer(repaired_response)
         try:
             return parse_response(repaired_request, repaired_response)
         except LLMResponseError as repair_exc:

@@ -99,6 +99,7 @@ configure_single_line_json_logging(log_level)
 logger = logging.getLogger("fake-news-orchestrator")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", DEFAULT_KAFKA_BOOTSTRAP)
+KAFKA_MAX_MESSAGE_BYTES = int(os.getenv("KAFKA_MAX_MESSAGE_BYTES", str(4 * 1024 * 1024)))
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
 KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
 KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
@@ -1337,6 +1338,8 @@ async def process_kafka_message(data: dict):
                     "evidence_used": payload.get("evidence_used", []),
                     "evidence_validation": payload.get("evidence_validation"),
                     "evaluation_citation_trace": payload.get("evaluation_citation_trace"),
+                    "llm_usage": payload.get("llm_usage"),
+                    "resolved_model": payload.get("resolved_model"),
                     "evidence_search_response": payload.get("evidence_search_response"),
                     "search_policy": payload.get("search_policy"),
                     "confidence": payload.get("confidence"),
@@ -1432,6 +1435,8 @@ async def process_kafka_message(data: dict):
                     "evidence_used": payload.get("evidence_used", []),
                     "evidence_validation": payload.get("evidence_validation"),
                     "evaluation_citation_trace": payload.get("evaluation_citation_trace"),
+                    "llm_usage": payload.get("llm_usage"),
+                    "resolved_model": payload.get("resolved_model"),
                     "evidence_search_response": payload.get("evidence_search_response"),
                     "search_policy": payload.get("search_policy"),
                     "execution_status": execution_status.value,
@@ -1501,6 +1506,8 @@ async def consume_responses_loop():
         TOPIC_RESPONSES,
         TOPIC_LIGHT_VALIDATION_RESPONSES,
         bootstrap_servers=KAFKA_BROKER,
+        fetch_max_bytes=KAFKA_MAX_MESSAGE_BYTES * 4,
+        max_partition_fetch_bytes=KAFKA_MAX_MESSAGE_BYTES,
         group_id="fake-news-orchestrator-group",
         auto_offset_reset="earliest",
         **kafka_security_kwargs()
@@ -2563,6 +2570,7 @@ async def startup_event():
     # Kafka producer
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BROKER,
+        max_request_size=KAFKA_MAX_MESSAGE_BYTES,
         **kafka_security_kwargs()
     )
     await producer.start()

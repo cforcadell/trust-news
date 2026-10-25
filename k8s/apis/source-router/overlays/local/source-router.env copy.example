@@ -2,3 +2,6 @@
 OPENROUTER_API_KEY=replace-me
 # API key for the provider configured by SEARCH_PROVIDER in source-router-config.
 API_KEY_PROVIDER=replace-me
+# Prefer EXA_API_KEY or TAVILY_API_KEY for provider-specific credentials.
+# EXA_API_KEY=replace-me
+# TAVILY_API_KEY=replace-me

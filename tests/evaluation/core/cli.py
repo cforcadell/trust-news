@@ -56,6 +56,7 @@ def parser(kind):
     p.add_argument("--evidence-search-url", default="http://localhost:8074")
     p.add_argument("--prompt-file", type=Path, help="Use a specific deployed RAG template; only its hash is persisted")
     p.add_argument("--output", type=Path, help="New output directory; existing directories are never overwritten")
+    p.add_argument("--cost-rates", type=Path, help="USD rate card saved with the campaign for reproducible costs")
     p.add_argument("--analyze", type=Path, metavar="CAMPAIGN_DIR",
                    help="Analyze saved campaign artifacts offline; write analysis.json and analysis.md")
     p.add_argument("--validate-only", action="store_true", help="Validate resources without calling services or LLMs")
@@ -68,7 +69,7 @@ def main(kind, argv=None):
     try:
         if args.analyze:
             if (args.dataset or args.tag or args.model or args.order or args.publish or args.replay_artifact
-                    or args.counterfactuals or args.validate_only or args.cache or args.prompt_file
+                    or args.counterfactuals or args.validate_only or args.cache or args.prompt_file or args.cost_rates
                     or args.mode != ("gold-evidence" if kind == "llm" else "full") or args.repetitions != 1):
                 raise EvaluationError("--analyze reads a saved campaign; omit execution and dataset flags")
             from evaluation.pipeline.analyze import analyze_campaign
@@ -78,6 +79,13 @@ def main(kind, argv=None):
             return 0
         if args.repetitions < 1:
             raise EvaluationError("repetitions must be positive")
+        cost_rates = None
+        if args.cost_rates:
+            from evaluation.viewer.costs import validate_rates
+            try:
+                cost_rates = validate_rates(read_json(args.cost_rates))
+            except (OSError, ValueError, TypeError) as exc:
+                raise EvaluationError(f"Invalid --cost-rates: {exc}") from exc
         replay = read_json(args.replay_artifact) if args.replay_artifact else None
         if args.mode == "replay" and replay is None:
             raise EvaluationError("replay requires --replay-artifact")
@@ -117,6 +125,8 @@ def main(kind, argv=None):
         services = HttpServices(args.router_url, args.evidence_search_url)
         output = args.output or ROOT / "tests/data/evaluation/artifacts" / str(uuid.uuid4())
         output.mkdir(parents=True, exist_ok=False)
+        if cost_rates is not None:
+            write_json(output / "cost-rates.json", cost_rates)
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=False).stdout.strip()
         dirty = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, text=True, capture_output=True, check=False).stdout.strip()
         manifest = {"schema_version": "evaluation-manifest-v1", "status": "RUNNING", "git_commit": commit,

@@ -26,7 +26,7 @@ sys.path.append(os.path.dirname(__file__))
 from app.chunk_ranker import rank_chunks
 from app.chunker import build_context_windows, chunk_text
 from app.document_fetcher import classify_attempt_outcome, classify_fetch_outcome, fetch_main_text
-from common.search import search_with_provider
+from common.search import get_search_plan, search_with_provider
 
 load_dotenv()
 
@@ -588,11 +588,7 @@ def search_backend_for_cache() -> Dict[str, Any]:
     """Return search-provider settings that affect evidence content shape."""
     # Provider and content extraction flags must partition cache entries when operators switch backends.
     return {
-        "provider": SEARCH_PROVIDER or os.getenv("SEARCH_PROVIDER", "tavily"),
-        "search_provider_max_results": os.getenv("SEARCH_PROVIDER_MAX_RESULTS", "50"),
-        "search_include_raw_content": os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true"),
-        "exa_include_highlights": os.getenv("EXA_INCLUDE_HIGHLIGHTS", "true"),
-        "exa_include_text": os.getenv("EXA_INCLUDE_TEXT", "true"),
+        "search_plan": get_search_plan(SEARCH_PROVIDER)["cache_config"],
         "evidence_fetch_full_text": EVIDENCE_FETCH_FULL_TEXT,
         "evidence_max_contexts_per_source": EVIDENCE_MAX_CONTEXTS_PER_SOURCE,
         "evidence_max_contexts_total": EVIDENCE_MAX_CONTEXTS_TOTAL,
@@ -1341,6 +1337,10 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
     provider_errors: List[Dict[str, str]] = []
     policy_drops: List[Dict[str, str]] = []
     provider_name = SEARCH_PROVIDER
+    search_plan = get_search_plan(provider_name)
+    primary_search_type = search_plan["primary_mode"]
+    fallback_search_type = search_plan["fallback_mode"]
+    primary_kwargs = {"search_profile": "primary"} if search_plan["primary_requires_selection"] else {}
     provider_call_sequence = 0
     for request_index, search_request in enumerate(search_requests):
         query = search_request["query"]
@@ -1354,6 +1354,10 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         trace_request["provider_call_id"] = f"{provider_name or 'provider'}-{provider_call_sequence}"
         trace_request["call_sequence"] = provider_call_sequence
         trace_request["status"] = "EXECUTED"
+        if primary_search_type:
+            trace_request["search_type"] = primary_search_type
+            trace_request["search_mode"] = primary_search_type
+        trace_request["search_profile"] = "primary"
         trace_request["started_at"] = iso(utc_now())
         call_started = time.perf_counter()
         include_domains = search_request.get("include_domains")
@@ -1366,6 +1370,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                 candidate_budget,
                 include_domains=include_domains or None,
                 external_source_policy=external_source_policy,
+                **primary_kwargs,
             )
             successful_searches += 1
             provider_returned = search_results.get("results", []) or []
@@ -1433,7 +1438,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             trace_request["outcome"] = "CANDIDATE_BUDGET_REACHED"
 
     # Zero results is valid. Zero successful requests is a dependency failure.
-    if search_requests and successful_searches == 0:
+    if search_requests and successful_searches == 0 and not fallback_search_type:
         failed_provider_trace = {
             "provider": provider_name,
             "cache_hit": False,
@@ -1548,6 +1553,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         EVIDENCE_FETCH_FULL_TEXT
         and initial_citable < target_citable_sources
         and len(evidences) < effective_search_policy["max_results"]
+        and not (fallback_search_type and fallback_search_type != primary_search_type)
     ):
         fallback_rounds += 1
         fallback_reason = (
@@ -1600,6 +1606,10 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                 "returned_urls": [],
                 "result_decisions": [],
             }
+            if primary_search_type:
+                trace_request["search_type"] = primary_search_type
+                trace_request["search_mode"] = primary_search_type
+            trace_request["search_profile"] = "primary"
             trace_requests.append(trace_request)
             call_started = time.perf_counter()
             try:
@@ -1609,6 +1619,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                     candidate_budget,
                     include_domains=fallback_include_domains,
                     external_source_policy=fallback_policy,
+                    **primary_kwargs,
                 )
                 provider_returned = search_results.get("results", []) or []
                 returned = provider_returned
@@ -1706,6 +1717,108 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         domain_resolution["fallback_reason"] = "EXISTING_CANDIDATES_AFTER_UNUSABLE_FETCH"
         domain_resolution["fallback_excluded_domains"] = []
         domain_resolution["local_candidate_refill_count"] = local_refill_candidate_count
+
+    # The second search tier is justified by actual citable documents, not by
+    # provider result count. Reuse the same query and source policy; only fetch
+    # previously unseen URLs so a failed first tier does not duplicate downloads.
+    if (EVIDENCE_FETCH_FULL_TEXT and fallback_search_type and fallback_search_type != primary_search_type
+            and sum(item.get("citation_status") == "available" and bool(item.get("contexts"))
+                    for item in evidences) < target_citable_sources):
+        seen_urls = {normalize_url(item.get("url") or "") for item in evidences}
+        tier_candidates: List[Dict[str, Any]] = []
+        tier_queries: List[Dict[str, Any]] = []
+        for seed in search_requests:
+            if seed.get("trigger"):
+                continue
+            tier_queries.append({**seed, "trigger": "INSUFFICIENT_CITABLE_SOURCES",
+                                 "search_type": fallback_search_type, "search_mode": fallback_search_type,
+                                 "search_profile": "fallback"})
+            provider_call_sequence += 1
+            trace_request = {
+                **seed, "plan_sequence": len(trace_requests) + 1,
+                "provider": provider_name,
+                "provider_call_id": f"{provider_name}-{provider_call_sequence}",
+                "call_sequence": provider_call_sequence,
+                "search_type": fallback_search_type,
+                "search_mode": fallback_search_type,
+                "search_profile": "fallback",
+                "trigger": "INSUFFICIENT_CITABLE_SOURCES",
+                "status": "EXECUTED", "started_at": iso(utc_now()),
+                "returned_urls": [], "result_decisions": [],
+            }
+            trace_requests.append(trace_request)
+            call_started = time.perf_counter()
+            try:
+                result = await search_with_provider(
+                    provider_name, seed["query"], candidate_budget,
+                    include_domains=seed.get("include_domains") or None,
+                    external_source_policy=seed.get("external_source_policy") or "none",
+                    search_profile="fallback",
+                )
+                returned = result.get("results") or []
+                successful_searches += 1
+                trace_request["returned_urls"] = [str(item.get("url") or "") for item in returned]
+                trace_request["result_count"] = len(returned)
+                for rank, item in enumerate(returned, start=1):
+                    url = normalize_url(item.get("url") or "")
+                    domain = normalize_domain(urlparse(url).netloc)
+                    if strategy == EvidenceSearchStrategy.EXT_ONLY_OFFICIAL and not is_official_source_type(source_type_for_domain(domain)):
+                        decision = "DROPPED_NOT_OFFICIAL"
+                    elif not url or url in seen_urls:
+                        decision = "DUPLICATE_INITIAL_URL"
+                    elif len(tier_candidates) >= candidate_budget:
+                        decision = "NOT_CONSIDERED_LIMIT"
+                    else:
+                        decision = "RETAINED"
+                        seen_urls.add(url)
+                        tier_candidates.append(item)
+                    trace_request["result_decisions"].append(
+                        {"url": url, "provider_rank": rank, "decision": decision})
+                trace_request["retained_result_count"] = sum(
+                    item["decision"] == "RETAINED" for item in trace_request["result_decisions"])
+                trace_request["outcome"] = "RESULTS" if returned else "EMPTY"
+            except Exception as exc:
+                trace_request.update(status="FAILED", error_type=type(exc).__name__,
+                                     error=str(exc) or exc.__class__.__name__, outcome="ERROR")
+            finally:
+                trace_request["completed_at"] = iso(utc_now())
+                trace_request["duration_ms"] = round((time.perf_counter() - call_started) * 1000, 3)
+            if tier_candidates:
+                break
+        search_requests.extend(tier_queries)
+        if tier_candidates:
+            scheduled_tier = diversify_search_results(tier_candidates, max_sources=candidate_budget)
+            tier_evidences = await build_evidences_with_optional_contexts(
+                assertion, scheduled_tier, domain_resolution,
+                max_results=candidate_budget,
+                origin_document=origin_document, capture_chunks=bool(run_id),
+                rank_offset=len(evidences),
+            )
+            for item in tier_evidences:
+                item["retrieval_mode"] = "search_tier_fallback"
+                item["fallback_reason"] = "INSUFFICIENT_CITABLE_SOURCES"
+            await persist_unusable_url_outcomes(tier_evidences)
+            # Preserve existing citable evidence first, followed by newly
+            # citable fallback results; failed attempts fill only spare slots.
+            ordered = [item for item in evidences if item.get("citation_status") == "available" and item.get("contexts")]
+            ordered += [item for item in tier_evidences if item.get("citation_status") == "available" and item.get("contexts")]
+            ordered += [item for item in evidences + tier_evidences if not (item.get("citation_status") == "available" and item.get("contexts"))]
+            evidences = ordered[:effective_search_policy["max_results"]]
+            fallback_candidate_count += len(tier_candidates)
+            fallback_rounds += 1
+            domain_resolution["fallback_used"] = True
+            domain_resolution["fallback_reason"] = "INSUFFICIENT_CITABLE_SOURCES"
+
+    if search_requests and successful_searches == 0:
+        failed_provider_trace = {
+            "provider": provider_name, "cache_hit": False, "capture_status": "CAPTURED",
+            "requests": trace_requests, "summary": provider_trace_summary(trace_requests),
+        }
+        raise HTTPException(status_code=502, detail={
+            "code": "EVIDENCE_PROVIDER_FAILED", "message": "All evidence provider requests failed",
+            "provider": provider_name, "errors": provider_errors,
+            "search_policy": effective_search_policy, "provider_trace": failed_provider_trace,
+        })
 
     attach_provider_lineage(evidences, trace_requests)
     summary = retrieval_summary(

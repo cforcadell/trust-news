@@ -31,6 +31,8 @@ class ValidationRecord(BaseModel):
     sources_declared: List[EvidenceItem] = Field(default_factory=list)
     evidence_used: List[EvidenceItem] = Field(default_factory=list)
     evidence_validation: Optional[Dict[str, Any]] = None
+    llm_usage: Optional[Dict[str, Optional[int]]] = None
+    resolved_model: Optional[str] = None
     confidence: Optional[float | str] = None
     execution_status: ValidationExecutionStatus
     error: Optional[str] = None

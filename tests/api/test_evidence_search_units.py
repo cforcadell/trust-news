@@ -1129,8 +1129,16 @@ def test_cache_key_normalizes_text_and_partitions_origin_policy_and_profile(monk
 
     monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
     exa = evidence.evidence_cache_key(assertion(), origin, policy, "v1")
+    monkeypatch.setenv("EXA_SEARCH_TYPE_PRIMARY", "lite")
+    lite = evidence.evidence_cache_key(assertion(), origin, policy, "v1")
+    monkeypatch.setenv("EXA_SEARCH_TYPE_FALLBACK", "auto")
+    lite_auto = evidence.evidence_cache_key(assertion(), origin, policy, "v1")
+    assert len({exa, lite, lite_auto}) == 3
     monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "tavily")
-    assert exa != evidence.evidence_cache_key(assertion(), origin, policy, "v1")
+    tavily_key = evidence.evidence_cache_key(assertion(), origin, policy, "v1")
+    assert exa != tavily_key
+    monkeypatch.setenv("EXA_SEARCH_TYPE_PRIMARY", "auto")
+    assert tavily_key == evidence.evidence_cache_key(assertion(), origin, policy, "v1")
 
 
 def test_request_contract_requires_origin():
@@ -1458,6 +1466,109 @@ async def test_local_search_does_not_fallback_when_a_routed_source_is_citable(mo
     assert calls == [["ine.es"]]
     assert response["domain_resolution"].get("fallback_used") is None
     assert len(response["queries_executed"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_exa_auto_tier_recovers_when_lite_results_are_not_citable(monkeypatch):
+    calls = []
+    document = " ".join(["El instituto publica la estadística oficial solicitada."] * 12)
+
+    async def fake_search(provider, query, max_results, **kwargs):
+        tier = "auto" if kwargs.get("search_profile") == "fallback" else "lite"
+        calls.append(tier)
+        url = "https://ine.es/auto" if tier == "auto" else "https://ine.es/lite"
+        return {"results": [{"url": url, "title": tier or "Lite"}]}
+
+    async def fake_fetch(url, **kwargs):
+        readable = url.endswith("/auto")
+        return SimpleNamespace(status="ok" if readable else "empty_text", error=None,
+                               text=document if readable else "",
+                               document_length_chars=len(document) if readable else 0)
+
+    monkeypatch.setenv("EXA_SEARCH_TYPE_PRIMARY", "lite")
+    monkeypatch.setenv("EXA_SEARCH_TYPE_FALLBACK", "auto")
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    response = await evidence.search_evidence(request("LOCAL", [preferred_source()]))
+
+    assert calls[-1] == "auto"
+    assert all(tier == "lite" for tier in calls[:-1])
+    assert any(item["url"] == "https://ine.es/auto" and item["citation_status"] == "available"
+               for item in response["evidences"])
+    assert response["provider_trace"]["requests"][-1]["search_type"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_exa_auto_tier_is_skipped_when_lite_is_citable(monkeypatch):
+    calls = []
+    document = " ".join(["El instituto publica la estadística oficial solicitada."] * 12)
+
+    async def fake_search(provider, query, max_results, **kwargs):
+        calls.append("auto" if kwargs.get("search_profile") == "fallback" else "lite")
+        return {"results": [{"url": "https://ine.es/lite", "title": "Lite"}]}
+
+    async def fake_fetch(url, **kwargs):
+        return SimpleNamespace(status="ok", error=None, text=document,
+                               document_length_chars=len(document))
+
+    monkeypatch.setenv("EXA_SEARCH_TYPE_PRIMARY", "lite")
+    monkeypatch.setenv("EXA_SEARCH_TYPE_FALLBACK", "auto")
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "exa")
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    response = await evidence.search_evidence(request("LOCAL", [preferred_source()]))
+
+    assert calls == ["lite"]
+    assert [item["search_type"] for item in response["provider_trace"]["requests"]] == ["lite"]
+
+
+@pytest.mark.asyncio
+async def test_registered_provider_fallback_recovers_uncitable_evidence(monkeypatch):
+    import common.search.factory as search_factory
+    from common.search import SearchProvider
+
+    class TwoProfileProvider(SearchProvider):
+        name = "evidence-profile-test"
+
+        def default_mode(self):
+            return "quick"
+
+        def profile_mode(self, profile):
+            return {"primary": "quick", "fallback": "thorough"}[profile]
+
+        async def search(self, request):
+            raise AssertionError("search call is replaced by the test double")
+
+    monkeypatch.setitem(search_factory._providers, "evidence-profile-test", TwoProfileProvider())
+    calls = []
+    document = " ".join(["El instituto publica la estadística oficial solicitada."] * 12)
+
+    async def fake_search(provider, query, max_results, **kwargs):
+        profile = kwargs.get("search_profile", "primary")
+        calls.append(profile)
+        return {"results": [{"url": f"https://ine.es/{profile}", "title": profile}]}
+
+    async def fake_fetch(url, **kwargs):
+        readable = url.endswith("/fallback")
+        return SimpleNamespace(status="ok" if readable else "empty_text", error=None,
+                               text=document if readable else "",
+                               document_length_chars=len(document) if readable else 0)
+
+    monkeypatch.setattr(evidence, "SEARCH_PROVIDER", "evidence-profile-test")
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    response = await evidence.search_evidence(request("LOCAL", [preferred_source()]))
+
+    assert calls == ["primary", "fallback"]
+    assert any(item["citation_status"] == "available" for item in response["evidences"])
+    assert [item["search_type"] for item in response["provider_trace"]["requests"]] == ["quick", "thorough"]
 
 
 @pytest.mark.asyncio

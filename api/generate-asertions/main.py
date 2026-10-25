@@ -343,11 +343,18 @@ async def _call_configured_llm(text: str, trace: Optional[dict] = None) -> List[
                 validation_issues=summarize_assertion_validation(invalid_response),
             )
         return build_assertions_repair_prompt(invalid_response, validation_error)
+    def record_usage(response):
+        if trace is not None:
+            trace.setdefault("usage", []).append(
+                response.usage.model_dump(mode="json") if response.usage else {}
+            )
     try:
         request = build_assertions_llm_request(text, model)
         if trace is not None:
             trace["structured_attempts"] = 1
-        batch = await acomplete_structured_with_repair(AI_PROVIDER, request, repair_prompt)
+        batch = await acomplete_structured_with_repair(
+            AI_PROVIDER, request, repair_prompt, usage_observer=record_usage if trace is not None else None,
+        )
         assertions = parse_assertions_content(batch.model_dump(mode="json"))
         if trace is not None:
             trace.update(status="COMPLETED", assertion_count=len(assertions))

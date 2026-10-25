@@ -753,6 +753,8 @@ async def blockchain_event_listener():
                                         sources_declared=validation_json.get("sources_declared") or [],
                                         evidence_used=validation_json.get("evidence_used") or [],
                                         evidence_validation=validation_json.get("evidence_validation"),
+                                        llm_usage=validation_json.get("llm_usage"),
+                                        resolved_model=validation_json.get("resolved_model"),
                                         evidence_search_response=validation_json.get("evidence_search_response"),
                                         execution_status=ValidationExecutionStatus.COMPLETED,
                                     ),

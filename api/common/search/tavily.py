@@ -44,8 +44,29 @@ def normalize_tavily_result(row: dict[str, Any]) -> dict[str, Any]:
 class TavilySearchProvider(SearchProvider):
     name = "tavily"
 
+    def default_mode(self) -> str:
+        return "advanced"
+
+    def profile_mode(self, profile: str) -> str | None:
+        if profile == "primary":
+            mode = os.getenv("TAVILY_PRIMARY_DEPTH") or os.getenv("SEARCH_DEPTH", "advanced")
+        elif profile == "fallback":
+            mode = os.getenv("TAVILY_FALLBACK_DEPTH") or None
+        else:
+            raise SearchConfigurationError(f"Unknown search profile: {profile}")
+        if mode and mode not in {"basic", "advanced"}:
+            raise SearchConfigurationError("Tavily search depth must be basic or advanced")
+        return mode
+
+    def cache_config(self) -> dict:
+        return {**super().cache_config(), "primary_mode": self.profile_mode("primary"),
+                "fallback_mode": self.profile_mode("fallback"),
+                "endpoint": os.getenv("TAVILY_API_URL") or os.getenv("SEARCH_API_URL", "https://api.tavily.com/search"),
+                "include_answer": os.getenv("SEARCH_INCLUDE_ANSWER", "false"),
+                "include_raw_content": os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true")}
+
     async def search(self, request: SearchRequest) -> list[SearchResult]:
-        api_key = os.getenv("API_KEY_PROVIDER", "")
+        api_key = os.getenv("TAVILY_API_KEY") or os.getenv("API_KEY_PROVIDER", "")
         if not api_key:
             raise SearchConfigurationError("API_KEY_PROVIDER is not configured")
         raw_content = os.getenv("SEARCH_INCLUDE_RAW_CONTENT", "true").strip().lower()
@@ -53,7 +74,7 @@ class TavilySearchProvider(SearchProvider):
         payload = {
             "api_key": api_key,
             "query": _official_query(request.query, request.external_source_policy),
-            "search_depth": os.getenv("SEARCH_DEPTH", "advanced"),
+            "search_depth": request.search_mode or self.profile_mode(request.search_profile),
             "include_answer": os.getenv("SEARCH_INCLUDE_ANSWER", "false").lower() == "true",
             "include_raw_content": raw_content_value,
             "max_results": effective_max_results(request.max_results),
@@ -62,7 +83,7 @@ class TavilySearchProvider(SearchProvider):
             payload["include_domains"] = request.include_domains
         try:
             async with httpx.AsyncClient(timeout=float(os.getenv("SEARCH_TIMEOUT", "30"))) as client:
-                response = await client.post(os.getenv("SEARCH_API_URL", "https://api.tavily.com/search"), json=payload)
+                response = await client.post(os.getenv("TAVILY_API_URL") or os.getenv("SEARCH_API_URL", "https://api.tavily.com/search"), json=payload)
                 response.raise_for_status()
                 rows = response.json().get("results") or []
         except httpx.HTTPStatusError as exc:

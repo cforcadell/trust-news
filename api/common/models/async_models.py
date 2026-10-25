@@ -325,6 +325,7 @@ class GenerationEvaluationTrace(BaseModel):
     error_type: Optional[str] = None
     assertion_count: int = 0
     validation_issues: List[GenerationValidationIssue] = Field(default_factory=list)
+    usage: List[Dict[str, Optional[int]]] = Field(default_factory=list)
 
 
 class AssertionGeneratedPayload(BaseModel):
@@ -492,6 +493,8 @@ class ValidationCompletedPayload(BaseModel):
     validator_alias: str = ""
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+    llm_usage: Optional[Dict[str, Optional[int]]] = None
+    resolved_model: Optional[str] = None
     llm_config_version: Optional[int] = None
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
     sources: Optional[List[EvidenceItem]] = None
@@ -555,6 +558,8 @@ class LightValidationResponsePayload(BaseModel):
     validator_id: str
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+    llm_usage: Optional[Dict[str, Optional[int]]] = None
+    resolved_model: Optional[str] = None
     llm_config_version: Optional[int] = None
     categoryId: CategoryId
     verdict: Optional[Validacion] = None

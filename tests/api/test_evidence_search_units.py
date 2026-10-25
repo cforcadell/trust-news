@@ -590,8 +590,25 @@ def test_retrieval_summary_separates_transport_extraction_and_citability():
         "substitution_exhausted": 0,
         "fallback_rounds": 1,
         "failure_counts": {"HTTP_202_EMPTY_BODY": 1, "HTTP_CLIENT_ERROR": 1},
+        "negative_history_hits": 0,
+        "negative_history_attempts_avoided": 0,
         "stop_reason": "BUDGET_EXHAUSTED",
     }
+
+
+def test_negative_history_classifies_outcomes_and_reports_attempt_savings():
+    assert evidence._unusable_outcome_class({
+        "fetch_status": "failed", "http_status": 429,
+    }) == "RATE_LIMITED"
+    assert evidence._unusable_outcome_class({
+        "fetch_status": "failed", "http_status": 503,
+    }) == "SERVER_FAILURE"
+    summary = evidence.retrieval_summary(
+        [], candidates_considered=4, target_documents=1, fallback_rounds=0,
+        negative_history_hits=3, negative_history_attempts_avoided=2,
+    )
+    assert summary["negative_history_hits"] == 3
+    assert summary["negative_history_attempts_avoided"] == 2
 
 
 def test_retrieval_summary_counts_recovered_and_exhausted_actions():

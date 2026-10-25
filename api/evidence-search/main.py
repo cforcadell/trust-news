@@ -61,6 +61,19 @@ EVIDENCE_CANDIDATE_MULTIPLIER = max(1, int(os.getenv("EVIDENCE_CANDIDATE_MULTIPL
 EVIDENCE_TARGET_CITABLE_SOURCES = max(1, int(os.getenv("EVIDENCE_TARGET_CITABLE_SOURCES", "1")))
 UNUSABLE_URL_TTL_SECONDS = int(os.getenv("EVIDENCE_UNUSABLE_URL_TTL_SECONDS", "3600"))
 UNUSABLE_URL_MAX_ENTRIES = int(os.getenv("EVIDENCE_UNUSABLE_URL_MAX_ENTRIES", "1024"))
+UNUSABLE_OUTCOME_TTLS = {
+    "PENDING": int(os.getenv("EVIDENCE_UNUSABLE_PENDING_TTL_SECONDS", "120")),
+    "ACCESS_DENIED": int(os.getenv("EVIDENCE_UNUSABLE_ACCESS_DENIED_TTL_SECONDS", "1800")),
+    "RATE_LIMITED": int(os.getenv("EVIDENCE_UNUSABLE_RATE_LIMITED_TTL_SECONDS", "120")),
+    "SERVER_FAILURE": int(os.getenv("EVIDENCE_UNUSABLE_SERVER_FAILURE_TTL_SECONDS", "120")),
+    "NETWORK_FAILURE": int(os.getenv("EVIDENCE_UNUSABLE_NETWORK_FAILURE_TTL_SECONDS", "120")),
+    "EMPTY_CONTENT": int(os.getenv("EVIDENCE_UNUSABLE_EMPTY_CONTENT_TTL_SECONDS", "1800")),
+    "NOT_FOUND": int(os.getenv("EVIDENCE_UNUSABLE_NOT_FOUND_TTL_SECONDS", "3600")),
+}
+UNUSABLE_HISTORY_SUCCESS_TTL_SECONDS = int(
+    os.getenv("EVIDENCE_UNUSABLE_SUCCESS_HISTORY_TTL_SECONDS", "86400")
+)
+UNUSABLE_HISTORY_POLICY = os.getenv("EVIDENCE_UNUSABLE_HISTORY_POLICY", "fetch-outcomes-v1")
 _recent_unusable_urls: Dict[str, float] = {}
 
 QUERY_OPERATIONAL_TERMS = {
@@ -935,10 +948,10 @@ def remember_unusable_urls(evidences: List[Dict[str, Any]]) -> None:
         status = item.get("fetch_status")
         if status == "ok":
             _recent_unusable_urls.pop(url, None)
-        elif status == "empty_text" or (status == "failed" and item.get("fetch_error") in {
-            "http_401", "http_403", "http_404", "connect_error"
-        }):
-            _recent_unusable_urls[url] = now + UNUSABLE_URL_TTL_SECONDS
+        elif _is_unusable_url_outcome(item):
+            outcome_class = _unusable_outcome_class(item) or "UNCLASSIFIED"
+            ttl_seconds = UNUSABLE_OUTCOME_TTLS.get(outcome_class, UNUSABLE_URL_TTL_SECONDS)
+            _recent_unusable_urls[url] = now + ttl_seconds
     if len(_recent_unusable_urls) > UNUSABLE_URL_MAX_ENTRIES:
         for url, _ in sorted(_recent_unusable_urls.items(), key=lambda pair: pair[1])[
             :len(_recent_unusable_urls) - UNUSABLE_URL_MAX_ENTRIES
@@ -947,12 +960,37 @@ def remember_unusable_urls(evidences: List[Dict[str, Any]]) -> None:
 
 
 def _is_unusable_url_outcome(item: Dict[str, Any]) -> bool:
-    status = item.get("fetch_status")
-    return status == "empty_text" or (
-        status == "failed" and item.get("fetch_error") in {
-            "http_401", "http_403", "http_404", "connect_error",
-        }
+    return _unusable_outcome_class(item) is not None
+
+
+def _document_identity(url: str) -> str:
+    """Stable opaque identity shared by replicas for a normalized document URL."""
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+def _unusable_outcome_class(item: Dict[str, Any]) -> Optional[str]:
+    code = (item.get("failure") or {}).get("code") or item.get("fetch_error")
+    http_status = item.get("http_status")
+    outcome = classify_fetch_outcome(
+        status=str(item.get("fetch_status") or "failed"),
+        failure_code=str(code).upper() if code else None,
+        http_status=http_status if isinstance(http_status, int) else None,
     )
+    if outcome in UNUSABLE_OUTCOME_TTLS:
+        return outcome
+    if outcome == "ACCESS_DENIED":
+        return outcome
+    # Keep compatibility with older evidence payloads that only carry fetch_error.
+    legacy_code = str(item.get("fetch_error") or "").lower()
+    if legacy_code in {"http_401", "http_403"}:
+        return "ACCESS_DENIED"
+    if legacy_code == "http_404":
+        return "NOT_FOUND"
+    if legacy_code == "connect_error":
+        return "NETWORK_FAILURE"
+    if item.get("fetch_status") == "empty_text":
+        return "EMPTY_CONTENT"
+    return None
 
 
 async def hydrate_unusable_url_history(results: List[Dict[str, Any]]) -> None:
@@ -969,8 +1007,8 @@ async def hydrate_unusable_url_history(results: List[Dict[str, Any]]) -> None:
     now = utc_now()
     try:
         cursor = unusable_url_collection.find(
-            {"url": {"$in": urls}, "expires_at": {"$gt": now}},
-            {"_id": 0, "url": 1, "expires_at": 1},
+            {"url": {"$in": urls}, "expires_at": {"$gt": now}, "active_failure": {"$ne": False}},
+            {"_id": 0, "url": 1, "expires_at": 1, "active_failure": 1},
         )
         records = await cursor.to_list(length=len(urls))
         monotonic_now = time.monotonic()
@@ -996,24 +1034,42 @@ async def persist_unusable_url_outcomes(evidences: List[Dict[str, Any]]) -> None
     if unusable_url_collection is None:
         return
     now = utc_now()
-    expires_at = now + timedelta(seconds=UNUSABLE_URL_TTL_SECONDS)
     try:
         for item in evidences:
             url = normalize_url(item.get("url") or "")
             if not url:
                 continue
+            identity = _document_identity(url)
             if item.get("fetch_status") == "ok":
-                await unusable_url_collection.delete_one({"url": url})
+                await unusable_url_collection.update_one(
+                    {"url": url},
+                    {"$set": {
+                        "url": url, "document_identity": identity, "active_failure": False,
+                        "last_success_at": now, "updated_at": now,
+                        "expires_at": now + timedelta(seconds=UNUSABLE_HISTORY_SUCCESS_TTL_SECONDS),
+                        "policy": UNUSABLE_HISTORY_POLICY,
+                    }, "$setOnInsert": {"first_attempt_at": now}, "$inc": {"success_count": 1}},
+                    upsert=True,
+                )
+                _recent_unusable_urls.pop(url, None)
             elif _is_unusable_url_outcome(item):
+                outcome_class = _unusable_outcome_class(item) or "UNCLASSIFIED"
+                ttl_seconds = UNUSABLE_OUTCOME_TTLS.get(outcome_class, UNUSABLE_URL_TTL_SECONDS)
                 await unusable_url_collection.update_one(
                     {"url": url},
                     {"$set": {
                         "url": url,
+                        "document_identity": identity,
+                        "outcome_class": outcome_class,
+                        "active_failure": True,
                         "failure_code": (item.get("failure") or {}).get("code"),
                         "http_status": item.get("http_status"),
+                        "last_attempt_at": now,
                         "updated_at": now,
-                        "expires_at": expires_at,
-                    }},
+                        "expires_at": now + timedelta(seconds=ttl_seconds),
+                        "policy": UNUSABLE_HISTORY_POLICY,
+                    }, "$setOnInsert": {"first_attempt_at": now},
+                        "$inc": {"attempt_count": max(1, len(item.get("fetch_attempts") or []))}},
                     upsert=True,
                 )
     except Exception as exc:
@@ -1035,6 +1091,8 @@ def retrieval_summary(
     candidates_considered: int,
     target_documents: int,
     fallback_rounds: int,
+    negative_history_hits: int = 0,
+    negative_history_attempts_avoided: int = 0,
 ) -> Dict[str, Any]:
     citable = sum(bool(item.get("citation_status") == "available" and item.get("contexts")) for item in evidences)
     extracted = sum(item.get("fetch_status") == "ok" for item in evidences)
@@ -1100,6 +1158,8 @@ def retrieval_summary(
         "substitution_exhausted": candidate_substitutions - substitution_recovered,
         "fallback_rounds": fallback_rounds,
         "failure_counts": failures,
+        "negative_history_hits": negative_history_hits,
+        "negative_history_attempts_avoided": negative_history_attempts_avoided,
         "stop_reason": "TARGET_REACHED" if citable >= target_documents else "BUDGET_EXHAUSTED",
     }
 
@@ -1401,6 +1461,11 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             max(2, target_citable_sources, effective_search_policy["max_results"] - 2),
         ),
     )
+    negative_history_urls = {
+        normalize_url(item.get("url") or "")
+        for item in raw_results
+        if normalize_url(item.get("url") or "") in _recent_unusable_urls
+    }
     evidences = await build_evidences_with_optional_contexts(
         assertion,
         scheduled_results,
@@ -1648,6 +1713,12 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         candidates_considered=len(raw_results) + fallback_candidate_count,
         target_documents=target_citable_sources,
         fallback_rounds=fallback_rounds,
+        negative_history_hits=len(negative_history_urls),
+        negative_history_attempts_avoided=len(
+            negative_history_urls - {
+                normalize_url(item.get("url") or "") for item in evidences
+            }
+        ),
     )
     cache_policy = response_cache_policy(evidences)
     response = {

@@ -86,6 +86,8 @@ class EvidenceRetrievalSummary(BaseModel):
     substitution_exhausted: int = Field(default=0, ge=0)
     fallback_rounds: int = Field(ge=0)
     failure_counts: Dict[str, int] = Field(default_factory=dict)
+    negative_history_hits: int = Field(default=0, ge=0)
+    negative_history_attempts_avoided: int = Field(default=0, ge=0)
     stop_reason: Literal["TARGET_REACHED", "BUDGET_EXHAUSTED"]
 
 

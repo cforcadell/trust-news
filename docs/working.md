@@ -344,7 +344,7 @@ Informes: [campaña `e2e-20261025-093335`](../tests/data/evaluation/artifacts/e2
 
 ## Bloque 3. Historial compartido y caché por resultado
 
-**Estado:** parcial; existen caché de respuesta y memoria compartida de URLs no utilizables, pero faltan identidad documental, TTL por resultado y métricas de intentos evitados.
+**Estado:** implementación parcial en curso; el historial negativo compartido ya tiene identidad estable, TTL por clase, contadores/fechas, recuperación e instrumentación. Falta la caché positiva de contenido extraído, cobertura de pruebas de persistencia multi-réplica y medir la aceptación con campañas fría/caliente.
 
 ### Propósito
 
@@ -390,6 +390,14 @@ El repositorio ya contiene primitivas de caché y memoria de URLs no utilizables
 - Sin reducción de `documents_citable` respecto a la campaña fría.
 - Cero reutilizaciones de contenido no validado como caché positiva.
 - Todos los ahorros de intentos reconstruibles desde artefactos.
+
+### Implementación aplicada (2026-10-25)
+
+- Se amplió la colección existente `evidence_unusable_urls_v1`; no se creó una caché negativa paralela.
+- La identidad compartida es SHA-256 de la URL normalizada (incluida su query), y se conservan lecturas de registros legacy sin `active_failure`.
+- Las clases `ACCESS_DENIED`, `RATE_LIMITED`, `SERVER_FAILURE`, `NETWORK_FAILURE`, `EMPTY_CONTENT` y `NOT_FOUND` tienen TTL configurables; Mongo guarda clase, política, primer/último intento, número acumulado de intentos, expiración y último éxito. Un éxito desactiva la penalización, sin borrar el historial inmediatamente.
+- La selección sigue siendo operativa si Mongo no está disponible: el historial local está acotado por TTL y máximo de entradas. La respuesta expone `negative_history_hits` e `negative_history_attempts_avoided`.
+- Pendiente: caché positiva del texto extraído (separada de historial y caché de respuesta), pruebas de persistencia/expiración/recuperación contra colección simulada o Mongo y campaña E2E fría/caliente. Por ello, el bloque no supera todavía su puerta de aceptación.
 
 ---
 

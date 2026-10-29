@@ -404,11 +404,20 @@ def _validation_stages(row):
         evidence = _stage("SKIPPED", "SKIPPED", deepcopy(retrieval), missing_reason="La evidencia se inyectó o se omitió la búsqueda.")
     else:
         evidence = _stage("NOT_RECORDED", "NOT_EVALUATED", deepcopy(retrieval), missing_reason="No se guardó respuesta de Evidence Search.")
-    retrieved_hash = inputs.get("retrieval_evidence_bundle_hash")
-    delivered_hash = inputs.get("validator_input_evidence_bundle_hash")
-    handoff_obs = {"retrieval_hash": retrieved_hash, "validator_input_hash": delivered_hash}
+    hash_version = "v2" if inputs.get("retrieval_evidence_bundle_hash_v2") and inputs.get(
+        "validator_input_evidence_bundle_hash_v2") else "v1"
+    suffix = "_v2" if hash_version == "v2" else ""
+    retrieved_hash = inputs.get("retrieval_evidence_bundle_hash" + suffix)
+    delivered_hash = inputs.get("validator_input_evidence_bundle_hash" + suffix)
+    v1_retrieved = inputs.get("retrieval_evidence_bundle_hash")
+    v1_delivered = inputs.get("validator_input_evidence_bundle_hash")
+    handoff_obs = {"retrieval_hash": retrieved_hash, "validator_input_hash": delivered_hash,
+                   "hash_version": hash_version, "v1_retrieval_hash": v1_retrieved,
+                   "v1_validator_input_hash": v1_delivered}
     if retrieved_hash and delivered_hash:
-        good = retrieved_hash == delivered_hash
+        good = retrieved_hash == delivered_hash and (
+            not (v1_retrieved and v1_delivered) or v1_retrieved == v1_delivered
+        )
         handoff = _stage("COMPLETED", "PASS" if good else "FAIL", handoff_obs,
                          [_check("BUNDLE_HASH_MATCH" if good else "HANDOFF_EVIDENCE_MISMATCH",
                                  "PASS" if good else "FAIL",
@@ -476,8 +485,11 @@ def _validation_stages(row):
     delivered = inputs.get("evidences") if isinstance(inputs.get("evidences"), list) else bundle
     contexts = [{"source_id": source.get("source_id"), "url": source.get("url"),
                  "relationship_to_origin": source.get("relationship_to_origin"),
+                 "document_provenance": deepcopy(source.get("document_provenance")),
                  "context_id": context.get("context_id"), "text": context.get("text"),
                  "citation_eligible": context.get("citation_eligible"),
+                 "origin": context.get("origin"),
+                 "document_sha256": context.get("document_sha256"),
                  "selected_chunk_id": context.get("selected_chunk_id")}
                 for source in delivered if isinstance(source, dict)
                 for context in source.get("contexts") or [] if isinstance(context, dict)]

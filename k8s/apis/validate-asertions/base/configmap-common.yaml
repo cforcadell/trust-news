@@ -19,10 +19,12 @@ data:
   # amplifying a repeated Evidence Search outage.
   EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS: "2"
   EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS: "120"
+  LIGHT_VALIDATION_MAX_IN_FLIGHT: "1" # Override per worker after sizing external quotas/resources.
   EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS: "0.25"
   EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD: "3"
   EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS: "30"
   SOURCE_ROUTER_URL: "http://source-router.apis.svc.cluster.local:8075"
+  SOURCE_ROUTER_TIMEOUT_SECONDS: "180"
   ADMIN_URL: "http://admin-service.apis.svc.cluster.local:8400"
   OPENROUTER_API_URL: "https://openrouter.ai/api/v1/chat/completions"
   MISTRAL_API_URL: "https://api.mistral.ai/v1/chat/completions"

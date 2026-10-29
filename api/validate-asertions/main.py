@@ -42,7 +42,7 @@ from common.utils.llm_runtime import fetch_llm_runtime_override
 from common.llm import LLMRequest, complete, complete_structured, parse_response
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.evidence import evaluate_evidence_grounding
-from common.utils.evidence_bundle import evidence_bundle_hash
+from common.utils.evidence_bundle import evidence_bundle_hash, evidence_bundle_hash_v2
 from common.utils.validation_prompt import DEFAULT_RAG_PROMPT, format_evidences_for_prompt
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -144,6 +144,7 @@ EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS = max(
     0.0, float(os.getenv("EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS", "30")),
 )
 SOURCE_ROUTER_URL = os.getenv("SOURCE_ROUTER_URL", "http://source-router.apis.svc.cluster.local:8075")
+SOURCE_ROUTER_TIMEOUT_SECONDS = max(1.0, float(os.getenv("SOURCE_ROUTER_TIMEOUT_SECONDS", "180")))
 AUTOMATIC_VALIDATOR_TYPES = {
     ValidatorType.LLM_MEMORY_VALIDATION,
     ValidatorType.LLM_SEARCH_VALIDATION,
@@ -525,6 +526,7 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
         raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], None) from exc
     if evidence_response is not None:
         evidence_response["validator_input_evidence_bundle_hash"] = evidence_bundle_hash(evidences)
+        evidence_response["validator_input_evidence_bundle_hash_v2"] = evidence_bundle_hash_v2(evidences)
         prompt_context = payload_context_for_prompt(payload_v2)
         evidence_response["validator_input"] = {
             "context": prompt_context,
@@ -681,7 +683,7 @@ def evaluation_headers_for_payload(payload_v2: AssertionValidationPayloadV2) -> 
 def resolve_local_sources(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     logger.info("[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling source-router before evidence-search")
     try:
-        request_options = {"timeout": 30.0}
+        request_options = {"timeout": SOURCE_ROUTER_TIMEOUT_SECONDS}
         headers = evaluation_headers_for_payload(payload_v2)
         if headers:
             request_options["headers"] = headers
@@ -1057,6 +1059,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
 
 async def consume_light_validation_requests():
     global light_consumer, light_producer
+    max_in_flight = max(1, int(os.getenv("LIGHT_VALIDATION_MAX_IN_FLIGHT", "1")))
     light_consumer = AIOKafkaConsumer(
         TOPIC_LIGHT_VALIDATION_REQUESTS,
         bootstrap_servers=KAFKA_BROKER,
@@ -1074,19 +1077,31 @@ async def consume_light_validation_requests():
     await light_producer.start()
     logger.info(f"[LIGHT] Kafka consumer subscribed to {TOPIC_LIGHT_VALIDATION_REQUESTS} as {ACCOUNT_ADDRESS}")
 
+    in_flight: set[asyncio.Task] = set()
+    slots = asyncio.Semaphore(max_in_flight)
+
+    async def process_message(msg):
+        try:
+            data = json.loads(msg.value.decode("utf-8"))
+            req = LightValidationRequest(**data)
+            if req.payload.validation_mode == ValidationMode.LIGHT:
+                await handle_light_validation_request(req)
+        except ValidationError as exc:
+            logger.warning("[LIGHT] Invalid Kafka request ignored: %s", exc)
+        except Exception:
+            logger.exception("[LIGHT] Error processing Kafka request")
+        finally:
+            slots.release()
+
     try:
         async for msg in light_consumer:
-            try:
-                data = json.loads(msg.value.decode("utf-8"))
-                req = LightValidationRequest(**data)
-                if req.payload.validation_mode != ValidationMode.LIGHT:
-                    continue
-                await handle_light_validation_request(req)
-            except ValidationError as e:
-                logger.warning(f"[LIGHT] Invalid Kafka request ignored: {e}")
-            except Exception as e:
-                logger.exception(f"[LIGHT] Error processing Kafka request: {e}")
+            await slots.acquire()
+            task = asyncio.create_task(process_message(msg))
+            in_flight.add(task)
+            task.add_done_callback(in_flight.discard)
     finally:
+        if in_flight:
+            await asyncio.gather(*in_flight, return_exceptions=True)
         await light_consumer.stop()
         await light_producer.stop()
 

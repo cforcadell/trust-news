@@ -244,6 +244,9 @@ async def test_classifier_preserves_valid_domain_when_other_jurisdiction_fails(m
     assert result.failed_domains == ["bad.example"]
     assert len(calls) == 2
     assert "Return corrected classifications only for: bad.example" in calls[1].prompt
+    assert '"domain": "idescat.cat"' in calls[0].prompt
+    assert '"domain": "idescat.cat"' not in calls[1].prompt
+    assert '"domain": "bad.example"' in calls[1].prompt
 
 
 def test_jurisdiction_repairs_only_redundant_codes_without_broadening_coverage():

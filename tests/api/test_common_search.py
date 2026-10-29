@@ -4,12 +4,18 @@ import pytest
 
 from common.search import SearchProvider, SearchProviderError, SearchResult, get_search_plan, search_with_provider
 from common.search.errors import SearchConfigurationError
-from common.search.exa import ExaSearchProvider
+from common.search.exa import ExaSearchProvider, normalize_exa_result
 from common.search.factory import get_search_provider
 from common.search.limits import effective_max_results
 from common.search.models import SearchRequest
 from common.search.normalization import normalize_domain, normalize_url
 from common.search.tavily import TavilySearchProvider
+
+
+def test_exa_preserves_full_text_when_search_excerpt_is_identical():
+    document = "Official document text " * 12
+    normalized = normalize_exa_result({"url": "https://example.org/report", "text": document})
+    assert normalized["content"] == normalized["raw_content"]
 
 
 class FlakySearch(SearchProvider):
@@ -245,5 +251,88 @@ def test_search_consumers_use_shared_layer():
     api = Path(__file__).resolve().parents[2] / "api"
     evidence = (api / "evidence-search" / "main.py").read_text()
     router = (api / "source-router" / "app" / "service.py").read_text()
-    assert "from common.search import get_search_plan, search_with_provider" in evidence
+    assert "from common.search import extract_with_provider, get_search_plan, search_with_provider" in evidence
     assert "from common.search import get_search_plan, search_with_provider" in router
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_type,module_name,body,expected_status", [
+    (ExaSearchProvider, "common.search.exa", {"results": [{"url": "https://example.org/a", "text": "document"}],
+       "statuses": [{"id": "https://example.org/a", "status": "error", "error": {"tag": "blocked"}}]}, "failed"),
+    (TavilySearchProvider, "common.search.tavily", {"results": [],
+       "failed_results": [{"url": "https://example.org/a", "error": "blocked"}]}, "failed"),
+])
+async def test_extract_checks_per_url_success_after_http_200(monkeypatch, provider_type, module_name, body, expected_status):
+    import importlib
+
+    module = importlib.import_module(module_name)
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return body
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", Client)
+    monkeypatch.setenv("API_KEY_PROVIDER", "test-key")
+    result = await provider_type().extract("https://example.org/a")
+    assert result.status == expected_status
+    assert result.text == ""
+
+
+@pytest.mark.asyncio
+async def test_exa_live_extract_requires_live_source(monkeypatch):
+    import common.search.exa as exa
+
+    payloads = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"requestId": "call-1", "costDollars": {"total": 0.003},
+                    "results": [{"url": "https://example.org/a", "text": "document"}],
+                    "statuses": [{"id": "https://example.org/a", "status": "success", "source": "cached"}]}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, _url, **kwargs):
+            payloads.append(kwargs["json"])
+            return Response()
+
+    monkeypatch.setattr(exa.httpx, "AsyncClient", Client)
+    monkeypatch.setenv("API_KEY_PROVIDER", "test-key")
+    result = await ExaSearchProvider().extract("https://example.org/a", require_live=True)
+    assert payloads == [{"urls": ["https://example.org/a"], "text": True, "maxAgeHours": 0}]
+    assert result.status == "failed" and result.error == "FRESHNESS_UNPROVEN"
+    assert result.cost_usd == 0.003
+
+
+@pytest.mark.asyncio
+async def test_tavily_live_extract_is_unsupported_without_call():
+    result = await TavilySearchProvider().extract("https://example.org/a", require_live=True)
+    assert result.status == "unsupported"
+    assert result.error == "LIVE_FRESHNESS_UNSUPPORTED"

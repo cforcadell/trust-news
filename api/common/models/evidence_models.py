@@ -77,6 +77,16 @@ class EvidenceRetrievalSummary(BaseModel):
     documents_attempted: int = Field(default=0, ge=0)
     documents_extracted: int = Field(ge=0)
     documents_citable: int = Field(ge=0)
+    documents_provider_text: int = Field(default=0, ge=0)
+    documents_direct: int = Field(default=0, ge=0)
+    documents_provider_extract: int = Field(default=0, ge=0)
+    documents_cache: int = Field(default=0, ge=0)
+    provider_extract_calls: int = Field(default=0, ge=0)
+    provider_extract_cost_usd_observed: float | None = Field(default=0, ge=0)
+    provider_extract_cost_usd_per_citable_source: float | None = Field(default=None, ge=0)
+    direct_failures_recovered_by_provider: int = Field(default=0, ge=0)
+    documents_freshness_unknown: int = Field(default=0, ge=0)
+    provider_text_rejected: int = Field(default=0, ge=0)
     outcome_counts: Dict[str, int] = Field(default_factory=dict)
     retry_actions: int = Field(default=0, ge=0)
     retry_recovered: int = Field(default=0, ge=0)
@@ -105,11 +115,13 @@ class EvidenceSearchResponseV2(BaseModel):
     assertion_id: str | int
     domain_resolution: dict
     search_policy: EvidenceSearchPolicy
+    extraction_policy: dict | None = None
     queries_executed: List[dict] = Field(default_factory=list)
     evidences: List[dict] = Field(default_factory=list)
     cached: bool
     cache_key: str
     evidence_bundle_hash: str | None = None
+    evidence_bundle_hash_v2: str | None = None
     provider_trace: dict | None = None
     evaluation_trace: dict | None = None
     retrieval_summary: EvidenceRetrievalSummary | None = None

@@ -64,7 +64,9 @@ def results_from_order(dataset, order, run_id=None):
                 inputs = response.get("validator_input", {})
                 row.validator_input = {**inputs, "evidences": response.get("evidences", []),
                     "retrieval_evidence_bundle_hash": response.get("evidence_bundle_hash"),
-                    "validator_input_evidence_bundle_hash": response.get("validator_input_evidence_bundle_hash")}
+                    "validator_input_evidence_bundle_hash": response.get("validator_input_evidence_bundle_hash"),
+                    "retrieval_evidence_bundle_hash_v2": response.get("evidence_bundle_hash_v2"),
+                    "validator_input_evidence_bundle_hash_v2": response.get("validator_input_evidence_bundle_hash_v2")}
                 row.cache_state.update(router_cache_hit=(route.get("route_state") == "FRESH" or bool(route.get("stale_route_used"))) if route else None,
                     evidence_cache_hit=response.get("cached"),
                     route_recomputed=(route.get("route_state") in {"MISSING", "STALE"}

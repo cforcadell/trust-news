@@ -1,4 +1,6 @@
 import importlib.util
+import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -51,6 +53,67 @@ def minimal_payload():
         "url": "https://publisher.test/story", "domain": "publisher.test",
     })
     return SimpleNamespace(assertion=assertion, origin_document=origin)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [1, 3])
+async def test_light_consumer_bounds_parallel_validations(validator, monkeypatch, limit):
+    monkeypatch.setenv("LIGHT_VALIDATION_MAX_IN_FLIGHT", str(limit))
+    active = 0
+    peak = 0
+    completed = []
+
+    class Consumer:
+        def __init__(self, *args, **kwargs):
+            self.index = 0
+            self.stopped = False
+
+        async def start(self):
+            pass
+
+        async def stop(self):
+            self.stopped = True
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.index == 3:
+                raise StopAsyncIteration
+            value = json.dumps({"index": self.index}).encode()
+            self.index += 1
+            return SimpleNamespace(value=value)
+
+    class Producer:
+        def __init__(self, *args, **kwargs):
+            self.stopped = False
+
+        async def start(self):
+            pass
+
+        async def stop(self):
+            self.stopped = True
+
+    async def handle(req):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        completed.append(req.index)
+        active -= 1
+
+    monkeypatch.setattr(validator, "AIOKafkaConsumer", Consumer)
+    monkeypatch.setattr(validator, "AIOKafkaProducer", Producer)
+    monkeypatch.setattr(validator, "LightValidationRequest", lambda **data: SimpleNamespace(
+        index=data["index"], payload=SimpleNamespace(validation_mode=validator.ValidationMode.LIGHT)))
+    monkeypatch.setattr(validator, "handle_light_validation_request", handle)
+
+    await validator.consume_light_validation_requests()
+
+    assert peak == limit
+    assert sorted(completed) == [0, 1, 2]
+    assert validator.light_consumer.stopped
+    assert validator.light_producer.stopped
 
 
 def test_light_worker_import_does_not_open_contract(monkeypatch):
@@ -323,6 +386,26 @@ def test_source_router_http_status_is_preserved_as_retryable(validator, monkeypa
     assert details.status_code == 500
     assert details.retryable is True
     assert details.message == "classification failed"
+
+
+def test_source_router_uses_configured_timeout(validator, monkeypatch):
+    monkeypatch.setattr(validator, "SOURCE_ROUTER_TIMEOUT_SECONDS", 145.0)
+    observed = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"sources": []}
+
+    def post(*args, **kwargs):
+        observed.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    assert validator.resolve_local_sources(minimal_payload()) == ([], {"sources": []})
+    assert observed["timeout"] == 145.0
 
 
 def test_evidence_search_timeout_is_classified_as_retryable(validator):

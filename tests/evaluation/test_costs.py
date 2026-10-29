@@ -66,6 +66,39 @@ def test_missing_price_and_missing_tokens_remain_unknown():
         validate_rates({**RATES, "search": [{"provider": "exa", "usd_per_call": "NaN"}]})
 
 
+def test_provider_extract_cost_is_separate_from_search_and_cache_hits():
+    diagnostic = _diagnostic()
+    obs = diagnostic["validations"][0]["stages"]["evidence_search"]["observations"]
+    obs["evidences"] = [{"source_id": "source-1", "document_provenance": {"provider": "exa"},
+                         "acquisition_attempts": [{"method": "provider_extract", "duration_ms": 25,
+                                                   "provider": "exa", "cost_usd": 0.003,
+                                                   "request_id": "contents-1"}]}]
+    costs = order_costs(diagnostic, validate_rates(RATES))
+    extracted = [event for event in costs["ledger"] if event["component"] == "provider_extract"]
+    assert len(extracted) == 1
+    assert extracted[0]["basis"] == "PROVIDER_ESTIMATE"
+    assert extracted[0]["cost_usd"] == "0.00300000"
+    assert costs["components"]["evidence_search"]["known_usd"] == "0.01000000"
+    obs["cached"] = True
+    assert not [event for event in order_costs(diagnostic, validate_rates(RATES))["ledger"]
+                if event["component"] == "provider_extract"]
+
+
+def test_tavily_extract_credits_require_explicit_rate():
+    diagnostic = _diagnostic()
+    obs = diagnostic["validations"][0]["stages"]["evidence_search"]["observations"]
+    obs["evidences"] = [{"acquisition_attempts": [{"method": "provider_extract", "duration_ms": 15,
+                                                   "provider": "tavily", "usage": {"credits": 2}}]}]
+    unknown = [event for event in order_costs(diagnostic, validate_rates(RATES))["ledger"]
+               if event["component"] == "provider_extract"]
+    assert unknown[0]["cost_usd"] is None
+    rates = validate_rates({**RATES, "extract": [{"provider": "tavily", "usd_per_credit": "0.002"}]})
+    known = [event for event in order_costs(diagnostic, rates)["ledger"]
+             if event["component"] == "provider_extract"]
+    assert known[0]["cost_usd"] == "0.00400000"
+    assert known[0]["basis"] == "CALCULATED"
+
+
 def test_tiered_search_rate_uses_returned_result_count():
     diagnostic = _diagnostic()
     requests = diagnostic["validations"][0]["stages"]["evidence_search"]["observations"]["provider_trace"]["requests"]

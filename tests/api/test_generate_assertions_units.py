@@ -119,4 +119,7 @@ async def test_evaluation_trace_records_structured_repair_without_response_body(
     assert trace["assertion_count"] == 1
     assert trace["validation_issues"] == []
     assert trace["usage"] == [{"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}]
+    assert trace["request_build_seconds"] >= 0
+    assert trace["structured_completion_seconds"] >= 0
+    assert trace["parse_seconds"] >= 0
     assert "response" not in str(trace)

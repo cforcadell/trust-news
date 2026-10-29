@@ -98,6 +98,44 @@ def retrieval_metrics(retrieval, expected, bundle):
                     for context in source.get("contexts", []))
                 for source in bundle
             )),
+            "documents_provider_text": summary.get("documents_provider_text", sum(
+                (source.get("document_provenance") or {}).get("method") == "provider_search_text"
+                for source in bundle
+            )),
+            "documents_direct": summary.get("documents_direct", sum(
+                (source.get("document_provenance") or {}).get("method") == "direct_fetch"
+                for source in bundle
+            )),
+            "documents_provider_extract": summary.get("documents_provider_extract", sum(
+                (source.get("document_provenance") or {}).get("method") == "provider_extract"
+                for source in bundle
+            )),
+            "documents_cache": summary.get("documents_cache", sum(
+                (source.get("document_provenance") or {}).get("method") == "document_cache"
+                for source in bundle
+            )),
+            "documents_freshness_unknown": summary.get("documents_freshness_unknown", sum(
+                source.get("fetch_status") == "ok" and
+                (source.get("document_provenance") or {}).get("freshness_status") == "UNKNOWN"
+                for source in bundle
+            )),
+            "provider_extract_calls": summary.get("provider_extract_calls", sum(
+                attempt.get("method") == "provider_extract" and "duration_ms" in attempt
+                for source in bundle for attempt in source.get("acquisition_attempts") or []
+            )),
+            "provider_extract_cost_usd_observed": summary.get("provider_extract_cost_usd_observed"),
+            "provider_extract_cost_usd_per_citable_source": summary.get(
+                "provider_extract_cost_usd_per_citable_source"),
+            "direct_failures_recovered_by_provider": summary.get("direct_failures_recovered_by_provider", sum(
+                (source.get("document_provenance") or {}).get("method") == "provider_extract"
+                and source.get("direct_fetch_status") not in {None, "ok"}
+                for source in bundle
+            )),
+            "provider_text_rejected": summary.get("provider_text_rejected", sum(
+                any(attempt.get("method") == "provider_search_text" and attempt.get("outcome") != "ACCEPTED"
+                    for attempt in source.get("acquisition_attempts") or [])
+                for source in bundle
+            )),
             "fetch_outcome_counts": summary.get("outcome_counts", outcome_counts),
             "retry_actions": summary.get("retry_actions", sum(
                 action.get("action") == "RETRY"
@@ -135,11 +173,20 @@ def retrieval_metrics(retrieval, expected, bundle):
 
 
 def handoff_metrics(inputs):
-    retrieved = inputs.get("retrieval_evidence_bundle_hash")
-    delivered = inputs.get("validator_input_evidence_bundle_hash")
-    return {"status": "NOT_EVALUATED" if not retrieved or not delivered else
-            "PASS" if retrieved == delivered else "HANDOFF_EVIDENCE_MISMATCH",
-            "retrieval_evidence_bundle_hash": retrieved, "validator_input_evidence_bundle_hash": delivered}
+    pairs = [
+        (version, inputs.get("retrieval_evidence_bundle_hash" + suffix),
+         inputs.get("validator_input_evidence_bundle_hash" + suffix))
+        for version, suffix in (("v1", ""), ("v2", "_v2"))
+    ]
+    recorded = [(version, retrieved, delivered) for version, retrieved, delivered in pairs
+                if retrieved and delivered]
+    mismatch = any(retrieved != delivered for _, retrieved, delivered in recorded)
+    status = "HANDOFF_EVIDENCE_MISMATCH" if mismatch else "PASS" if recorded else "NOT_EVALUATED"
+    version, retrieved, delivered = recorded[-1] if recorded else ("v1", None, None)
+    return {"status": status, "version": version,
+            "retrieval_evidence_bundle_hash": retrieved, "validator_input_evidence_bundle_hash": delivered,
+            "hashes_v1_match": pairs[0][1] == pairs[0][2] if pairs[0][1] and pairs[0][2] else None,
+            "hashes_v2_match": pairs[1][1] == pairs[1][2] if pairs[1][1] and pairs[1][2] else None}
 
 
 def evaluate(result):

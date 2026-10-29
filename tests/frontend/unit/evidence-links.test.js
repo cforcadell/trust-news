@@ -10,7 +10,7 @@ const context = vm.createContext({ URL, t: key => key });
 for (const name of ['escapeHTML', 'safeText', 'compactText', 'validationEvidenceItems', 'validationEvidenceSelection',
     'isGenericEvidenceLabel', 'evidenceUrlHost', 'safeEvidenceUrl',
     'firstEvidenceContextText', 'evidenceDisplayTitle', 'evidenceDecisionText',
-    'evidenceSupportsLabel', 'evidenceValidationResult', 'renderEvidenceValidationBadge',
+    'evidenceSupportsLabel', 'evidenceAcquisitionLabel', 'evidenceValidationResult', 'renderEvidenceValidationBadge',
     'renderEvidenceLinks']) {
     const start = source.indexOf(`function ${name}(`);
     assert.ok(start >= 0, `Missing function ${name}`);
@@ -74,6 +74,34 @@ test('verified evidence used takes precedence over the retrieved collection', ()
     assert.ok(html.includes('ui.usedEvidence'));
     assert.ok(html.includes('Used text'));
     assert.doesNotMatch(html, /Retrieved text/);
+});
+
+test('retrieved document provenance is visible without making it a verified citation', () => {
+    const html = context.renderEvidenceLinks({
+        evidence_search_response: { evidences: [{
+            url: 'https://example.test/report', snippet: 'Excerpt',
+            document_provenance: { method: 'provider_search_text', freshness_status: 'UNKNOWN' }
+        }] }
+    });
+    assert.ok(html.includes('ui.retrievedEvidenceNotUsed'));
+    assert.ok(html.includes('ui.evidenceProviderText'));
+    assert.ok(html.includes('ui.evidenceFreshnessUnknown'));
+});
+
+test('provider extraction and document cache have distinct visible labels', () => {
+    for (const [method, freshness, methodLabel, freshnessLabel] of [
+        ['provider_extract', 'OBSERVED_NOW', 'ui.evidenceProviderExtract', 'ui.evidenceObservedAtRetrieval'],
+        ['document_cache', 'CACHED_KNOWN_AGE', 'ui.evidenceDocumentCache', 'ui.evidenceCachedKnownAge']
+    ]) {
+        const html = context.renderEvidenceLinks({
+            evidence_search_response: { evidences: [{
+                url: 'https://example.test/report', snippet: 'Excerpt',
+                document_provenance: { method, freshness_status: freshness }
+            }] }
+        });
+        assert.ok(html.includes(methodLabel));
+        assert.ok(html.includes(freshnessLabel));
+    }
 });
 
 test('provider-declared sources are explicitly shown as unverified', () => {

@@ -256,6 +256,18 @@ https://localhost:7443/backend/docs
 https://localhost:7443/auth/admin/master/console/
 ```
 
+Antes de ejecutar un E2E que publique órdenes, comprobar la ruta OIDC:
+
+```bash
+curl -k -sS -o /dev/null -w 'OIDC HTTP %{http_code}\n' \
+  https://localhost:7443/auth/realms/TrustNews/.well-known/openid-configuration
+```
+
+`Connection refused` en 7443 indica que falta el túnel. Un error local
+`[Errno 1] Operation not permitted` indica que el proceso no puede abrir
+conexiones desde su sandbox; no demuestra que el secreto del cliente sea
+incorrecto. OIDC 200 confirma la ruta, pero no valida las credenciales.
+
 Kind does not play Cloudflare Single Redirects: `/` must be routed and GUI tested directly in `/gui/`. Traefik's middleware removes that prefix before sending the request to the nginx frontend.
 
 Align the local web client idempotently before trying login and logout:

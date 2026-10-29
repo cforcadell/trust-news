@@ -3,7 +3,7 @@ import os
 
 from .errors import SearchConfigurationError, SearchProviderError
 from .exa import ExaSearchProvider
-from .models import SearchRequest
+from .models import ExtractResult, SearchRequest
 from .provider import SearchProvider
 from .tavily import TavilySearchProvider
 
@@ -34,6 +34,11 @@ def get_search_plan(name: str | None = None) -> dict:
         "primary_requires_selection": bool(primary and primary != provider.default_mode()),
         "cache_config": provider.cache_config(),
     }
+
+
+async def extract_with_provider(provider_name: str | None, url: str, *, require_live: bool = False) -> ExtractResult:
+    """Resolve a provider capability without coupling evidence search to its API."""
+    return await get_search_provider(provider_name).extract(url, require_live=require_live)
 
 
 async def search_with_provider(

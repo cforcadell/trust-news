@@ -90,6 +90,9 @@ def _canonical_evidence_reference(
     text_sha256 = context.get("text_sha256")
     if text_sha256:
         reference["evidence_text_sha256"] = text_sha256
+    provenance = source.get("document_provenance")
+    if isinstance(provenance, dict):
+        reference["document_provenance"] = dict(provenance)
     return sanitize_evidence_item(reference)
 
 

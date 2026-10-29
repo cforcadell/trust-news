@@ -1,5 +1,7 @@
 import importlib.util
+import gzip
 import sys
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +18,189 @@ MODULE_PATH = ROOT / "main.py"
 spec = importlib.util.spec_from_file_location("evidence_search_main", MODULE_PATH)
 evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
+
+
+def test_chunker_handles_large_punctuation_free_document_with_bounded_chunks():
+    from app.chunker import chunk_text
+
+    chunks = chunk_text("large", "x" * 100_000, chunk_size_chars=1200, overlap_chars=200)
+
+    assert len(chunks) < 110
+    assert chunks[0]["text"] == "x" * 1200
+    assert chunks[1]["text"] == "x" * 1200
+    assert max(len(item["text"]) for item in chunks) <= 1800
+
+
+@pytest.mark.asyncio
+async def test_non_pdf_payload_over_limit_is_rejected_before_text_extraction(monkeypatch):
+    from app import document_fetcher
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "text/csv"}
+        content = b"x" * 2048
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, follow_redirects=False):
+            return Response()
+
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
+    monkeypatch.setattr(document_fetcher, "MAX_DOCUMENT_BYTES", 1024)
+
+    result = await document_fetcher.fetch_main_text("https://example.test/data.csv")
+
+    assert result.status == "failed"
+    assert result.failure_code == "DOCUMENT_TOO_LARGE"
+    assert result.response_bytes == 2048
+    assert result.outcome == "EXTRACTION_FAILURE"
+
+
+@pytest.mark.asyncio
+async def test_streaming_fetch_stops_reading_at_byte_limit(monkeypatch):
+    from app import document_fetcher
+
+    read_chunks = []
+
+    class PayloadStream(document_fetcher.httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for index in range(10):
+                read_chunks.append(index)
+                yield b"x" * 600
+
+        async def aclose(self):
+            pass
+
+    transport = document_fetcher.httpx.MockTransport(
+        lambda request: document_fetcher.httpx.Response(
+            200, headers={"content-type": "text/csv"}, stream=PayloadStream(), request=request,
+        )
+    )
+    real_client = document_fetcher.httpx.AsyncClient
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport, **kwargs))
+    monkeypatch.setattr(document_fetcher, "MAX_DOCUMENT_BYTES", 1000)
+
+    result = await document_fetcher.fetch_main_text("https://example.test/data.csv")
+
+    assert result.failure_code == "DOCUMENT_TOO_LARGE"
+    assert read_chunks == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_streaming_fetch_preserves_small_text_document(monkeypatch):
+    from app import document_fetcher
+
+    transport = document_fetcher.httpx.MockTransport(
+        lambda request: document_fetcher.httpx.Response(
+            200, headers={"content-type": "text/plain; charset=utf-8"},
+            text="Dato oficial publicado. " * 8, request=request,
+        )
+    )
+    real_client = document_fetcher.httpx.AsyncClient
+    monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport, **kwargs))
+
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.status == "ok"
+    assert result.text.startswith("Dato oficial publicado.")
+    assert result.fetched_url == "https://example.test/report"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding,compress", [("gzip", gzip.compress), ("deflate", zlib.compress)])
+async def test_streaming_fetch_decodes_compressed_document_after_redirect(monkeypatch, encoding, compress):
+    from app import document_fetcher
+
+    content = ("Dato oficial publicado. " * 8).encode("utf-8")
+    compressed = compress(content)
+    requested = []
+
+    def handler(request):
+        requested.append(str(request.url))
+        if request.url.path == "/report":
+            return document_fetcher.httpx.Response(
+                302, headers={"location": "/report/current"}, request=request,
+            )
+        return document_fetcher.httpx.Response(
+            200,
+            headers={
+                "content-type": "text/plain; charset=utf-8",
+                "content-encoding": encoding,
+                "content-length": str(len(compressed)),
+            },
+            content=compressed,
+            request=request,
+        )
+
+    transport = document_fetcher.httpx.MockTransport(handler)
+    real_client = document_fetcher.httpx.AsyncClient
+    monkeypatch.setattr(
+        document_fetcher.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.status == "ok"
+    assert result.text == content.decode("utf-8").strip()
+    assert result.response_bytes == len(content)
+    assert result.fetched_url == "https://example.test/report/current"
+    assert requested == ["https://example.test/report", "https://example.test/report/current"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_fetch_limits_decoded_compressed_bytes(monkeypatch):
+    from app import document_fetcher
+
+    compressed = gzip.compress(b"x" * 2048)
+    transport = document_fetcher.httpx.MockTransport(
+        lambda request: document_fetcher.httpx.Response(
+            200,
+            headers={
+                "content-type": "text/plain",
+                "content-encoding": "gzip",
+                "content-length": str(len(compressed)),
+            },
+            content=compressed,
+            request=request,
+        )
+    )
+    real_client = document_fetcher.httpx.AsyncClient
+    monkeypatch.setattr(
+        document_fetcher.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr(document_fetcher, "MAX_DOCUMENT_BYTES", 1024)
+
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+
+    assert result.status == "failed"
+    assert result.failure_code == "DOCUMENT_TOO_LARGE"
+    assert result.response_bytes == 2048
+
+
+@pytest.mark.asyncio
+async def test_oversized_search_text_falls_back_to_direct_fetch():
+    from app.acquisition import ExtractionPolicy, acquire_document
+    from app.document_fetcher import FetchResult
+
+    async def direct_fetch(url, **kwargs):
+        return FetchResult(status="ok", text="dato " * 30, fetched_url=url)
+
+    result = await acquire_document(
+        {"url": "https://example.test/data", "raw_content": "x" * 200},
+        "https://example.test/data",
+        ExtractionPolicy(mode="SMART", min_document_chars=20, max_document_chars=150),
+        direct_fetch, timeout=1, user_agent="test",
+    )
+
+    assert result.method == "direct_fetch"
+    assert result.attempts[0]["outcome"] == "DOCUMENT_TOO_LARGE"
 
 
 @pytest.fixture(autouse=True)
@@ -581,6 +766,16 @@ def test_retrieval_summary_separates_transport_extraction_and_citability():
         "documents_attempted": 3,
         "documents_extracted": 1,
         "documents_citable": 1,
+        "documents_provider_text": 0,
+        "documents_direct": 0,
+        "documents_provider_extract": 0,
+        "documents_cache": 0,
+        "provider_extract_calls": 0,
+        "provider_extract_cost_usd_observed": 0,
+        "provider_extract_cost_usd_per_citable_source": None,
+        "direct_failures_recovered_by_provider": 0,
+        "documents_freshness_unknown": 0,
+        "provider_text_rejected": 0,
         "outcome_counts": {"EXTRACTED": 1, "PENDING": 1, "ACCESS_DENIED": 1},
         "retry_actions": 0,
         "retry_recovered": 0,
@@ -1603,6 +1798,222 @@ async def test_fetched_document_context_is_citable_and_hashed(monkeypatch):
     assert context["citation_eligible"] is True
     assert context["origin"] == "fetched_document"
     assert len(context["text_sha256"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_smart_acquisition_uses_provider_document_and_preserves_citation_chain(monkeypatch):
+    from common.utils.evidence import evaluate_evidence_grounding
+
+    document = " ".join(["El informe oficial sitúa la cifra de Barcelona en 2024."] * 10)
+
+    async def unexpected_fetch(*args, **kwargs):
+        raise AssertionError("SMART fetched a document already supplied by search")
+
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_EXTRACTION_MODE", "SMART")
+    monkeypatch.setattr(evidence, "EVIDENCE_REQUIRE_KNOWN_FRESHNESS", False)
+    monkeypatch.setattr(evidence, "fetch_main_text", unexpected_fetch)
+    rows = await evidence.build_evidences_with_optional_contexts(
+        assertion(), [{"url": "https://ine.es/report", "content": "Relevant highlight",
+                      "raw_content": document, "provider_metadata": {"provider": "exa"}}],
+        {"preferred_sources": [preferred_source()]}, max_results=1,
+    )
+    source = rows[0]
+    context = source["contexts"][0]
+    assert source["document_provenance"]["method"] == "provider_search_text"
+    assert source["document_provenance"]["freshness_status"] == "UNKNOWN"
+    assert context["origin"] == "provider_extracted"
+    assert context["document_sha256"] == source["document_provenance"]["text_sha256"]
+    assert source["fetch_attempts"] == []
+    assert evidence.retrieval_summary(rows, 1, 1, 0)["http_requests"] == 0
+    assert evidence.retrieval_summary(rows, 1, 1, 0)["documents_provider_text"] == 1
+    grounded = evaluate_evidence_grounding(
+        "TRUE", [{"context_id": context["context_id"], "supports": True}],
+        rows, require_grounding=True,
+    )
+    assert grounded["effective_verdict"] == "TRUE"
+    assert grounded["evidence_used"][0]["evidence_text"] == context["text"]
+    assert grounded["evidence_used"][0]["document_provenance"]["method"] == "provider_search_text"
+
+
+@pytest.mark.asyncio
+async def test_smart_acquisition_requires_direct_fetch_when_provider_freshness_unknown(monkeypatch):
+    document = " ".join(["El informe oficial sitúa la cifra de Barcelona en 2024."] * 10)
+    calls = []
+
+    async def direct_fetch(url, **kwargs):
+        calls.append(url)
+        return SimpleNamespace(status="ok", error=None, text=document,
+                               document_length_chars=len(document), attempts=[{"url": url}])
+
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_EXTRACTION_MODE", "SMART")
+    monkeypatch.setattr(evidence, "EVIDENCE_REQUIRE_KNOWN_FRESHNESS", True)
+    monkeypatch.setattr(evidence, "fetch_main_text", direct_fetch)
+    rows = await evidence.build_evidences_with_optional_contexts(
+        assertion(), [{"url": "https://ine.es/report", "raw_content": document}],
+        {"preferred_sources": [preferred_source()]}, max_results=1,
+    )
+    assert calls == ["https://ine.es/report"]
+    assert rows[0]["document_provenance"]["method"] == "direct_fetch"
+    assert rows[0]["acquisition_attempts"][0]["outcome"] == "FRESHNESS_UNKNOWN"
+    assert rows[0]["contexts"][0]["origin"] == "fetched_document"
+
+
+@pytest.mark.asyncio
+async def test_smart_acquisition_does_not_cite_provider_snippet_or_block_page(monkeypatch):
+    document = " ".join(["El informe oficial sitúa la cifra de Barcelona en 2024."] * 10)
+    calls = []
+
+    async def direct_fetch(url, **kwargs):
+        calls.append(url)
+        return SimpleNamespace(status="ok", error=None, text=document,
+                               document_length_chars=len(document), attempts=[{"url": url}])
+
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_EXTRACTION_MODE", "SMART")
+    monkeypatch.setattr(evidence, "EVIDENCE_REQUIRE_KNOWN_FRESHNESS", False)
+    monkeypatch.setattr(evidence, "fetch_main_text", direct_fetch)
+    rows = await evidence.build_evidences_with_optional_contexts(
+        assertion(), [
+            {"url": "https://a.example/report", "content": "Resultado de búsqueda amplio " * 20},
+            {"url": "https://b.example/report", "raw_content": "Access denied " * 30},
+        ], {"preferred_sources": []}, max_results=2,
+    )
+    assert calls == ["https://a.example/report", "https://b.example/report"]
+    assert [row["acquisition_attempts"][0]["outcome"] for row in rows] == ["NO_FULL_TEXT", "BLOCK_PAGE"]
+    assert all(row["contexts"][0]["origin"] == "fetched_document" for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_smart_acquisition_keeps_blocked_direct_result_uncitable_when_freshness_required(monkeypatch):
+    document = " ".join(["El informe oficial sitúa la cifra de Barcelona en 2024."] * 10)
+
+    async def blocked_fetch(url, **kwargs):
+        return SimpleNamespace(status="failed", error="http_403", text="",
+                               failure_code="HTTP_ACCESS_DENIED", failure_stage="FETCH",
+                               http_status=403, retryable=False, attempts=[{"url": url, "http_status": 403}])
+
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_EXTRACTION_MODE", "SMART")
+    monkeypatch.setattr(evidence, "EVIDENCE_REQUIRE_KNOWN_FRESHNESS", True)
+    monkeypatch.setattr(evidence, "fetch_main_text", blocked_fetch)
+    rows = await evidence.build_evidences_with_optional_contexts(
+        assertion(), [{"url": "https://ine.es/report", "raw_content": document}],
+        {"preferred_sources": [preferred_source()]}, max_results=1,
+    )
+    assert rows[0]["citation_status"] == "unavailable"
+    assert rows[0]["contexts"] == []
+    assert rows[0]["acquisition_attempts"][0]["outcome"] == "FRESHNESS_UNKNOWN"
+    assert rows[0]["acquisition_attempts"][1]["outcome"] == "HTTP_ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_smart_provider_extract_recovers_direct_403_without_erasing_http_history(monkeypatch):
+    from app import acquisition as acquisition_module
+    from common.search.models import ExtractResult
+
+    document = "Informe oficial de Barcelona en 2024. " * 16
+    url = "https://ine.es/report"
+    calls = []
+
+    async def blocked_fetch(requested, **kwargs):
+        return SimpleNamespace(status="failed", error="http_403", text="", failure_code="HTTP_ACCESS_DENIED",
+                               http_status=403, attempts=[{"url": requested, "http_status": 403}],
+                               retry_trace=[])
+
+    async def extracted(provider, requested, **kwargs):
+        calls.append((provider, requested, kwargs))
+        return ExtractResult(requested_url=requested, status="ok", text=document,
+                             resolved_url=requested, request_id="extract-1", cost_usd=0.003)
+
+    async def safe_url(_url):
+        return None
+
+    monkeypatch.setattr(acquisition_module, "_validate_fetch_url", safe_url)
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_EXTRACTION_MODE", "SMART")
+    monkeypatch.setattr(evidence, "EVIDENCE_ALLOW_PROVIDER_EXTRACT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_REQUIRE_KNOWN_FRESHNESS", False)
+    monkeypatch.setattr(evidence, "fetch_main_text", blocked_fetch)
+    monkeypatch.setattr(evidence, "extract_with_provider", extracted)
+    rows = await evidence.build_evidences_with_optional_contexts(
+        assertion(), [{"url": url, "provider_metadata": {"provider": "exa"}}],
+        {"preferred_sources": [preferred_source()]}, max_results=1, extract_budget=[1],
+    )
+    source = rows[0]
+    assert calls == [("exa", url, {"require_live": False})]
+    assert source["citation_status"] == "available"
+    assert source["contexts"][0]["origin"] == "provider_extracted"
+    assert source["document_provenance"]["provider_request_id"] == "extract-1"
+    assert source["fetch_attempts"][0]["http_status"] == 403
+    assert source["direct_fetch_status"] == "failed"
+    summary = evidence.retrieval_summary(rows, 1, 1, 0)
+    assert summary["documents_provider_extract"] == 1
+    assert summary["provider_extract_calls"] == 1
+    assert summary["provider_extract_cost_usd_observed"] == 0.003
+    assert summary["provider_extract_cost_usd_per_citable_source"] == 0.003
+    assert summary["direct_failures_recovered_by_provider"] == 1
+    evidence._recent_unusable_urls.clear()
+    evidence.remember_unusable_urls(rows)
+    assert url in evidence._recent_unusable_urls
+    evidence._recent_unusable_urls.clear()
+
+
+@pytest.mark.asyncio
+async def test_provider_extract_budget_and_url_guard_do_not_call_provider(monkeypatch):
+    from app import acquisition as acquisition_module
+
+    async def blocked_fetch(url, **kwargs):
+        return SimpleNamespace(status="failed", error="http_403", text="", failure_code="HTTP_ACCESS_DENIED")
+
+    async def forbidden_extract(*args, **kwargs):
+        raise AssertionError("Provider should not receive this URL")
+
+    async def unsafe_url(_url):
+        return "REDIRECT_UNSAFE_TARGET"
+
+    monkeypatch.setattr(acquisition_module, "_validate_fetch_url", unsafe_url)
+    policy = acquisition_module.ExtractionPolicy(mode="SMART", allow_provider_extract=True)
+    for budget, expected in [([0], "BUDGET_EXHAUSTED"), ([1], "REDIRECT_UNSAFE_TARGET")]:
+        result = await acquisition_module.acquire_document(
+            {}, "https://private.example/report", policy, blocked_fetch,
+            timeout=1, user_agent="test", extract_provider=forbidden_extract, extract_budget=budget,
+        )
+        assert result.attempts[-1]["outcome"] == expected
+
+
+@pytest.mark.asyncio
+async def test_initial_batch_stops_before_unused_provider_candidates(monkeypatch):
+    document = " ".join(["El informe oficial sitúa la cifra de Barcelona en 2024."] * 10)
+    fetch_urls = []
+    results = [{"url": f"https://source-{index}.example/report", "title": str(index)}
+               for index in range(5)]
+
+    async def fake_search(*args, **kwargs):
+        return {"results": results}
+
+    async def fake_fetch(url, **kwargs):
+        fetch_urls.append(url)
+        return SimpleNamespace(status="ok", error=None, text=document,
+                               document_length_chars=len(document), attempts=[{"url": url}])
+
+    monkeypatch.setattr(evidence, "cache_collection", None)
+    monkeypatch.setattr(evidence, "unusable_url_collection", None)
+    monkeypatch.setattr(evidence, "_recent_unusable_urls", {})
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", True)
+    monkeypatch.setattr(evidence, "EVIDENCE_EXTRACTION_MODE", "DIRECT")
+    monkeypatch.setattr(evidence, "EVIDENCE_INITIAL_BATCH_SIZE", 2)
+    monkeypatch.setattr(evidence, "EVIDENCE_TARGET_CITABLE_SOURCES", 1)
+    monkeypatch.setattr(evidence, "search_with_provider", fake_search)
+    monkeypatch.setattr(evidence, "fetch_main_text", fake_fetch)
+    response = await evidence.search_evidence(request())
+    assert fetch_urls == [item["url"] for item in results[:2]]
+    assert response["retrieval_summary"]["stop_reason"] == "TARGET_REACHED"
+    monkeypatch.setattr(evidence, "EVIDENCE_FETCH_FULL_TEXT", False)
+    discovery_only = await evidence.search_evidence(request())
+    assert len(discovery_only["evidences"]) == 3
+    assert len(fetch_urls) == 2
 
 
 @pytest.mark.asyncio

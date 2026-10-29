@@ -24,4 +24,6 @@ spec:
           value: "http://evidence-search.apis.svc.cluster.local:8074"
         - name: EVIDENCE_SEARCH_STRATEGY
           value: "LOCAL"
+        - name: LIGHT_VALIDATION_MAX_IN_FLIGHT
+          value: "3"
         

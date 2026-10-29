@@ -5,7 +5,7 @@ import httpx
 
 from .errors import SearchConfigurationError, SearchProviderError
 from .limits import effective_max_results
-from .models import SearchRequest, SearchResult
+from .models import ExtractResult, SearchRequest, SearchResult
 from .normalization import normalize_url
 from .provider import SearchProvider
 from .tavily import _text
@@ -20,7 +20,8 @@ def normalize_exa_result(row: dict[str, Any]) -> dict[str, Any]:
         "content": content,
         "score": row.get("score"),
     }
-    if raw and raw != content:
+    # Preserve the full document even when it equals the search excerpt.
+    if raw:
         result["raw_content"] = raw
     if row.get("summary"):
         result["summary"] = _text(row["summary"])
@@ -31,6 +32,46 @@ def normalize_exa_result(row: dict[str, Any]) -> dict[str, Any]:
 
 class ExaSearchProvider(SearchProvider):
     name = "exa"
+
+    async def extract(self, url: str, *, require_live: bool = False) -> ExtractResult:
+        api_key = os.getenv("EXA_API_KEY") or os.getenv("API_KEY_PROVIDER", "")
+        if not api_key:
+            raise SearchConfigurationError("API_KEY_PROVIDER is not configured")
+        payload: dict[str, Any] = {"urls": [url], "text": True}
+        if require_live:
+            payload["maxAgeHours"] = 0
+        try:
+            async with httpx.AsyncClient(timeout=float(os.getenv("SEARCH_TIMEOUT", "30"))) as client:
+                response = await client.post(
+                    os.getenv("EXA_CONTENTS_API_URL", "https://api.exa.ai/contents"),
+                    json=payload, headers={"x-api-key": api_key},
+                )
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise SearchProviderError(self.name, f"Exa returned HTTP {exc.response.status_code}", status_code=exc.response.status_code) from exc
+        except httpx.HTTPError as exc:
+            raise SearchProviderError(self.name, str(exc) or exc.__class__.__name__) from exc
+        rows = body.get("results") or []
+        statuses = body.get("statuses") or []
+        # A successful API request can contain a failed URL. Match the one URL
+        # by its normalized URL, never by array position alone.
+        target = normalize_url(url)
+        row = next((item for item in rows if normalize_url(item.get("url") or "") == target), None)
+        status = next((item for item in statuses if normalize_url(item.get("id") or "") == target), None)
+        status = status or {}
+        cost = body.get("costDollars") or {}
+        value = cost.get("total") if isinstance(cost, dict) else None
+        common = {"requested_url": url, "request_id": body.get("requestId"),
+                  "cost_usd": value if isinstance(value, (int, float)) and not isinstance(value, bool) else None}
+        if status.get("status") not in (None, "success") or row is None:
+            error = (status.get("error") or {}).get("tag") if isinstance(status.get("error"), dict) else None
+            return ExtractResult(status="failed", error=error or "URL_EXTRACTION_FAILED", **common)
+        source = status.get("source")
+        if require_live and source != "live":
+            return ExtractResult(status="failed", error="FRESHNESS_UNPROVEN", **common)
+        return ExtractResult(status="ok", text=row.get("text") or "", resolved_url=row.get("url"),
+                             freshness_status="OBSERVED_NOW" if source == "live" else "UNKNOWN", **common)
 
     def default_mode(self) -> str:
         return "auto"

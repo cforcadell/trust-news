@@ -6,7 +6,7 @@ Only this module invokes LLMs. HTTP services use existing production contracts.
 from copy import deepcopy
 import time
 
-from common.utils.evidence_bundle import evidence_bundle_hash
+from common.utils.evidence_bundle import evidence_bundle_hash, evidence_bundle_hash_v2
 from common.utils.validation_prompt import DEFAULT_RAG_PROMPT, build_rag_prompt
 from .artifacts import EvaluationError, canonical_json, sha256_text
 from .evidence import gold_bundle, replay_bundle
@@ -68,14 +68,16 @@ def execute(dataset, expected, config, mode="GOLD_EVIDENCE", *, services=None,
             context = replay["validator_input"]["context"]
             result.router = {"status": "SKIPPED"}
             notify("router.skipped", reason="validator_replay")
-            result.retrieval = {"status": "INJECTED", "evidence_bundle_hash": evidence_bundle_hash(bundle)}
+            result.retrieval = {"status": "INJECTED", "evidence_bundle_hash": evidence_bundle_hash(bundle),
+                                "evidence_bundle_hash_v2": evidence_bundle_hash_v2(bundle)}
             notify("retrieval.injected", evidence_count=len(bundle), source="replay")
         elif mode == "GOLD_EVIDENCE":
             bundle = gold_bundle(expected)
             context = canonical_json({"assertion": assertion})
             result.router = {"status": "SKIPPED"}
             notify("router.skipped", reason="gold_evidence")
-            result.retrieval = {"status": "INJECTED", "evidence_bundle_hash": evidence_bundle_hash(bundle)}
+            result.retrieval = {"status": "INJECTED", "evidence_bundle_hash": evidence_bundle_hash(bundle),
+                                "evidence_bundle_hash_v2": evidence_bundle_hash_v2(bundle)}
             notify("retrieval.injected", evidence_count=len(bundle), source="gold_evidence")
         else:
             from common.models.protocol_models import EnrichedAssertion
@@ -126,11 +128,14 @@ def execute(dataset, expected, config, mode="GOLD_EVIDENCE", *, services=None,
         if not str(assertion.get("text") or "").strip():
             raise EvaluationError("Validator execution requires assertion text")
         input_hash = evidence_bundle_hash(bundle)
+        input_hash_v2 = evidence_bundle_hash_v2(bundle)
         prompt = build_rag_prompt(assertion["text"], context, bundle, template)
         result.validator_input = {
             "evidences": deepcopy(bundle), "context": context,
             "validator_input_evidence_bundle_hash": input_hash,
+            "validator_input_evidence_bundle_hash_v2": input_hash_v2,
             "retrieval_evidence_bundle_hash": result.retrieval.get("evidence_bundle_hash"),
+            "retrieval_evidence_bundle_hash_v2": result.retrieval.get("evidence_bundle_hash_v2"),
             "prompt_hash": sha256_text(prompt), "prompt_template_hash": sha256_text(template),
         }
         if replay and replay["validator_input"].get("prompt_hash") != result.validator_input["prompt_hash"]:

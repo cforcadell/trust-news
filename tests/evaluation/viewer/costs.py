@@ -20,11 +20,12 @@ def _decimal(value):
 def validate_rates(value):
     if not isinstance(value, dict) or value.get("schema_version") != RATE_VERSION or value.get("currency") != "USD":
         raise ValueError("Expected evaluation-cost-rates-v1 in USD")
-    if set(value) - {"schema_version", "currency", "llm", "search"}:
+    if set(value) - {"schema_version", "currency", "llm", "search", "extract"}:
         raise ValueError("Unknown cost rate fields")
     for category, fields, identity_fields in (
         ("llm", {"provider", "model", "input_usd_per_million_tokens", "output_usd_per_million_tokens"}, ("provider", "model")),
         ("search", {"provider", "usd_per_call"}, ("provider", "search_type")),
+        ("extract", {"provider", "usd_per_call"}, ("provider",)),
     ):
         rows = value.get(category, [])
         if not isinstance(rows, list):
@@ -36,7 +37,9 @@ def validate_rates(value):
             if not isinstance(row, dict) or (category == "llm" and keys != fields) or (
                 category == "search" and keys not in (fields, fields | tier_keys,
                                                        fields | {"search_type"}, fields | tier_keys | {"search_type"})
-            ):
+            ) or (category == "extract" and keys not in (
+                {"provider", "usd_per_call"}, {"provider", "usd_per_credit"}
+            )):
                 raise ValueError(f"Invalid {category} rate entry")
             key = tuple(row.get(field) for field in identity_fields)
             if (not isinstance(row.get("provider"), str) or not row["provider"].strip()
@@ -72,7 +75,7 @@ def _rate(rates, category, provider, model=None, search_type=None):
 
 def _event(event_id, component, provider, *, model=None, cost=None, quantity=1,
            unit="call", rate=None, reason=None, usage=None, row=None,
-           input_cost=None, output_cost=None, search_type=None):
+           input_cost=None, output_cost=None, search_type=None, basis=None):
     row = row or {}
     return {"event_id": event_id, "component": component, "provider": provider, "model": model,
             "search_type": search_type,
@@ -81,7 +84,42 @@ def _event(event_id, component, provider, *, model=None, cost=None, quantity=1,
             "usage": usage, "rate": rate, "cost_usd": _amount(cost) if cost is not None else None,
             "input_cost_usd": _amount(input_cost) if input_cost is not None else None,
             "output_cost_usd": _amount(output_cost) if output_cost is not None else None,
-            "basis": "CALCULATED" if cost is not None else "UNKNOWN", "reason": reason}
+            "basis": basis or ("CALCULATED" if cost is not None else "UNKNOWN"), "reason": reason}
+
+
+def _extract_events(observations, prefix, rates, row):
+    if observations.get("cached") is True:
+        return []
+    events = []
+    for source_index, source in enumerate(observations.get("evidences") or []):
+        for attempt_index, attempt in enumerate(source.get("acquisition_attempts") or []):
+            if attempt.get("method") != "provider_extract" or "duration_ms" not in attempt:
+                continue
+            provider = attempt.get("provider") or (source.get("document_provenance") or {}).get("provider")
+            rate = _rate(rates, "extract", provider)
+            reported = attempt.get("cost_usd")
+            usage = attempt.get("usage") if isinstance(attempt.get("usage"), dict) else None
+            credits = (usage or {}).get("credits")
+            valid_credits = isinstance(credits, (int, float)) and not isinstance(credits, bool) and credits >= 0
+            if reported is not None:
+                cost, basis = _decimal(reported), "PROVIDER_ESTIMATE"
+            elif attempt.get("outcome") == "PROVIDER_ERROR":
+                cost, basis = None, "UNKNOWN"
+            elif rate and "usd_per_credit" in rate and valid_credits:
+                cost, basis = _decimal(rate["usd_per_credit"]) * _decimal(credits), "CALCULATED"
+            elif rate and "usd_per_call" in rate:
+                cost, basis = _decimal(rate["usd_per_call"]), "CALCULATED"
+            else:
+                cost, basis = None, "UNKNOWN"
+            events.append(_event(
+                f"{prefix}:provider_extract:{source_index}:{attempt_index}", "provider_extract", provider,
+                cost=cost, basis=basis, rate={k: v for k, v in (rate or {}).items() if k != "provider"} or None,
+                usage={"credits": credits} if valid_credits else None,
+                reason=None if cost is not None else "BILLING_UNKNOWN" if attempt.get("outcome") == "PROVIDER_ERROR"
+                else "RATE_MISSING" if not rate else "USAGE_MISSING",
+                quantity=credits if valid_credits else 1, unit="credits" if valid_credits else "call", row=row,
+            ))
+    return events
 
 
 def _search_events(trace, component, prefix, rates, row):
@@ -161,7 +199,8 @@ def summarize_events(events):
             if event["cost_usd"] is None:
                 reason = event.get("reason") or "UNKNOWN"
                 reasons[reason] = reasons.get(reason, 0) + 1
-        usages = [event["usage"] for event in group_events if event.get("usage")]
+        usages = [event["usage"] for event in group_events if event.get("usage")
+                  and event["component"].endswith("_llm")]
         def part(field):
             return _amount(sum((Decimal(event[field]) for event in group_events
                                 if event.get(field) is not None), Decimal(0)))
@@ -171,7 +210,7 @@ def summarize_events(events):
                 "llm_priced_events": sum(event["component"].endswith("_llm") and event["cost_usd"] is not None
                                          for event in group_events),
                 "llm_events_with_usage": len(usages),
-                "search_priced_events": sum(event["component"] in {"router_discovery", "evidence_search"}
+                "search_priced_events": sum(event["component"] in {"router_discovery", "evidence_search", "provider_extract"}
                                             and event["cost_usd"] is not None for event in group_events),
                 "input_tokens": sum(item["input_tokens"] for item in usages),
                 "output_tokens": sum(item["output_tokens"] for item in usages),
@@ -179,7 +218,7 @@ def summarize_events(events):
                                                 for event in group_events),
                 "input_cost_usd": part("input_cost_usd"), "output_cost_usd": part("output_cost_usd"),
                 "search_cost_usd": _amount(sum((Decimal(event["cost_usd"]) for event in group_events
-                                             if event["component"] in {"router_discovery", "evidence_search"}
+                                             if event["component"] in {"router_discovery", "evidence_search", "provider_extract"}
                                              and event["cost_usd"] is not None), Decimal(0)))}
     values = list(unique.values())
     components = {}
@@ -224,6 +263,8 @@ def order_costs(diagnostic, rates):
                 row_events.append(_event(f"{row_prefix}:{component}:unobserved", component,
                                          None, reason="TRACE_MISSING", row=row))
             row_events.extend(_search_events(trace, component, row_prefix, rates, row))
+            if component == "evidence_search" and stage.get("execution_status") == "COMPLETED":
+                row_events.extend(_extract_events(obs, row_prefix, rates, row))
             if component == "router_discovery" and not trace.get("cache_hit") and (
                 trace.get("classification_usage") or trace.get("classification") or
                 trace.get("classification_error_type")

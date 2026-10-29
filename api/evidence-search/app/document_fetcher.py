@@ -40,6 +40,7 @@ REMOVE_SELECTORS = (
 )
 CONTAINER_SELECTORS = ("article", "main", '[role="main"]')
 PDF_MAX_BYTES = 15 * 1024 * 1024
+MAX_DOCUMENT_BYTES = max(1, int(os.getenv("EVIDENCE_MAX_DOCUMENT_BYTES", str(4 * 1024 * 1024))))
 MAX_REDIRECTS = 5
 PDF_MAX_PAGES = int(os.getenv("EVIDENCE_PDF_MAX_PAGES", "80"))
 FETCH_MAX_ATTEMPTS = max(1, int(os.getenv("EVIDENCE_FETCH_MAX_ATTEMPTS", "2")))
@@ -351,7 +352,10 @@ async def _get_following_validated_redirects(client, url: str, attempted_urls: L
             attempts.append({"url": current, "outcome": "REDIRECT_LOOP"})
             return None, "REDIRECT_LOOP"
         visited.add(current)
-        response = await client.get(current, follow_redirects=False)
+        response, payload_error = await _bounded_get(client, current)
+        if payload_error:
+            attempts.append({"url": current, **payload_error})
+            return None, payload_error["outcome"]
         if response.status_code not in {301, 302, 303, 307, 308}:
             return response, None
         location = response.headers.get("location")
@@ -378,6 +382,57 @@ async def _get_following_validated_redirects(client, url: str, attempted_urls: L
                          "redirect_to": target, "outcome": "HTTP_REDIRECT"})
         current = target
         redirects += 1
+
+
+async def _bounded_get(client, url: str):
+    """Read a response with a byte budget, including chunked bodies.
+
+    HTTP clients used by existing adapters may only expose ``get``; the
+    production httpx client supports streaming and stops before buffering an
+    oversized representation. PDF retains its separate, larger budget.
+    """
+    if not hasattr(client, "stream"):
+        return await client.get(url, follow_redirects=False), None
+
+    async with client.stream("GET", url, follow_redirects=False) as response:
+        content_type = (response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        unknown_format = content_type in {"", "application/octet-stream"}
+        byte_limit = PDF_MAX_BYTES if content_type in PDF_CONTENT_TYPES else MAX_DOCUMENT_BYTES
+        if response.status_code in {301, 302, 303, 307, 308} or response.status_code >= 400:
+            body = b""
+        else:
+            declared = response.headers.get("content-length")
+            if not unknown_format and declared and declared.isdecimal() and int(declared) > byte_limit:
+                return None, {
+                    "outcome": "DOCUMENT_TOO_LARGE", "http_status": response.status_code,
+                    "declared_content_type": content_type, "declared_content_length": int(declared),
+                    "byte_limit": byte_limit,
+                }
+            body_parts = []
+            total = 0
+            async for part in response.aiter_bytes():
+                if unknown_format and not body_parts and part.lstrip().startswith(b"%PDF-"):
+                    byte_limit = PDF_MAX_BYTES
+                total += len(part)
+                if total > byte_limit:
+                    return None, {
+                        "outcome": "DOCUMENT_TOO_LARGE", "http_status": response.status_code,
+                        "declared_content_type": content_type, "response_bytes": total,
+                        "byte_limit": byte_limit,
+                    }
+                body_parts.append(part)
+            body = b"".join(body_parts)
+        # aiter_bytes() has already decoded Content-Encoding. Reusing the
+        # original wire headers would make httpx decode the body a second time
+        # when constructing the in-memory response.
+        headers = httpx.Headers(response.headers)
+        for header in ("content-encoding", "content-length", "transfer-encoding"):
+            if header in headers:
+                del headers[header]
+        return httpx.Response(
+            response.status_code, headers=headers, content=body,
+            request=response.request, extensions=response.extensions,
+        ), None
 
 
 def www_hostname_variant(url: str) -> Optional[str]:
@@ -550,9 +605,14 @@ async def _fetch_main_text_once(url: str, timeout: float = 10.0,
                     client, url, attempted_urls, attempts,
                 )
                 if redirect_error:
+                    latest = attempts[-1] if attempts else {}
                     return FetchResult(
                         status="failed", error=redirect_error, attempted_urls=attempted_urls,
-                        failure_stage="FETCH", failure_code=redirect_error, retryable=False,
+                        failure_stage="EXTRACTION" if redirect_error == "DOCUMENT_TOO_LARGE" else "FETCH",
+                        failure_code=redirect_error, retryable=False,
+                        http_status=latest.get("http_status"),
+                        response_bytes=latest.get("response_bytes", 0),
+                        content_type=latest.get("declared_content_type"),
                         attempts=attempts,
                     )
             except Exception as exc:
@@ -572,11 +632,16 @@ async def _fetch_main_text_once(url: str, timeout: float = 10.0,
                         client, normalized_url, attempted_urls, attempts,
                     )
                     if redirect_error:
+                        latest = attempts[-1] if attempts else {}
                         return FetchResult(
                             status="failed", error=redirect_error,
                             normalization_reason=normalization_reason,
-                            attempted_urls=attempted_urls, failure_stage="FETCH",
-                            failure_code=redirect_error, retryable=False, attempts=attempts,
+                            attempted_urls=attempted_urls,
+                            failure_stage="EXTRACTION" if redirect_error == "DOCUMENT_TOO_LARGE" else "FETCH",
+                            failure_code=redirect_error, retryable=False,
+                            http_status=latest.get("http_status"),
+                            response_bytes=latest.get("response_bytes", 0),
+                            content_type=latest.get("declared_content_type"), attempts=attempts,
                         )
                 except Exception as retry_exc:
                     retry_error = _fetch_error_code(retry_exc)
@@ -639,6 +704,18 @@ async def _fetch_main_text_once(url: str, timeout: float = 10.0,
         )
 
     detected_format = detect_document_format(content_type, response.content)
+    if detected_format != "PDF" and response_bytes > MAX_DOCUMENT_BYTES:
+        attempts.append({"url": fetched_url, "http_status": http_status,
+                         "response_bytes": response_bytes, "declared_content_type": content_type,
+                         "detected_format": detected_format, "outcome": "DOCUMENT_TOO_LARGE"})
+        return FetchResult(
+            status="failed", error="document_too_large", content_type=content_type,
+            fetched_url=fetched_url, url_normalized=url_normalized,
+            normalization_reason=normalization_reason, attempted_urls=attempted_urls,
+            failure_stage="EXTRACTION", failure_code="DOCUMENT_TOO_LARGE", retryable=False,
+            http_status=http_status, response_bytes=response_bytes,
+            detected_format=detected_format, attempts=attempts,
+        )
     extractor = detected_format.lower() if detected_format != "UNKNOWN" else None
     attempts.append({"url": fetched_url, "http_status": http_status, "response_bytes": response_bytes,
                      "declared_content_type": content_type, "detected_format": detected_format,

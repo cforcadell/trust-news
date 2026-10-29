@@ -3,7 +3,7 @@
 from copy import deepcopy
 from urllib.parse import urlsplit
 
-from common.utils.evidence_bundle import evidence_bundle_hash, text_hash
+from common.utils.evidence_bundle import evidence_bundle_hash, evidence_bundle_hash_v2, text_hash
 from .artifacts import EvaluationError
 
 
@@ -44,4 +44,7 @@ def replay_bundle(artifact: dict) -> list[dict]:
         raise EvaluationError("Replay artifact does not contain the validator input bundle and hash")
     if evidence_bundle_hash(bundle) != expected_hash:
         raise EvaluationError("Replay evidence integrity check failed")
+    expected_v2 = inputs.get("validator_input_evidence_bundle_hash_v2")
+    if expected_v2 and evidence_bundle_hash_v2(bundle) != expected_v2:
+        raise EvaluationError("Replay evidence provenance integrity check failed")
     return deepcopy(bundle)

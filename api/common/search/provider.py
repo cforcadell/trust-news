@@ -2,7 +2,7 @@ import os
 from abc import ABC, abstractmethod
 
 from .errors import SearchConfigurationError
-from .models import SearchRequest, SearchResult
+from .models import ExtractResult, SearchRequest, SearchResult
 
 
 class SearchProvider(ABC):
@@ -25,3 +25,7 @@ class SearchProvider(ABC):
     @abstractmethod
     async def search(self, request: SearchRequest) -> list[SearchResult]:
         """Execute one external search and return normalized real results."""
+
+    async def extract(self, url: str, *, require_live: bool = False) -> ExtractResult:
+        """Optional URL extraction capability; providers may leave it unsupported."""
+        return ExtractResult(requested_url=url, status="unsupported", error="EXTRACT_UNSUPPORTED")

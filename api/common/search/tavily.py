@@ -6,7 +6,7 @@ import httpx
 
 from .errors import SearchConfigurationError, SearchProviderError
 from .limits import effective_max_results
-from .models import SearchRequest, SearchResult
+from .models import ExtractResult, SearchRequest, SearchResult
 from .normalization import normalize_url
 from .provider import SearchProvider
 
@@ -43,6 +43,34 @@ def normalize_tavily_result(row: dict[str, Any]) -> dict[str, Any]:
 
 class TavilySearchProvider(SearchProvider):
     name = "tavily"
+
+    async def extract(self, url: str, *, require_live: bool = False) -> ExtractResult:
+        if require_live:
+            return ExtractResult(requested_url=url, status="unsupported", error="LIVE_FRESHNESS_UNSUPPORTED")
+        api_key = os.getenv("TAVILY_API_KEY") or os.getenv("API_KEY_PROVIDER", "")
+        if not api_key:
+            raise SearchConfigurationError("API_KEY_PROVIDER is not configured")
+        payload = {"urls": [url], "extract_depth": "basic", "format": "text", "include_usage": True}
+        try:
+            async with httpx.AsyncClient(timeout=float(os.getenv("SEARCH_TIMEOUT", "30"))) as client:
+                response = await client.post(
+                    os.getenv("TAVILY_EXTRACT_API_URL", "https://api.tavily.com/extract"),
+                    json=payload, headers={"Authorization": f"Bearer {api_key}"},
+                )
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise SearchProviderError(self.name, f"Tavily returned HTTP {exc.response.status_code}", status_code=exc.response.status_code) from exc
+        except httpx.HTTPError as exc:
+            raise SearchProviderError(self.name, str(exc) or exc.__class__.__name__) from exc
+        target = normalize_url(url)
+        row = next((item for item in body.get("results") or [] if normalize_url(item.get("url") or "") == target), None)
+        failed = next((item for item in body.get("failed_results") or [] if normalize_url(item.get("url") or "") == target), None)
+        common = {"requested_url": url, "request_id": body.get("request_id"),
+                  "usage": body.get("usage") if isinstance(body.get("usage"), dict) else None}
+        if row is None:
+            return ExtractResult(status="failed", error=str((failed or {}).get("error") or "URL_EXTRACTION_FAILED"), **common)
+        return ExtractResult(status="ok", text=row.get("raw_content") or "", resolved_url=row.get("url"), **common)
 
     def default_mode(self) -> str:
         return "advanced"

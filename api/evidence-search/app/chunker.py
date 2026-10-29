@@ -36,11 +36,18 @@ def chunk_text(source_id: str, text: str, chunk_size_chars: int = 1200, overlap_
             current = _overlap_sentences(current, overlap_chars)
         current.append(sentence)
 
-        while len(_normalize_text(" ".join(current))) > chunk_size_chars * 1.5 and len(current) == 1:
+        if len(current) == 1 and len(current[0]) > chunk_size_chars * 1.5:
+            # Advance an index instead of copying the entire remaining suffix
+            # for every chunk. Large punctuation-free documents used to make
+            # this loop quadratic and block the ASGI event loop.
             long_sentence = current.pop()
-            slice_text = long_sentence[:chunk_size_chars].strip()
-            chunks.append(_make_chunk(source_id, len(chunks), slice_text))
-            remainder = long_sentence[max(0, chunk_size_chars - overlap_chars):].strip()
+            offset = 0
+            step = max(1, chunk_size_chars - min(overlap_chars, chunk_size_chars - 1))
+            while len(long_sentence) - offset > chunk_size_chars * 1.5:
+                slice_text = long_sentence[offset:offset + chunk_size_chars].strip()
+                chunks.append(_make_chunk(source_id, len(chunks), slice_text))
+                offset += step
+            remainder = long_sentence[offset:].strip()
             current = [remainder] if remainder else []
 
     if current:

@@ -158,8 +158,19 @@ async def classify_candidates(
         missing = allowed - accepted.keys()
         if not missing:
             break
-        prompt = (
-            f"{prompt}\n\nYour previous JSON response failed schema validation or omitted candidates:\n"
+        # Retry only unresolved candidates. Repeating the full first prompt
+        # makes the model reclassify valid domains and inflates both latency
+        # and output tokens while the accepted rows are already retained.
+        retry_payload = {
+            **payload,
+            "candidates": [item.model_dump() for item in candidates
+                           if normalize_domain(item.domain) in missing],
+        }
+        prompt = CLASSIFIER_PROMPT.format(
+            authority_levels=", ".join(item.value for item in AuthorityLevel),
+            payload=json.dumps(retry_payload, ensure_ascii=False),
+        ) + (
+            "\n\nYour previous JSON response failed schema validation or omitted candidates:\n"
             f"{' '.join(feedback)[:3000]}\nReturn corrected classifications only for: {', '.join(sorted(missing))}."
             " Use the jurisdiction rules above and return the complete JSON object."
         )

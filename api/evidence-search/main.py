@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -18,15 +19,17 @@ from common.models.async_models import EvidenceSearchStrategy
 from common.models.evidence_models import EvidenceSearchRequestV2, EvidenceSearchResponseV2
 from common.routing_taxonomy import SourceType
 from common.search.normalization import normalize_domain, normalize_url
-from common.utils.evidence_bundle import evidence_bundle_hash
+from common.utils.evidence_bundle import evidence_bundle_hash, evidence_bundle_hash_v2
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
 
 sys.path.append(os.path.dirname(__file__))
 from app.chunk_ranker import rank_chunks
 from app.chunker import build_context_windows, chunk_text
-from app.document_fetcher import classify_attempt_outcome, classify_fetch_outcome, fetch_main_text
-from common.search import get_search_plan, search_with_provider
+from app.acquisition import ExtractionPolicy, acquire_document
+from app.document_store import load_snapshot, save_snapshot
+from app.document_fetcher import MAX_DOCUMENT_BYTES, classify_attempt_outcome, classify_fetch_outcome, fetch_main_text
+from common.search import extract_with_provider, get_search_plan, search_with_provider
 
 load_dotenv()
 
@@ -40,12 +43,21 @@ MONGO_CACHE_COLLECTION = os.getenv("EVIDENCE_SEARCH_CACHE_COLLECTION", "evidence
 MONGO_UNUSABLE_URL_COLLECTION = os.getenv(
     "EVIDENCE_UNUSABLE_URL_COLLECTION", "evidence_unusable_urls_v1",
 )
+MONGO_DOCUMENT_COLLECTION = os.getenv("EVIDENCE_DOCUMENT_COLLECTION", "evidence_document_snapshots_v1")
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_CACHE_TTL_SECONDS", "86400"))
 EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS", "300"))
 EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS = int(os.getenv("EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS", "1800"))
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "").lower() or None
 EVIDENCE_FETCH_FULL_TEXT = os.getenv("EVIDENCE_FETCH_FULL_TEXT", "false").lower() == "true"
+EVIDENCE_EXTRACTION_MODE = os.getenv("EVIDENCE_EXTRACTION_MODE", "DIRECT").strip().upper()
+EVIDENCE_MIN_DOCUMENT_CHARS = int(os.getenv("EVIDENCE_MIN_DOCUMENT_CHARS", "120"))
+EVIDENCE_MAX_DOCUMENT_CHARS = max(1, int(os.getenv("EVIDENCE_MAX_DOCUMENT_CHARS", "1000000")))
+EVIDENCE_REQUIRE_KNOWN_FRESHNESS = os.getenv("EVIDENCE_REQUIRE_KNOWN_FRESHNESS", "false").lower() == "true"
+EVIDENCE_ALLOW_PROVIDER_EXTRACT = os.getenv("EVIDENCE_ALLOW_PROVIDER_EXTRACT", "false").lower() == "true"
+EVIDENCE_MAX_PROVIDER_EXTRACT_CALLS = max(0, int(os.getenv("EVIDENCE_MAX_PROVIDER_EXTRACT_CALLS", "2")))
+EVIDENCE_DOCUMENT_SNAPSHOT_TTL_SECONDS = max(0, int(os.getenv("EVIDENCE_DOCUMENT_SNAPSHOT_TTL_SECONDS", "604800")))
+EVIDENCE_DOCUMENT_REUSE_MAX_AGE_SECONDS = max(0, int(os.getenv("EVIDENCE_DOCUMENT_REUSE_MAX_AGE_SECONDS", "0")))
 EVIDENCE_MAX_CONTEXTS_PER_SOURCE = int(os.getenv("EVIDENCE_MAX_CONTEXTS_PER_SOURCE", "2"))
 EVIDENCE_MAX_CONTEXTS_TOTAL = int(os.getenv("EVIDENCE_MAX_CONTEXTS_TOTAL", "8"))
 EVIDENCE_CHUNK_SIZE_CHARS = int(os.getenv("EVIDENCE_CHUNK_SIZE_CHARS", "1200"))
@@ -59,6 +71,7 @@ EVIDENCE_MAX_QUERY_RELAXATION_ATTEMPTS = int(os.getenv("EVIDENCE_MAX_QUERY_RELAX
 EVIDENCE_MAX_RESULTS_PER_DOMAIN = int(os.getenv("EVIDENCE_MAX_RESULTS_PER_DOMAIN", "2"))
 EVIDENCE_CANDIDATE_MULTIPLIER = max(1, int(os.getenv("EVIDENCE_CANDIDATE_MULTIPLIER", "3")))
 EVIDENCE_TARGET_CITABLE_SOURCES = max(1, int(os.getenv("EVIDENCE_TARGET_CITABLE_SOURCES", "1")))
+EVIDENCE_INITIAL_BATCH_SIZE = max(1, int(os.getenv("EVIDENCE_INITIAL_BATCH_SIZE", "2")))
 UNUSABLE_URL_TTL_SECONDS = int(os.getenv("EVIDENCE_UNUSABLE_URL_TTL_SECONDS", "3600"))
 UNUSABLE_URL_MAX_ENTRIES = int(os.getenv("EVIDENCE_UNUSABLE_URL_MAX_ENTRIES", "1024"))
 UNUSABLE_OUTCOME_TTLS = {
@@ -110,6 +123,7 @@ mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 cache_collection = None
 unusable_url_collection = None
+document_collection = None
 
 
 
@@ -547,6 +561,8 @@ def attach_provider_lineage(evidences: List[Dict[str, Any]], requests: List[Dict
         call_ids = calls_by_url.get(normalize_url(evidence.get("url") or ""), [])
         evidence["provider_call_ids"] = call_ids
         evidence["first_provider_call_id"] = call_ids[0] if call_ids else None
+        if isinstance(evidence.get("document_provenance"), dict):
+            evidence["document_provenance"]["provider_call_ids"] = call_ids
 
 
 def canonical_json(value: Any) -> str:
@@ -590,6 +606,14 @@ def search_backend_for_cache() -> Dict[str, Any]:
     return {
         "search_plan": get_search_plan(SEARCH_PROVIDER)["cache_config"],
         "evidence_fetch_full_text": EVIDENCE_FETCH_FULL_TEXT,
+        "evidence_extraction_mode": EVIDENCE_EXTRACTION_MODE,
+        "evidence_min_document_chars": EVIDENCE_MIN_DOCUMENT_CHARS,
+        "evidence_max_document_chars": EVIDENCE_MAX_DOCUMENT_CHARS,
+        "evidence_max_document_bytes": MAX_DOCUMENT_BYTES,
+        "evidence_require_known_freshness": EVIDENCE_REQUIRE_KNOWN_FRESHNESS,
+        "evidence_allow_provider_extract": EVIDENCE_ALLOW_PROVIDER_EXTRACT,
+        "evidence_max_provider_extract_calls": EVIDENCE_MAX_PROVIDER_EXTRACT_CALLS,
+        "evidence_document_reuse_max_age_seconds": EVIDENCE_DOCUMENT_REUSE_MAX_AGE_SECONDS,
         "evidence_max_contexts_per_source": EVIDENCE_MAX_CONTEXTS_PER_SOURCE,
         "evidence_max_contexts_total": EVIDENCE_MAX_CONTEXTS_TOTAL,
         "evidence_chunk_size_chars": EVIDENCE_CHUNK_SIZE_CHARS,
@@ -600,6 +624,7 @@ def search_backend_for_cache() -> Dict[str, Any]:
         "evidence_max_results_per_domain": EVIDENCE_MAX_RESULTS_PER_DOMAIN,
         "evidence_candidate_multiplier": EVIDENCE_CANDIDATE_MULTIPLIER,
         "evidence_target_citable_sources": EVIDENCE_TARGET_CITABLE_SOURCES,
+        "evidence_initial_batch_size": EVIDENCE_INITIAL_BATCH_SIZE,
         "progressive_query_relaxation": "v1",
         "citation_contract": "retrieved-context-id-v1",
         "provider_trace_contract": "v1",
@@ -672,13 +697,16 @@ def mark_evidence_uncitable(evidence: Dict[str, Any], fetch_status: str) -> Dict
     return evidence
 
 
-def make_contexts_citable(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def make_contexts_citable(contexts: List[Dict[str, Any]], *, origin: str = "fetched_document",
+                          document_sha256: str | None = None) -> List[Dict[str, Any]]:
     """Mark contexts derived from fetched documents and bind them to their text hash."""
     for context in contexts:
         text = str(context.get("text") or "")
-        context["origin"] = "fetched_document"
+        context["origin"] = origin
         context["citation_eligible"] = True
         context["text_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if document_sha256:
+            context["document_sha256"] = document_sha256
     return contexts
 
 
@@ -706,6 +734,7 @@ async def build_evidences_with_optional_contexts(
     origin_document: Optional[Dict[str, Any]] = None,
     capture_chunks: bool = False,
     rank_offset: int = 0,
+    extract_budget: Optional[list[int]] = None,
 ) -> List[Dict[str, Any]]:
     """Normalize search results and optionally enrich them with selected document contexts."""
     evidences: List[Dict[str, Any]] = []
@@ -729,17 +758,75 @@ async def build_evidences_with_optional_contexts(
             continue
 
         url = evidence.get("url") or ""
-        logger.info(f"[evidence-search] downloading_url source_id={source_id} url={url}")
-        fetch_result = await fetch_main_text(url, timeout=EVIDENCE_HTTP_TIMEOUT, user_agent=EVIDENCE_USER_AGENT)
+        extraction_policy = ExtractionPolicy(
+            mode=EVIDENCE_EXTRACTION_MODE,
+            min_document_chars=EVIDENCE_MIN_DOCUMENT_CHARS,
+            require_known_freshness=EVIDENCE_REQUIRE_KNOWN_FRESHNESS,
+            allow_provider_extract=EVIDENCE_ALLOW_PROVIDER_EXTRACT,
+            max_content_age_seconds=EVIDENCE_DOCUMENT_REUSE_MAX_AGE_SECONDS,
+            max_document_chars=EVIDENCE_MAX_DOCUMENT_CHARS,
+        )
+        async def load_document(**kwargs):
+            try:
+                return await load_snapshot(document_collection, **kwargs)
+            except Exception as exc:
+                logger.warning(f"[evidence-search] document_snapshot_read_failed error='{exc}'")
+                return None
+
+        acquisition = await acquire_document(
+            source, url, extraction_policy, fetch_main_text,
+            timeout=EVIDENCE_HTTP_TIMEOUT, user_agent=EVIDENCE_USER_AGENT,
+            extract_provider=extract_with_provider,
+            provider=((source.get("provider_metadata") or {}).get("provider") or SEARCH_PROVIDER),
+            extract_budget=extract_budget,
+            load_cached=load_document,
+        )
+        fetch_result = acquisition.fetch
+        snapshot_id = acquisition.snapshot_id
+        if fetch_result.status == "ok" and acquisition.method != "document_cache":
+            try:
+                snapshot_id = await save_snapshot(
+                    document_collection, url=url, method=acquisition.method or "unknown",
+                    provider=((source.get("provider_metadata") or {}).get("provider") or SEARCH_PROVIDER)
+                    if acquisition.method in {"provider_search_text", "provider_extract"} else None,
+                    text=fetch_result.text, resolved_url=getattr(fetch_result, "fetched_url", None),
+                    received_at=acquisition.received_at, freshness_status=acquisition.freshness_status,
+                    ttl_seconds=EVIDENCE_DOCUMENT_SNAPSHOT_TTL_SECONDS,
+                )
+            except Exception as exc:
+                logger.warning(f"[evidence-search] document_snapshot_write_failed error='{exc}'")
+        evidence["acquisition_attempts"] = acquisition.attempts
+        evidence["document_provenance"] = {
+            "method": acquisition.method,
+            "provider": ((source.get("provider_metadata") or {}).get("provider") or SEARCH_PROVIDER)
+                        if acquisition.method in {"provider_search_text", "provider_extract"} else acquisition.provider,
+            "requested_url": url,
+            "resolved_url": getattr(fetch_result, "fetched_url", None),
+            "received_at": acquisition.received_at,
+            "source_fetched_at": acquisition.source_fetched_at or (
+                acquisition.received_at if acquisition.freshness_status == "OBSERVED_NOW" else None),
+            "freshness_status": acquisition.freshness_status,
+            "text_sha256": acquisition.document_sha256,
+            "provider_request_id": acquisition.provider_request_id,
+            "snapshot_id": snapshot_id,
+            "cache_origin_method": acquisition.cache_origin_method,
+        }
         evidence["fetch_status"] = fetch_result.status
         evidence["content_type"] = getattr(fetch_result, "content_type", None)
         evidence["fetch_error"] = fetch_result.error
         evidence["fetched_url"] = getattr(fetch_result, "fetched_url", None)
         evidence["url_normalized"] = bool(getattr(fetch_result, "url_normalized", False))
         evidence["normalization_reason"] = getattr(fetch_result, "normalization_reason", None)
-        evidence["fetch_attempted_urls"] = getattr(fetch_result, "attempted_urls", None) or [url]
-        evidence["fetch_attempts"] = getattr(fetch_result, "attempts", None) or []
-        evidence["fetch_retry_trace"] = getattr(fetch_result, "retry_trace", None) or []
+        evidence["fetch_attempted_urls"] = getattr(fetch_result, "attempted_urls", None)
+        if evidence["fetch_attempted_urls"] is None:
+            evidence["fetch_attempted_urls"] = [url] if acquisition.method == "direct_fetch" else []
+        direct_result = acquisition.direct_fetch
+        evidence["direct_fetch_status"] = getattr(direct_result, "status", None)
+        evidence["direct_fetch_error"] = getattr(direct_result, "error", None)
+        evidence["direct_fetch_failure_code"] = getattr(direct_result, "failure_code", None)
+        evidence["direct_fetch_http_status"] = getattr(direct_result, "http_status", None)
+        evidence["fetch_attempts"] = getattr(direct_result or fetch_result, "attempts", None) or []
+        evidence["fetch_retry_trace"] = getattr(direct_result or fetch_result, "retry_trace", None) or []
         for attempt in evidence["fetch_attempts"]:
             attempt["classification"] = classify_attempt_outcome(attempt)
         http_status = getattr(fetch_result, "http_status", None)
@@ -785,8 +872,13 @@ async def build_evidences_with_optional_contexts(
             continue
 
         document_length = fetch_result.document_length_chars
-        chunks = chunk_text(source_id, fetch_result.text, EVIDENCE_CHUNK_SIZE_CHARS, EVIDENCE_CHUNK_OVERLAP_CHARS)
-        ranked = rank_chunks(assertion, chunks)
+        # Chunking and BM25 ranking are CPU-bound. Keep probes and other
+        # searches responsive while a larger but still permitted document is processed.
+        chunks = await asyncio.to_thread(
+            chunk_text, source_id, fetch_result.text,
+            EVIDENCE_CHUNK_SIZE_CHARS, EVIDENCE_CHUNK_OVERLAP_CHARS,
+        )
+        ranked = await asyncio.to_thread(rank_chunks, assertion, chunks)
         remaining_contexts = max(0, EVIDENCE_MAX_CONTEXTS_TOTAL - total_contexts)
         selection_decisions = {} if capture_chunks else None
         contexts = build_context_windows(
@@ -838,7 +930,12 @@ async def build_evidences_with_optional_contexts(
             evidences.append(evidence)
             continue
 
-        evidence["contexts"] = make_contexts_citable(contexts)
+        evidence["contexts"] = make_contexts_citable(
+            contexts,
+            origin="provider_extracted" if acquisition.method in {"provider_search_text", "provider_extract"}
+            or acquisition.cache_origin_method == "provider_extract" else "fetched_document",
+            document_sha256=acquisition.document_sha256,
+        )
         evidence["citation_status"] = "available"
         evidence["fetch_diagnostics"]["citable"] = bool(evidence["contexts"])
         evidence["chunks_metadata"] = chunks_metadata(ranked, contexts)
@@ -938,9 +1035,15 @@ def remember_unusable_urls(evidences: List[Dict[str, Any]]) -> None:
     """Use completed fetches to rank future candidates, without extra requests."""
     now = time.monotonic()
     for item in evidences:
+        if item.get("acquisition_attempts") and not any(
+            attempt.get("method") == "direct_fetch" for attempt in item["acquisition_attempts"]
+        ):
+            # Provider-only outcomes say nothing about direct access to this URL.
+            continue
         url = normalize_url(item.get("url") or "")
         if not url:
             continue
+        item = _direct_history_view(item)
         status = item.get("fetch_status")
         if status == "ok":
             _recent_unusable_urls.pop(url, None)
@@ -957,6 +1060,17 @@ def remember_unusable_urls(evidences: List[Dict[str, Any]]) -> None:
 
 def _is_unusable_url_outcome(item: Dict[str, Any]) -> bool:
     return _unusable_outcome_class(item) is not None
+
+
+def _direct_history_view(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Separate direct HTTP history from a later successful provider extraction."""
+    if item.get("direct_fetch_status") is None:
+        return item
+    return {**item,
+            "fetch_status": item.get("direct_fetch_status"),
+            "fetch_error": item.get("direct_fetch_error"),
+            "http_status": item.get("direct_fetch_http_status"),
+            "failure": {"code": item.get("direct_fetch_failure_code")}}
 
 
 def _document_identity(url: str) -> str:
@@ -1032,6 +1146,11 @@ async def persist_unusable_url_outcomes(evidences: List[Dict[str, Any]]) -> None
     now = utc_now()
     try:
         for item in evidences:
+            if item.get("acquisition_attempts") and not any(
+                attempt.get("method") == "direct_fetch" for attempt in item["acquisition_attempts"]
+            ):
+                continue
+            item = _direct_history_view(item)
             url = normalize_url(item.get("url") or "")
             if not url:
                 continue
@@ -1092,7 +1211,13 @@ def retrieval_summary(
 ) -> Dict[str, Any]:
     citable = sum(bool(item.get("citation_status") == "available" and item.get("contexts")) for item in evidences)
     extracted = sum(item.get("fetch_status") == "ok" for item in evidences)
-    attempts = sum(max(1, len(item.get("fetch_attempts") or [])) for item in evidences)
+    attempts = sum(
+        max(1, len(item.get("fetch_attempts") or []))
+        for item in evidences
+        if not item.get("acquisition_attempts") or any(
+            attempt.get("method") == "direct_fetch" for attempt in item["acquisition_attempts"]
+        )
+    )
     http_requests = sum(len(item.get("fetch_attempts") or []) for item in evidences)
     http_responses = sum(
         attempt.get("http_status") is not None
@@ -1131,6 +1256,12 @@ def retrieval_summary(
         code = (item.get("failure") or {}).get("code")
         if code:
             failures[code] = failures.get(code, 0) + 1
+    provider_extract_attempts = [attempt for item in evidences
+                                 for attempt in item.get("acquisition_attempts") or []
+                                 if attempt.get("method") == "provider_extract" and "duration_ms" in attempt]
+    reported_extract_cost = (None if any(attempt.get("cost_usd") is None for attempt in provider_extract_attempts)
+                             else round(sum(float(attempt.get("cost_usd") or 0)
+                                            for attempt in provider_extract_attempts), 8))
     return {
         "target_documents": target_documents,
         "candidates_considered": candidates_considered,
@@ -1142,6 +1273,43 @@ def retrieval_summary(
         "documents_attempted": attempted_documents,
         "documents_extracted": extracted,
         "documents_citable": citable,
+        "documents_provider_text": sum(
+            (item.get("document_provenance") or {}).get("method") == "provider_search_text"
+            for item in evidences
+        ),
+        "documents_direct": sum(
+            (item.get("document_provenance") or {}).get("method") == "direct_fetch"
+            for item in evidences
+        ),
+        "documents_provider_extract": sum(
+            (item.get("document_provenance") or {}).get("method") == "provider_extract"
+            for item in evidences
+        ),
+        "documents_cache": sum(
+            (item.get("document_provenance") or {}).get("method") == "document_cache"
+            for item in evidences
+        ),
+        "provider_extract_calls": len(provider_extract_attempts),
+        "provider_extract_cost_usd_observed": reported_extract_cost,
+        "provider_extract_cost_usd_per_citable_source": (
+            round(reported_extract_cost / citable, 8)
+            if provider_extract_attempts and reported_extract_cost is not None and citable else None
+        ),
+        "direct_failures_recovered_by_provider": sum(
+            (item.get("document_provenance") or {}).get("method") == "provider_extract"
+            and item.get("direct_fetch_status") not in {None, "ok"}
+            for item in evidences
+        ),
+        "documents_freshness_unknown": sum(
+            item.get("fetch_status") == "ok" and
+            (item.get("document_provenance") or {}).get("freshness_status") == "UNKNOWN"
+            for item in evidences
+        ),
+        "provider_text_rejected": sum(
+            any(attempt.get("method") == "provider_search_text" and attempt.get("outcome") != "ACCEPTED"
+                for attempt in item.get("acquisition_attempts") or [])
+            for item in evidences
+        ),
         "outcome_counts": outcome_counts,
         "retry_actions": retry_actions,
         "retry_recovered": retry_recovered,
@@ -1173,17 +1341,21 @@ async def ensure_indexes():
         await unusable_url_collection.create_index(
             "expires_at", name="expires_at_ttl", expireAfterSeconds=0,
         )
+    if document_collection is not None:
+        await document_collection.create_index([("url", 1), ("stored_at", -1)], name="url_stored_at_1")
+        await document_collection.create_index("expires_at", name="expires_at_ttl", expireAfterSeconds=0)
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize Mongo collections and indexes when the FastAPI app starts."""
     # Create the shared Mongo client and bind the collections used by handlers.
-    global mongo_client, db, cache_collection, unusable_url_collection
+    global mongo_client, db, cache_collection, unusable_url_collection, document_collection
     mongo_client = AsyncIOMotorClient(MONGO_URI)
     db = mongo_client[MONGO_DBNAME]
     cache_collection = db[MONGO_CACHE_COLLECTION]
     unusable_url_collection = db[MONGO_UNUSABLE_URL_COLLECTION]
+    document_collection = db[MONGO_DOCUMENT_COLLECTION]
 
     # Create or update indexes before serving traffic.
     await ensure_indexes()
@@ -1262,6 +1434,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             origin_trace = response.get("provider_trace") or {}
             origin_requests = origin_trace.get("requests") or []
             response["evidence_bundle_hash"] = evidence_bundle_hash(response.get("evidences", []))
+            response["evidence_bundle_hash_v2"] = evidence_bundle_hash_v2(response.get("evidences", []))
             response["cached"] = True
             response["cache_key"] = cache_key
             response["provider_trace"] = {
@@ -1463,7 +1636,8 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         raw_results,
         max_sources=min(
             effective_search_policy["max_results"],
-            max(2, target_citable_sources, effective_search_policy["max_results"] - 2),
+            max(EVIDENCE_INITIAL_BATCH_SIZE, target_citable_sources)
+            if EVIDENCE_FETCH_FULL_TEXT else effective_search_policy["max_results"],
         ),
     )
     negative_history_urls = {
@@ -1471,6 +1645,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         for item in raw_results
         if normalize_url(item.get("url") or "") in _recent_unusable_urls
     }
+    extract_budget = [EVIDENCE_MAX_PROVIDER_EXTRACT_CALLS if EVIDENCE_ALLOW_PROVIDER_EXTRACT else 0]
     evidences = await build_evidences_with_optional_contexts(
         assertion,
         scheduled_results,
@@ -1478,6 +1653,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         max_results=effective_search_policy["max_results"],
         origin_document=origin_document,
         capture_chunks=bool(run_id),
+        extract_budget=extract_budget,
     )
     await persist_unusable_url_outcomes(evidences)
 
@@ -1525,6 +1701,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
             origin_document=origin_document,
             capture_chunks=bool(run_id),
             rank_offset=len(evidences),
+            extract_budget=extract_budget,
         )
         for item in refill_evidences:
             item["retrieval_mode"] = "existing_provider_candidates_after_unusable_fetch"
@@ -1700,6 +1877,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                 origin_document=origin_document,
                 capture_chunks=bool(run_id),
                 rank_offset=len(evidences),
+                extract_budget=extract_budget,
             )
             for item in fallback_evidences:
                 item["retrieval_mode"] = fallback_requests[0]["mode"]
@@ -1793,6 +1971,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                 max_results=candidate_budget,
                 origin_document=origin_document, capture_chunks=bool(run_id),
                 rank_offset=len(evidences),
+                extract_budget=extract_budget,
             )
             for item in tier_evidences:
                 item["retrieval_mode"] = "search_tier_fallback"
@@ -1839,11 +2018,19 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
         "assertion_id": assertion.get("assertion_id"),
         "domain_resolution": domain_resolution,
         "search_policy": effective_search_policy,
+        "extraction_policy": {
+            "mode": EVIDENCE_EXTRACTION_MODE,
+            "allow_provider_extract": EVIDENCE_ALLOW_PROVIDER_EXTRACT,
+            "max_provider_extract_calls": EVIDENCE_MAX_PROVIDER_EXTRACT_CALLS,
+            "require_known_freshness": EVIDENCE_REQUIRE_KNOWN_FRESHNESS,
+            "document_reuse_max_age_seconds": EVIDENCE_DOCUMENT_REUSE_MAX_AGE_SECONDS,
+        },
         "queries_executed": search_requests,
         "evidences": evidences,
         "retrieval_summary": summary,
         "cache_policy": cache_policy,
         "evidence_bundle_hash": evidence_bundle_hash(evidences),
+        "evidence_bundle_hash_v2": evidence_bundle_hash_v2(evidences),
         "provider_trace": {
             "provider": provider_name,
             "cache_hit": False,

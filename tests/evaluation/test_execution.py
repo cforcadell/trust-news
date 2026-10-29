@@ -6,7 +6,7 @@ import pytest
 
 from common.llm import LLMResponse, LLMUsage
 from common.models.evidence_models import EvidenceSearchRequestV2
-from common.utils.evidence_bundle import evidence_bundle_hash
+from common.utils.evidence_bundle import evidence_bundle_hash, evidence_bundle_hash_v2
 from common.utils.validation_prompt import build_rag_prompt
 from evaluation.core.artifacts import EvaluationError
 from evaluation.core.evidence import gold_bundle, replay_bundle
@@ -71,6 +71,25 @@ def test_replay_detects_tampering_and_changed_prompt():
     result = execute(d, d["assertions"][0], CONFIG, "VALIDATOR_REPLAY", replay=original, template="Changed", complete_fn=llm)
     assert result.errors and result.errors[0]["stage"] == "SETUP"
     llm.assert_not_called()
+
+
+def test_replay_and_handoff_detect_provenance_change_without_text_change():
+    original = run().to_dict()
+    bundle = original["validator_input"]["evidences"]
+    bundle[0]["document_provenance"] = {
+        "method": "provider_search_text", "provider": "exa",
+        "requested_url": bundle[0]["url"], "text_sha256": "document-version-a",
+    }
+    original["validator_input"]["validator_input_evidence_bundle_hash_v2"] = evidence_bundle_hash_v2(bundle)
+    altered = deepcopy(original)
+    altered["validator_input"]["evidences"][0]["document_provenance"]["provider"] = "other"
+    assert evidence_bundle_hash(altered["validator_input"]["evidences"]) == evidence_bundle_hash(bundle)
+    with pytest.raises(EvaluationError, match="provenance integrity"):
+        replay_bundle(altered)
+    assert handoff_metrics({
+        "retrieval_evidence_bundle_hash_v2": evidence_bundle_hash_v2(bundle),
+        "validator_input_evidence_bundle_hash_v2": evidence_bundle_hash_v2(altered["validator_input"]["evidences"]),
+    })["status"] == "HANDOFF_EVIDENCE_MISMATCH"
 
 
 def test_hash_order_normalization_and_forged_text_hash():

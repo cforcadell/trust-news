@@ -4052,6 +4052,23 @@ function evidenceSupportsLabel(value) {
     return "";
 }
 
+function evidenceAcquisitionLabel(src = {}) {
+    const provenance = src.document_provenance;
+    if (!provenance || typeof provenance !== "object") return "";
+    const method = provenance.method === "direct_fetch" ? t("ui.evidenceDirectFetch")
+        : provenance.method === "provider_search_text" ? t("ui.evidenceProviderText")
+        : provenance.method === "provider_extract" ? t("ui.evidenceProviderExtract")
+        : provenance.method === "document_cache" ? t("ui.evidenceDocumentCache") : "";
+    if (!method) return "";
+    const freshness = provenance.freshness_status === "UNKNOWN"
+        ? t("ui.evidenceFreshnessUnknown")
+        : provenance.freshness_status === "OBSERVED_NOW"
+            ? t("ui.evidenceObservedAtRetrieval")
+            : provenance.freshness_status === "CACHED_KNOWN_AGE"
+                ? t("ui.evidenceCachedKnownAge") : "";
+    return [method, freshness].filter(Boolean).join(" · ");
+}
+
 function allValidationEvidenceItems(info = {}) {
     return [
         info.evidence_used,
@@ -4169,6 +4186,7 @@ function renderEvidenceLinks(info = {}) {
         const chunkId = src.chunk_id || (Array.isArray(src.included_chunk_ids) ? src.included_chunk_ids.join(", ") : "");
         const meta = [
             supports,
+            evidenceAcquisitionLabel(src),
             src.source_type,
             src.reliability,
             contextId ? `context ${contextId}` : "",

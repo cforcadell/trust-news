@@ -349,15 +349,24 @@ async def _call_configured_llm(text: str, trace: Optional[dict] = None) -> List[
                 response.usage.model_dump(mode="json") if response.usage else {}
             )
     try:
+        phase_started = time.monotonic()
         request = build_assertions_llm_request(text, model)
         if trace is not None:
             trace["structured_attempts"] = 1
-        batch = await acomplete_structured_with_repair(
-            AI_PROVIDER, request, repair_prompt, usage_observer=record_usage if trace is not None else None,
-        )
+            trace["request_build_seconds"] = round(time.monotonic() - phase_started, 6)
+        phase_started = time.monotonic()
+        try:
+            batch = await acomplete_structured_with_repair(
+                AI_PROVIDER, request, repair_prompt, usage_observer=record_usage if trace is not None else None,
+            )
+        finally:
+            if trace is not None:
+                trace["structured_completion_seconds"] = round(time.monotonic() - phase_started, 6)
+        phase_started = time.monotonic()
         assertions = parse_assertions_content(batch.model_dump(mode="json"))
         if trace is not None:
-            trace.update(status="COMPLETED", assertion_count=len(assertions))
+            trace.update(status="COMPLETED", assertion_count=len(assertions),
+                         parse_seconds=round(time.monotonic() - phase_started, 6))
         return assertions
     except LLMConfigurationError as exc:
         if trace is not None:
@@ -642,6 +651,7 @@ async def extraer_texto(
     body: TextoEntrada,
     client_id: str = Query(..., description="ID del cliente para cuotas") 
 ):
+    endpoint_started = time.monotonic()
     # ================================================================
     # 1️⃣ Control de Cuotas PRE-Extracción
     # ================================================================
@@ -660,12 +670,14 @@ async def extraer_texto(
         logger.error(f"❌ Error validando cuotas en /extraer: {e}")
         raise HTTPException(status_code=500, detail="Error interno verificando cuotas.")
     
+    quota_read_seconds = round(time.monotonic() - endpoint_started, 6)
     text = body.text
     order_id = str(uuid.uuid4())
     logger.info(f"[{order_id}] Endpoint /extraer (provider={AI_PROVIDER})")
+    trace: dict[str, Any] = {}
     
     try:
-        assertion_objs = await extract_assertions_from_text(text)
+        assertion_objs = await extract_assertions_from_text(text, trace=trace)
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -673,11 +685,25 @@ async def extraer_texto(
         raise HTTPException(status_code=500, detail=str(e))
 
     try:
+        quota_update_started = time.monotonic()
         await update_client_consumed(client_id, "news_generation", cons_news + 1)
         logger.info(f"💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id} (Endpoint: /extraer)")
     except Exception as e:
         logger.error(f"❌ Error incrementando cuota en /extraer para {client_id}: {e}")
         # No bloqueamos el return aunque falle la actualización, para no perjudicar al usuario si la BBDD de cuotas falla puntualmente.
+    finally:
+        log_event(
+            logger, logging.INFO, "assertion_generation_timing",
+            request_id=order_id, provider=AI_PROVIDER, model=trace.get("model"),
+            assertion_count=len(assertion_objs), repair_used=trace.get("repair_used"),
+            usage=trace.get("usage", []),
+            quota_read_seconds=quota_read_seconds,
+            request_build_seconds=trace.get("request_build_seconds"),
+            structured_completion_seconds=trace.get("structured_completion_seconds"),
+            parse_seconds=trace.get("parse_seconds"),
+            quota_update_seconds=round(time.monotonic() - quota_update_started, 6),
+            total_seconds=round(time.monotonic() - endpoint_started, 6),
+        )
 
     try:
         assertions_document = build_generated_document(text, assertion_objs, "BLOCKCHAIN")

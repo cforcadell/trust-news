@@ -20,3 +20,17 @@ class SearchResult(BaseModel):
     score: float | None = None
     raw_content: str | None = None
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtractResult(BaseModel):
+    """One requested URL, independently of the HTTP status of the API call."""
+
+    requested_url: str
+    status: str
+    text: str = ""
+    resolved_url: str | None = None
+    freshness_status: str = "UNKNOWN"
+    request_id: str | None = None
+    cost_usd: float | None = None
+    usage: dict[str, Any] | None = None
+    error: str | None = None

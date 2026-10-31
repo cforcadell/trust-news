@@ -321,6 +321,9 @@ class GenerationEvaluationTrace(BaseModel):
     structured_attempts: int = 0
     repair_used: bool = False
     duration_seconds: float = 0.0
+    request_build_seconds: Optional[float] = None
+    structured_completion_seconds: Optional[float] = None
+    parse_seconds: Optional[float] = None
     status: Literal["COMPLETED", "FAILED"]
     error_type: Optional[str] = None
     assertion_count: int = 0

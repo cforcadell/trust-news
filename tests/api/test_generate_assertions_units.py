@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -123,3 +124,54 @@ async def test_evaluation_trace_records_structured_repair_without_response_body(
     assert trace["structured_completion_seconds"] >= 0
     assert trace["parse_seconds"] >= 0
     assert "response" not in str(trace)
+
+
+def test_kafka_generation_publishes_trace_with_timing_fields(monkeypatch):
+    assertion = generate.Assertion.model_validate({
+        "idAssertion": "1",
+        "text": "España superó los 49 millones de habitantes en 2025.",
+        "categoryId": 10,
+        "topic_code": "DEMOGRAPHY",
+        "evidence_kind": "STATISTICAL_DATA",
+        "context": {
+            "locations": [], "entities": [], "temporal_context": [], "language": "es",
+            "jurisdiction": {"scope": "COUNTRY", "country_code": "ES"},
+        },
+    })
+
+    async def fake_extract(_text, trace=None):
+        assert trace is not None
+        trace.update({
+            "provider": "openrouter", "model": "test-model", "temperature": 0.0,
+            "config_version": 1, "structured_attempts": 1, "repair_used": False,
+            "duration_seconds": 1.5, "request_build_seconds": 0.1,
+            "structured_completion_seconds": 1.3, "parse_seconds": 0.01,
+            "status": "COMPLETED", "assertion_count": 1, "usage": [],
+        })
+        return [assertion]
+
+    class Producer:
+        def __init__(self):
+            self.sent = []
+
+        async def send_and_wait(self, topic, value):
+            self.sent.append((topic, value))
+
+    monkeypatch.setenv("EVALUATION_CAPTURE_GENERATION", "true")
+    monkeypatch.setattr(generate, "extract_assertions_from_text", fake_extract)
+    producer = Producer()
+    request = generate.GenerateAssertionsRequest(
+        action="generate_assertions", order_id="order-trace",
+        payload={"text": "Noticia", "validation_mode": "LIGHT"},
+    )
+
+    asyncio.run(generate.process_message_bytes(request.model_dump_json().encode(), producer))
+
+    assert len(producer.sent) == 1
+    assert producer.sent[0][0] == generate.OUTPUT_TOPIC
+    response = generate.AssertionsGeneratedResponse.model_validate_json(producer.sent[0][1])
+    trace = response.payload.evaluation_trace
+    assert trace is not None
+    assert trace.request_build_seconds == 0.1
+    assert trace.structured_completion_seconds == 1.3
+    assert trace.parse_seconds == 0.01

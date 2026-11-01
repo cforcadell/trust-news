@@ -15,6 +15,7 @@ variables:
   HELM_VERSION: "v3.21.0"
   HELM_LINUX_AMD64_SHA256: "0093eb572e3d2380f094df162ddb525e219249de88957afe24cfbb19632acd36"
   DOCKER_BUILDKIT: "1"
+  OPERATIONS_SCRIPTS_DIR: "/home/sysadmin/trust-news/scripts/k8s"
 
 .kube_access:
   before_script:
@@ -176,6 +177,18 @@ deploy:
 
   script:
     - |
+      if [ "$PROFILE" = "apis-frontend-prod" ]; then
+        echo "Instalando scripts operativos versionados en $OPERATIONS_SCRIPTS_DIR"
+        scripts/ci/sync-remote-files.sh \
+          --host "$HETZNER_IP" \
+          --user "$HETZNER_USER" \
+          --port 2222 \
+          --identity "$HOME/.ssh/id_rsa" \
+          --target-dir "$OPERATIONS_SCRIPTS_DIR" \
+          --mode 0750 \
+          -- scripts/k8s/backup-mongodb.sh scripts/k8s/restore-mongodb.sh scripts/k8s/set-blockchain-mode.sh
+      fi
+    - |
       test -f build.json || {
         echo "ERROR: falta build.json para el perfil $PROFILE"
         exit 1
@@ -186,8 +199,8 @@ deploy:
         scripts/k8s/realign-source-routing-mongodb.sh --apply
         scripts/k8s/realign-source-routing-mongodb.sh --check
         if [ "$BLOCKCHAIN_ENABLED" = "OFF" ] && kubectl get deployment/news-handler -n apis >/dev/null 2>&1; then
-          bash scripts/k8s/set-blockchain-mode.sh --gate
           bash scripts/k8s/set-blockchain-mode.sh --check-pending
+          bash scripts/k8s/set-blockchain-mode.sh --prepare-off
         fi
       fi
     - echo "Deploy con Skaffold $SKAFFOLD_VERSION"

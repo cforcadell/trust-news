@@ -1,8 +1,6 @@
-# Incidences of Assermetry
+# Incidencias y alcance de v0.0.13
 
-Revisión: **2026-10-17**. Inventario y criterios de cierre de [v0.0.13](version.md), actualizado con la campaña publicada [`gold-v0-published-20261017T083319Z`](../tests/data/evaluation/artifacts/gold-v0-published-20261017T083319Z/report.md). La campaña usó `c84bb6e` con árbol sucio; los cambios locales actuales de Evidence Search son posteriores y requieren otra publicación para ser validados. No es una aceptación de calidad factual ni una regresión completa en Hetzner.
-
-Execution order and benchmark protocol: [working.md](working.md).
+**Revisión: 2026-11-01. v0.0.13 tiene alcance de desarrollo cerrado y estado Deploying.** «Incluido» significa que la implementación forma parte del código candidato; no significa que la incidencia esté resuelta en Hetzner ni que la calidad factual esté aceptada. Los resultados recientes son [SMART, 31-10](../tests/data/evaluation/artifacts/e2e-20261031-181209/report.md) y [DIRECT, 01-11](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md). Ambos manifiestos indican `da356fdf` y árbol sucio. [version.md](version.md) define el alcance y sus anexos. [working.md](working.md) es una propuesta independiente de generación en dos etapas, todavía sin ejecutar.
 
 ## Management
 
@@ -10,34 +8,29 @@ States: **Open → In progress → Pending validation → Solved**. **Mitigated*
 
 Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safety, flow or incorrect essential result; **P2** Degradation with alternative; **P3** Cosmetics. Work order and blocking are decided separately. 005–008 move from historical P0 to P1 by functional impact: continuing blocking the cloud of 13, except for validating 008. Its urgency is not reduced.
 
-| ID | Gravedad | Current status/evidence | Objective |
+| ID | Gravedad | Incluido en v0.0.13 | Estado al entrar en Deploying |
 | --- | --- | --- | --- |
-| 001 | P1 | Pending validation; safe refresh and lossless event merge implemented locally | 13 |
-| 002 | — | Solved 2026-08-19 | History |
-| 003–004 | P1 | Open; CI configuration confirmed, formal deferral from 13 pending | 16 proposed |
-| 005 | P1 | Pending validation; UTC/ISO contract and strict GUI parser implemented locally | 13 |
-| 006 | P1 | Pending validation; terminal-state presentation implemented locally | 13 |
-| 007 | P1 | Pending validation; local solution, target deployment evidence pending | 13 |
-| 008 | P1 | Pending validation; exclusion of errors already implemented | 13 |
-| 009 | P1 | Open; optional edition already exists | 14 |
-| 010 | P1 | Open; detailed evidence already exists | 14 |
-| 011 | P1 | Pending validation; deployed, two-identity target evidence pending | 13 |
-| 012 | P1 | Pending validation; deployed, negative-token target evidence pending | 13 |
-| 013 | P1 | Pending validation; canonical grounding local, target pending | 13 |
-| 014 | P1 | Pending validation; summary collision and partial-order fallback solved locally | 13 |
-| 015 | P1 | Pending validation; local LIGHT route checked, target pending | 13 |
-| 016 | P1 | Pending validation; clean local regression and strict browser diagnostics implemented | 13 |
-| 017 | P1 | En curso; campaña publish de 11 casos, 9/11 unidades e2e correctas; gold sin homologar | 13, expand by 14 |
-| 018 | P1 | Pending validation; deployed, browser link check pending | 13 |
-| 019 | P1 | Pending validation; local polling fix, partial/duplicate matrix missing | 13 |
-| 020 | P2 | Open; regression now asserts overflow, but the reproduced mobile/UI defects lack a validated fix | 13 |
-| 021 | P1 | En curso; 27/33 validaciones con fuentes inutilizables; documentos oficiales sin texto recuperado | 13 |
-| 022 | P2 | Pending validation; taxonomy/route-v2 local, Hetzner and cache measurements pending | 13 |
-| 023 | P1 | Pending validation; local BLOCKCHAIN E2E passed, target pending | 13 |
-| 024 | P1 | Open; ignored local launch helper contains a plaintext OIDC client credential | 13 |
-| 025 | P1 | Abierta; timeout de Evidence Search bloqueó dos validaciones de una orden publicada | 13 |
+| 001 | P1 | Sí: refresco seguro y fusión de eventos de validadores | Pendiente prueba concurrente y 3×3 en Kind/Hetzner |
+| 002 | — | Resuelto históricamente | Solved desde 2026-08-19 |
+| 003–004 | P1 | No: endurecimiento de CA K3s y SSH en CI | Abiertas; v0.0.16 propuesto, decisión formal de riesgo pendiente |
+| 005–006 | P1 | Sí: fechas UTC/ISO y presentación terminal | Pendiente matriz de navegador LIGHT/BLOCKCHAIN |
+| 007–008 | P1 | Sí: consensus-v2 y exclusión de errores del voto | Pendiente matriz de empate, timeout y reintento en destino |
+| 009–010 | P1 | No: revisión humana obligatoria e informe reutilizable | Abiertas para v0.0.14 |
+| 011–012 | P1 | Sí: aislamiento por propietario y validación JWT | Pendiente evidencia con dos identidades y tokens negativos |
+| 013–014 | P1 | Sí: citas canónicas y resumen de orden parcial | Pendiente prueba completa de ruta y navegador en destino |
+| 015–016 | P1 | Sí: Source Router y regresión local estricta | Pendiente proveedores externos, despliegue y navegador |
+| 017 | P1 | Sí: runner, corpus, visor y trazas | Abierta: SMART 19/22 y DIRECT 12/22 e2e estrictos; gold sin homologar |
+| 018–019 | P1 | Sí: enlaces saneados y contadores/polling corregidos localmente | Pendiente enlace en navegador y matriz de llegadas/duplicados/errores |
+| 020 | P2 | Parcial: detección estricta de overflow | Abierta: faltan corrección y prueba móvil/ES/EN |
+| 021 | P1 | Parcial: origen, metadatos, filtro oficial y motor de adquisición | Abierta: primarias inaccesibles, copias y política documental |
+| 022 | P2 | Sí: taxonomía y route-v2 | Pendiente realineación y métricas de caché en Hetzner |
+| 023 | P1 | Sí: registro BLOCKCHAIN v2 por CID | Pendiente prueba en destino |
+| 024 | P1 | No: retirada de credencial local | Abierta; remediación previa a ejecución compartida o destino |
+| 025 | P1 | Parcial: trazas y manejo de timeout | Abierta: falta fallo inducido y repetición estable |
+| 026 | P1 | Sí: motor DIRECT medible; corrección de recuperación no incluida | Abierta: 88/139 descargas útiles y primarias inaccesibles |
+| 027 | P1 | Parcial: polling y diagnóstico | Abierta: una orden DIRECT quedó DOCUMENT_CREATED tras timeout de sondeo |
 
-Las P1 abiertas de 13 bloquean el cierre. La prioridad operativa es publicar una campaña corta tras cada corrección, analizar los mismos casos y conservar sus artefactos; [working.md](working.md) fija el ciclo. 003/004 precisan decisión formal de aplazamiento. 024 exige retirar el secreto literal antes de otra ejecución compartida o en destino. 020 y 022 conservan sus pruebas de cierre específicas.
+**La inclusión en la release no cierra una incidencia.** Las P1 abiertas y el aplazamiento de 003/004 condicionan la salida de Deploying. La promoción exige una revisión limpia con modo de extracción elegido y observado en los pods. Una campaña corta después de cada corrección y el lote completo posterior deben conservar manifiesto, órdenes y trazas. La comparación SMART/DIRECT no aísla la adquisición: la temperatura y la versión de configuración observada de generación también cambiaron.
 
 ## Incidencias previas, revisadas
 
@@ -190,7 +183,8 @@ they are dealt with in ISSUE-021; the stability of the signature is resolved in 
 
 ### ISSUE-017 - Representative evaluation of factual quality and adverse content
 
-- **Current state:** benchmark infrastructure now exists: the historical OpenRouter CLI records profiles, repeated LIGHT orders, SQLite history, cost/latency estimates and comparisons; shared evaluation runners provide full, gold-domain, gold-evidence and replay modes, versioned artifacts, campaign summaries, a local viewer and offline `--analyze` per validation. See [evaluation.md](tests/evaluation.md), [llm-benchmark.md](tests/llm-benchmark.md) and [working.md](working.md). This is implementation progress, not factual-quality certification.
+- **Estado de release (2026-11-01):** el motor de evaluación, las campañas publicadas, el visor, el análisis offline y las trazas están incluidos en v0.0.13. La campaña SMART de 31-10 registró 19/22 unidades e2e estrictas y 21/22 decisiones correctas, con 22 órdenes VALIDATED. La campaña DIRECT de 01-11 registró 12/22 y 16/22 respectivamente, más una decisión no evaluable; hubo 19 órdenes VALIDATED, dos VALIDATED_WITH_ERRORS y una DOCUMENT_CREATED. El corpus tiene los mismos once hashes, pero la temperatura observada de generación cambió de 0,0 a 0,1 y config_version de 30 a 0. No atribuir causalidad exclusiva al modo de adquisición. Persisten categorías divergentes y decisiones UNKNOWN o contrarias al gold. Gold sin aprobación independiente: **ISSUE-017 permanece abierta**.
+- **Current state:** benchmark infrastructure now exists: the historical OpenRouter CLI records profiles, repeated LIGHT orders, SQLite history, cost/latency estimates and comparisons; shared evaluation runners provide full, gold-domain, gold-evidence and replay modes, versioned artifacts, campaign summaries, a local viewer and offline `--analyze` per validation. See [evaluation.md](tests/evaluation.md) and [llm-benchmark.md](tests/llm-benchmark.md). This is implementation progress, not factual-quality certification.
 - **Corpus y campaña (2026-10-17):** el corpus activo tiene once casos atómicos, seis `TRUE` y cinco `FALSE`, tras retirar el falso de población por ambigüedad provisional/definitiva. Las seis fuentes siguen `CANDIDATE`. La campaña publicada de una repetición por caso generó once órdenes LIGHT y 33 registros de validador; diez órdenes quedaron `VALIDATED` y una `VALIDATED_WITH_ERRORS`. El informe cuenta **9/11 unidades afirmación × repetición e2e correctas y 2/11 incorrectas**, no 9/33. Dos validadores dieron un veredicto contrario al gold, aunque el consenso de sus órdenes fue correcto. Un caso tiene desajuste de categoría de extracción y otro perdió dos validaciones por timeout. El resultado es diagnóstico, no acreditación factual.
 - **Comparación limitada:** la campaña del 2026-10-16 18:08 UTC registró 12 órdenes y 39 registros de validador, con `CONSENSUS_ERROR`, `ROUTER_NO_SOURCE` y dos ejecuciones sin contexto citable; la del 17 no muestra esas incidencias. El corpus, la revisión y el árbol sucio cambiaron, de modo que no hay comparación causal ni tasa de mejora atribuible solo a la modificación de Source Router de `c84bb6e`.
 - **Coverage gap:** the candidate set has no independent human approval, `UNKNOWN`/abstention cases, adversarial content, PDFs or representative scale. Acceptance thresholds and the simple LLM-plus-web-search comparison are not fixed. Historical pre-gold resources are retained only for deliberate regression and cannot be merged into current acceptance metrics.
@@ -229,6 +223,7 @@ Content warnings and accessible result; ES/EN complete and consistent actions. V
 
 ### ISSUE-021 - A recovered source can self-confirm the news and circumvent documentary policy
 
+- **Estado de release (2026-11-01):** el motor DIRECT/PROVIDER/SMART, la procedencia, el filtro posterior a búsqueda y los diagnósticos se incluyen; la recuperación independiente y semántica no está cerrada. SMART produjo 126 documentos citables desde texto del proveedor con cero descargas HTTP. DIRECT midió 88/139 documentos extraídos y 115/222 respuestas HTTP 2xx; estas últimas incluyen 27 respuestas 202 sin texto de EUR-Lex. Las trazas DIRECT también registran 16 ACCESS_DENIED, cinco FETCH_FAILURE y tres RATE_LIMITED. Una fuente citable del gold apareció en 49/66 validaciones SMART y 22/64 DIRECT. La identidad de la cita no demuestra que apoye la afirmación. Resolver de forma general la adquisición de primarias, copias y regla documental antes de cerrar.
 - ** Status:** partially resolved. Reproduced in the LIGHT order
 `355f6090-cec0-4ed3-a29a-46763fe66cc6`, first assertion.
 - **Impact:** all three RAG validators issued TRUE using the
@@ -243,7 +238,7 @@ secondary, copy and relationship to the document submitted; apply the policy aft
 This cannot be recovered, Freedom Digital can be preserved as context or track, without producing TRUE/FALSE documentary alone.
 - **Relationship:** expands the factual quality of 017; does not invalidate grounding
 Syntactic of 013 nor the geographical eligibility resolved by 015.
-- **Campaña publicada 2026-10-17:** `SOME_SOURCES_UNUSABLE` aparece en 27 de 33 validaciones: `eur-lex.europa.eu` da `empty_text` 21 veces y `europarl.europa.eu` 12, además de 403 y errores de conexión de otras fuentes. Hay contextos citables alternativos, pero el warning es una pérdida sistemática de fuente primaria, no prueba de soporte semántico. El handoff y las citas pasan en las 31 validaciones que terminaron; eso acredita identidad del contexto, no independencia ni implicación del veredicto. Los cambios locales actuales de descarga y normalización se hicieron después de la campaña y deben comprobarse con otra publicación de los mismos casos.
+- **Campaña histórica publicada 2026-10-17:** `SOME_SOURCES_UNUSABLE` aparece en 27 de 33 validaciones: `eur-lex.europa.eu` da `empty_text` 21 veces y `europarl.europa.eu` 12, además de 403 y errores de conexión de otras fuentes. Hay contextos citables alternativos, pero el warning es una pérdida sistemática de fuente primaria, no prueba de soporte semántico. El handoff y las citas pasan en las 31 validaciones que terminaron; eso acredita identidad del contexto, no independencia ni implicación del veredicto. Los cambios de descarga y normalización posteriores a esa campaña se midieron de nuevo en las campañas del 31-10 y 01-11, resumidas arriba; la recuperación primaria sigue abierta.
 - **Cierre adicional:** en los casos jurídicos e institucionales recuperar texto y fragmento auditable de las fuentes primarias, o registrar una causa precisa y una abstención segura; verificar PDF, HTML, redirecciones y anti-bot con URL final y estado. Reducir warnings de recuperación sin sustituir silenciosamente la fuente primaria por contenido secundario.
 
 ### ISSUE-022 - Subcategories and free types generate duplicate or too wide routes
@@ -287,7 +282,23 @@ Blockchain validations. GUI case cannot satisfy CID/post/tx/IPFS or reach `VALID
 
 ### ISSUE-025 - Timeout de Evidence Search deja validadores sin decisión
 
-- **Evidencia:** la orden `328bb1ce-4de2-411a-8e1f-fc99eee1fc8d` del caso `EU_RENEWABLE_SHARE_2023_FALSE` terminó `VALIDATED_WITH_ERRORS`. Dos de tres validadores registraron `stage=EVIDENCE_SEARCH`, `code=TECHNICAL_ERROR`, `message=timed out`; el tercero respondió `FALSE`. El informe agrupa esto como un fallo de ejecución que afecta a una unidad e2e, aunque existan dos registros de validador fallidos. Véanse los artefactos de la campaña enlazada al principio.
+- **Estado de release (2026-11-01):** la campaña SMART del 31-10 terminó sin error técnico, pero ello no reproduce ni cierra el timeout inducido requerido. DIRECT registró dos fallos de Source Router y un timeout de ORDER_POLL, que se siguen además en 026/027; no son una repetición demostrada de la causa original de Evidence Search.
+- **Evidencia histórica:** la orden `328bb1ce-4de2-411a-8e1f-fc99eee1fc8d` del caso `EU_RENEWABLE_SHARE_2023_FALSE` terminó `VALIDATED_WITH_ERRORS`. Dos de tres validadores registraron `stage=EVIDENCE_SEARCH`, `code=TECHNICAL_ERROR`, `message=timed out`; el tercero respondió `FALSE`. El informe agrupa esto como un fallo de ejecución que afecta a una unidad e2e, aunque existan dos registros de validador fallidos. [Informe de la campaña del 17-10](../tests/data/evaluation/artifacts/gold-v0-published-20261017T083319Z/report.md).
 - **Impacto:** se pierde cobertura de validación y el estado terminal puede aparentar una decisión suficiente cuando dos votos no se emitieron. Se solapa con la presentación de errores de 008/019, pero la causa operativa de búsqueda requiere seguimiento propio.
 - **Diagnóstico pendiente:** localizar el límite que expiró (cliente, Evidence Search, proveedor o descarga), medir duración por etapa, concurrencia y reintentos, y comprobar si se ejecutó trabajo posterior al timeout. El artefacto solo demuestra `timed out`; no identifica aún la causa interna.
 - **Cierre:** corregir el límite o el trabajo bloqueante y ejecutar de nuevo el caso mediante `full --publish` en la misma revisión desplegada. Exigir tres decisiones terminales sin timeout; inducir aparte un fallo controlado para verificar errores explícitos y recuperables sin votos ficticios, contadores y retry idempotente de 008/019. Repetir después los once casos y conservar trazas y latencias.
+
+## Hallazgos de la comparación SMART/DIRECT — 2026-11-01
+
+### ISSUE-026 - Recuperación directa de fuentes primarias insuficiente
+
+- **Estado:** abierta, P1. El motor de adquisición configurable entra en v0.0.13; la recuperación útil en DIRECT no queda aceptada.
+- **Evidencia:** [campaña DIRECT](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md), 88/139 documentos extraídos (63,3 %), 115/222 respuestas HTTP 2xx (51,8 %). Las 27 respuestas 202 sin cuerpo extraíble proceden de EUR-Lex; Europarl acumula diez accesos denegados, sistemaelectrico-ree.es cinco fallos de descarga y edpb.europa.eu tres respuestas con limitación de tasa. Hubo 18 sustituciones de candidato: cinco recuperaron un documento y trece se agotaron. Una respuesta 2xx sin texto no es descarga útil.
+- **Impacto:** los documentos de referencia citables pasan de 49/66 validaciones SMART a 22/64 DIRECT; la campaña DIRECT obtuvo 12/22 unidades e2e estrictas. Esto es asociación observada, no atribución causal: también cambió la configuración observada de generación.
+- **Cierre:** corregir mediante políticas generales de adquisición, redirección, reintento y fallback, sin excepciones para URLs o casos concretos. Repetir DIRECT/SMART sobre una revisión limpia, mismos modelos y parámetros, corpus congelado y configuración controlada; comparar fuentes primarias, contenido auditable, frescura, abstención, latencia, coste y resultado e2e. Coordinar la independencia y el apoyo semántico con 017/021.
+
+### ISSUE-027 - Una orden publicada queda sin estado terminal por timeout de sondeo
+
+- **Estado:** abierta, P1. El polling y sus diagnósticos forman parte de v0.0.13, pero el caso falló en la campaña DIRECT.
+- **Evidencia:** [campaña DIRECT](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md), caso EU_PARLIAMENT_MEMBERS_FALSE, repetición 1: la orden quedó DOCUMENT_CREATED y el importador agrupó ORDER_POLL_ERROR, TimeoutError, «The read operation timed out». El informe cuenta una decisión no evaluable y una unidad operativamente fallida.
+- **Cierre:** localizar si expiró el cliente de sondeo, la consulta de orden o la publicación; guardar tiempos y estados de cada transición. Asegurar que un error de lectura no se confunde con un estado terminal, probar recuperación y reintento idempotente, y repetir el caso más el lote con cero órdenes pendientes. Coordinar la matriz de contadores y errores con 008/019/025.

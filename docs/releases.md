@@ -1,6 +1,18 @@
-# Published versions
+# Releases
 
-This document retains the functional result of versions prior to the current version. Active planning is in [`version.md`](version.md) and future versions in [`next_releases.md`](next_releases.md).
+Este documento distingue la versión actual en despliegue de las versiones publicadas. El alcance y la puerta de salida de v0.0.13 están en [version.md](version.md); los trabajos posteriores, en [next_releases.md](next_releases.md).
+
+## v0.0.13 — Estabilización funcional
+
+**Estado: Deploying (1 de noviembre de 2026).** Alcance de desarrollo documentado; despliegue y aceptación pendientes. No se acredita una etiqueta ni publicación en Hetzner para esta revisión. [Detalle y anexos](version.md) · [Incidencias](issues.md) · [Guía de despliegue](deploy/main-posttfm-hetzner-smart-light.md).
+
+- Flujo LIGHT y contrato v2 de afirmaciones integrados con generación, validación, Kafka y persistencia; ruta BLOCKCHAIN por CID, IPFS y registro con estados de error y reintento.
+- Consensus-v2 con votos, pesos, abstenciones, errores y motivos explícitos; citas RAG canónicas desde contextos entregados y elegibles.
+- Source Router dinámico, taxonomía cerrada, route-v2, cachés versionadas y motor Evidence Search configurable DIRECT/PROVIDER/SMART, con extracción HTML/PDF y procedencia auditable.
+- Aislamiento de consultas por propietario, comprobación de audiencia y cliente JWT, enlaces saneados; fechas UTC/ISO, estados terminales y resumen de órdenes parciales en GUI/API.
+- Evaluación full --publish, corpus Official Gold v0 de once casos, visor, análisis offline, trazas de generación/ruta/recuperación, costes observados y regresión local estricta.
+- Diagnóstico LIGHT: [SMART, 31-10](../tests/data/evaluation/artifacts/e2e-20261031-181209/report.md), 19/22 unidades e2e estrictas y 22 órdenes VALIDATED; [DIRECT, 01-11](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md), 12/22, 88/139 documentos extraídos y tres fallos de ejecución agrupados. Los manifiestos declaran árbol sucio y cambió la configuración observada de generación, por lo que no acreditan una comparación causal ni una release factual estable.
+- El ConfigMap versionado y el checkout actual seleccionan SMART para el despliegue LIGHT de v0.0.13; DIRECT queda como campaña diagnóstica. Antes de publicación: congelar un SHA limpio, verificar SMART en cada pod y el borde de Hetzner, resolver o aceptar formalmente las incidencias P1, homologar el gold y completar la puerta de [version.md](version.md).
 
 ## v0.0.12 - Closure of the perimeter and administrative access
 

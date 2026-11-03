@@ -606,7 +606,7 @@ kubectl get pvc -n infra
 kubectl get pvc -n blockchain
 ```
 
-Active PVC destructive restorations are prohibited. Backups and complete isolated restoration belong to `v0.0.16`.
+Active PVC destructive restorations are prohibited. La copia protegida y la restauración aislada de MongoDB/Keycloak se adelantan a **v0.0.13b**, antes de migrar datos y abrir beta, según [version.md](../../version.md). La cobertura productiva ampliada y la verificación continuada permanecen en `v0.0.16`; esta reasignación no acredita que las pruebas ya estén ejecutadas.
 
 ---
 

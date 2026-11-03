@@ -681,6 +681,7 @@ Planned progression:
 |---|---|---|
 | `v0.0.12` | Closed | Cloudflare perimeter, controlled access and administrative protection |
 | `v0.0.13` | Deployed; acceptance pending | Functional stabilization and repeatable private demo |
+| `v0.0.13b` | Planned; remediation pending | [Security closure before beta](version.md), with P0/P1 acceptance gates |
 | `v0.0.14` | Planned | Closed beta by invitation |
 | `v0.0.15` | Planned | Design-partner pilot with explicit success criteria |
 | `v0.0.16` | Planned | Production hardening, recovery and operational readiness |

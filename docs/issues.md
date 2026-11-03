@@ -12,7 +12,7 @@ Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safet
 | --- | --- | --- | --- |
 | 001 | P1 | Sí: refresco seguro y fusión de eventos de validadores | Pendiente prueba concurrente y 3×3 en Kind/Hetzner |
 | 002 | — | Resuelto históricamente | Solved desde 2026-08-19 |
-| 003–004 | P1 | No: endurecimiento de CA K3s y SSH en CI | Abiertas; v0.0.16 propuesto, decisión formal de riesgo pendiente |
+| 003–004 | P1 | No: endurecimiento de CA K3s y SSH en CI | Abiertas; adelantadas a P0 de v0.0.13b; cierre verificable antes del siguiente pipeline privilegiado |
 | 005–006 | P1 | Sí: fechas UTC/ISO y presentación terminal | Pendiente matriz de navegador LIGHT/BLOCKCHAIN |
 | 007–008 | P1 | Sí: consensus-v2 y exclusión de errores del voto | Pendiente matriz de empate, timeout y reintento en destino |
 | 009–010 | P1 | No: revisión humana obligatoria e informe reutilizable | Abiertas para v0.0.14 |
@@ -51,12 +51,12 @@ remains active; the fixture must still fail soon if configuration is missing (01
 ### ISSUE-003 - IC does not authenticate the K3s API with its CA
 
 - **Confirmado:** `.gitlab-ci.yml` conserva `--insecure-skip-tls-verify=true`.
-- **Close:** verify the K3s API CA and TLS name and reject a wrong CA or server name before deployment. v0.0.16 is the proposed implementation target; v0.0.13 still needs an explicit owner, mitigation, private-demo scope and risk decision before deferral.
+- **Close:** verify the K3s API CA and TLS name and reject a wrong CA or server name before deployment. Objetivo adelantado de v0.0.16 a **v0.0.13b, P0/S01** según [version.md](../version.md). Sigue abierta: no ejecutar otro pipeline privilegiado con verificación omitida; demostrar rechazo antes de acciones sobre el clúster.
 
 ### ISSUE-004 - CI does not set the server SSH key
 
 - ** Confirmed:** `.gitlab-ci.yml` feeds `known_hosts` from `ssh-keyscan`.
-- **Close:** pin the independently verified host key, reject a missing or changed key and document rotation. v0.0.16 is the proposed implementation target; record the v0.0.13 risk decision and demo restriction before deferral.
+- **Close:** pin the independently verified host key, reject a missing or changed key and document rotation. Objetivo adelantado de v0.0.16 a **v0.0.13b, P0/S01** según [version.md](../version.md). Sigue abierta: verificar la identidad antes de otro pipeline privilegiado y probar fallo con clave ausente/cambiada.
 
 ### ISSUE-005 - Dates, time zones and time states inconsistent with the results GUI
 

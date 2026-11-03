@@ -2,17 +2,31 @@
 
 This document contains only versions after the current version. The status of the current version is in [`v0.0.13.md`](releases/v0.0.13.md) and the release history in [`releases.md`](releases.md).
 
+Actualización de seguridad del 03-11-2026: **v0.0.13b precede y bloquea la apertura de v0.0.14**. El [plan de ejecución](../version.md) adelanta los controles P0/P1 antes aplazados a preparación productiva. Las versiones siguientes conservan sus objetivos; ningún cambio se considera implantado por aparecer en este roadmap.
+
 ## Summary
 
 | Version | Objective | Main exit criterion |
 | --- | --- | --- |
+| v0.0.13b | Cierre de seguridad previo a beta | Puertas P0/P1 del plan verificadas sobre el candidato exacto |
 | v0.0.14 | Beta closed by invitation | Two external evaluations and one candidate for partner design |
 | v0.0.15 | Pilot with design partners | A pilot with evidence of value and explicit decision of continuity |
 | v0.0.16 | Production preparation | Hardening and recovery demonstrated; risks resolved or accepted |
 | v0.9.0 | Release Candidate | Full regression and formal decision GO/NO-GO |
 | v1.0.0 | Controlled production | Repeatable case, contractual commitment and accepted transaction |
 
+## v0.0.13b — Cierre de seguridad previo a la beta
+
+**Planificada, sin remediaciones ejecutadas.** Contrasta al mismo nivel la auditoría aportada y la revisión Copilot mediante [análisis propio del código y docs](security/security_review_codex.md). El [enfoque, paquetes ordenados, dependencias, estimaciones y puertas](../version.md) son la referencia de ejecución.
+
+- Primero identidad de CI (ISSUE-003/004), verificación de exposición e inventario de secretos activos; después SSRF, autorización/segmentación interna, cuotas/estado de cliente, Kafka, JWT/JWKS y canales de identidad protegidos.
+- Restauración aislada/cifrado externo antes de migración soportada de MongoDB y aceptación integrada del perfil LIGHT/SMART.
+- Mantener Blockchain OFF y mTLS general/administrativo. El hardening general P2 continúa después; ON queda bloqueado hasta endurecer Geth.
+- No abrir beta mientras una puerta P0/P1 esté pendiente. La aceptación funcional/factual de v0.0.13 conserva sus requisitos independientes.
+
 ## v0.0.14 - Beta closed by invitation
+
+**Prerequisito:** cerrar v0.0.13b según [version.md](../version.md), además de la aceptación funcional requerida. El corte de mTLS no se ejecuta como parte de la auditoría ni de la preparación del plan.
 
 ### Objective
 
@@ -108,7 +122,7 @@ in the components concerned.
 - Laterance measurement, cost per validation, perceived quality, repetition and
 support load.
 
-This hardening is limited to the components affected by the pilot. The cross-sectional closure of the pipeline, Geth, segmentation and supply chain remains at `v0.0.16`.
+This hardening is limited to the components affected by the pilot. Pipeline identity and the P1 segmentation controls are prerequisites closed in `v0.0.13b`; the pilot verifies they remain effective. General supply-chain hardening remains at `v0.0.16`. Geth must pass its security activation gate before any ON use, including a pilot.
 
 Disposable data can accept risk of loss. Data to be stored requires minimal backup before entering; irreplaceable data are not supported until a standalone restoration is demonstrated.
 
@@ -124,6 +138,8 @@ At least one pilot ends up with evidence of value and an explicit decision to co
 
 Converting the validated platform with customers into a service that can be operated. It is a stabilization version and does not incorporate commercial functionalities except those necessary to close a production risk.
 
+Los controles P0/P1 de [v0.0.13b](../version.md) son prerrequisitos, no trabajo aplazado hasta esta versión. Los apartados siguientes verifican su continuidad y completan el endurecimiento P2 y la preparación productiva. Si un control ya cerrado regresa, se bloquea la promoción.
+
 ### Identity Hardening
 
 - Review and harden `aud` validation implanted before beta.
@@ -138,10 +154,10 @@ of clients presenters.
 
 ### Pipeline confidence
 
-- Resolve [`ISSUE-003`](issues.md#issue-003---ci-no-autentica-el-api-de-k3s-con-su-ca):
-authenticate the K3s API with your real CA and remove unsafe TLS jumps.
-- Resolve [`ISSUE-004`](issues.md#issue-004---ci-no-fija-la-clave-ssh-del-servidor):
-fix and verify the expected SSH key with `StrictHostKeyChecking=yes`.
+- Revalidate [`ISSUE-003`](issues.md#issue-003---ic-does-not-authenticate-the-k3s-api-with-its-ca), cuyo cierre se adelanta a v0.0.13b:
+authenticate the K3s API with its real CA and verified TLS name, without unsafe TLS bypasses.
+- Revalidate [`ISSUE-004`](issues.md#issue-004---ci-does-not-set-the-server-ssh-key), cuyo cierre se adelanta a v0.0.13b:
+pin and verify the expected SSH key with `StrictHostKeyChecking=yes`.
 - Make mandatory the security checks applicable to each profile.
 - Prove that an incorrect CA, TLS name or SSH key fails before running
   despliegues.

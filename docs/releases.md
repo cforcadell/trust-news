@@ -1,6 +1,21 @@
 # Releases
 
-Este documento recoge las versiones desplegadas y sus límites conocidos. Los trabajos posteriores están en [next_releases.md](next_releases.md).
+Este documento recoge las versiones desplegadas, sus límites conocidos y los siguientes hitos planificados. Una entrada planificada no acredita implementación ni despliegue. El roadmap completo está en [next_releases.md](next_releases.md).
+
+## v0.0.13b — Cierre de seguridad previo a la beta
+
+**Estado: planificada; auditoría y plan preparados el 03-11-2026. Remediaciones pendientes.** Se ejecuta después de v0.0.13 y antes de v0.0.14. [Enfoque, ejecución y planning](../version.md) · [Auditoría contrastada Codex](security/security_review_codex.md) · [Auditoría aportada](security/security_review_aportada.md) · [Revisión Copilot](security/security_review_copilot.md).
+
+- P0: autenticar host SSH y API K3s en todos los jobs privilegiados, adelantando ISSUE-003/004 desde el objetivo anterior v0.0.16; verificar exposición y contener cualquier secreto activo expuesto.
+- P1: motores reutilizables de descarga segura frente a SSRF/rebinding, identidad/autorización interna, segmentación declarativa, admisión y consumo idempotentes por organización y estado del cliente, Kafka autenticado y JWT/JWKS robustos.
+- Recuperación cifrada externa y restauración aislada antes de migrar MongoDB 4.4 a una versión soportada; pruebas negativas, regresión y aceptación por el borde sobre el candidato exacto.
+- Prioridad adicional del análisis propio: LIGHT puede admitir trabajo con cuotas cero y cliente suspendido; `publishWithAssertions` solicita escrituras de consumo `+1` y `-1` respecto al mismo valor inicial. La reproducción fue local y aislada, sin acreditar explotación productiva.
+- Se mantiene LIGHT/SMART, Blockchain OFF y mTLS general/administrativo. P2 conserva endurecimiento general de pods, suministro, cabeceras/TLS restante y el bloqueo de activación Geth sin controles.
+- Cierre: todas las puertas P0/P1 de `version.md` superadas con evidencias; P2 con responsable y revisión. Estimación P0/P1: 178–314 h técnicas. La seguridad no sustituye la aceptación funcional/factual pendiente de v0.0.13.
+
+## v0.0.14 — Beta cerrada por invitación
+
+**Estado: planificada y condicionada al cierre de v0.0.13b.** Retirada controlada del mTLS general conservando el gate de rutas y mTLS administrativo, prueba de revocación e invitaciones a organizaciones externas. [Alcance y aceptación](next_releases.md#v0014---beta-closed-by-invitation). Esta entrada no autoriza abrir el acceso ni indica que se hayan aplicado cambios al borde.
 
 ## v0.0.13 — Estabilización funcional
 

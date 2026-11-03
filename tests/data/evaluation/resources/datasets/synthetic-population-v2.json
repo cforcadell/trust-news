@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "id": "synthetic-population-v2",
+  "title": "Synthetic arithmetic and abstention fixture",
+  "description": "Invented municipality and reference document. Use GOLD_EVIDENCE or mocks, not live source discovery. This is a smoke fixture, not a factual benchmark.",
+  "language": "es",
+  "tags": ["lang:es", "topic:statistics"],
+  "news": "Un municipio ficticio tiene 120 residentes. Se afirma que supera los 100 residentes y también que tiene menos de 100. No se aporta una proyección para el próximo año.",
+  "assertions": [
+    {
+      "id": "POPULATION_ABOVE_100",
+      "text": "El municipio ficticio tiene más de 100 residentes.",
+      "expected_verdict": "TRUE",
+      "required_terms": ["municipio", "residentes", "100"],
+      "tags": ["expected:decisive"],
+      "reference_sources": [{"id": "fixture", "url": "https://example.org/synthetic-population", "title": "Synthetic population fixture", "relation": "SUPPORTS"}],
+      "reference_evidence": [{"text": "El municipio ficticio tiene exactamente 120 residentes.", "source": "fixture", "relation": "SUPPORTS"}]
+    },
+    {
+      "id": "POPULATION_BELOW_100",
+      "text": "El municipio ficticio tiene menos de 100 residentes.",
+      "expected_verdict": "FALSE",
+      "tags": ["expected:decisive"],
+      "reference_evidence": [{"text": "El municipio ficticio tiene exactamente 120 residentes.", "source": "https://example.org/synthetic-population", "relation": "CONTRADICTS"}]
+    },
+    {
+      "id": "POPULATION_NEXT_YEAR",
+      "text": "El municipio ficticio tendrá 200 residentes el próximo año.",
+      "expected_verdict": "UNKNOWN",
+      "tags": ["evidence:insufficient", "expected:unknown", "expected:abstention"],
+      "reference_evidence": []
+    }
+  ]
+}

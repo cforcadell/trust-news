@@ -5,8 +5,12 @@ NAMESPACE="infra"
 DEPLOYMENT="keycloak"
 REALM="TrustNews"
 CLIENT_ID="TrustNewsWeb"
-KEYCLOAK_URL="https://assermetry.com/auth"
-FRONTEND_URL="https://assermetry.com"
+BACKEND_CLIENT_ID="TrustNewsApi"
+GATEWAY_AUDIENCE="TrustNewsGateway"
+GATEWAY_SCOPE_NAME="trustnews-gateway-audience"
+KEYCLOAK_URL="${KEYCLOAK_URL:-https://assermetry.com/auth}"
+FRONTEND_URL="${FRONTEND_URL:-https://assermetry.com/gui}"
+WEB_ORIGIN="${WEB_ORIGIN:-https://assermetry.com}"
 
 for command_name in kubectl python3; do
   command -v "$command_name" >/dev/null || {
@@ -17,13 +21,17 @@ done
 
 observed_state="$({
   kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -- \
-    sh -s -- "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL" <<'KEYCLOAK_SCRIPT'
+    sh -s -- "$REALM" "$CLIENT_ID" "$BACKEND_CLIENT_ID" "$GATEWAY_AUDIENCE" "$GATEWAY_SCOPE_NAME" "$KEYCLOAK_URL" "$FRONTEND_URL" "$WEB_ORIGIN" <<'KEYCLOAK_SCRIPT'
 set -eu
 
 realm="$1"
 client_id="$2"
-keycloak_url="$3"
-frontend_url="$4"
+  backend_client_id="$3"
+  gateway_audience="$4"
+  gateway_scope_name="$5"
+  keycloak_url="$6"
+  frontend_url="$7"
+  web_origin="$8"
 kcadm=/opt/keycloak/bin/kcadm.sh
 config="/tmp/kcadm-reconcile-web-$$.config"
 trap 'rm -f "$config"' EXIT
@@ -57,6 +65,96 @@ if [ "$#" -ne 1 ]; then
 fi
 client_uuid="$1"
 
+backend_rows="$($kcadm get client-scopes \
+  --config "$config" \
+  -r "$realm" \
+  --fields id,name \
+  --format csv \
+  --noquotes | grep -E ",${gateway_scope_name}$" | cut -d, -f1 || true)"
+set -- $backend_rows
+if [ "$#" -gt 1 ]; then
+  echo "ERROR: expected at most one $gateway_scope_name client scope in realm $realm; found $#" >&2
+  exit 1
+fi
+if [ "$#" -eq 1 ]; then
+  "$kcadm" delete "client-scopes/$1" --config "$config" -r "$realm" >/dev/null
+fi
+
+scope_json=$(printf '{"name":"%s","protocol":"openid-connect"}' "$gateway_scope_name")
+"$kcadm" create client-scopes \
+  --config "$config" \
+  -r "$realm" \
+  -f - <<<"$scope_json" \
+  >/dev/null
+
+backend_rows="$($kcadm get client-scopes \
+  --config "$config" \
+  -r "$realm" \
+  --fields id,name \
+  --format csv \
+  --noquotes | grep -E ",${gateway_scope_name}$" | cut -d, -f1 || true)"
+set -- $backend_rows
+if [ "$#" -ne 1 ]; then
+  echo "ERROR: expected exactly one $gateway_scope_name client scope in realm $realm; found $#" >&2
+  exit 1
+fi
+gateway_scope_uuid="$1"
+
+mapper_json=$(printf '{"name":"%s","protocol":"openid-connect","protocolMapper":"oidc-audience-mapper","config":{"included.custom.audience":"%s","access.token.claim":"true","id.token.claim":"false"}}' \
+  "$gateway_scope_name" "$gateway_audience")
+"$kcadm" create "client-scopes/$gateway_scope_uuid/protocol-mappers/models" \
+  --config "$config" \
+  -r "$realm" \
+  -f - <<<"$mapper_json" \
+  >/dev/null
+
+scope_state="$($kcadm get "client-scopes/$gateway_scope_uuid" \
+  --config "$config" \
+  -r "$realm" \
+  --fields name,protocol \
+  --format json)"
+printf '%s\n' "$scope_state" | grep -F '"name"' | grep -F "\"$gateway_scope_name\"" >/dev/null || {
+  echo "ERROR: client scope $gateway_scope_name has unexpected metadata" >&2
+  exit 1
+}
+mapper_state="$($kcadm get "client-scopes/$gateway_scope_uuid/protocol-mappers/models" \
+  --config "$config" \
+  -r "$realm" \
+  --format json)"
+printf '%s\n' "$mapper_state" | grep -F '"included.custom.audience"' | grep -F "\"$gateway_audience\"" >/dev/null || {
+  echo "ERROR: client scope $gateway_scope_name does not emit audience $gateway_audience" >&2
+  exit 1
+}
+
+for presenting_client in "$client_id" "$backend_client_id"; do
+  presenting_rows="$($kcadm get clients \
+    --config "$config" \
+    -r "$realm" \
+    -q "clientId=$presenting_client" \
+    --fields id \
+    --format csv \
+    --noquotes)"
+  set -- $presenting_rows
+  if [ "$#" -ne 1 ]; then
+    echo "ERROR: expected exactly one $presenting_client client in realm $realm; found $#" >&2
+    exit 1
+  fi
+  presenting_uuid="$1"
+  "$kcadm" update "clients/$presenting_uuid/default-client-scopes/$gateway_scope_uuid" \
+    --config "$config" \
+    -r "$realm" \
+    >/dev/null 2>&1 || {
+      default_scope_state="$($kcadm get "clients/$presenting_uuid/default-client-scopes" \
+        --config "$config" \
+        -r "$realm" \
+        --format json)"
+      printf '%s\n' "$default_scope_state" | grep -F '"name" : "'"$gateway_scope_name"'"' >/dev/null || {
+        echo "ERROR: could not assign $gateway_scope_name to $presenting_client" >&2
+        exit 1
+      }
+    }
+done
+
 "$kcadm" update "realms/$realm" \
   --config "$config" \
   -s "attributes.frontendUrl=$keycloak_url" \
@@ -68,7 +166,7 @@ client_uuid="$1"
   -s "rootUrl=$frontend_url" \
   -s "baseUrl=$frontend_url/" \
   -s "redirectUris=[\"$frontend_url/*\"]" \
-  -s "webOrigins=[\"$frontend_url\"]" \
+  -s "webOrigins=[\"$web_origin\"]" \
   -s "attributes.\"post.logout.redirect.uris\"=\"$frontend_url/*\"" \
   >/dev/null
 
@@ -91,7 +189,7 @@ printf '%s\n' "$observed_state" | python3 -c '
 import json
 import sys
 
-realm, client_id, keycloak_url, frontend_url = sys.argv[1:]
+realm, client_id, keycloak_url, frontend_url, web_origin = sys.argv[1:]
 try:
     state = json.load(sys.stdin)
 except (json.JSONDecodeError, TypeError) as error:
@@ -120,12 +218,12 @@ expected = {
     "rootUrl": frontend_url,
     "baseUrl": f"{frontend_url}/",
     "redirectUris": [f"{frontend_url}/*"],
-    "webOrigins": [frontend_url],
+    "webOrigins": [web_origin],
     "postLogoutRedirectUris": f"{frontend_url}/*",
 }
 
 if observed != expected:
-    print("ERROR: Keycloak web alignment differs from the production contract", file=sys.stderr)
+    print("ERROR: Keycloak web alignment differs from the configured web contract", file=sys.stderr)
     print(f"expected={json.dumps(expected, sort_keys=True)}", file=sys.stderr)
     print(f"observed={json.dumps(observed, sort_keys=True)}", file=sys.stderr)
     raise SystemExit(1)
@@ -133,6 +231,6 @@ if observed != expected:
 print(
     "keycloak_web_alignment=PASS "
     f"realm={realm} client={client_id} "
-    f"keycloak_url={keycloak_url} frontend_url={frontend_url}"
+    f"keycloak_url={keycloak_url} frontend_url={frontend_url} web_origin={web_origin}"
 )
-' "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL"
+' "$REALM" "$CLIENT_ID" "$KEYCLOAK_URL" "$FRONTEND_URL" "$WEB_ORIGIN"

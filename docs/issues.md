@@ -1,252 +1,304 @@
-# Issues detectados
+# Incidencias y alcance de v0.0.13
 
-Este documento registra incidencias descubiertas durante el despliegue y las
-pruebas de cada version de Assermetry. No sustituye a un gestor de tareas: sirve
-como inventario tecnico versionado, sin secretos, direcciones de infraestructura
-ni datos personales.
+**Estado: v0.0.13 desplegada en Hetzner; validación funcional y aceptación pendientes.** «Incluido» significa que la implementación forma parte del código candidato; no significa que la incidencia esté resuelta en Hetzner ni que la calidad factual esté aceptada. Los resultados recientes son [SMART, 31-10](../tests/data/evaluation/artifacts/e2e-20261031-181209/report.md) y [DIRECT, 01-11](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md). Ambos manifiestos indican `da356fdf` y árbol sucio. [detalle de v0.0.13](releases/v0.0.13.md) define el alcance y sus anexos. La propuesta independiente de generación en dos etapas sigue sin ejecutar.
 
-Estados utilizados:
+## Management
 
-- **Abierto**: reproducido y pendiente de correccion.
-- **Mitigado**: existe una recuperacion operativa, pero la causa permanece.
-- **Resuelto**: la correccion esta implementada y validada.
-- **Descartado**: no requiere cambio, con la justificacion documentada.
+States: **Open → In progress → Pending validation → Solved**. **Mitigated** retains the cause; a failed validation reopens the incidence. **Discarded** requires justification. Each change records commit, case, environment and evidence; no credentials or personal data are saved.
 
----
+Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safety, flow or incorrect essential result; **P2** Degradation with alternative; **P3** Cosmetics. Work order and blocking are decided separately. 005–008 move from historical P0 to P1 by functional impact: continuing blocking the cloud of 13, except for validating 008. Its urgency is not reduced.
 
-## v0.0.12 - Exposicion controlada de Assermetry en Internet
+| ID | Gravedad | Incluido en v0.0.13 | Estado al entrar en Deploying |
+| --- | --- | --- | --- |
+| 001 | P1 | Sí: refresco seguro y fusión de eventos de validadores | Pendiente prueba concurrente y 3×3 en Kind/Hetzner |
+| 002 | — | Resuelto históricamente | Solved desde 2026-08-19 |
+| 003–004 | P1 | No: endurecimiento de CA K3s y SSH en CI | Abiertas; v0.0.16 propuesto, decisión formal de riesgo pendiente |
+| 005–006 | P1 | Sí: fechas UTC/ISO y presentación terminal | Pendiente matriz de navegador LIGHT/BLOCKCHAIN |
+| 007–008 | P1 | Sí: consensus-v2 y exclusión de errores del voto | Pendiente matriz de empate, timeout y reintento en destino |
+| 009–010 | P1 | No: revisión humana obligatoria e informe reutilizable | Abiertas para v0.0.14 |
+| 011–012 | P1 | Sí: aislamiento por propietario y validación JWT | Pendiente evidencia con dos identidades y tokens negativos |
+| 013–014 | P1 | Sí: citas canónicas y resumen de orden parcial | Pendiente prueba completa de ruta y navegador en destino |
+| 015–016 | P1 | Sí: Source Router y regresión local estricta | Pendiente proveedores externos, despliegue y navegador |
+| 017 | P1 | Sí: runner, corpus, visor y trazas | Abierta: SMART 19/22 y DIRECT 12/22 e2e estrictos; gold sin homologar |
+| 018–019 | P1 | Sí: enlaces saneados y contadores/polling corregidos localmente | Pendiente enlace en navegador y matriz de llegadas/duplicados/errores |
+| 020 | P2 | Parcial: detección estricta de overflow | Abierta: faltan corrección y prueba móvil/ES/EN |
+| 021 | P1 | Parcial: origen, metadatos, filtro oficial y motor de adquisición | Abierta: primarias inaccesibles, copias y política documental |
+| 022 | P2 | Sí: taxonomía y route-v2 | Pendiente realineación y métricas de caché en Hetzner |
+| 023 | P1 | Sí: registro BLOCKCHAIN v2 por CID | Pendiente prueba en destino |
+| 024 | P1 | No: retirada de credencial local | Abierta; remediación previa a ejecución compartida o destino |
+| 025 | P1 | Parcial: trazas y manejo de timeout | Abierta: falta fallo inducido y repetición estable |
+| 026 | P1 | Sí: motor DIRECT medible; corrección de recuperación no incluida | Abierta: 88/139 descargas útiles y primarias inaccesibles |
+| 027 | P1 | Parcial: polling y diagnóstico | Abierta: una orden DIRECT quedó DOCUMENT_CREATED tras timeout de sondeo |
 
-### ISSUE-001 - Carrera de inicializacion en la cache de validadores LIGHT
+**La inclusión en la release no cierra una incidencia.** Las P1 abiertas y el aplazamiento de 003/004 condicionan la aceptación. La revisión y el modo de extracción deben quedar identificados y verificados en los pods. Una campaña corta después de cada corrección y el lote completo posterior deben conservar manifiesto, órdenes y trazas. La comparación SMART/DIRECT no aísla la adquisición: la temperatura y la versión de configuración observada de generación también cambiaron.
 
-| Campo | Valor |
-| --- | --- |
-| Fecha de deteccion | 2026-08-13 |
-| Entorno | Hetzner, perfil `apis-frontend-prod` |
-| Fase | 5.2 - Metodos, cuerpos y rechazos |
-| Estado | **Mitigado; correccion pendiente** |
-| Versión objetivo | `v0.0.13` |
-| Componentes | `news-handler`, `validate-asertions`, Kafka, blockchain/IPFS |
+## Incidencias previas, revisadas
 
-#### Comportamiento detectado
+### ISSUE-001 - Initialization race in the LIGHT validator cache
 
-Tras desplegar simultaneamente News Handler y los tres workers, una orden LIGHT
-con tres aserciones genero solo tres eventos `light_validation_request`: cada
-asercion se asigno al mismo validador. El resultado esperado eran nueve eventos,
-uno por cada pareja asercion/validador.
-
-Los tres deployments estaban preparados, sus Services resolvian correctamente y
-los tres endpoints `/health` devolvian `200`, con tipo automatico, `ai_ready=true`
-y categorias `[1,2,3,4,5,6,7,8,9,10]`. Los workers tambien publicaron sus eventos
-de configuracion durante el arranque.
-
-#### Diagnostico
-
-News Handler selecciona los validadores antes de publicar en Kafka. Usa una
-cache en memoria cargada desde blockchain/IPFS y actualizada mediante eventos de
-configuracion. Durante el reinicio conjunto, la seleccion uso una vista
-transitoria en la que solo un validador resultaba elegible.
-
-La presencia de tres pods no garantiza por si sola tres validaciones: News
-Handler filtra previamente por estado, tipo automatico, categoria, `service_url`
-y healthcheck. Kafka solo recibe los destinos que sobreviven a esa seleccion.
-
-El mecanismo exacto de intercalado entre la carga inicial y los eventos de
-configuracion debe cubrirse con pruebas de concurrencia; el refresco posterior
-demostro que la fuente autoritativa contenia correctamente los tres validadores.
-
-#### Mitigacion aplicada
-
-Se forzo un refresco de la cache de News Handler desde blockchain/IPFS mediante
-el endpoint interno de validadores con `recover_ipfs=true`. No se modificaron
-blockchain, IPFS ni MongoDB.
-
-La siguiente orden LIGHT genero correctamente:
-
-- tres aserciones;
-- tres validadores por asercion;
-- nueve eventos `light_validation_request`;
-- nueve respuestas de validacion.
-
-La mitigacion recupera el estado actual, pero la incidencia puede repetirse en
-otro despliegue simultaneo.
-
-#### Propuesta de mejora
-
-Implementar una cache con frescura acotada dentro de News Handler:
-
-1. Registrar `validators_cache_refreshed_at` con reloj monotonico.
-2. Antes de despachar una orden LIGHT, refrescar una sola vez desde
-   blockchain/IPFS si la cache supera un TTL inicial de 30 segundos.
-3. Proteger el refresco con `asyncio.Lock` para que ordenes concurrentes
-   compartan una unica consulta.
-4. Construir la nueva cache fuera de la referencia activa y sustituirla de forma
-   atomica solo tras una carga completa valida.
-5. Si la carga falla o devuelve un vacio inesperado, conservar la ultima cache
-   valida y emitir un warning.
-6. Mantener los eventos Kafka como via de actualizacion inmediata y añadir un
-   refresco periodico de respaldo, inicialmente cada 60 segundos.
-7. Registrar por despacho los contadores `cached`, `eligible`, `healthy` y
-   `selected`, junto con la razon de descarte de cada candidato.
-
-No se propone refrescar por asercion: una sola instantanea coherente debe usarse
-para toda la orden.
-
-#### Pruebas de aceptacion propuestas
-
-- Una cache reciente no provoca consultas adicionales.
-- Una cache caducada se refresca una vez por orden.
-- Varias ordenes concurrentes producen un unico refresco.
-- Un fallo de blockchain/IPFS conserva la ultima cache valida.
-- Una carga vacia inesperada no borra una cache valida.
-- Los eventos de configuracion recibidos durante un refresco no se pierden ni
-  quedan sobrescritos por una instantanea anterior.
-- Un arranque donde los validadores aparecen de forma escalonada converge a los
-  tres sin intervencion manual.
-- Tres aserciones y tres validadores elegibles generan exactamente nueve
-  solicitudes y nueve respuestas LIGHT.
-
-#### Criterio de resolucion
-
-Marcar como **Resuelto** cuando la mejora este implementada, las pruebas de
-concurrencia pasen y un despliegue conjunto en Kind y Hetzner seleccione los
-tres validadores sin refresco manual.
-
+- **Historical finding:** a startup selected only one of three validators; a manual refresh later recovered nine validations for three assertions. `load_validators_cache_from_chain` could replace a valid cache with an empty response and a late refresh could overwrite a concurrent validator event.
+- **Locally implemented (2026-10-06):** refresh now fetches before mutation, rejects empty or unusable snapshots, preserves the last valid cache after HTTP/schema failures, and commits a non-empty snapshot atomically. Event updates use the same lock and copy-on-write cache, initialize the cache even while news-chain is degraded, and remain authoritative until a newer chain timestamp catches up. Event-only validators missing from a stale snapshot are retained; internal cache provenance is not exposed by the UI endpoint.
+- **Local evidence:** six focused tests cover empty, failed and malformed refreshes, atomic replacement, an event arriving during an in-flight stale refresh, an event absent from the returned snapshot, degraded initialization and preservation of the three LIGHT validators. The related orchestration/scoring selection passes 76 tests; the clean global regression passes 284 API and 42 frontend tests.
+- **Pending closure:** deploy the same revision and prove a concurrent restart plus config events and a 3 assertions × 3 validators LIGHT run without manual refresh in Kind and Hetzner.
 
 ### ISSUE-002 - Secret OIDC no vacio como valor por defecto en tests
 
-| Campo | Valor |
-| --- | --- |
-| Fecha de deteccion | 2026-08-19 |
-| Entorno | Repositorio y credenciales de tests; produccion descartada |
-| Fase | 6 - Despliegue definitivo todavia cerrado (cerrada) |
-| Estado | **Resuelto** |
-| Componentes | `api/tests`, Keycloak, clientes B2B y CI/CD |
+- **Resolved:** deleted default value; operator confirmed that it was not
+productive secrecy. No productive rotation is required for this finding.
+- **Follow-up:** check by secure means if the historical test card
+remains active; the fixture must still fail soon if configuration is missing (016).
 
-#### Comportamiento detectado
+### ISSUE-003 - IC does not authenticate the K3s API with its CA
 
-La fixture de autenticacion de las pruebas define un valor por defecto no vacio
-para `AUTH_CLIENT_SECRET`. El valor no se reproduce en este documento. El operador comparo el valor por una via que no lo expuso en logs ni
-documentacion y confirmo que no coincide con el secret productivo de
-`TrustNewsApi`. No se requiere rotacion productiva por este hallazgo. Falta
-determinar si corresponde a una credencial de tests todavia activa. La copia de
-trabajo sustituye el valor por defecto no vacio por uno vacio, sin revelar el
-valor anterior. Esta correccion resuelve la incidencia y no bloquea la Fase 7.
+- **Confirmado:** `.gitlab-ci.yml` conserva `--insecure-skip-tls-verify=true`.
+- **Close:** verify the K3s API CA and TLS name and reject a wrong CA or server name before deployment. v0.0.16 is the proposed implementation target; v0.0.13 still needs an explicit owner, mitigation, private-demo scope and risk decision before deferral.
 
-La prueba operativa del 2026-08-19 obtuvo un token `client_credentials` mediante
-un secret proporcionado de forma interactiva. No se registra si era el mismo
-valor y no debe compararse mediante logs, comandos versionados o documentacion.
+### ISSUE-004 - CI does not set the server SSH key
 
-#### Seguimiento recomendado no bloqueante
+- ** Confirmed:** `.gitlab-ci.yml` feeds `known_hosts` from `ssh-keyscan`.
+- **Close:** pin the independently verified host key, reject a missing or changed key and document rotation. v0.0.16 is the proposed implementation target; record the v0.0.13 risk decision and demo restriction before deferral.
 
-1. En una mejora posterior, hacer que la fixture exija `AUTH_CLIENT_SECRET`
-   explicitamente y falle antes de realizar una peticion cuando la variable no
-   exista.
-2. Revisar de forma autorizada el historial y el entorno de tests para
-   determinar a que credencial pertenece, sin copiar el valor a incidencias ni
-   logs.
-3. Si la credencial de tests sigue activa, revocarla o rotarla y actualizar su
-   gestor de secretos. No rotar `TrustNewsApi` de produccion por este hallazgo.
-4. Ejecutar una busqueda de secretos y conservar solo evidencias anonimizadas.
+### ISSUE-005 - Dates, time zones and time states inconsistent with the results GUI
 
-#### Resolucion
+- **Locally implemented (2026-10-06):** new orders and events use zoned ISO 8601 in UTC at the API boundary; the GUI has a single strict parser and rejects ambiguous dates with slashes. Historical orders, events and validations were removed from the local `kind-trust-news` MongoDB by explicit product decision, so legacy date parsing is no longer supported.
+- **Pending closure:** deploy the same revision and verify local ES/EN presentation, offsets and a daylight-saving transition in a real LIGHT and BLOCKCHAIN order. Decision messaging remains coordinated with 006.
 
-**Resuelto el 2026-08-19.** El valor por defecto no vacio se elimino y el
-operador confirmo que no coincide con el secret productivo. No se requiere
-rotacion de `TrustNewsApi`. La comprobacion y eventual revocacion de una
-credencial historica de tests se conserva como recomendacion independiente.
+### ISSUE-006 - provisional/final status mixed in process screen
 
-### ISSUE-003 - CI no autentica el API de K3s con su CA
+- **Locally implemented (2026-10-06):** `renderOrderProcess` now derives one presentation from terminality, valid responses, errors, sufficiency and consensus. Terminal orders render a final result, including separate messages for errors, insufficient evidence, no consensus and no valid responses; they are never labelled provisional.
+- **Pending closure:** browser validation of the terminal-state matrix in deployed LIGHT and BLOCKCHAIN flows.
 
-| Campo | Valor |
-| --- | --- |
-| Fecha de deteccion | 2026-08-21 |
-| Entorno | GitLab CI, acceso al API de K3s mediante tunel SSH |
-| Fase | Revision independiente de confianza del pipeline |
-| Estado | **Abierto** |
-| Prioridad | **P1** |
-| Version objetivo | `v0.0.16` |
-| Componentes | `.gitlab-ci.yml`, `KUBECONFIG_DATA`, `kubectl`, K3s |
+### ISSUE-007 - Global verification and consensus calculation do not explain draws or decisions
 
-#### Comportamiento detectado
+- ** Status:** locally resolved and validated (2026-09-07).
+display and check with real LIGHT/BLOCKCHAIN paths in browser.
+- **Cause:** `calculate_assertion_result` normalized the accumulated by number of
+answers and selected with `max` between TRUE/FALSE/UNKNOWN. The tie was resolved in order of keys, UNKNOWN competed as factual statement and the GUI reused the scores as percentages without explaining the decision.
+- ** Implemented policy:** `consensus-v2`, centralized in
+`api/common/utils/scoring.py`, with minimal decisive coverage `0.5` (required to be strictly superior) and `tie_epsilon=1e-9`. Distinguish `CONSENSUS`, `WEIGHTED_MAJORITY`, `NO_CONSENSUS`, `INSUFFICIENT_EVIDENCE` and `NO_VALID_RESPONSES`; UNKNOWN is abstaining and ERROR is excluded.
+- **Contract:** adds `verdict`, `decision_status`, `reason_code`, gross weights,
+decisive weight quota, coverage, abstention, margin, counting and policy version. `winner` and `scores` are preserved as legacy aliases: `winner` is null and void without factual decision and `scores` now represents gross weights, not probabilities or the previous average.
+- **Reproducibility:** the new LIGHT and BLOCKCHAIN responses keep type,
+Type weight, reputation, effective weight and `validator-weights-v1`. Previous records maintain the fallback to current cache/configuration and are identified by `legacy_dynamic_weight=true`; do not rewrite Blockchain or MongoDB.
+- **GUI:** presents motive, decisive votes, abstentions, errors and weight
+TRUE/FALSE/UNKNOWN in ES/EN. Percents are labeled as weight quota decisivo/completado. The documentary and state is conservative (`SUPPORTED`, `CONTRADICTED`, `MIXED`, `PARTIALLY_VERIFIED`, `INCONCLUSIVE`); FALSE+UNKNOWN is partial and not "Demented".
+- **Exams:** 38 Python focused tests and Node consensus suites,
+Status and evidence pass. Python regression: **181 PASS, 2 FAIL**; the known bugs of 015 and 016 remain exactly. JS syntax correct.
+- **Pending for ISSUE-017:** calibration with evaluation corpus,
+`min_winner_share` or other statistical thresholds, and `HUMAN=0.1` weight review. That value does not express automatic epistemological authority.
 
-La plantilla `.kube_access` restaura `KUBECONFIG_DATA`, cambia el endpoint del
-cluster `default` a `https://127.0.0.1:6443` y activa
-`--insecure-skip-tls-verify=true`. Esta opcion evita que `kubectl` autentique el
-certificado del API de K3s, incluso si el kubeconfig contiene la CA correcta.
-El tunel cifra y limita el recorrido de red, pero no sustituye la validacion TLS
-del servidor.
+### ISSUE-008 - Timeout Validators treated as a valid result
 
-#### Riesgo
+- **Delivered advance:**backend, models and GUI distinguish `ERROR`; tests
+The original diagnosis no longer describes the entire current code.
+- **Pending:** induce real timeout in LIGHT/BLOCKCHAIN and validate message,
+count, final status and absence of voto/evidencia; try individual retry without duplicates. The final presentation is coordinated with 006 and 019.
 
-El pipeline puede aceptar un API que no presente un certificado firmado por la
-CA esperada. El impacto aumenta al combinarse con `ISSUE-004`: actualmente la
-identidad del servidor tampoco queda fijada en la capa SSH. Una suplantacion de
-ambas capas podria proporcionar respuestas falsas al pipeline y, segun el tipo
-de credencial del kubeconfig, exponer credenciales reutilizables.
+### ISSUE-009 - Extraction flow and unrevisable statement classification
 
-#### Correccion prevista
+- **Advance:** `renderEditableAssertionsTable` allows editing texto/categoria,
+add and delete. It remains available to publish directly; the human revision path is not guaranteed or covered by regression.
+- **Close at 14:** human path text → extraction → revision → confirmation
+→ validation; explicit automatic API. Test units, dates, denial, composite statements and context; do not confuse category with truthfulness.
 
-1. Exigir que el kubeconfig productivo incluya la CA real de K3s mediante
-   `certificate-authority-data` o una CA proporcionada como variable protegida.
-2. Eliminar `--insecure-skip-tls-verify=true` y cualquier valor equivalente del
-   kubeconfig efectivo.
-3. Mantener el endpoint del tunel y, solo si el certificado lo requiere, fijar
-   un nombre TLS que forme parte de sus SAN.
-4. Verificar antes del despliegue que existen CA y validacion de nombre, sin
-   imprimir certificados, credenciales ni datos de infraestructura.
-5. Añadir pruebas negativas con CA ausente o incorrecta y nombre TLS no valido.
+### ISSUE-010 - Result does not present main evidence or reusable report
 
-#### Criterio de resolucion
+- **Advance:**There are Evidences, Fragments and Link-by-Validator tabs.
+The main summary by statement and the reusable report are missing.
+- **Close on 14:** original text, verdict, source, date, fragment and
+Visible and exportable limitations. Differentiate Blockchain traceability from factual evidence; use "Check Content" consistently.
 
-Marcar como **Resuelto** cuando todos los jobs que usan `.kube_access`
-autentiquen K3s con la CA real, no permitan omitir TLS y fallen antes de
-desplegar ante una CA o un nombre TLS incorrectos. La configuracion valida debe
-seguir permitiendo las comprobaciones y despliegues de todos los perfiles.
+## Hallazgos nuevos — 2026-09-05
 
+### ISSUE-011 - Consultation of validations without effective isolation
 
-### ISSUE-004 - CI no fija la clave SSH del servidor
+- ** Status:** resolved and deployed in Hetzner (2026-09-06).
 
-| Campo | Valor |
-| --- | --- |
-| Fecha de deteccion | 2026-08-21 |
-| Entorno | GitLab CI, tunel SSH hacia Hetzner por `2222/tcp` |
-| Fase | Revision independiente de confianza del pipeline |
-| Estado | **Abierto** |
-| Prioridad | **P1** |
-| Version objetivo | `v0.0.16` |
-| Componentes | `.gitlab-ci.yml`, GitLab CI/CD, OpenSSH, tunel de K3s |
+- **Cause:** Gateway omitted identity in `/validators/cache/{hash}/validations`;
+News Handler assumed `admin=True` and could return orders from others.
+- **Implementado:** Gateway deriva el propietario del token y codifica los
+filters; News Handler requires identity and filters validations, texts, links and statistics. The `admin` parameter does not expand access, nor does `trust-admin`.
+- **Local validation:**15 HTTP Gateway tests → News Handler with two
+owners and simulated collections; include subpoenas by parameters, missing identity, empty scope and orphan orders.
+- **Pending evidence:** repeat the deployed Gateway → News Handler flow with two real identities and preserve results for indirect links and exports. This internal endpoint relies on identity transmitted by Gateway and must remain internal. Organizations are single-user in the current model; do not infer isolation of routes not exercised.
 
-#### Comportamiento detectado
+### ISSUE-012 - JWT without audience validation or client presenter
 
-La plantilla `.kube_access` ejecuta `ssh-keyscan` contra la direccion recibida
-por el job y guarda inmediatamente esa respuesta en `known_hosts`. La conexion
-posterior comprueba que la clave coincide con la observada en ese mismo
-pipeline, pero no con una clave aprobada previamente por un canal independiente.
-La opcion `-H` oculta el host almacenado; no autentica la clave.
+- ** Status:** resolved and deployed in Hetzner (2026-09-06).
 
-#### Riesgo
+- **Original cause:** `get_current_user` disabled `aud` validation and
+did not require a list of `azp/client_id`. Source: `api/gateway/main.py`.
+- **Implemented:** mandatory `TrustNewsGateway` audience and client list
+Local verification: 6 helpers tests and 11 JWT probes signed correctly; the latter are not yet incorporated into the suite.
+- **Target validation:** confirm Keycloak configuration and negative tokens for both client presenters in Hetzner. The reconciliation script also needs a portable `sh` check because local `sh -n` rejects its `<<<` syntax.
+- **Cierre:** audiencia `TrustNewsGateway`, presentadores permitidos
+  (`TrustNewsWeb` y `TrustNewsApi`) y pruebas negativas de token válido para
+  otra API/cliente. Las organizaciones son uniusuarias; no se introduce un
+  modelo adicional de roles organizativos.
 
-Un intermediario presente durante `ssh-keyscan` y la conexion puede presentar
-su propia clave y recibir el tunel. La clave privada de despliegue autentica el
-cliente ante el servidor, pero no demuestra al cliente que el servidor sea el
-Hetzner esperado. La ausencia simultanea de validacion TLS descrita en
-`ISSUE-003` elimina la segunda barrera de autenticacion del API.
+### ISSUE-013 - Verdicts without proven evidence and automatic attribution
 
-#### Correccion prevista
+- **Locally valid (2026-09-06):**RAG requires URL, fragment and membership
+A documentary verdict TRUE/FALSE without support is degraded to UNKNOWN; invented, empty or foreign to the corpus is rejected. Retrieved evidence, `evidence_used` and `sources_declared` are distinguished.
+- **Types:** memory and delegated search can emit a signal without sources,
+identified respectively as `MODEL_KNOWLEDGE` and `PROVIDER_SEARCH_UNVERIFIED`; not presented as documentary evidence. RAG retains only proven evidence.
+- **Evidence:** Grounding tests, contracts and UI; LIGHT order
+`943346a6-1071-45f2-b97c-f10d746c150a` executed with three RAG validators and persistence of verificadas/rechazadas evidence in MongoDB.
+- **Reinforcement implemented (2026-09-19, `d7b4308`):** the model reference
+must include a unique, citationable, and server-created `context_id`. URL, title, text, hash and public chunk are reconstructed exclusively from that canonical context. Recovered ambiguos/no identifiers, non-citationable text and sources that are the original document are rejected; the supplier snippets are left as a diagnosis, never as an citation.
+- **New local validation:**27 grounding and Evidence Search tests pass;
+cover invented, ambiguous, non-quota context, injected URL/texto and original source. The cache incorporates `citation_contract=retrieved-context-id-v1` to prevent the reuse of incompatible responses.
+- **Formal closure:**E of the three types and routes
+Kafka/IPFS/MongoDB/navegador, especially BLOCKCHAIN and the target environment. The semantic implication check between affirmation and quote is maintained as scope of ISSUE-017.
+- **Limit discovered:** check that an appointment belongs to the corpus does not prove
+Independency and quality of the source. Self-confirmation and documentary eligibility are separated in ISSUE-021 so as not to reopen the scope already implemented.
 
-1. Obtener y verificar fuera de banda la clave publica SSH del servidor, sin
-   registrar en Git la direccion ni la huella concretas.
-2. Guardar la entrada exacta de `known_hosts` en una variable protegida de
-   GitLab y escribirla con permisos restrictivos durante el job.
-3. Eliminar `ssh-keyscan` del pipeline.
-4. Abrir el tunel con `StrictHostKeyChecking=yes`, `BatchMode=yes` y un
-   `UserKnownHostsFile` explicito.
-5. Documentar la rotacion autorizada de la clave y probar claves ausentes,
-   modificadas y desconocidas sin imprimir sus valores.
+### ISSUE-014 - Summary breaks with missing weighted results
 
-#### Criterio de resolucion
+- **Locally solved (2026-10-06):** the count/function collision was removed and the fallback is covered for current partial orders without weighted results, including completed and error responses. Legacy order compatibility was removed from scope after the local historical dataset was deleted.
+- **Evidence:** clean local regression passes 284 API tests and 42 frontend tests; deployed browser validation remains part of 005/006.
 
-Marcar como **Resuelto** cuando el tunel solo acepte la clave fijada, una clave
-incorrecta falle antes de cualquier acceso a Kubernetes y el pipeline no use
-confianza obtenida dinamicamente. La clave valida debe seguir permitiendo los
-preflight y despliegues de todos los perfiles.
+### ISSUE-015 - Local selection of sources without accredited regional relevance
+
+- ** Status:** locally resolved and validated; MongoDB was re-established in
+`kind-trust-news`. Pending deployment and execution with external suppliers.
+- **Deleted cause:** `LOCAL` used a massive static allowlist without
+Proven regional relevance. Evidence Search mixed domain selection and recovery, and could manufacture placeholders without supplier.
+- **Implyd:** internal microservice `source-router`; current discovery by
+`common/search`, a batch classification by `common/llm`, rejection of invented domains, strict geographical eligibility, deterministic ranking and `source_routes_v2` FRESH/STALE/MISSING. memory Validators orchestrate `source-router → evidence-search(preferred_sources)` only for RAG+LOCAL.
+- **Deleted:**Static perfiles/seeds/generadores and collections
+`evidence_domain_profiles`/`evidence_normalization_configs`. Bootstrap explicitly removes them. External RAG strategies are maintained as `EXT_OFFICIAL_FIRST` and `EXT_ONLY_OFFICIAL`; `NONE` is removed.
+- **Validation:** unit tests cover regional, national and EU routes,
+standard signature, FRESH cache, stale failback, rejection of invented domains and `router -> evidence-search` order. The script was applied and double-checked on local MongoDB. The E2E LIGHT of 2026-09-19 resolved four `FRESH` routes and restricted search to their domains before calling Evidence Search; all 12 validators ended and the order was left `VALIDATED`. It was not repeated in BLOCKCHAIN and the target environment.
+- **Follow-up:** Italian route classified
+`gazzettaufficiale.biz` as `OFFICIAL_GAZETTE/NATIONAL_PRIMARY` at `gazzettaufficiale.it` level. You must correct the profile or enter a denial of mirror before considering stable documentary eligibility.
+- **Limit remaining:** PDF extraction and fine documentary classification is
+they are dealt with in ISSUE-021; the stability of the signature is resolved in ISSUE-022.
+
+### ISSUE-016 - Regression with false positives and incomplete diagnosis
+
+- **Historical diagnosis:** the mobile E2E captured document and viewport widths without failing on overflow; early exits could omit HTTP/console failures; the API test requirements did not collect the whole local suite and lacked `hexbytes`, PyJWT and document-extraction dependencies.
+- **Locally implemented (2026-10-06):** `tests/run-local-regression.sh` creates a disposable environment from pinned dependencies and runs the local API and frontend suites. The E2E runner now fails on horizontal overflow at 390 px for the result and home views, and finalizes HTTP/loading/console diagnostics on both success and early failure. Configuration still fails before creating an order when credentials are absent.
+- **Local evidence:** dependency installation and `pip check` succeed from a clean environment; 284 API tests and 42 frontend tests passed on 2026-10-06 and were reproduced on 2026-10-15 against `b9003cf` plus the current working tree. **Pending closure:** run the strict browser regression against the same deployed revision in LIGHT and BLOCKCHAIN and retain identity/revision metadata and artifacts.
+
+### ISSUE-017 - Representative evaluation of factual quality and adverse content
+
+- **Estado de release (2026-11-01):** el motor de evaluación, las campañas publicadas, el visor, el análisis offline y las trazas están incluidos en v0.0.13. La campaña SMART de 31-10 registró 19/22 unidades e2e estrictas y 21/22 decisiones correctas, con 22 órdenes VALIDATED. La campaña DIRECT de 01-11 registró 12/22 y 16/22 respectivamente, más una decisión no evaluable; hubo 19 órdenes VALIDATED, dos VALIDATED_WITH_ERRORS y una DOCUMENT_CREATED. El corpus tiene los mismos once hashes, pero la temperatura observada de generación cambió de 0,0 a 0,1 y config_version de 30 a 0. No atribuir causalidad exclusiva al modo de adquisición. Persisten categorías divergentes y decisiones UNKNOWN o contrarias al gold. Gold sin aprobación independiente: **ISSUE-017 permanece abierta**.
+- **Current state:** benchmark infrastructure now exists: the historical OpenRouter CLI records profiles, repeated LIGHT orders, SQLite history, cost/latency estimates and comparisons; shared evaluation runners provide full, gold-domain, gold-evidence and replay modes, versioned artifacts, campaign summaries, a local viewer and offline `--analyze` per validation. See [evaluation.md](tests/evaluation.md) and [llm-benchmark.md](tests/llm-benchmark.md). This is implementation progress, not factual-quality certification.
+- **Corpus y campaña (2026-10-17):** el corpus activo tiene once casos atómicos, seis `TRUE` y cinco `FALSE`, tras retirar el falso de población por ambigüedad provisional/definitiva. Las seis fuentes siguen `CANDIDATE`. La campaña publicada de una repetición por caso generó once órdenes LIGHT y 33 registros de validador; diez órdenes quedaron `VALIDATED` y una `VALIDATED_WITH_ERRORS`. El informe cuenta **9/11 unidades afirmación × repetición e2e correctas y 2/11 incorrectas**, no 9/33. Dos validadores dieron un veredicto contrario al gold, aunque el consenso de sus órdenes fue correcto. Un caso tiene desajuste de categoría de extracción y otro perdió dos validaciones por timeout. El resultado es diagnóstico, no acreditación factual.
+- **Comparación limitada:** la campaña del 2026-10-16 18:08 UTC registró 12 órdenes y 39 registros de validador, con `CONSENSUS_ERROR`, `ROUTER_NO_SOURCE` y dos ejecuciones sin contexto citable; la del 17 no muestra esas incidencias. El corpus, la revisión y el árbol sucio cambiaron, de modo que no hay comparación causal ni tasa de mejora atribuible solo a la modificación de Source Router de `c84bb6e`.
+- **Coverage gap:** the candidate set has no independent human approval, `UNKNOWN`/abstention cases, adversarial content, PDFs or representative scale. Acceptance thresholds and the simple LLM-plus-web-search comparison are not fixed. Historical pre-gold resources are retained only for deliberate regression and cannot be merged into current acceptance metrics.
+- **Observed evaluation:** the 2026-09-29 three-repetition official-statistics run saved 27 validator records and five upstream HTTP 429 failures. The recovered pipeline report marks 2/9 assertion/repetition units end-to-end correct under its strict technical/error criteria. It cannot establish product quality or routing correctness: the case has no reviewed acceptable domains or reference sources. The artifacts are local and Git-ignored until retained durably.
+- **Cierre:** homologar y congelar el gold; fijar umbrales antes de una campaña de aceptación; repetir publish sobre el mismo hash y revisión con cero errores técnicos, extracción compatible y consenso correcto; analizar por separado los dos veredictos equivocados mediante evidencia congelada y revisión semántica humana. Añadir un lote de abstención `UNKNOWN` y ampliar cobertura sin mezclarlo con la métrica actual. Conservar manifiesto, órdenes, trazas, configuración y comparación simple con LLM+búsqueda web. La campaña es la vía principal de cierre, y `gold-evidence`/`gold-domains` son contrafactuales puntuales para aislar causas.
+
+### ISSUE-018 - Evidence links without validating the schema
+
+- ** Status:** resolved and deployed in Hetzner (2026-09-06).
+
+- **Reproduced in isolated rendering:** `renderEvidenceLinks` conserves
+`href="javascript:void(0)"`; `safeText` escapes HTML, but does not validate protocols. The model accepts fonts as free dictionaries. A payload has not been executed in the browser nor tested exploitation with the deployed CSP.
+- **Close:** accept HTTP(S) only on server and client; inert text for URLs
+invalid; tests with dangerous schemes and malformed links.
+- **Impplemented (2026-09-06):** sanitation in evidence models and
+Link validation in rendering. Malformed URLs do not invalidate the entire object; they are preserved in `url_text`/`source_url_text`, only to display escaped text. Absent or invalid hosts, invalid ports, dangerous schemas and ambiguous characters are rejected.
+- **Local validation:** 38 URL/model Python tests and 15 rendering tests passed in the recorded run. The fix is recorded as deployed in Hetzner; preserve a browser check of invalid and valid links before marking target validation complete.
+
+### ISSUE-019 - Total of contradictory validations during the process
+
+- **Noted in Blockchain:** two statements, six pending and card
+‘0/4’. `buildVerificationSummary` prioritizes partial requests over other counts. It can produce premature percentages or messages.
+- **Close:** an authoritative source for esperadas/recibidas/error/pendientes;
+always total=received+pending, not exceeding 100 %. Prove partial arrival, duplicates and retrying in both modes.
+- **Locally implemented (2026-09-19, `d7b4308`):** the summary prioritizes the
+Complete validation requests, calculates pending as the maximum between the persistent field and the difference against the completed ones, and the polling tab retains the Process until you have a clean terminal render. The three estado/polling Node tests pass. The closing matrix is missing: partial arrival, duplicates, retrying, induced error and both modes.
+
+### ISSUE-020 - Mobile overflow and inconsistent interface language
+
+- **Reproduced:** 847 px document with 390 px viewport in LIGHT and
+BLOCKCHAIN; navigation occupies much of the screen and the warning comes out of the visible width. In Spanish, "valid", "errors" and "Publish News" appear.
+- **Close:** without horizontal page scroll at 390 px, compact navigation,
+Content warnings and accessible result; ES/EN complete and consistent actions. Validate keyboard and focus, not just viewport size.
+
+## Hallazgos nuevos — 2026-09-11
+
+### ISSUE-021 - A recovered source can self-confirm the news and circumvent documentary policy
+
+- **Estado de release (2026-11-01):** el motor DIRECT/PROVIDER/SMART, la procedencia, el filtro posterior a búsqueda y los diagnósticos se incluyen; la recuperación independiente y semántica no está cerrada. SMART produjo 126 documentos citables desde texto del proveedor con cero descargas HTTP. DIRECT midió 88/139 documentos extraídos y 115/222 respuestas HTTP 2xx; estas últimas incluyen 27 respuestas 202 sin texto de EUR-Lex. Las trazas DIRECT también registran 16 ACCESS_DENIED, cinco FETCH_FAILURE y tres RATE_LIMITED. Una fuente citable del gold apareció en 49/66 validaciones SMART y 22/64 DIRECT. La identidad de la cita no demuestra que apoye la afirmación. Resolver de forma general la adquisición de primarias, copias y regla documental antes de cerrar.
+- ** Status:** partially resolved. Reproduced in the LIGHT order
+`355f6090-cec0-4ed3-a29a-46763fe66cc6`, first assertion.
+- **Impact:** all three RAG validators issued TRUE using the
+The quotation is literal and surpasses the ISSUE-013 grounding, but it is not independent corroboration.
+- **Original causes:** the original URL is lost after importing the text; Source Router
+allows media if they comply with jurisdiction; `EXT_ONLY_OFFICIAL` guides the provider but does not filter its response; the validator passes only domains to Evidence Search and loses metadata; the recoverer rejects PDF, so the primary localized IEA report did not provide usable context.
+- **Close:** propagate source URL/dominio; classify primary source,
+secondary, copy and relationship to the document submitted; apply the policy after recovering results; keep metadata from the router; extract PDF with page and auditable error. A submitted source or copy cannot be the only decisive evidence. For a claim attributable to a study, the primary document recovered or the actual verdict is UNKNOWN.
+- **Implemented:** origin URL/domain travel in `v2` contracts; Evidence Search retains source type, authority, score, profile version and relation to origin; `EXT_ONLY_OFFICIAL` filters after retrieval. Grounding rejects `relationship_to_origin=ORIGINAL` against the canonical `context_id`, so a free model URL/text/hash cannot bypass that check.
+- **Remaining mechanism:** `document_type` is still `UNKNOWN`; same URL becomes `ORIGINAL`, same domain `UNKNOWN`, and another domain `INDEPENDENT`. Different domains can repeat the same wire story or study, so this classification is not proof of independence. PDF extraction with page and auditable fragment, copy/derived-source detection and a primary-source rule for attributed claims remain open.
+- **Return:** the order indicated should prioritize and quote the IEA report.
+This cannot be recovered, Freedom Digital can be preserved as context or track, without producing TRUE/FALSE documentary alone.
+- **Relationship:** expands the factual quality of 017; does not invalidate grounding
+Syntactic of 013 nor the geographical eligibility resolved by 015.
+- **Campaña histórica publicada 2026-10-17:** `SOME_SOURCES_UNUSABLE` aparece en 27 de 33 validaciones: `eur-lex.europa.eu` da `empty_text` 21 veces y `europarl.europa.eu` 12, además de 403 y errores de conexión de otras fuentes. Hay contextos citables alternativos, pero el warning es una pérdida sistemática de fuente primaria, no prueba de soporte semántico. El handoff y las citas pasan en las 31 validaciones que terminaron; eso acredita identidad del contexto, no independencia ni implicación del veredicto. Los cambios de descarga y normalización posteriores a esa campaña se midieron de nuevo en las campañas del 31-10 y 01-11, resumidas arriba; la recuperación primaria sigue abierta.
+- **Cierre adicional:** en los casos jurídicos e institucionales recuperar texto y fragmento auditable de las fuentes primarias, o registrar una causa precisa y una abstención segura; verificar PDF, HTML, redirecciones y anti-bot con URL final y estado. Reducir warnings de recuperación sin sustituir silenciosamente la fuente primaria por contenido secundario.
+
+### ISSUE-022 - Subcategories and free types generate duplicate or too wide routes
+
+- **Status:** pending validation. Closed taxonomy and `route-v2` are coded and the local `kind-trust-news` collections were realigned; Hetzner deployment, indexes and route/cache behavior still need evidence. Before the change, nearby combinations created different routes and free `subcategory` values fragmented the cache.
+- **Impact:** synonyms, tildes, translations or variable choices create
+new entries; at the same time, a broad thematic route can reuse sources discovered for a particular study. It increases cost and can degrade relevance without producing an explicit failure.
+- **Causes:** the signature only normalizes spaces and capitals; there is no catalogue or
+subcategories alias; `claim_type_for_assertion` can choose the first `preferred_source_type` in alphabetical order; authors and title influence discovery, but do not separate from thematic memory.
+- **Implemented:** `subcategory` is removed and free values replaced
+by `topic_code`, `evidence_kind`, `source_type`, `authority_level` and jurisdiction of `routing-taxonomy-v1`. Pydantic and JSON Schema reject invented values and combinations tema/categoria incompatible. The signature is `route-v2|taxonomy|topic|evidence|jurisdiction`; text, entity and date are left out of the thematic cache and used in the specific documentary search.
+- **Realineamiento:** colecciones nuevas `source_routes_v2`,
+`domain_profiles_v1` and `evidence_search_cache_v2`. The `scripts/k8s/realign-source-routing-mongodb.sh` idepotent script removes obsolete data, secures indexes and records the version; CI runs `--apply` and `--check`.
+- **Close:** deploy the same revision and run MongoDB realignment in Hetzner; check indexes and prove that equivalent aliases share a key while distinct topics do not. Record new-route rate, reuse, collisions and `OTHER` candidates. Reopen design only if these checks expose an actual defect.
+
+### ISSUE-023 - The BLOCKCHAIN registry loses the fields of the v2 assertions contract
+
+- **Reproduced (2026-09-19):** the E2E GUI Blockchain published the order
+`11ea41f6-c315-4c13-9ab8-00fbbcc686f0`, generated four assertions and uploaded the document to IPFS (`QmQrPwqsPZafEvCuZ1xvoTk5XwNk2Z4bQJ3QkoAd4eedBo`). The order was left in `BLOCKCHAIN_PENDING`, without `post_id` or `tx_hash`.
+- **Cause:** after `ipfs_uploaded`, `news-handler` converts the v2 document with
+`to_chain_assertion()` and delivers it to `RegisterBlockchainRequest`. That conversion retains only `idAssertion`, `text` and `categoryId`, while the `RegisterBlockchainPayload` model also requires `topic_code`, `evidence_kind` and `context`. The Pydatic validation rejects the four assertions and `handle_blockchain_request` captures the error; the flow continues to mark the order as pending although it never publishes `register_blockchain`.
+- **Impact:** no post or transaction created and no request or receipt
+Blockchain validations. GUI case cannot satisfy CID/post/tx/IPFS or reach `VALIDATED`.
+- **Solution (2026-09-20):** `register_blockchain` uses now
+`register-blockchain-v2` and transports only CID and publisher. `news-chain` recovers and validates IPFS `AssertionsDocumentV2`, derives its categories and sends only these to the existing contract. The response uses compact mappings and `news-handler` combines them with MongoDB canonical document. Request or registration failures persist as `BLOCKCHAIN_ERROR` with stage, code and retry capacity; no fictitious slope is announced.
+- **Associated correction:** the listers of `news-chain` and
+`validate-asertions` unpack IPFS `{cid, content}` response before validating V2; an invalid event no longer ends the lister of a validator.
+- **Closing validation:**28 focused tests pass.
+`synthetic-blockchain-01` creó la orden `a237441b-f1aa-4c32-8468-fe79163f865c`, CID `QmNaWX2Ra7SKUzoswZERE7GGHwFpRxT3WZVwHaaWCbpXR3`, post `36` y transacción `0x019cff71a2bf46fea9a5840f7b1426ad1b0fa44eb740b779caea2e64861a051b`. Alcanzó `VALIDATED` con cuatro aserciones, doce validaciones y cero pendientes; comprobó pestaña IPFS, escritorio/móvil y ausencia de errores HTTP/consola inesperados. Artefactos: `/tmp/assermetry-e2e-blockchain-v2-retry-20260920`.
+- **Limit:** This evidence is from the local cluster, not from the target environment.
+
+## Hallazgo nuevo — 2026-10-15
+
+### ISSUE-024 - Credencial OIDC en texto claro en el lanzador local
+
+- **Estado:** abierta. El fichero local ignorado `launch_e2e.sh` exporta directamente un identificador de cliente y un secreto OIDC antes de publicar una campaña. `git check-ignore` confirma que el fichero está excluido por `.gitignore`; no se ha encontrado como fichero versionado ni se infiere por ello una exposición en el historial Git.
+- **Impacto:** cualquier copia, captura, backup o acceso al workspace puede revelar la credencial y permitir usar el cliente según sus permisos. Además contradice el contrato documental de suministrar secretos solo mediante el entorno o un almacén externo.
+- **Cierre:** retirar el valor literal del script y exigir variables ya definidas o carga desde un mecanismo local no versionado; comprobar por un canal seguro si la credencial sigue activa y rotarla o revocarla si procede; revisar artefactos y el historial versionado sin imprimir valores; demostrar que el lanzador falla pronto cuando falta configuración y que ninguna prueba guarda secretos.
+
+## Hallazgos de la campaña publish — 2026-10-17
+
+### ISSUE-025 - Timeout de Evidence Search deja validadores sin decisión
+
+- **Estado de release (2026-11-01):** la campaña SMART del 31-10 terminó sin error técnico, pero ello no reproduce ni cierra el timeout inducido requerido. DIRECT registró dos fallos de Source Router y un timeout de ORDER_POLL, que se siguen además en 026/027; no son una repetición demostrada de la causa original de Evidence Search.
+- **Evidencia histórica:** la orden `328bb1ce-4de2-411a-8e1f-fc99eee1fc8d` del caso `EU_RENEWABLE_SHARE_2023_FALSE` terminó `VALIDATED_WITH_ERRORS`. Dos de tres validadores registraron `stage=EVIDENCE_SEARCH`, `code=TECHNICAL_ERROR`, `message=timed out`; el tercero respondió `FALSE`. El informe agrupa esto como un fallo de ejecución que afecta a una unidad e2e, aunque existan dos registros de validador fallidos. [Informe de la campaña del 17-10](../tests/data/evaluation/artifacts/gold-v0-published-20261017T083319Z/report.md).
+- **Impacto:** se pierde cobertura de validación y el estado terminal puede aparentar una decisión suficiente cuando dos votos no se emitieron. Se solapa con la presentación de errores de 008/019, pero la causa operativa de búsqueda requiere seguimiento propio.
+- **Diagnóstico pendiente:** localizar el límite que expiró (cliente, Evidence Search, proveedor o descarga), medir duración por etapa, concurrencia y reintentos, y comprobar si se ejecutó trabajo posterior al timeout. El artefacto solo demuestra `timed out`; no identifica aún la causa interna.
+- **Cierre:** corregir el límite o el trabajo bloqueante y ejecutar de nuevo el caso mediante `full --publish` en la misma revisión desplegada. Exigir tres decisiones terminales sin timeout; inducir aparte un fallo controlado para verificar errores explícitos y recuperables sin votos ficticios, contadores y retry idempotente de 008/019. Repetir después los once casos y conservar trazas y latencias.
+
+## Hallazgos de la comparación SMART/DIRECT — 2026-11-01
+
+### ISSUE-026 - Recuperación directa de fuentes primarias insuficiente
+
+- **Estado:** abierta, P1. El motor de adquisición configurable entra en v0.0.13; la recuperación útil en DIRECT no queda aceptada.
+- **Evidencia:** [campaña DIRECT](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md), 88/139 documentos extraídos (63,3 %), 115/222 respuestas HTTP 2xx (51,8 %). Las 27 respuestas 202 sin cuerpo extraíble proceden de EUR-Lex; Europarl acumula diez accesos denegados, sistemaelectrico-ree.es cinco fallos de descarga y edpb.europa.eu tres respuestas con limitación de tasa. Hubo 18 sustituciones de candidato: cinco recuperaron un documento y trece se agotaron. Una respuesta 2xx sin texto no es descarga útil.
+- **Impacto:** los documentos de referencia citables pasan de 49/66 validaciones SMART a 22/64 DIRECT; la campaña DIRECT obtuvo 12/22 unidades e2e estrictas. Esto es asociación observada, no atribución causal: también cambió la configuración observada de generación.
+- **Cierre:** corregir mediante políticas generales de adquisición, redirección, reintento y fallback, sin excepciones para URLs o casos concretos. Repetir DIRECT/SMART sobre una revisión limpia, mismos modelos y parámetros, corpus congelado y configuración controlada; comparar fuentes primarias, contenido auditable, frescura, abstención, latencia, coste y resultado e2e. Coordinar la independencia y el apoyo semántico con 017/021.
+
+### ISSUE-027 - Una orden publicada queda sin estado terminal por timeout de sondeo
+
+- **Estado:** abierta, P1. El polling y sus diagnósticos forman parte de v0.0.13, pero el caso falló en la campaña DIRECT.
+- **Evidencia:** [campaña DIRECT](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md), caso EU_PARLIAMENT_MEMBERS_FALSE, repetición 1: la orden quedó DOCUMENT_CREATED y el importador agrupó ORDER_POLL_ERROR, TimeoutError, «The read operation timed out». El informe cuenta una decisión no evaluable y una unidad operativamente fallida.
+- **Cierre:** localizar si expiró el cliente de sondeo, la consulta de orden o la publicación; guardar tiempos y estados de cada transición. Asegurar que un error de lectura no se confunde con un estado terminal, probar recuperación y reintento idempotente, y repetir el caso más el lote con cero órdenes pendientes. Coordinar la matriz de contadores y errores con 008/019/025.

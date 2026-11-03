@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "example-balanced-openrouter",
+  "description": "Ejemplo editable; valida disponibilidad y presupuesto antes de ejecutarlo.",
+  "components": {
+    "generate-asertions": {
+      "provider": "openrouter",
+      "model": "google/openai/gpt-4.1-nano",
+      "temperature": 0
+    },
+    "source-router": {
+      "provider": "openrouter",
+      "model": "google/gemini-2.5-flash-lite",
+      "temperature": 0
+    }
+  },
+  "validators": [
+    {
+      "selector": {
+        "id": "0x4504A1d4047583164919AE40C37c4f4c5B854BBb"
+      },
+      "provider": "openrouter",
+      "model": "mistralai/mistral-small-24b-instruct-2501",
+      "temperature": 0.0
+    },
+    {
+      "selector": {
+        "id": "0x42d488D0393FD1D6b72BB424Db28Dd7eb5E06737"
+      },
+      "provider": "openrouter",
+      "model": "qwen/qwen3-30b-a3b-instruct-2507",
+      "temperature": 0.0
+    },
+    {
+      "selector": {
+        "id": "0xBe794abf86d173ddCfE937c6d8d739BDc4e94165"
+      },
+      "provider": "openrouter",
+      "model": "mistralai/mistral-small-24b-instruct-2501",
+      "temperature": 0.0
+    }
+  ]
+}

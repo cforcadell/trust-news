@@ -4,9 +4,7 @@ metadata:
   name: news-chain # Tiene que coincidir con el nombre de la base
   namespace: apis
 spec:
-  # En producción podríamos querer 2 réplicas por si una cae, 
-  # pero si tu worker no soporta concurrencia, déjalo en 1.
-  replicas: 1 
+  replicas: 1
   template:
     spec:
       containers:

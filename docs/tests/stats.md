@@ -1,40 +1,28 @@
-### NewsStats
+# Collection of historical metrics
 
+`api/stats` contains manual tools for capturing commands and calculating statistics. It is not a test suite, it has no acceptance assertions and is not part of the regression described in [tests.md](tests.md).
 
-## 1️⃣ Setup the environment
+## Current status
 
-```bash
-cd api/stats
-(python3 -m venv venv )
-source venv/bin/activate
-(install required packages)
-```
-## 2️⃣ Execute Same validation ans extract json data  
+The scripts retain the historic contract of News Handler:
 
-This module generates json data for further analysis. We will only get data files if the news goes to VALIDATES status.
+- URL fija `http://127.0.0.1:8072`;
+- calls to `/publishNew`, `/orders/{order_id}` and
+`/news/{order_id}/events` without authentication or `client_id`;
+- `VALIDATED` status only;
+- timestamps with `%m/%d/%Y %H:%M:%S` format and events
+  `request_validation`/`validation_completed`.
 
-```bash
-python collector.py \
-  --text "Text to validate" \
-  --num_runs 2 \
-  --timeout 200 
+The current API requires identity and client scope, and its event and date contracts have evolved. That's why `collector.py` and `refetch_orders.py` should not be used against the current deployment without first adapting them. JSONs present in `tests/data/historical-stats/artifacts` and `tests/data/historical-stats/resources` are historical samples, not reproducible results of the current version.
 
-```
-## 2️⃣ BIS  Generate json data from existing orders
+## Conserved components
 
-We can get the same output using preexisting orders by setting order_id in output/orders.csv directly and executing this module.
+| Script | Historical function | Entrada/salida |
+| --- | --- | --- |
+| `collector.py` | Post the same text several times and wait `VALIDATED` | Type `tests/data/historical-stats/artifacts/orders.csv` and a JSON directory in order |
+| `refetch_orders.py` | Re-downloading already listed commands | Read `tests/data/historical-stats/artifacts/orders.csv` and replace `order.json`/`events.json` |
+| `stats_report.py` | Calculate aggregates of assertions, votes and times | Read captured JSONs and print tables with `tabulate` |
 
+Before reactivating these tools, authentication, propagation of `client_id`, explicit selection of LIGHT/BLOCKCHAIN, current terminal states, parsing ISO-8601 and support for current events must be added. Then you must work on a new running directory, without overwriting historical samples.
 
-```bash
-python refetch_orders.py
-
-```
-
-## 3️⃣ Generate Stat News
-
-Once we get json data file we can excute stat module. We need the output/orders.csv and related directories properly informed with news data.
-
-```bash
-python stats_report.py
-
-```
+Until such adaptation is made, the valid regression metrics are the dated artifacts produced by `tests/frontend/e2e/run-regression.js`; they record scenario, duration, checks, created commands and errors without being confused with a factual quality test.

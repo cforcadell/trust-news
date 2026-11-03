@@ -36,11 +36,18 @@ def chunk_text(source_id: str, text: str, chunk_size_chars: int = 1200, overlap_
             current = _overlap_sentences(current, overlap_chars)
         current.append(sentence)
 
-        while len(_normalize_text(" ".join(current))) > chunk_size_chars * 1.5 and len(current) == 1:
+        if len(current) == 1 and len(current[0]) > chunk_size_chars * 1.5:
+            # Advance an index instead of copying the entire remaining suffix
+            # for every chunk. Large punctuation-free documents used to make
+            # this loop quadratic and block the ASGI event loop.
             long_sentence = current.pop()
-            slice_text = long_sentence[:chunk_size_chars].strip()
-            chunks.append(_make_chunk(source_id, len(chunks), slice_text))
-            remainder = long_sentence[max(0, chunk_size_chars - overlap_chars):].strip()
+            offset = 0
+            step = max(1, chunk_size_chars - min(overlap_chars, chunk_size_chars - 1))
+            while len(long_sentence) - offset > chunk_size_chars * 1.5:
+                slice_text = long_sentence[offset:offset + chunk_size_chars].strip()
+                chunks.append(_make_chunk(source_id, len(chunks), slice_text))
+                offset += step
+            remainder = long_sentence[offset:].strip()
             current = [remainder] if remainder else []
 
     if current:
@@ -78,6 +85,7 @@ def build_context_windows(
     before: int = 1,
     after: int = 1,
     min_context_chars: int = 120,
+    selection_decisions: Dict[str, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Build deduplicated context windows around selected ranked chunks."""
     contexts: List[Dict[str, Any]] = []
@@ -87,6 +95,8 @@ def build_context_windows(
     for ranked in ranked_chunks:
         selected = chunk_by_id.get(ranked.get("chunk_id"))
         if not selected:
+            if selection_decisions is not None:
+                selection_decisions[str(ranked.get("chunk_id"))] = "CHUNK_NOT_FOUND"
             continue
         idx = int(selected["chunk_index"]) - 1
         start = max(0, idx - max(0, int(before or 0)))
@@ -95,13 +105,19 @@ def build_context_windows(
         included_ids = [chunk["chunk_id"] for chunk in window_chunks]
         included_set = set(included_ids)
         if any(included_set == previous or included_set.issubset(previous) or previous.issubset(included_set) for previous in used_windows):
+            if selection_decisions is not None:
+                selection_decisions[selected["chunk_id"]] = "OVERLAPPING_CONTEXT_WINDOW"
             continue
 
         text = _normalize_text(" ".join(chunk["text"] for chunk in window_chunks))
         if len(text) < min_context_chars and len(chunks) > len(window_chunks):
+            if selection_decisions is not None:
+                selection_decisions[selected["chunk_id"]] = "CONTEXT_TOO_SHORT"
             continue
 
         used_windows.append(included_set)
+        if selection_decisions is not None:
+            selection_decisions[selected["chunk_id"]] = "SELECTED_CONTEXT"
         contexts.append({
             "context_id": f"{source_id}-context-{len(contexts) + 1}",
             "selected_chunk_id": selected["chunk_id"],
@@ -114,4 +130,7 @@ def build_context_windows(
         if len(contexts) >= max_contexts:
             break
 
+    if selection_decisions is not None:
+        for ranked in ranked_chunks:
+            selection_decisions.setdefault(str(ranked.get("chunk_id")), "CONTEXT_LIMIT_REACHED")
     return contexts

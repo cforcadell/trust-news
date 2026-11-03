@@ -1,0 +1,395 @@
+import importlib.util
+import json
+import pathlib
+import tempfile
+import unittest
+from unittest import mock
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location("llm_benchmark", ROOT / "tests/llm-benchmark/llm-benchmark.py")
+benchmark = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(benchmark)
+
+
+class LLMBenchmarkTests(unittest.TestCase):
+    def test_markdown_report_identifies_validator_type_and_strategy(self):
+        report = benchmark.markdown_report({
+            "batch_id": "batch", "status": "PASS", "started_at": "start", "finished_at": "end",
+            "case_id": "case", "profiles": [{
+                "profile_id": "profile", "runs": 1, "passed": 1,
+                "quality_score_mean": 100, "verdict_accuracy_mean": 1,
+                "sample_cost_usd_mean": 0.1, "normalized_5_assertions_cost_usd_mean": 0.2,
+                "duration_seconds_mean": 1,
+                "validators": [{"validator_id": "rag-local", "validator_type": "RAG_EVIDENCE_VALIDATION",
+                                "strategy": "LOCAL", "provider": "openrouter", "model": "vendor/model"}],
+            }],
+        })
+        self.assertIn("| profile | rag-local | RAG_EVIDENCE_VALIDATION | LOCAL — RAG con dominios de Source Router | openrouter/vendor/model |", report)
+
+    def test_clear_evidence_cache_uses_delete_and_returns_audit_data(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "status": "ok",
+            "cache_collection": "evidence_search_cache_v2",
+            "deleted_count": 7,
+        }).encode()
+
+        with mock.patch.object(benchmark.urllib.request, "urlopen", return_value=response) as urlopen:
+            result = benchmark.clear_evidence_cache("http://evidence:8074/", False, 12)
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://evidence:8074/admin/cache")
+        self.assertEqual(request.get_method(), "DELETE")
+        self.assertEqual(result["deleted_count"], 7)
+        self.assertEqual(result["cache_collection"], "evidence_search_cache_v2")
+
+    def test_run_parser_exposes_opt_in_evidence_cache_clear(self):
+        with mock.patch.dict(benchmark.os.environ, {
+            "ASSERMETRY_EVIDENCE_SEARCH_URL": "http://evidence:8074",
+        }):
+            args = benchmark.parser().parse_args(["run", "--clear-evidence-cache"])
+        self.assertTrue(args.clear_evidence_cache)
+        self.assertEqual(args.evidence_search_url, "http://evidence:8074")
+
+    def test_token_provider_uses_client_credentials(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "access_token": "service-token",
+            "expires_in": 300,
+        }).encode()
+        environment = {
+            "ASSERMETRY_KEYCLOAK_CLIENT_ID": "TrustNewsApi",
+            "ASSERMETRY_KEYCLOAK_CLIENT_SECRET": "secret-for-test",
+        }
+        with mock.patch.dict(benchmark.os.environ, environment, clear=True):
+            with mock.patch.object(benchmark.urllib.request, "urlopen", return_value=response) as urlopen:
+                provider = benchmark.TokenProvider("https://localhost:7443", False)
+                self.assertEqual(provider.token(), "service-token")
+        request = urlopen.call_args.args[0]
+        form = dict(benchmark.urllib.parse.parse_qsl(request.data.decode()))
+        self.assertEqual(form, {
+            "grant_type": "client_credentials",
+            "client_id": "TrustNewsApi",
+            "client_secret": "secret-for-test",
+        })
+    def test_profile_rejects_non_openrouter_provider(self):
+        profile = {
+            "schema_version": 1,
+            "id": "invalid",
+            "components": {"generate-asertions": {"provider": "gemini", "model": "x"}},
+        }
+        with self.assertRaises(benchmark.BenchmarkError):
+            benchmark.validate_profile(profile)
+
+    def test_current_marker_requires_an_effective_openrouter_model(self):
+        marker = "$" + "current"
+        profile = {
+            "schema_version": 1,
+            "id": "current",
+            "components": {"generate-asertions": {"provider": "openrouter", "model": marker}},
+            "validators": [],
+        }
+        manager = benchmark.ConfigurationManager(None)
+        snapshot = {
+            "components": {
+                "generate-asertions": {
+                    "provider": "openrouter", "model": "vendor/model",
+                    "temperature": 0, "config_version": 1,
+                },
+            },
+            "validators": {},
+        }
+
+        resolved = manager.resolve_profile(profile, snapshot)
+        self.assertEqual(resolved["components"]["generate-asertions"]["model"], "vendor/model")
+
+        snapshot["components"]["generate-asertions"]["provider"] = "gemini"
+        with self.assertRaises(benchmark.BenchmarkError):
+            manager.resolve_profile(profile, snapshot)
+
+    def test_scores_extraction_and_verdicts_against_canonical_assertions(self):
+        case = {
+            "schema_version": 1,
+            "id": "case",
+            "news": "sample",
+            "match_threshold": 0.5,
+            "assertions": [
+                {
+                    "id": "A", "expected_verdict": "TRUE", "category_ids": [5],
+                    "required_terms": ["Suecia", "vacunación", "infantil"],
+                },
+                {
+                    "id": "B", "expected_verdict": "FALSE", "category_ids": [8],
+                    "required_terms": ["Italia", "turistas", "centros", "históricos"],
+                },
+            ],
+        }
+        order = {
+            "assertions": [
+                {"idAssertion": "1", "text": "Suecia amplía la vacunación infantil", "categoryId": 5},
+                {"idAssertion": "2", "text": "Italia prohíbe turistas en centros históricos", "categoryId": 8},
+            ],
+            "assertion_results": {
+                "1": {"verdict": "TRUE"},
+                "2": {"verdict": "FALSE"},
+            },
+            "validations": {
+                "1": {"v1": {
+                    "approval": 1, "execution_status": "COMPLETED",
+                    "validator_type": "LLM_MEMORY_VALIDATION", "response_time_seconds": 1.2,
+                }},
+                "2": {"v1": {
+                    "approval": 2, "execution_status": "COMPLETED",
+                    "validator_type": "LLM_MEMORY_VALIDATION", "response_time_seconds": 1.8,
+                }},
+            },
+        }
+
+        score = benchmark.score_order(case, order)
+
+        self.assertEqual(score["metrics"]["assertion_coverage"], 1)
+        self.assertEqual(score["metrics"]["verdict_accuracy"], 1)
+        self.assertEqual(score["validators"]["v1"]["accuracy"], 1)
+        self.assertEqual(score["quality_score"], 100)
+
+    def test_costs_keep_sample_and_normalized_five_assertion_totals(self):
+        pricing = {
+            "generated_at": "2026-01-01T00:00:00Z",
+            "estimated_news_costs_usd": {"current": 0.56},
+            "deployment_recommendations": [
+                {
+                    "target_id": "generate-asertions", "target_kind": "component",
+                    "current_provider": "openrouter", "current_model": "generator",
+                    "estimated_current_cost_usd": 0.01,
+                },
+                {
+                    "target_id": "validator", "target_kind": "validator",
+                    "workload_key": "memory", "current_provider": "openrouter",
+                    "current_model": "validator", "estimated_current_cost_usd": 0.11,
+                },
+            ],
+        }
+
+        costs = benchmark.collect_costs(pricing, 4)
+
+        self.assertAlmostEqual(costs["sample_total_usd"], 0.45)
+        self.assertAlmostEqual(costs["normalized_5_assertions_total_usd"], 0.56)
+        self.assertTrue(costs["complete"])
+
+        incomplete = benchmark.collect_costs(pricing, 4, {"generate-asertions", "missing"})
+        self.assertFalse(incomplete["complete"])
+        self.assertEqual(incomplete["missing_targets"], ["missing"])
+
+    def test_generates_exact_profiles_under_budget_and_deduplicates(self):
+        snapshot = {
+            "captured_at": "2026-01-01T00:00:00Z",
+            "components": {
+                "generate-asertions": {
+                    "provider": "openrouter", "model": "vendor/current-generator",
+                    "temperature": 0, "config_version": 1,
+                },
+            },
+            "validators": {
+                "validator-1": {
+                    "provider": "openrouter", "model": "vendor/current-validator",
+                    "temperature": 0.2, "config_version": 1,
+                    "validator_type": "LLM_MEMORY_VALIDATION", "strategy": None,
+                },
+            },
+        }
+        pricing = {
+            "estimated_news_costs_usd": {
+                "premium": 0.19, "similar": 0.19, "budget": 0.08,
+            },
+            "deployment_recommendations": [
+                {
+                    "target_kind": "component", "target_id": "generate-asertions",
+                    "current_provider": "openrouter", "current_model": "vendor/current-generator",
+                    "estimated_current_cost_usd": 0.01,
+                    "options": [
+                        {"tier": "premium", "model": "vendor/premium-generator"},
+                        {"tier": "similar", "model": "vendor/premium-generator"},
+                        {"tier": "budget", "model": "vendor/budget-generator"},
+                    ],
+                },
+                {
+                    "target_kind": "validator", "target_id": "validator-1",
+                    "current_provider": "openrouter", "current_model": "vendor/current-validator",
+                    "estimated_current_cost_usd": 0.02,
+                    "options": [
+                        {"tier": "premium", "model": "vendor/premium-validator"},
+                        {"tier": "similar", "model": "vendor/premium-validator"},
+                        {"tier": "budget", "model": "vendor/budget-validator"},
+                    ],
+                },
+            ],
+        }
+
+        profiles, discarded = benchmark.generated_profiles(snapshot, pricing, 0.20, 0.19)
+
+        self.assertEqual([item["id"] for item in profiles], ["premium-safe", "budget-safe"])
+        self.assertEqual(profiles[0]["validators"][0]["selector"], {"id": "validator-1"})
+        self.assertEqual(profiles[0]["validators"][0]["temperature"], 0.2)
+        self.assertEqual(profiles[0]["generation"]["validator_catalog"], [{
+            "validator_id": "validator-1", "validator_type": "LLM_MEMORY_VALIDATION",
+            "strategy": "NOT_RECORDED",
+        }])
+        self.assertEqual(discarded[0]["reason"], "duplicate_configuration")
+        self.assertEqual(discarded[0]["duplicate_of"], "premium-safe")
+        self.assertTrue(all(
+            item["generation"]["estimated_news_cost_usd"] <= 0.19 for item in profiles
+        ))
+
+    def test_profile_generation_rejects_incomplete_target_costs(self):
+        snapshot = {
+            "components": {
+                "generate-asertions": {"provider": "openrouter", "model": "vendor/model"},
+            },
+            "validators": {
+                "missing-validator": {"provider": "openrouter", "model": "vendor/model"},
+            },
+        }
+        pricing = {
+            "estimated_news_costs_usd": {"budget": 0.01},
+            "deployment_recommendations": [{
+                "target_kind": "component", "target_id": "generate-asertions",
+                "current_provider": "openrouter", "current_model": "vendor/model",
+                "estimated_current_cost_usd": 0.01, "options": [],
+            }],
+        }
+
+        with self.assertRaisesRegex(benchmark.BenchmarkError, "missing-validator"):
+            benchmark.generated_profiles(snapshot, pricing, 0.10, 0.095)
+
+    def test_profile_plan_resolves_relative_paths_and_checks_hash(self):
+        profile = {
+            "schema_version": 1, "id": "generated",
+            "components": {"generate-asertions": {
+                "provider": "openrouter", "model": "vendor/model",
+            }},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            profile_path = root / "profiles/generated.json"
+            profile_path.parent.mkdir()
+            profile_path.write_text(json.dumps(profile), encoding="utf-8")
+            plan_path = root / "plan.json"
+            plan = {
+                "schema_version": 1, "plan_id": "plan",
+                "requested_max_news_cost_usd": 0.20,
+                "effective_max_news_cost_usd": 0.19,
+                "profiles": [{
+                    "path": "profiles/generated.json",
+                    "sha256": benchmark.sha256_text(benchmark.canonical_json(profile)),
+                }],
+            }
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+            paths, loaded = benchmark.load_profile_plan(plan_path)
+            self.assertEqual(paths, [profile_path.resolve()])
+            self.assertEqual(loaded["plan_id"], "plan")
+
+            profile["id"] = "tampered"
+            profile_path.write_text(json.dumps(profile), encoding="utf-8")
+            with self.assertRaisesRegex(benchmark.BenchmarkError, "hash"):
+                benchmark.load_profile_plan(plan_path)
+
+    def test_sqlite_history_is_append_only_and_comparable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = pathlib.Path(directory) / "history.sqlite"
+            history = benchmark.History(database)
+            manifest = {
+                "batch_id": "batch", "started_at": "2026-01-01T00:00:00Z",
+                "case": {"id": "case"}, "git": {"commit": "abc", "dirty": False},
+                "artifacts_dir": directory,
+            }
+            history.start_batch(manifest)
+            for run_id, quality, cost in (("base", 70.0, 0.2), ("candidate", 80.0, 0.15)):
+                history.save_run({
+                    "run_id": run_id, "batch_id": "batch", "profile_id": run_id,
+                    "repetition": 1, "started_at": "2026-01-01T00:00:00Z",
+                    "finished_at": "2026-01-01T00:01:00Z", "status": "PASS",
+                    "quality_score": quality, "score": {
+                        "quality_score": quality,
+                        "metrics": {"verdict_accuracy": quality / 100},
+                        "assertions": [],
+                    },
+                    "costs": {
+                        "sample_total_usd": cost,
+                        "normalized_5_assertions_total_usd": cost,
+                        "modules": [],
+                    },
+                    "duration_seconds": 60, "resolved_profile": {},
+                })
+            result = benchmark.comparison(history.get_run("base"), history.get_run("candidate"))
+            history.close()
+
+        self.assertEqual(result["delta"]["quality_score"], 10)
+        self.assertAlmostEqual(result["delta"]["sample_cost_usd"], -0.05)
+
+
+    def test_order_polling_reports_status_and_latest_event_without_affecting_result(self):
+        class Client:
+            def __init__(self):
+                self.paths = []
+
+            def get(self, path):
+                self.paths.append(path)
+                if path.endswith("/events"):
+                    return [{
+                        "action": "validation_completed",
+                        "created_at": "2026-09-26T08:00:00Z",
+                        "event_id": "event-1",
+                    }]
+                return {"status": "VALIDATED", "order_id": "order-1"}
+
+        client = Client()
+        progress = []
+        order = benchmark.wait_for_order(
+            client, "order-1", timeout_seconds=1, poll_seconds=0,
+            progress=lambda current, status, event: progress.append((current, status, event)),
+        )
+
+        self.assertEqual(order["status"], "VALIDATED")
+        self.assertEqual(progress[0][1], "VALIDATED")
+        self.assertEqual(progress[0][2], "action:validation_completed,at:2026-09-26T08:00:00Z,id:event-1")
+        self.assertEqual(client.paths, ["/orders/order-1", "/orders/order-1/events"])
+
+    def test_event_diagnostic_failure_does_not_interrupt_order_polling(self):
+        class Client:
+            def get(self, path):
+                if path.endswith("/events"):
+                    raise benchmark.BenchmarkError("events unavailable")
+                return {"status": "VALIDATED"}
+
+        progress = []
+        order = benchmark.wait_for_order(
+            Client(), "order-1", timeout_seconds=1, poll_seconds=0,
+            progress=lambda current, status, event: progress.append((status, event)),
+        )
+
+        self.assertEqual(order["status"], "VALIDATED")
+        self.assertEqual(progress, [("VALIDATED", "unavailable:BenchmarkError")])
+
+
+class SharedEvaluationCompatibilityTests(unittest.TestCase):
+    def test_order_export_remains_available_without_third_party_dependencies(self):
+        import subprocess
+        import sys
+
+        code = '''
+import sys
+sys.path.insert(0, "tests")
+from evaluation.core.orders import results_from_order
+case = {"id": "old", "assertions": [{"id": "a", "expected_verdict": "TRUE", "required_terms": ["population"]}]}
+row = results_from_order(case, {"assertions": []})[0].to_dict()
+assert row["root_cause"]["code"] == "EXTRACTION_ERROR"
+assert row["metrics"]["extraction"]["status"] == "EXTRACTION_ERROR"
+'''
+        result = subprocess.run([sys.executable, "-S", "-c", code], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

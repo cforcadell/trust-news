@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "id": "gold-v0-es-renewable-generation-false-v1",
+  "title": "Afirmación extrema sobre la generación renovable española",
+  "language": "es",
+  "description": "Caso atómico falso contradicho directamente por el cierre anual de Red Eléctrica.",
+  "news": "El 100 % de la electricidad generada en España durante 2024 procedió de fuentes renovables.",
+  "tags": ["suite:official-gold-v0", "lang:es", "jurisdiction:ES", "topic:energy", "difficulty:easy", "temporal:historical", "evidence:official", "expected:decisive", "status:candidate"],
+  "assertions": [{
+    "id": "ES_RENEWABLE_GENERATION_2024_FALSE",
+    "text": "El 100 % de la electricidad generada en España durante 2024 procedió de fuentes renovables.",
+    "source_excerpt": "El 100 % de la electricidad generada en España durante 2024 procedió de fuentes renovables.",
+    "expected_verdict": "FALSE",
+    "category_ids": [9],
+    "expected_topic_code": "ENERGY",
+    "expected_evidence_kind": "STATISTICAL_DATA",
+    "expected_context": {"entities": ["Red Eléctrica", "España"], "temporal_context": ["2024"], "jurisdiction": {"scope": "COUNTRY", "country_code": "ES"}},
+    "pipeline_assertion": {"assertion_id": "ES_RENEWABLE_GENERATION_2024_FALSE", "assertion_index": 0, "text": "El 100 % de la electricidad generada en España durante 2024 procedió de fuentes renovables.", "categoryId": 9, "topic_code": "ENERGY", "evidence_kind": "STATISTICAL_DATA", "context": {"language": "es", "jurisdiction": {"scope": "COUNTRY", "country_code": "ES"}}},
+    "required_terms": ["100", "electricidad", "España", "renovables", "2024"],
+    "acceptable_domains": ["ree.es"],
+    "reference_facts": ["La cuota renovable oficial de 2024 fue 56,8 %, no 100 %."],
+    "reference_sources": [{"id": "ree-close-2024", "url": "https://www.ree.es/es/sala-de-prensa/actualidad/nota-de-prensa/2025/03/la-produccion-renovable-crece-en-Espana-un-10-3-por-ciento-2024-alcanza-mayores-registros", "title": "La producción renovable crece en España un 10,3% en 2024"}],
+    "reference_evidence": [{"source": "ree-close-2024", "relation": "CONTRADICTS", "text": "Red Eléctrica situó la participación renovable de 2024 en el 56,8 % del total generado."}]
+  }]
+}

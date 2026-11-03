@@ -1,8 +1,8 @@
 
 **create/recreate cluster**
 > [!WARNING]
-> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
-> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+> **ARCHIVADO — NOT USE.** Historical reference; see
+> [`README.md`](README.md) and runbooks are in place before operation.
 
 ```bash delete
 
@@ -275,39 +275,37 @@ https://localhost:7443/auth/admin/master/console/
 
 ```
 
-Crea el Realm: * Haz clic en el desplegable de arriba a la izquierda (Master) y dale a Create Realm.
+Create the Realm: * Click the top left drop-down (Master) and hit Create Realm.
 
-Nombre: TrustNews.
+Name: TrustNews.
 
-Crea el Cliente para la Web (Frontend):
+Creates the Client for the Web (Frontend):
 
 Clients -> Create client.
 
 ClientID: TrustNewsWeb.
 
-Root URL: https://localhost:7443 (o la URL de tu frontend).
-Valid redirect: https://localhost:7443/*
+Root URL: https://localhost:7443 (or your frontend URL). Valid redirect: https://localhost:7443/*
 
-Web Origins: * (para evitar problemas de CORS en desarrollo).
+Web Origins: * (to avoid developing CORS problems).
 
-Crea el Cliente para los Backends Públicos (Lo que pediste al inicio):
+Create Customer for Public Backends (What you asked for at the beginning):
 
 Clients -> Create client.
 
 ClientID: TrustNewsApi.
 
-Client Authentication: Ponlo en ON.
+Client Authentication: Put it on ON.
 
-Authorization: Ponlo en OFF.
+Authorization: Put it in OFF.
 
-Authentication Flow: Marca solo Service accounts roles (desmarca el resto).
+Authentication Flow: Brand only Service accounts roles (unmarks the rest).
 
 Una vez guardado, ve a la pestaña Credentials y ahí verás el Client Secret que necesitarán los backends externos para llamarte.
 
-#En realm settings (TrustNews)
-#Frontend URL: https://localhost:7443/auth/
+#In realm settings (TrustNews) #Frontend URL: https://localhost:7443/auth/
 
-Crear usuario de aplicacion
+Create Application User
 
 ```bash quota & users admin
 
@@ -389,43 +387,43 @@ validations
 { "acknowledged" : true, "deletedCount" : 22 }
 ```
 
-**RESUMEN DE ENDPOINTS**
-| Servicio | URL | Perfil Skaffold | Descripción |
+**ENDPOINTS SUMMARY**
+| Service | URL | Perfil Skaffold | Description |
 |---|---|---|---|
-| Frontend | https://localhost:7443 | `apis-frontend` | Aplicación web principal |
-| Admin API Swagger | http://localhost:8400/docs | `apis-frontend` | API de administración |
+| Frontend | https://localhost:7443 | `apis-frontend` | Main Web application |
+| Admin API Swagger | http://localhost:8400/docs | `apis-frontend` | Administration API |
 | Gateway Swagger | http://localhost:8500/docs | `apis-frontend` | API Gateway |
-| Evidence Search Swagger | http://localhost:8074/docs | `apis-frontend` | Servicio de búsqueda de evidencias |
-| News Handler Swagger | http://localhost:8072/docs | `apis-frontend` | Orquestador principal de noticias |
-| News Chain Swagger | http://localhost:8073/docs | `apis-frontend` | API de interacción con blockchain/IPFS |
-| IPFS FastAPI Swagger | http://localhost:8060/docs | `apis-frontend` | API propia para IPFS |
-| Assertion Generator Swagger | http://localhost:8071/docs | `apis-frontend` | Generador de aserciones |
-| Validator Worker 1 Swagger | http://localhost:8070/docs | `apis-frontend` | Validador IA worker 1 |
-| Validator Worker 2 Swagger | http://localhost:8069/docs | `apis-frontend` | Validador IA worker 2 |
-| Validator Worker 3 Swagger | http://localhost:8068/docs | `apis-frontend` | Validador IA worker 3 |
-| Grafana | http://localhost:3000 | `infra` | Dashboards y logs |
-| Mongo Express | http://localhost:8081 | `infra` | UI para MongoDB, requiere Basic Auth |
-| Kafdrop | http://localhost:9000 | `infra` | UI para Kafka, topics y mensajes |
-| Keycloak Admin | https://localhost:7443/auth/admin/master/console/ | `apis-frontend` | Consola de administración de Keycloak vía frontend/proxy |
-| Frontend Prod | https://localhost:10443 | `apis-frontend-prod` | Frontend en perfil prod |
-| Admin API Prod Swagger | http://localhost:8400/docs | `apis-frontend-prod` | Admin API en perfil prod |
+| Evidence Search Swagger | http://localhost:8074/docs | `apis-frontend` | Evidence-seeking service |
+| News Handler Swagger | http://localhost:8072/docs | `apis-frontend` | Main news orchestrator |
+| News Chain Swagger | http://localhost:8073/docs | `apis-frontend` | blockchain/IPFS interaction API |
+| IPFS FastAPI Swagger | http://localhost:8060/docs | `apis-frontend` | Own API for IPFS |
+| Assertion Generator Swagger | http://localhost:8071/docs | `apis-frontend` | Assertion Generator |
+| Validator Worker 1 Swagger | http://localhost:8070/docs | `apis-frontend` | Validator IA worker 1 |
+| Validator Worker 2 Swagger | http://localhost:8069/docs | `apis-frontend` | Validator IA worker 2 |
+| Validator Worker 3 Swagger | http://localhost:8068/docs | `apis-frontend` | Validator IA worker 3 |
+| Grafana | http://localhost:3000 | `infra` | Dashboards and logs |
+| Mongo Express | http://localhost:8081 | `infra` | UI for MongoDB, requires Basic Auth |
+| Kafdrop | http://localhost:9000 | `infra` | UI for Kafka, topics and messages |
+| Keycloak Admin | https://localhost:7443/auth/admin/master/console/ | `apis-frontend` | Keycloak administration console via frontend/proxy |
+| Frontend Prod | https://localhost:10443 | `apis-frontend-prod` | Frontend in prod profile |
+| Admin API Prod Swagger | http://localhost:8400/docs | `apis-frontend-prod` | Admin API in prod profile |
 
 
-**RESUMEN DE COLECCIONES**
-| Base de datos | Colección | Servicio principal | Variable/config | Uso |
+** COLLECTIONS OVERVIEW**
+| Database | Collection | Main Service | Variable/config | Uso |
 |---|---|---|---|---|
-| `newsdb` | `news` | `news-handler` | `MONGO_COLLECTION=news` | Colección principal de órdenes/noticias. Guarda estado del flujo, documento, aserciones, validaciones, `postId`, hashes, CIDs, resultados y metadatos. |
-| `newsdb` | `news` | `admin` | `ORDERS_COLLECTION=news` | Consulta órdenes para resolver `client_id` y asociar consumo de cuotas a una orden o `postId`. |
-| `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Guarda eventos del flujo por `order_id`: acciones Kafka enviadas/recibidas, topic, timestamp y payload. La UI los recupera para pintar la pestaña de eventos de una orden. |
-| `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | Guarda registros normalizados de validaciones por orden/aserción/validador, incluyendo resultado, `tx_hash`, evidencia usada, config del validador y tiempos de respuesta. |
-| `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Guarda clientes y cuotas disponibles/consumidas por servicio, como generación de noticias o validaciones. |
-| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | Un documento completo por `profile_id` para scoring LOCAL; no existe fallback hardcodeado ni modelo legacy por categoría. |
-| `newsdb` | `evidence_normalization_configs` | `evidence-search` | `EVIDENCE_NORMALIZATION_CONFIG_COLLECTION=evidence_normalization_configs` | Un documento por taxonomía off-chain: subcategorías, scopes de localización y source types. |
-| `newsdb` | `evidence_search_cache` | `evidence-search` | `EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache` | Cache v2 de respuestas de `/search/evidence` por aserción normalizada, política de búsqueda y versión de perfiles. Expira por TTL (`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`). |
+| `newsdb` | `news` | `news-handler` | `MONGO_COLLECTION=news` | Main command/news collection. Save flow status, document, assertions, validations, `postId`, hashes, CIDs, results and metadata. |
+| `newsdb` | `news` | `admin` | `ORDERS_COLLECTION=news` | Check commands to resolve `client_id` and associate quota consumption to an order or `postId`. |
+| `newsdb` | `events` | `news-handler` | Hardcoded: `db["events"]` | Saves flow events by `order_id`: Kafka enviadas/recibidas actions, topic, timestamp and payload. The UI retrieves them to paint the event tab of an order. |
+| `newsdb` | `validations` | `news-handler` | Hardcoded: `db["validations"]` | It keeps standardized validation records by orden/asercion/validator, including result, `tx_hash`, used evidence, validator config and response times. |
+| `newsdb` | `clients_quotas` | `admin` | `QUOTAS_COLLECTION_NAME=clients_quotas` | Save disponibles/consumidas customers and quotas per service, as news generation or validations. |
+| `newsdb` | `evidence_domain_profiles` | `evidence-search` | `EVIDENCE_DOMAIN_CONFIG_COLLECTION=evidence_domain_profiles` | A complete document by `profile_id` for LOCAL scorring; there is no hardcoded fallback or legacy model by category. |
+| `newsdb` | `evidence_normalization_configs` | `evidence-search` | `EVIDENCE_NORMALIZATION_CONFIG_COLLECTION=evidence_normalization_configs` | A document by taxonomy off-chain: subcategories, location scopes and source types. |
+| `newsdb` | `evidence_search_cache` | `evidence-search` | `EVIDENCE_SEARCH_CACHE_COLLECTION=evidence_search_cache` | `/search/evidence` response cache v2 for standardized assertion, search policy and profile version. Expires by TTL (`EVIDENCE_SEARCH_CACHE_TTL_SECONDS`). |
 
-**Reset de datos de desarrollo y recarga de dominios preferentes**
+**Reset of development data and top-up of preferred domains**
 
-El schema `assertions-document-v2` no mantiene compatibilidad con documentos antiguos. Si en un entorno local se quiere limpiar solo datos runtime, hacerlo manualmente y sin borrar cuotas/clientes:
+`assertions-document-v2` Schema does not maintain compatibility with old documents. If in a local environment you want to clean only runtime data, do it manually and without deleting cuotas/clientes:
 
 ```javascript
 use newsdb
@@ -435,19 +433,19 @@ db.events.deleteMany({})
 db.clients_quotas.countDocuments()
 ```
 
-La configuración contextual de dominios preferentes vive en MongoDB, colección `evidence_domain_profiles`. El seed versionado está en `api/evidence-search/config/evidence-domain-profile-default.json` y `api/evidence-search/config/evidence-normalization-configs.json`. Dry-run del cargador destructivo controlado:
+The context configuration of preferred domains lives in MongoDB, `evidence_domain_profiles` collection. The versioned seed is in `api/evidence-search/config/evidence-domain-profile-default.json` and `api/evidence-search/config/evidence-normalization-configs.json`. Dry-run of the controlled destructive charger:
 
 ```bash
 python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
 ```
 
-Recarga real a demanda. El cargador hace upsert del perfil indicado y de las taxonomías, preservando otros perfiles:
+Real charge on demand. The charger makes upsert of the profile indicated and taxonomy, preserving other profiles:
 
 ```bash
 python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
 ```
 
-También se pueden cargar ficheros explícitos:
+You can also load explicit files:
 
 ```bash
 python scripts/k8s/apis/init-evidence-search-domains.py \
@@ -456,14 +454,14 @@ python scripts/k8s/apis/init-evidence-search-domains.py \
   --refresh --confirm
 ```
 
-Verificación recomendada:
+Recommended verification:
 
 ```bash
 kubectl rollout restart deployment/evidence-search -n apis
 kubectl logs deployment/evidence-search -n apis
 ```
 
-Después de recargar, una búsqueda con `city=Barcelona` y `entity=Ayuntamiento de Barcelona` debe priorizar `barcelona.cat`, `seu.barcelona.cat` y `bop.diba.cat`.
+After reloading, a search with `city=Barcelona` and `entity=Ayuntamiento de Barcelona` should prioritize `barcelona.cat`, `seu.barcelona.cat` and `bop.diba.cat`.
 
 ```bash limpiar imagenes no usadas dento de los nodos de kind
 for node in trust-news-control-plane trust-news-worker trust-news-worker2; do

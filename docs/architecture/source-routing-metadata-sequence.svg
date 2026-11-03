@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="2450" viewBox="0 0 2400 2450" role="img" aria-labelledby="title desc">
+  <title id="title">Secuencia de metadatos y cachés de fuentes fiables</title>
+  <desc id="desc">Flujo propuesto sin compatibilidad hacia atrás, desde la extracción de aserciones hasta la validación con evidencias.</desc>
+  <defs>
+    <style>
+      text { font-family: Inter, Arial, sans-serif; fill: #172033; letter-spacing: 0; }
+      .title { font-size: 42px; font-weight: 700; }
+      .subtitle { font-size: 20px; fill: #526079; }
+      .lane-title { font-size: 18px; font-weight: 700; text-anchor: middle; }
+      .lane-sub { font-size: 14px; fill: #526079; text-anchor: middle; }
+      .section { font-size: 20px; font-weight: 700; fill: #ffffff; }
+      .step { font-size: 16px; font-weight: 700; }
+      .body { font-size: 15px; }
+      .small { font-size: 13px; fill: #526079; }
+      .mono { font-family: "DejaVu Sans Mono", monospace; font-size: 13px; }
+      .lane { stroke: #a5b1c3; stroke-width: 2; stroke-dasharray: 7 8; }
+      .arrow { stroke: #2857a4; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .return { stroke: #38715d; stroke-width: 3; fill: none; stroke-dasharray: 7 6; marker-end: url(#arrow-green); }
+      .store { stroke: #c46c1b; stroke-width: 3; fill: none; marker-end: url(#arrow-orange); }
+      .alt { fill: #ffffff; fill-opacity: .62; stroke: #8794a8; stroke-width: 2; stroke-dasharray: 8 7; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#2857a4"/></marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#38715d"/></marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#c46c1b"/></marker>
+  </defs>
+  <rect width="2400" height="2450" fill="#f5f7fb"/>
+  <text x="64" y="64" class="title">Viaje de metadatos y caché de fuentes fiables</text>
+  <text x="64" y="101" class="subtitle">Arquitectura v2 sin compatibilidad hacia atrás · secuencia RAG LOCAL; el validador tipo 2 busca directamente con su LLM</text>
+
+  <g>
+    <rect x="35" y="135" width="220" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="145" y="168" class="lane-title">News Handler</text><text x="145" y="194" class="lane-sub">entrada y orquestación</text>
+    <rect x="295" y="135" width="245" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="417" y="168" class="lane-title">Generate Assertions</text><text x="417" y="194" class="lane-sub">extracción estructurada</text>
+    <rect x="580" y="135" width="185" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="672" y="168" class="lane-title">LLM</text><text x="672" y="194" class="lane-sub">schema cerrado</text>
+    <rect x="805" y="135" width="185" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="897" y="168" class="lane-title">Kafka</text><text x="897" y="194" class="lane-sub">payload v2</text>
+    <rect x="1030" y="135" width="205" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="1132" y="168" class="lane-title">Validator</text><text x="1132" y="194" class="lane-sub">RAG local</text>
+    <rect x="1275" y="135" width="215" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="1382" y="168" class="lane-title">Source Router</text><text x="1382" y="194" class="lane-sub">dominios candidatos</text>
+    <rect x="1530" y="135" width="215" height="84" rx="8" fill="#fff8ec" stroke="#db9a4b" stroke-width="2"/><text x="1637" y="168" class="lane-title">Mongo</text><text x="1637" y="194" class="lane-sub">perfiles y cachés</text>
+    <rect x="1785" y="135" width="225" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="1897" y="168" class="lane-title">Evidence Search</text><text x="1897" y="194" class="lane-sub">documentos concretos</text>
+    <rect x="2050" y="135" width="310" height="84" rx="8" fill="#fff" stroke="#b8c2d3" stroke-width="2"/><text x="2205" y="168" class="lane-title">Search / Web</text><text x="2205" y="194" class="lane-sub">descubrimiento y recuperación</text>
+  </g>
+  <g>
+    <line x1="145" y1="219" x2="145" y2="2075" class="lane"/><line x1="417" y1="219" x2="417" y2="2075" class="lane"/><line x1="672" y1="219" x2="672" y2="2075" class="lane"/><line x1="897" y1="219" x2="897" y2="2075" class="lane"/><line x1="1132" y1="219" x2="1132" y2="2075" class="lane"/><line x1="1382" y1="219" x2="1382" y2="2075" class="lane"/><line x1="1637" y1="219" x2="1637" y2="2075" class="lane"/><line x1="1897" y1="219" x2="1897" y2="2075" class="lane"/><line x1="2205" y1="219" x2="2205" y2="2075" class="lane"/>
+  </g>
+
+  <rect x="35" y="252" width="2325" height="38" rx="5" fill="#2857a4"/><text x="56" y="278" class="section">1 · Extracción: el LLM solo devuelve valores del catálogo versionado</text>
+  <line x1="145" y1="330" x2="407" y2="330" class="arrow"/><text x="173" y="315" class="step">Noticia</text><text x="173" y="354" class="small">título · cuerpo · URL/dominio de origen</text>
+  <line x1="417" y1="405" x2="662" y2="405" class="arrow"/><text x="438" y="389" class="step">Prompt + JSON Schema v2</text><text x="438" y="429" class="small">enums cerrados y catálogo routing-taxonomy-v1</text>
+  <line x1="672" y1="500" x2="427" y2="500" class="return"/><text x="440" y="463" class="step">AssertionMetadata</text><text x="440" y="487" class="mono">categoryId · topic_code · evidence_kind</text><text x="440" y="525" class="mono">jurisdiction · entities · temporal · language</text><text x="440" y="548" class="mono">search_keywords · suggested_queries</text>
+  <line x1="417" y1="594" x2="887" y2="594" class="arrow"/><text x="520" y="578" class="step">AssertionsDocumentV2</text><text x="520" y="619" class="small">documento completo; taxonomía y contexto ya validados</text>
+  <line x1="897" y1="665" x2="1122" y2="665" class="arrow"/><text x="910" y="649" class="step">AssertionValidationPayloadV2</text>
+
+  <rect x="35" y="712" width="2325" height="38" rx="5" fill="#38715d"/><text x="56" y="738" class="section">2 · Routing: memoria reutilizable por tema, evidencia y jurisdicción</text>
+  <line x1="1132" y1="795" x2="1372" y2="795" class="arrow"/><text x="1146" y="778" class="step">POST /routes/resolve</text><text x="1146" y="820" class="mono">topic_code · evidence_kind · jurisdiction</text><text x="1146" y="842" class="small">language solo ajusta el ranking de salida</text>
+  <line x1="1382" y1="885" x2="1627" y2="885" class="store"/><text x="1401" y="869" class="step">GET ruta v2 + perfiles v1</text><text x="1401" y="909" class="mono">route-v2|taxonomy|TOPIC|EVIDENCE|JURISDICTION</text>
+  <line x1="1637" y1="958" x2="1392" y2="958" class="return"/><text x="1420" y="943" class="step">HIT: candidatos + DomainProfile</text>
+
+  <rect x="605" y="993" width="1735" height="342" rx="8" class="alt"/><rect x="605" y="993" width="162" height="34" rx="5" fill="#8794a8"/><text x="623" y="1016" class="section" style="font-size:16px">MISSING / STALE</text>
+  <line x1="1382" y1="1065" x2="2195" y2="1065" class="arrow"/><text x="1535" y="1048" class="step">Descubrir dominios para la RouteKey</text><text x="1535" y="1090" class="small">sin entidad, fecha ni texto de la noticia</text>
+  <line x1="2205" y1="1130" x2="1392" y2="1130" class="return"/><text x="1735" y="1114" class="step">CandidateURL[]</text>
+  <line x1="1382" y1="1195" x2="682" y2="1195" class="arrow"/><text x="835" y="1178" class="step">Clasificación batch con enums cerrados</text><text x="835" y="1220" class="small">CandidateURL[] + RouteKey metadata</text>
+  <line x1="672" y1="1262" x2="1372" y2="1262" class="return"/><text x="850" y="1246" class="step">DomainProfile[] + route_match[]</text>
+  <line x1="1382" y1="1310" x2="1627" y2="1310" class="store"/><text x="1405" y="1295" class="step">UPSERT perfiles + ruta</text>
+  <line x1="1382" y1="1382" x2="1142" y2="1382" class="return"/><text x="1160" y="1365" class="step">RoutedSource[]</text><text x="1160" y="1407" class="small">domain · type · authority · jurisdictions</text><text x="1160" y="1429" class="small">route_score · reason · profile_version</text>
+
+  <rect x="35" y="1470" width="2325" height="38" rx="5" fill="#7b4f9d"/><text x="56" y="1496" class="section">3 · Evidencia: la aserción concreta selecciona documentos dentro de los dominios enrutados</text>
+  <line x1="1132" y1="1555" x2="1887" y2="1555" class="arrow"/><text x="1340" y="1538" class="step">POST /search/evidence</text><text x="1340" y="1580" class="mono">assertion + origin_document + strategy + preferred_sources[]</text>
+  <line x1="1897" y1="1630" x2="1647" y2="1630" class="store"/><text x="1660" y="1614" class="step">GET EvidenceCacheKey</text><text x="1660" y="1655" class="small">plan + dominios/version + política + backend</text>
+  <line x1="1637" y1="1700" x2="1887" y2="1700" class="return"/><text x="1680" y="1684" class="step">HIT: Evidence[]</text>
+
+  <rect x="1525" y="1732" width="815" height="205" rx="8" class="alt"/><rect x="1525" y="1732" width="106" height="34" rx="5" fill="#8794a8"/><text x="1543" y="1755" class="section" style="font-size:16px">MISSING</text>
+  <line x1="1897" y1="1795" x2="2195" y2="1795" class="arrow"/><text x="1922" y="1779" class="step">Ejecutar plan concreto</text><text x="1922" y="1820" class="small">queries · filtros · fetch · extracción</text>
+  <line x1="2205" y1="1853" x2="1907" y2="1853" class="return"/><text x="1960" y="1837" class="step">Documentos + extractos</text>
+  <line x1="1897" y1="1910" x2="1647" y2="1910" class="store"/><text x="1670" y="1895" class="step">UPSERT Evidence[] + expiración</text>
+  <line x1="1897" y1="1975" x2="1142" y2="1975" class="return"/><text x="1370" y="1958" class="step">Evidence[] trazable</text><text x="1370" y="2000" class="small">URL · contexto · tipo documental · relación con origen</text>
+  <line x1="1132" y1="2040" x2="682" y2="2040" class="arrow"/><text x="760" y="2024" class="step">Validar aserción con evidencias</text>
+  <line x1="672" y1="2085" x2="1122" y2="2085" class="return"/><text x="815" y="2070" class="step">Veredicto + citas + auditoría</text>
+
+  <rect x="35" y="2140" width="750" height="238" rx="8" fill="#fff8ec" stroke="#db9a4b" stroke-width="2"/><text x="62" y="2174" class="step">PERSISTENCIA · domain_profiles_v1</text><text x="62" y="2208" class="body">Dominio canónico · source_type · authority_level</text><text x="62" y="2237" class="body">temas · evidencias · jurisdicciones · idiomas</text><text x="62" y="2266" class="body">motivo · confianza · taxonomy_version · revisión</text><text x="62" y="2312" class="small">Una propiedad del documento, como “copia” o “fuente primaria”,</text><text x="62" y="2335" class="small">no se aplica automáticamente a todo el dominio.</text>
+  <rect x="825" y="2140" width="750" height="238" rx="8" fill="#eef6f3" stroke="#68a18c" stroke-width="2"/><text x="852" y="2174" class="step">CACHÉ · source_routes_v2</text><text x="852" y="2208" class="body">RouteKey v2 · taxonomy_version · DomainProfile refs</text><text x="852" y="2237" class="body">afinidad temática · ranking base · frescura</text><text x="852" y="2266" class="body">created_at · refreshed_at · refresh_after</text><text x="852" y="2312" class="small">No guarda aserciones, entidades, fechas ni evidencias.</text><text x="852" y="2335" class="small">Una ruta fresca se reordena por idioma.</text>
+  <rect x="1615" y="2140" width="745" height="238" rx="8" fill="#f5eef9" stroke="#9b70ba" stroke-width="2"/><text x="1642" y="2174" class="step">CACHÉ · evidence_search_cache_v2</text><text x="1642" y="2208" class="body">EvidenceCacheKey · plan ejecutado · fuentes preferidas</text><text x="1642" y="2237" class="body">URLs · extractos · contextos · metadatos documentales</text><text x="1642" y="2266" class="body">backend · estrategia · origen · retrieved_at · expires_at</text><text x="1642" y="2312" class="small">CategoryId viaja hasta blockchain, pero no identifica rutas.</text><text x="1642" y="2335" class="small">UNKNOWN y GLOBAL permanecen separados.</text>
+</svg>

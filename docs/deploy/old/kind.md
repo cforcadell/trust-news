@@ -1,13 +1,13 @@
 
 > [!WARNING]
-> **ARCHIVADO — NO USAR.** Referencia histórica; consulte
-> [`README.md`](README.md) y los runbooks vigentes antes de operar.
+> **ARCHIVADO — NOT USE.** Historical reference; see
+> [`README.md`](README.md) and runbooks are in place before operation.
 
-**Crear el cluster:**
+**Create cluster:**
 ```bash
 kind create cluster --config kind-config.yaml
 ```
-Puede tardar un rato...
+It may take a while...
 
 Creating cluster "trust-news" ...
  ✓ Ensuring node image (kindest/node:v1.29.2) 🖼 
@@ -318,7 +318,7 @@ kubectl port-forward service/frontend-service 30443:443 -n frontend --address 0.
 https://192.168.56.108:30443/
 ```
 
-En caso de querer reconstruir una imagen
+In case you want to reconstruct an image
 
 ```bash
 #rebuil de la imagen

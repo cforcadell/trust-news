@@ -3,14 +3,14 @@ import os
 import json
 import math
 import asyncio
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiokafka import AIOKafkaConsumer
-from loguru import logger
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing import Optional, List, Dict, Any
 
 # =========================================================
@@ -20,7 +20,12 @@ from typing import Optional, List, Dict, Any
 from common.utils.kafka_contracts import ACTION_TO_QUOTA_MODEL, BILLABLE_SERVICES, DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_RESPONSES
 from common.models.async_models import ValidatorType, default_validator_type_weights
 from common.models.quota_models import ClientCreate, ClientResponse, ClientStatus, ClientUpdate, QuotaDetail
+from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
+
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
+logger = logging.getLogger("admin")
 
 # =========================================================
 # Modelos API REST (Gestión de Cuotas y Clientes)
@@ -49,16 +54,83 @@ class OpenRouterModelRecommendation(BaseModel):
     env: OpenRouterValidatorEnv
     reason: str
 
+
+class OpenRouterRecommendationOption(BaseModel):
+    tier: str
+    model: str
+    name: str
+    price: OpenRouterPrice
+    estimated_cost_usd: float
+    estimated_cost_delta_usd: Optional[float] = None
+    estimated_cost_delta_percent: Optional[float] = None
+
+
+class DeployedLLMRecommendation(BaseModel):
+    target_id: str
+    target_kind: str
+    workload: str
+    workload_key: Optional[str] = None
+    current_provider: str
+    current_model: str
+    input_tokens: int
+    output_tokens: int
+    current_price: Optional[OpenRouterPrice] = None
+    estimated_current_cost_usd: Optional[float] = None
+    options: List[OpenRouterRecommendationOption]
+    reason: str
+    reason_key: Optional[str] = None
+
+
 class OpenRouterRecommendationsResponse(BaseModel):
     generated_at: datetime
     source_url: str
     pricing_note: str
     estimation_note: str
     recommendations: List[OpenRouterModelRecommendation]
+    deployment_recommendations: List[DeployedLLMRecommendation] = Field(default_factory=list)
+    max_news_cost_usd: Optional[float] = None
+    estimated_news_costs_usd: Dict[str, Optional[float]] = Field(default_factory=dict)
 
 
 class ValidatorTypeWeightsUpdate(BaseModel):
     weights: Dict[str, float]
+
+
+class LLMRuntimeUpdate(BaseModel):
+    """The only mutable LLM fields exposed through the administrative API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+
+    @field_validator("provider")
+    @classmethod
+    def non_empty_provider(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip().lower()
+        if not value:
+            raise ValueError("provider no puede estar vacío")
+        return value
+
+    @field_validator("model")
+    @classmethod
+    def non_empty_model(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("model no puede estar vacío")
+        return value
+
+    @field_validator("temperature")
+    @classmethod
+    def valid_temperature(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise ValueError("temperature debe ser un número finito mayor o igual que cero")
+        return value
 
 # =========================================================
 # Configuración
@@ -80,6 +152,9 @@ OPENROUTER_CHAT_COMPLETIONS_URL = os.getenv(
 )
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL")
 OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "TrustNews Admin")
+GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
+SOURCE_ROUTER_URL = os.getenv("SOURCE_ROUTER_URL", "http://source-router.apis.svc.cluster.local:8075")
+NEWS_HANDLER_URL = os.getenv("NEWS_HANDLER_URL", "http://news-handler.apis.svc.cluster.local:8072")
 
 # =========================================================
 # App & Globales
@@ -294,6 +369,389 @@ def is_text_generation_model(model: Dict[str, Any]) -> bool:
     return True
 
 
+# Curated candidates are deliberately workload-specific. Catalog metadata can
+# confirm availability and price, but not evidence entailment or extraction quality.
+SIMILAR_COST_MIN_RATIO = 0.10
+SIMILAR_COST_MAX_RATIO = 5.00
+
+
+LLM_RECOMMENDATION_PROFILES: dict[str, dict[str, Any]] = {
+    "generate-asertions": {
+        "translation_key": "generateAssertions",
+        "workload": "Extracción estructurada de aserciones",
+        "tiers": {
+            "premium": ["google/gemini-3.8-flash", "mistralai/mistral-medium-3-5"],
+            "similar": ["openai/gpt-5-nano", "openai/gpt-4.1-nano"],
+            "budget": ["qwen/qwen3.7-flash", "qwen/qwen3-30b-a3b-instruct-2507"],
+        },
+        "input_tokens": 3000, "output_tokens": 1200,
+        "reason": "Prioriza extracción multilingüe, cobertura de hechos y salida estructurada; debe superar el benchmark de AssertionBatch antes del cambio.",
+    },
+    "source-router": {
+        "translation_key": "sourceRouter",
+        "workload": "Clasificación estructurada de fuentes",
+        "tiers": {
+            "premium": ["google/gemini-3.8-flash", "google/gemini-3.5-flash-lite"],
+            "similar": ["openai/gpt-5-nano", "openai/gpt-4.1-nano"],
+            "budget": ["mistralai/mistral-nemo", "qwen/qwen3.7-flash"],
+        },
+        "input_tokens": 2000, "output_tokens": 800,
+        "reason": "Modelo pequeño orientado a alto volumen, con contexto amplio y salida estructurada para clasificar autoridad y jurisdicción.",
+    },
+    "rag:ext_only_official": {
+        "translation_key": "ragExtOnlyOfficial",
+        "workload": "Validación RAG · solo fuentes oficiales externas",
+        "tiers": {
+            "premium": ["openai/gpt-5.6-sol", "google/gemini-3.1-pro-preview", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3-30b-a3b-instruct-2507", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["qwen/qwen3.7-flash", "amazon/nova-micro-v1"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Prioriza razonamiento probatorio y entailment sobre evidencias oficiales; es el uso con mayor impacto y justifica un modelo de gama alta.",
+    },
+    "rag:ext_official_first": {
+        "translation_key": "ragExtOfficialFirst",
+        "workload": "Validación RAG · fuentes oficiales primero",
+        "tiers": {
+            "premium": ["anthropic/claude-sonnet-5", "google/gemini-3.1-pro-preview", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3.7-flash", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["mistralai/mistral-nemo", "amazon/nova-micro-v1"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Aporta una familia distinta al ensemble y capacidad alta para distinguir soporte, contradicción y evidencia insuficiente.",
+    },
+    "rag:local": {
+        "translation_key": "ragLocal",
+        "workload": "Validación RAG · corpus local",
+        "tiers": {
+            "premium": ["mistralai/mistral-medium-3-5", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3-30b-a3b-instruct-2507", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["qwen/qwen3.7-flash", "mistralai/mistral-nemo"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Mantiene diversidad de proveedor y prioriza comprensión multilingüe de documentos locales con salida estructurada.",
+    },
+    "rag": {
+        "translation_key": "rag",
+        "workload": "Validación RAG",
+        "tiers": {
+            "premium": ["google/gemini-3.1-pro-preview", "openai/gpt-5.6-sol", "google/gemini-3.8-flash"],
+            "similar": ["qwen/qwen3-30b-a3b-instruct-2507", "mistralai/mistral-small-24b-instruct-2501"],
+            "budget": ["qwen/qwen3.7-flash", "amazon/nova-micro-v1"],
+        },
+        "input_tokens": 6000, "output_tokens": 600,
+        "reason": "Prioriza razonamiento probatorio y grounding; la elección final requiere medir entailment y citas con el corpus del proyecto.",
+    },
+    "search": {
+        "translation_key": "search",
+        "workload": "Validación con búsqueda online",
+        "tiers": {
+            "premium": ["google/gemini-3.8-flash", "openai/gpt-5.6-terra"],
+            "similar": ["openai/gpt-5-nano", "qwen/qwen3-30b-a3b-instruct-2507"],
+            "budget": ["qwen/qwen3.7-flash", "mistralai/mistral-nemo"],
+        },
+        "input_tokens": 2500, "output_tokens": 700,
+        "reason": "Equilibra síntesis y coste para búsqueda online; las citas siguen siendo no verificadas hasta persistir las anotaciones del proveedor.",
+    },
+    "memory": {
+        "translation_key": "memory",
+        "workload": "Validación por conocimiento del modelo",
+        "tiers": {
+            "premium": ["mistralai/mistral-small-2603", "google/gemini-3.5-flash-lite"],
+            "similar": ["openai/gpt-5-nano", "qwen/qwen3-30b-a3b-instruct-2507"],
+            "budget": ["mistralai/mistral-nemo", "qwen/qwen3.7-flash"],
+        },
+        "input_tokens": 1800, "output_tokens": 500,
+        "reason": "Prioriza calibración y coste moderado: un modelo más caro no corrige la falta de evidencia verificable de este tipo de validator.",
+    },
+}
+
+
+def openrouter_price(model: dict[str, Any]) -> Optional[OpenRouterPrice]:
+    pricing = model.get("pricing") or {}
+    prompt_price = decimal_or_none(pricing.get("prompt"))
+    completion_price = decimal_or_none(pricing.get("completion"))
+    if prompt_price is None or completion_price is None or prompt_price < 0 or completion_price < 0:
+        return None
+    return OpenRouterPrice(
+        prompt_per_token_usd=str(prompt_price), completion_per_token_usd=str(completion_price),
+        prompt_per_million_usd=round(price_per_million(prompt_price), 6),
+        completion_per_million_usd=round(price_per_million(completion_price), 6),
+    )
+
+
+def estimated_token_cost(price: OpenRouterPrice, input_tokens: int, output_tokens: int) -> float:
+    return float(
+        Decimal(price.prompt_per_token_usd) * Decimal(input_tokens)
+        + Decimal(price.completion_per_token_usd) * Decimal(output_tokens)
+    )
+
+
+def recommendation_profile(component: str, validator_type: Optional[dict[str, Any]] = None,
+                           strategy: Optional[str] = None) -> Optional[dict[str, Any]]:
+    if component in ("generate-asertions", "source-router"):
+        return LLM_RECOMMENDATION_PROFILES[component]
+    type_name = str((validator_type or {}).get("name") or "").upper()
+    if type_name == "RAG_EVIDENCE_VALIDATION":
+        key = f"rag:{str(strategy or '').lower()}"
+        return LLM_RECOMMENDATION_PROFILES.get(key, LLM_RECOMMENDATION_PROFILES["rag"])
+    if type_name == "LLM_SEARCH_VALIDATION":
+        return LLM_RECOMMENDATION_PROFILES["search"]
+    if type_name == "LLM_MEMORY_VALIDATION":
+        return LLM_RECOMMENDATION_PROFILES["memory"]
+    return None
+
+
+def build_deployed_recommendation(*, target_id: str, target_kind: str, current: dict[str, Any],
+                                  catalog: dict[str, dict[str, Any]], profile: dict[str, Any]) -> Optional[DeployedLLMRecommendation]:
+    input_tokens = int(profile["input_tokens"])
+    output_tokens = int(profile["output_tokens"])
+    current_provider = str(current.get("provider") or "").lower()
+    current_model = str(current.get("model") or "")
+    current_raw = catalog.get(current_model) if current_provider == "openrouter" else None
+    current_price = openrouter_price(current_raw) if current_raw else None
+    current_cost = estimated_token_cost(current_price, input_tokens, output_tokens) if current_price else None
+
+    options = []
+    for tier in ("premium", "similar", "budget"):
+        candidate_ids = profile.get("tiers", {}).get(tier, [])
+        for model_id in candidate_ids:
+            raw_model = catalog.get(model_id)
+            price = openrouter_price(raw_model) if raw_model else None
+            if not price or model_id == current_model:
+                continue
+            estimated_cost = estimated_token_cost(price, input_tokens, output_tokens)
+            if (
+                tier == "similar"
+                and current_cost is not None
+                and not current_cost * SIMILAR_COST_MIN_RATIO
+                <= estimated_cost
+                <= current_cost * SIMILAR_COST_MAX_RATIO
+            ):
+                continue
+            if tier == "budget" and (current_cost is None or estimated_cost >= current_cost):
+                continue
+            delta = estimated_cost - current_cost if current_cost is not None else None
+            delta_percent = (delta / current_cost * 100) if delta is not None and current_cost else None
+            options.append(OpenRouterRecommendationOption(
+                tier=tier,
+                model=model_id,
+                name=raw_model.get("name") or model_id,
+                price=price,
+                estimated_cost_usd=round(estimated_cost, 8),
+                estimated_cost_delta_usd=round(delta, 8) if delta is not None else None,
+                estimated_cost_delta_percent=round(delta_percent, 2) if delta_percent is not None else None,
+            ))
+            break
+
+    if not any(option.tier == "similar" for option in options):
+        fallback_candidates: list[tuple[tuple[float, float], str, dict[str, Any], OpenRouterPrice, float]] = []
+        seen_models: set[str] = set()
+        for tier in ("similar", "budget", "premium"):
+            for model_id in profile.get("tiers", {}).get(tier, []):
+                if model_id in seen_models or model_id == current_model:
+                    continue
+                seen_models.add(model_id)
+                raw_model = catalog.get(model_id)
+                price = openrouter_price(raw_model) if raw_model else None
+                if not raw_model or not price:
+                    continue
+                estimated_cost = estimated_token_cost(price, input_tokens, output_tokens)
+                if current_cost is not None and current_cost > 0:
+                    sort_key = (
+                        0.0 if estimated_cost <= current_cost else 1.0,
+                        abs(math.log(estimated_cost / current_cost)) if estimated_cost > 0 else float("inf"),
+                    )
+                else:
+                    sort_key = (0.0, estimated_cost)
+                fallback_candidates.append(
+                    (sort_key, model_id, raw_model, price, estimated_cost)
+                )
+        if not fallback_candidates:
+            for model_id, raw_model in catalog.items():
+                if model_id == current_model:
+                    continue
+                price = openrouter_price(raw_model)
+                if not price:
+                    continue
+                estimated_cost = estimated_token_cost(price, input_tokens, output_tokens)
+                if current_cost is not None and current_cost > 0:
+                    sort_key = (
+                        0.0 if estimated_cost <= current_cost else 1.0,
+                        abs(math.log(estimated_cost / current_cost))
+                        if estimated_cost > 0 else float("inf"),
+                    )
+                else:
+                    sort_key = (0.0, estimated_cost)
+                fallback_candidates.append(
+                    (sort_key, model_id, raw_model, price, estimated_cost)
+                )
+        if fallback_candidates:
+            _, model_id, raw_model, price, estimated_cost = min(
+                fallback_candidates, key=lambda item: item[0],
+            )
+            delta = estimated_cost - current_cost if current_cost is not None else None
+            delta_percent = (delta / current_cost * 100) if delta is not None and current_cost else None
+            options.append(OpenRouterRecommendationOption(
+                tier="similar",
+                model=model_id,
+                name=raw_model.get("name") or model_id,
+                price=price,
+                estimated_cost_usd=round(estimated_cost, 8),
+                estimated_cost_delta_usd=round(delta, 8) if delta is not None else None,
+                estimated_cost_delta_percent=round(delta_percent, 2) if delta_percent is not None else None,
+            ))
+    if not any(option.tier == "premium" for option in options):
+        similar = next((option for option in options if option.tier == "similar"), None)
+        if similar is not None:
+            options.append(similar.model_copy(update={"tier": "premium"}))
+    options.sort(key=lambda option: RECOMMENDATION_TIERS.index(option.tier))
+    return DeployedLLMRecommendation(
+        target_id=target_id, target_kind=target_kind, workload=profile["workload"],
+        workload_key=profile.get("translation_key"),
+        current_provider=current_provider, current_model=current_model,
+        input_tokens=input_tokens, output_tokens=output_tokens, current_price=current_price,
+        estimated_current_cost_usd=round(current_cost, 8) if current_cost is not None else None,
+        options=options,
+        reason=profile["reason"], reason_key=profile.get("translation_key"),
+    )
+
+
+NEWS_ASSERTION_COUNT = 5
+RECOMMENDATION_TIERS = ("premium", "similar", "budget")
+
+
+def recommendation_news_executions(
+    recommendation: DeployedLLMRecommendation,
+    recommendations: list[DeployedLLMRecommendation],
+) -> int:
+    if recommendation.target_id == "generate-asertions":
+        return 1
+    if recommendation.target_id == "source-router":
+        local_rag_validators = sum(
+            item.target_kind == "validator" and item.workload_key == "ragLocal"
+            for item in recommendations
+        )
+        return NEWS_ASSERTION_COUNT * local_rag_validators
+    if recommendation.target_kind == "validator":
+        return NEWS_ASSERTION_COUNT
+    return 0
+
+
+def estimated_recommendation_news_cost(
+    recommendations: list[DeployedLLMRecommendation],
+    tier: str = "current",
+) -> Optional[float]:
+    total = 0.0
+    for recommendation in recommendations:
+        executions = recommendation_news_executions(recommendation, recommendations)
+        if not executions:
+            continue
+        option = next((item for item in recommendation.options if item.tier == tier), None)
+        cost = option.estimated_cost_usd if option else recommendation.estimated_current_cost_usd
+        if cost is None or not math.isfinite(cost):
+            return None
+        total += cost * executions
+    return round(total, 8)
+
+
+def constrain_recommendations_by_news_cost(
+    recommendations: list[DeployedLLMRecommendation],
+    max_news_cost_usd: Optional[float],
+) -> dict[str, Optional[float]]:
+    totals: dict[str, Optional[float]] = {
+        "current": estimated_recommendation_news_cost(recommendations),
+    }
+    for tier in RECOMMENDATION_TIERS:
+        total = estimated_recommendation_news_cost(recommendations, tier)
+        if max_news_cost_usd is not None:
+            while total is not None and total > max_news_cost_usd:
+                removable: list[tuple[float, DeployedLLMRecommendation]] = []
+                for recommendation in recommendations:
+                    option = next((item for item in recommendation.options if item.tier == tier), None)
+                    current_cost = recommendation.estimated_current_cost_usd
+                    if option is None or current_cost is None:
+                        continue
+                    saving = (
+                        option.estimated_cost_usd - current_cost
+                    ) * recommendation_news_executions(recommendation, recommendations)
+                    if saving > 0:
+                        removable.append((saving, recommendation))
+                if not removable:
+                    break
+                _, recommendation = max(removable, key=lambda item: item[0])
+                current_option = next(
+                    item for item in recommendation.options if item.tier == tier
+                )
+                fallback_tiers = {
+                    "premium": ("similar", "budget"),
+                    "similar": ("budget",),
+                }.get(tier, ())
+                replacements = [
+                    item for item in recommendation.options
+                    if item.tier in fallback_tiers
+                    and item.model != current_option.model
+                    and item.estimated_cost_usd < current_option.estimated_cost_usd
+                ]
+                replacement = min(
+                    replacements,
+                    key=lambda item: (
+                        fallback_tiers.index(item.tier), item.estimated_cost_usd,
+                    ),
+                    default=None,
+                )
+                recommendation.options = [item for item in recommendation.options if item.tier != tier]
+                if replacement is not None:
+                    recommendation.options.append(replacement.model_copy(update={"tier": tier}))
+                    recommendation.options.sort(
+                        key=lambda option: RECOMMENDATION_TIERS.index(option.tier)
+                    )
+                total = estimated_recommendation_news_cost(recommendations, tier)
+
+            if total is None or total > max_news_cost_usd:
+                for recommendation in recommendations:
+                    recommendation.options = [item for item in recommendation.options if item.tier != tier]
+                total = None
+        totals[tier] = total
+    return totals
+
+
+async def deployed_llm_recommendations(catalog: dict[str, dict[str, Any]]) -> list[DeployedLLMRecommendation]:
+    component_calls = [get_llm_component(component) for component in LLM_COMPONENT_TARGETS]
+    results = await asyncio.gather(*component_calls, discover_validators(), return_exceptions=True)
+    recommendations: list[DeployedLLMRecommendation] = []
+
+    for component, result in zip(LLM_COMPONENT_TARGETS, results[:len(component_calls)]):
+        if isinstance(result, Exception):
+            logger.warning("Could not inspect deployed LLM component=%s error=%s", component, result.__class__.__name__)
+            continue
+        profile = recommendation_profile(component)
+        recommendation = build_deployed_recommendation(
+            target_id=component, target_kind="component", current=result.get("actual") or {},
+            catalog=catalog, profile=profile,
+        ) if profile else None
+        if recommendation:
+            recommendations.append(recommendation)
+
+    validator_result = results[-1]
+    if isinstance(validator_result, Exception):
+        logger.warning("Could not inspect deployed validators error=%s", validator_result.__class__.__name__)
+        return recommendations
+    for validator in validator_result:
+        profile = recommendation_profile(
+            "validator", validator.get("validator_type"), validator.get("evidence_search_strategy"),
+        )
+        if not profile or not validator.get("model"):
+            continue
+        recommendation = build_deployed_recommendation(
+            target_id=validator["validator_id"], target_kind="validator", current=validator,
+            catalog=catalog, profile=profile,
+        )
+        if recommendation:
+            recommendations.append(recommendation)
+    return recommendations
+
+
 # =========================================================
 # Procesamiento de Kafka
 # =========================================================
@@ -402,11 +860,316 @@ async def consume_responses_for_quotas():
 # =========================================================
 # Endpoints REST
 # =========================================================
+
+# LLM runtime configuration -------------------------------------------------
+#
+# Admin owns desired/actual state in Mongo.  The services keep the effective
+# configuration in memory and expose their already-existing internal
+# /admin/config endpoint.  No credential can cross either HTTP boundary.
+LLM_COMPONENT_TARGETS = {
+    "generate-asertions": GENERATE_ASSERTIONS_URL,
+    "source-router": SOURCE_ROUTER_URL,
+}
+
+
+def llm_config_id(component: str) -> str:
+    return f"llm:{component}"
+
+
+def validator_config_id(validator_id: str) -> str:
+    return f"llm:validator:{validator_id.lower()}"
+
+
+def normalized_llm_config(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep only non-sensitive, portable LLM settings from a service reply."""
+    source = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    result = {
+        "provider": str(source.get("provider") or "").strip().lower(),
+        "model": str(source.get("model") or "").strip(),
+        "temperature": source.get("temperature"),
+        "config_version": int(source.get("config_version") or 0),
+    }
+    if result["temperature"] is not None:
+        try:
+            result["temperature"] = float(result["temperature"])
+        except (TypeError, ValueError):
+            result["temperature"] = None
+    return result
+
+
+async def service_config(url: str) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{url.rstrip('/')}/admin/config")
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Servicio de configuración no disponible: {exc.__class__.__name__}") from exc
+    return normalized_llm_config(data)
+
+
+async def apply_service_config(url: str, desired: dict[str, Any]) -> dict[str, Any]:
+    safe_payload = {
+        key: desired[key]
+        for key in ("provider", "model", "temperature", "config_version")
+        if key in desired and desired[key] is not None
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.put(f"{url.rstrip('/')}/admin/config", json=safe_payload)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"No se pudo aplicar la configuración: {exc.__class__.__name__}") from exc
+    return normalized_llm_config(data)
+
+
+def config_matches(desired: dict[str, Any], actual: dict[str, Any]) -> bool:
+    return all(
+        desired.get(key) == actual.get(key)
+        for key in ("provider", "model", "temperature", "config_version")
+    )
+
+
+async def config_document_or_effective(config_id: str, effective: dict[str, Any], component: str) -> dict[str, Any]:
+    document = await config_collection.find_one({"_id": config_id})
+    if not document:
+        return {
+            "component": component,
+            "desired": effective,
+            "actual": effective,
+            "config_version": 0,
+            "status": "APPLIED",
+            "updated_at": None,
+            "updated_by": None,
+        }
+    return {
+        "component": component,
+        "desired": document.get("desired") or effective,
+        "actual": document.get("actual") or effective,
+        "config_version": int(document.get("config_version") or 0),
+        "status": document.get("status") or "ERROR",
+        "updated_at": document.get("updated_at"),
+        "updated_by": document.get("updated_by"),
+        "last_error": document.get("last_error"),
+    }
+
+
+def semantic_validator_type(value: Any) -> dict[str, Any]:
+    try:
+        parsed = ValidatorType(int(value))
+    except (TypeError, ValueError):
+        parsed = ValidatorType.LLM_MEMORY_VALIDATION
+    return {"id": int(parsed), "name": parsed.name}
+
+
+def validator_is_active(config: dict[str, Any]) -> bool:
+    return config.get("status") in (None, 1, "1", "Registered", "registered", "ACTIVE", "active")
+
+
+async def discover_validators() -> list[dict[str, Any]]:
+    """Discover validators from the existing blockchain/IPFS-backed cache.
+
+    The browser never provides a pod URL.  The service URL is read from the
+    registered validator configuration and is subsequently checked server-side.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(f"{NEWS_HANDLER_URL.rstrip('/')}/validators/cache", params={"recover_ipfs": "true"})
+        response.raise_for_status()
+        rows = response.json().get("validators") or []
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"No se pudieron descubrir validators: {exc.__class__.__name__}") from exc
+
+    validators = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        validator_id = str(row.get("validator") or "").strip()
+        config = row.get("config") or {}
+        if not validator_id or not isinstance(config, dict):
+            continue
+        service_url = str(row.get("service_url") or row.get("validator_service_url") or config.get("service_url") or "").strip()
+        item = {
+            "validator_id": validator_id,
+            "service_url": service_url,
+            "validator_type": semantic_validator_type(row.get("validator_type") or config.get("type")),
+            "evidence_search_strategy": config.get("evidence_search_strategy"),
+            "categories": row.get("categories") or [],
+            "status": "ACTIVE" if validator_is_active(config) else "INACTIVE",
+            "provider": config.get("provider"),
+            "model": config.get("model"),
+        }
+        if service_url and item["status"] == "ACTIVE":
+            try:
+                actual = await service_config(service_url)
+                item.update(actual)
+                document = await config_collection.find_one({"_id": validator_config_id(validator_id)})
+                item["config_version"] = int((document or {}).get("config_version") or actual.get("config_version") or 0)
+            except HTTPException:
+                item["status"] = "ERROR"
+                item["config_version"] = 0
+        else:
+            item["status"] = "ERROR" if item["status"] == "ACTIVE" else item["status"]
+            item["config_version"] = 0
+        validators.append(item)
+    return validators
+
+
+async def require_discovered_validator(validator_id: str) -> dict[str, Any]:
+    normalized = validator_id.lower()
+    for validator in await discover_validators():
+        if validator["validator_id"].lower() == normalized:
+            if validator["status"] != "ACTIVE" or not validator.get("service_url"):
+                raise HTTPException(status_code=503, detail="Validator existe pero no está accesible")
+            return validator
+    raise HTTPException(status_code=404, detail="Validator no encontrado")
+
+
+async def persist_and_apply_llm_config(
+    *,
+    config_id: str,
+    component: str,
+    target_url: str,
+    payload: LLMRuntimeUpdate,
+    updated_by: str,
+    validator_type: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    current = await service_config(target_url)
+    old_document = await config_collection.find_one({"_id": config_id}) or {}
+    desired = {**current, **payload.model_dump(exclude_none=True)}
+    desired["config_version"] = int(old_document.get("config_version") or 0) + 1
+    now = datetime.now(timezone.utc)
+    audit = {
+        "component": component,
+        "validator_type": validator_type,
+        "previous": {key: current.get(key) for key in ("provider", "model", "temperature", "config_version")},
+        "next": {key: desired.get(key) for key in ("provider", "model", "temperature", "config_version")},
+        "config_version": desired["config_version"],
+        "updated_by": updated_by,
+        "updated_at": now,
+        "result": "PENDING",
+    }
+    await config_collection.update_one(
+        {"_id": config_id},
+        {"$set": {"component": component, "desired": desired, "config_version": desired["config_version"], "status": "PENDING", "updated_at": now,
+                  "updated_by": updated_by, "last_audit": audit},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    try:
+        actual = await apply_service_config(target_url, desired)
+        if not config_matches(desired, actual):
+            raise RuntimeError("desired_actual_mismatch")
+    except Exception as exc:
+        error = exc.detail if isinstance(exc, HTTPException) else exc.__class__.__name__
+        audit["result"] = "ERROR"
+        await config_collection.update_one(
+            {"_id": config_id},
+            {"$set": {"status": "ERROR", "last_error": str(error), "updated_at": datetime.now(timezone.utc),
+                      "last_audit": audit}},
+        )
+        logger.warning("LLM runtime configuration failed component=%s version=%s error=%s", component, desired["config_version"], error)
+        raise HTTPException(status_code=503, detail=f"Configuración persistida pero no aplicada: {error}") from exc
+
+    audit["result"] = "APPLIED"
+    now = datetime.now(timezone.utc)
+    await config_collection.update_one(
+        {"_id": config_id},
+        {"$set": {"actual": actual, "status": "APPLIED", "updated_at": now, "updated_by": updated_by,
+                  "last_error": None, "last_audit": audit}},
+    )
+    logger.info("LLM runtime configuration applied component=%s version=%s provider=%s model=%s updated_by=%s",
+                component, desired["config_version"], desired["provider"], desired["model"], updated_by)
+    return await config_document_or_effective(config_id, actual, component)
+
+
+@app.get("/internal/llm/overrides/{config_id:path}")
+async def get_internal_llm_override(config_id: str):
+    """Cluster-internal startup lookup; intentionally contains no credentials."""
+    document = await config_collection.find_one({"_id": config_id})
+    if not document or not isinstance(document.get("desired"), dict):
+        raise HTTPException(status_code=404, detail="No runtime override")
+    desired = normalized_llm_config(document["desired"])
+    desired["config_version"] = int(document.get("config_version") or desired.get("config_version") or 0)
+    return {"desired": desired, "status": document.get("status")}
+
+
+@app.get("/llm/components")
+async def list_llm_components():
+    return {"components": [await get_llm_component(component) for component in LLM_COMPONENT_TARGETS]}
+
+
+@app.get("/llm/components/{component}")
+async def get_llm_component(component: str):
+    target = LLM_COMPONENT_TARGETS.get(component)
+    if not target:
+        raise HTTPException(status_code=404, detail="Componente LLM desconocido")
+    actual = await service_config(target)
+    return await config_document_or_effective(llm_config_id(component), actual, component)
+
+
+@app.put("/llm/components/{component}")
+async def update_llm_component(component: str, payload: LLMRuntimeUpdate, request: Request):
+    target = LLM_COMPONENT_TARGETS.get(component)
+    if not target:
+        raise HTTPException(status_code=404, detail="Componente LLM desconocido")
+    if not payload.model_dump(exclude_none=True):
+        raise HTTPException(status_code=400, detail="Indica al menos un campo LLM a actualizar")
+    updated_by = request.headers.get("x-assermetry-admin-user", "gateway-admin")
+    return await persist_and_apply_llm_config(
+        config_id=llm_config_id(component), component=component, target_url=target,
+        payload=payload, updated_by=updated_by,
+    )
+
+
+@app.get("/llm/validators")
+async def list_llm_validators(
+    type: Optional[str] = Query(None),
+    strategy: Optional[str] = Query(None),
+):
+    validators = await discover_validators()
+    if type:
+        type_upper = type.upper()
+        validators = [item for item in validators if item["validator_type"]["name"] == type_upper]
+    if strategy:
+        strategy_upper = strategy.upper()
+        validators = [item for item in validators if str(item.get("evidence_search_strategy") or "").upper() == strategy_upper]
+    return {"validators": validators}
+
+
+@app.get("/llm/validators/{validator_id}")
+async def get_llm_validator(validator_id: str):
+    validator = await require_discovered_validator(validator_id)
+    actual = await service_config(validator["service_url"])
+    view = await config_document_or_effective(validator_config_id(validator["validator_id"]), actual, f"validator:{validator['validator_id']}")
+    return {**view, **{key: value for key, value in validator.items() if key != "service_url"}}
+
+
+@app.put("/llm/validators/{validator_id}")
+async def update_llm_validator(validator_id: str, payload: LLMRuntimeUpdate, request: Request):
+    validator = await require_discovered_validator(validator_id)
+    if not payload.model_dump(exclude_none=True):
+        raise HTTPException(status_code=400, detail="Indica al menos un campo LLM a actualizar")
+    updated_by = request.headers.get("x-assermetry-admin-user", "gateway-admin")
+    result = await persist_and_apply_llm_config(
+        config_id=validator_config_id(validator["validator_id"]), component=f"validator:{validator['validator_id']}",
+        target_url=validator["service_url"], payload=payload, updated_by=updated_by,
+        validator_type=validator["validator_type"],
+    )
+    return {**result, "validator_id": validator["validator_id"], "validator_type": validator["validator_type"],
+            "evidence_search_strategy": validator["evidence_search_strategy"], "categories": validator["categories"],
+            "status": "APPLIED"}
+
+
 @app.get("/ai/openrouter/recommendations", response_model=OpenRouterRecommendationsResponse)
 async def get_openrouter_model_recommendations(
     limit: int = Query(8, ge=1, le=30, description="Número de modelos recomendados a devolver"),
     include_free: bool = Query(True, description="Incluir modelos gratuitos en la recomendación"),
     min_quality_score: float = Query(70, ge=1, le=100, description="Calidad mínima estimada por heurística interna"),
+    max_news_cost_usd: Optional[float] = Query(
+        None, gt=0, description="Coste LLM máximo combinado en USD para una noticia estimada de 5 aserciones",
+    ),
 ):
     """
     Devuelve modelos de OpenRouter ordenados por relación calidad/precio.
@@ -467,12 +1230,24 @@ async def get_openrouter_model_recommendations(
     for index, recommendation in enumerate(selected, start=1):
         recommendation.rank = index
 
+    catalog = {
+        model["id"]: model for model in raw_models
+        if isinstance(model, dict) and model.get("id") and is_text_generation_model(model)
+    }
+    deployment_recommendations = await deployed_llm_recommendations(catalog)
+    estimated_news_costs = constrain_recommendations_by_news_cost(
+        deployment_recommendations, max_news_cost_usd,
+    )
+
     return OpenRouterRecommendationsResponse(
         generated_at=datetime.now(timezone.utc),
         source_url=OPENROUTER_MODELS_URL,
         pricing_note="OpenRouter publica pricing.prompt y pricing.completion como USD por token; aquí también se muestra USD por millón de tokens.",
-        estimation_note="estimated_validation_cost_usd asume una validación típica de 1000 tokens de entrada y 250 de salida.",
+        estimation_note="El ranking general asume 1000 tokens de entrada y 250 de salida. La comparación por LLM usa la carga indicada en cada fila; no incluye búsqueda web, caché, razonamiento interno ni descuentos.",
         recommendations=selected,
+        deployment_recommendations=deployment_recommendations,
+        max_news_cost_usd=max_news_cost_usd,
+        estimated_news_costs_usd=estimated_news_costs,
     )
 
 

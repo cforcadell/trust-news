@@ -6,12 +6,13 @@ metadata:
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: frontend-frontend-strip-gui@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
     - http:
         paths:
-          - path: /
+          - path: /gui
             pathType: Prefix
             backend:
               service:

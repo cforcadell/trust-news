@@ -10,6 +10,7 @@ except Exception:  # pragma: no cover - dependency is installed in the service i
 
 TOKEN_RE = re.compile(r"[\wÀ-ÿ]+", re.UNICODE)
 NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+BOOST_WEIGHTS = {"entity": 1.5, "location": 1.0, "temporal": 1.2, "number": 1.0, "keyword": 0.5}
 
 
 def _tokens(text: str) -> List[str]:
@@ -66,6 +67,9 @@ def rank_chunks(assertion: Dict[str, Any], chunks: List[Dict[str, Any]]) -> List
         scored.append({
             **chunk,
             "score": round(score, 6),
+            "lexical_score": round(float(lexical_score or 0.0), 6),
+            "boost_components": {signal: BOOST_WEIGHTS[signal] for signal in signals},
+            "boost_score": round(boost, 6),
             "matched_signals": signals,
             "ranking_reason": _ranking_reason(float(lexical_score or 0.0), signals),
         })
@@ -111,14 +115,7 @@ def _matched_signals(assertion: Dict[str, Any], text: str) -> List[str]:
 
 
 def _boost(signals: List[str]) -> float:
-    weights = {
-        "entity": 1.5,
-        "location": 1.0,
-        "temporal": 1.2,
-        "number": 1.0,
-        "keyword": 0.5,
-    }
-    return sum(weights.get(signal, 0.0) for signal in signals)
+    return sum(BOOST_WEIGHTS.get(signal, 0.0) for signal in signals)
 
 
 def _ranking_reason(lexical_score: float, signals: List[str]) -> str:

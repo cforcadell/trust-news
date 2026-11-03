@@ -9,6 +9,9 @@ data:
   ORDERS_COLLECTION: "news"
   QUOTAS_COLLECTION_NAME: "clients_quotas"
   CONFIG_COLLECTION_NAME: "config"
+  GENERATE_ASSERTIONS_URL: "http://generate-asertions.apis.svc.cluster.local:8071"
+  SOURCE_ROUTER_URL: "http://source-router.apis.svc.cluster.local:8075"
+  NEWS_HANDLER_URL: "http://news-handler.apis.svc.cluster.local:8072"
 
   KAFKA_BROKER: "kafka.infra.svc.cluster.local:9092"
   TOPIC_RESPONSES: "fake_news_responses"

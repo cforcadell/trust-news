@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "candidate-mistral-ext-only-v1",
+  "description": "Variante de la configuración validada el 2026-09-26: sustituye únicamente Llama 3.1 8B por Mistral Small 24B en el validador RAG EXT_ONLY_OFFICIAL.",
+  "components": {
+    "generate-asertions": {
+      "provider": "openrouter",
+      "model": "openai/gpt-5-nano",
+      "temperature": 0.0
+    },
+    "source-router": {
+      "provider": "openrouter",
+      "model": "openai/gpt-5-nano",
+      "temperature": 0.0
+    }
+  },
+  "validators": [
+    {
+      "selector": {
+        "id": "0x4504A1d4047583164919AE40C37c4f4c5B854BBb"
+      },
+      "provider": "openrouter",
+      "model": "mistralai/mistral-small-24b-instruct-2501",
+      "temperature": 0.0
+    },
+    {
+      "selector": {
+        "id": "0x42d488D0393FD1D6b72BB424Db28Dd7eb5E06737"
+      },
+      "provider": "openrouter",
+      "model": "qwen/qwen3-30b-a3b-instruct-2507",
+      "temperature": 0.0
+    },
+    {
+      "selector": {
+        "id": "0xBe794abf86d173ddCfE937c6d8d739BDc4e94165"
+      },
+      "provider": "openrouter",
+      "model": "mistralai/mistral-small-24b-instruct-2501",
+      "temperature": 0.0
+    }
+  ]
+}

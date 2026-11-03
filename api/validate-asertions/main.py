@@ -4,6 +4,9 @@ import uuid
 import logging
 import asyncio
 import time
+import math
+import hashlib
+import threading
 
 from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -19,7 +22,7 @@ from abc import ABC, abstractmethod
 from common.utils.blockchain import send_signed_tx, wait_for_receipt_blocking, send_and_wait, receipt_succeeded, require_successful_receipt
 from common.utils.hash_utils import hash_text_to_multihash, multihash_to_base58,multihash_to_base58_dict, uuid_to_uint256,safe_multihash_to_tuple,cid_to_multihash_tuple
 from common.models.veredicto import Veredicto, Validacion
-from common.models.async_models import VerifyInputModel, ValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidencePreferredDomainsMode, local_preferred_domains_supported
+from common.models.async_models import VerifyInputModel, ValidatorAPIResponse, RAGValidatorAPIResponse,ValidatorRegistrationInput,Multihash, ValidatorConfig, ValidatorType, ValidatorStatus, LightValidationRequest, LightValidationResponse, ValidationCompletedResponse, ValidationMode, ValidationErrorDetails, ValidationExecutionStatus, ValidatorConfigEvent, ValidatorConfigEventPayload, EvidenceSearchStrategy, evidence_search_strategy_supported
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     AssertionValidationPayloadV2,
@@ -29,8 +32,18 @@ from common.models.protocol_models import (
     build_assertions_document_v2,
 )
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs as build_kafka_security_kwargs
-from common.utils.ipfs_client import upload_bytes_to_ipfs, upload_json_to_ipfs as upload_json_payload_to_ipfs
+from common.utils.ipfs_client import (
+    upload_bytes_to_ipfs,
+    upload_json_to_ipfs as upload_json_payload_to_ipfs,
+    unwrap_ipfs_content,
+)
 from common.utils.llm_json import strip_json_markdown
+from common.utils.llm_runtime import fetch_llm_runtime_override
+from common.llm import LLMRequest, complete, complete_structured, parse_response
+from common.utils.logging_utils import configure_single_line_json_logging
+from common.utils.evidence import evaluate_evidence_grounding
+from common.utils.evidence_bundle import evidence_bundle_hash, evidence_bundle_hash_v2
+from common.utils.validation_prompt import DEFAULT_RAG_PROMPT, format_evidences_for_prompt
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -57,10 +70,8 @@ class ProviderModelFilter(logging.Filter):
         return True
 
 # 1. Configuramos el formato global
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(levelname)s] %(provider_model)s: %(message)s"
-)
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_single_line_json_logging(log_level)
 
 # 2. LA MAGIA AQUÍ: Inyectamos el filtro en todos los handlers raíz
 for handler in logging.root.handlers:
@@ -73,6 +84,7 @@ logger = logging.getLogger("validate-asertions")
 # Config blockchain y AI
 # =========================================================
 RPC_URL = os.getenv("RPC_URL")
+BLOCKCHAIN_ENABLED = os.getenv("BLOCKCHAIN_ENABLED", "false").strip().lower() in {"1", "true", "on", "yes"}
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 ACCOUNT_ADDRESS = Web3.to_checksum_address(os.getenv("ACCOUNT_ADDRESS"))
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
@@ -98,63 +110,16 @@ DEFAULT_SEARCH_PROMPT = """Actúa como validador factual con búsqueda online.
 Busca evidencias actuales en Internet cuando sea necesario.
 Usa el contexto de la aserción para formular la búsqueda: origin=explicit prima sobre origin=inferred, y origin=inferred se usa cuando falta contexto explícito.
 Prioriza fuentes oficiales, agencias de noticias y fuentes reputadas.
-Explica porque has tomado su decision de forma breve y objetiva usando enlaces concretos.
-No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las fuentes" ni referencias genéricas en descripcion, reason ni evidence_text.
-Si devuelves TRUE o FALSE, sources debe contener al menos un enlace concreto con el fragmento o dato específico que te ha hecho decidir.
-En descripcion menciona el enlace, dominio o título concreto usado, no su índice interno.
-evidence_text debe ser un fragmento breve o dato concreto encontrado en esa URL; no inventes citas ni atribuyas texto no comprobado.
-supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
-Si no encuentras enlaces o fragmentos suficientes para apoyar o contradecir la aserción, devuelve UNKNOWN.
+Explica por qué has tomado la decisión de forma breve y objetiva.
+La búsqueda se realiza dentro del proveedor y Assermetry no puede comprobar el corpus consultado.
+No es obligatorio devolver fuentes. Si el proveedor expone enlaces concretos puedes incluirlos en sources, pero se tratarán como fuentes declaradas no comprobadas, nunca como evidencia documental verificada.
+No inventes enlaces, citas ni atribuciones. Si no tienes información suficiente, devuelve UNKNOWN.
 Devuelve exclusivamente JSON válido:
 {
   "resultado": "TRUE | FALSE | UNKNOWN",
-  "descripcion": "Justificación breve basada en enlaces concretos",
-  "sources": [
-    {
-      "url": "string",
-      "title": "string",
-      "evidence_text": "Fragmento o dato concreto encontrado en ese enlace",
-      "supports": true,
-      "reason": "string"
-    }
-  ]
+  "descripcion": "Justificación breve y objetiva"
 }"""
 
-DEFAULT_RAG_PROMPT = """Actúa como validador factual estricto.
-Debes validar la aserción usando exclusivamente las evidencias y contextos proporcionados en el prompt.
-Usa origin=explicit como contexto principal de la aserción. Usa origin=inferred solo cuando falte contexto explícito equivalente.
-No uses el contexto inferido como evidencia factual suficiente: el veredicto debe apoyarse en evidencias recuperadas o en contradicción directa de esas evidencias.
-No uses conocimiento interno salvo razonamiento lógico básico sobre el texto aportado.
-No accedas a URLs externas ni supongas que una URL contiene información no incluida en los contextos.
-No inventes fuentes, datos ni citas.
-Si los contextos/evidencias no contienen soporte directo ni contradicción directa para la aserción, responde UNKNOWN.
-Explica porque has tomado su decision de forma breve y objetiva usando URLs y fragmentos concretos.
-No digas "según la fuente 1", "Fuente 1", "CONTEXTO 1", "según las evidencias" ni referencias genéricas en descripcion, reason ni evidence_text.
-Si devuelves TRUE o FALSE, evidence_used debe contener al menos una evidencia con url y evidence_text.
-En descripcion menciona la URL, dominio o título concreto usado, no su índice interno.
-evidence_text debe ser un fragmento literal breve presente en las evidencias proporcionadas.
-supports indica si la evidencia apoya la aserción: true si la confirma, false si la contradice.
-Usa context_id o chunk_id cuando esté disponible para identificar el trozo exacto.
-No inventes citas ni resumas como si fuera una cita literal.
-Si ninguna evidencia contiene un fragmento directo que apoye o contradiga la aserción, devuelve UNKNOWN.
-Devuelve exclusivamente JSON válido:
-{
-  "resultado": "TRUE | FALSE | UNKNOWN",
-  "descripcion": "Justificación breve basada en URLs y fragmentos concretos",
-  "confidence": "HIGH | MEDIUM | LOW",
-  "evidence_used": [
-    {
-      "source_id": "string",
-      "context_id": "string",
-      "chunk_id": "string",
-      "url": "string",
-      "title": "string",
-      "supports": true,
-      "evidence_text": "Fragmento literal breve usado para decidir",
-      "reason": "string"
-    }
-  ]
-}"""
 
 
 LLM_MEMORY_VALIDATION_PROMPT = os.getenv("LLM_MEMORY_VALIDATION_PROMPT", "")
@@ -163,7 +128,23 @@ RAG_EVIDENCE_VALIDATION_PROMPT = os.getenv("RAG_EVIDENCE_VALIDATION_PROMPT", "")
 VALIDATOR_NAME = os.getenv("VALIDATOR_NAME", f"default-{ACCOUNT_ADDRESS}")
 VALIDATOR_TYPE = ValidatorType(int(os.getenv("VALIDATOR_TYPE", str(int(ValidatorType.LLM_MEMORY_VALIDATION)))))
 EVIDENCE_SEARCH_URL = os.getenv("EVIDENCE_SEARCH_URL", "http://evidence-search.apis.svc.cluster.local:8074")
-EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", "default")
+EVIDENCE_SEARCH_TIMEOUT_SECONDS = float(os.getenv("EVIDENCE_SEARCH_TIMEOUT_SECONDS", "90"))
+EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS = max(1, int(os.getenv("EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS", "2")))
+EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS = max(
+    EVIDENCE_SEARCH_TIMEOUT_SECONDS,
+    float(os.getenv("EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS", "120")),
+)
+EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS = max(
+    0.0, float(os.getenv("EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS", "0.25")),
+)
+EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD = max(
+    1, int(os.getenv("EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD", "3")),
+)
+EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS = max(
+    0.0, float(os.getenv("EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS", "30")),
+)
+SOURCE_ROUTER_URL = os.getenv("SOURCE_ROUTER_URL", "http://source-router.apis.svc.cluster.local:8075")
+SOURCE_ROUTER_TIMEOUT_SECONDS = max(1.0, float(os.getenv("SOURCE_ROUTER_TIMEOUT_SECONDS", "180")))
 AUTOMATIC_VALIDATOR_TYPES = {
     ValidatorType.LLM_MEMORY_VALIDATION,
     ValidatorType.LLM_SEARCH_VALIDATION,
@@ -172,8 +153,10 @@ AUTOMATIC_VALIDATOR_TYPES = {
 VALIDATOR_ACTIVE_DATE = os.getenv("VALIDATOR_ACTIVE_DATE", datetime.now(timezone.utc).isoformat())
 VALIDATOR_UPDATED_DATE = os.getenv("VALIDATOR_UPDATED_DATE", VALIDATOR_ACTIVE_DATE)
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
+LLM_CONFIG_VERSION = int(os.getenv("LLM_CONFIG_VERSION", "0"))
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", os.getenv("KAFKA_BOOTSTRAP", DEFAULT_KAFKA_BOOTSTRAP))
+KAFKA_MAX_MESSAGE_BYTES = int(os.getenv("KAFKA_MAX_MESSAGE_BYTES", str(4 * 1024 * 1024)))
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
 KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
 KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
@@ -182,6 +165,8 @@ TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", D
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", os.getenv("KAFKA_RESPONSE_TOPIC", DEFAULT_TOPIC_RESPONSES))
 light_consumer: Optional[AIOKafkaConsumer] = None
 light_producer: Optional[AIOKafkaProducer] = None
+_evidence_search_circuit_lock = threading.Lock()
+_evidence_search_circuit = {"failures": 0, "open_until": 0.0}
 
 # =========================================================
 # Parsear categorías
@@ -198,44 +183,51 @@ except Exception:
 
 
 class AdminConfigResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: str
     model: str
+    temperature: float
+    config_version: int
     categories: List[CategoryId]
-    api_url: Optional[str] = None
-    service_url: Optional[str] = None
     validator_type: int
-    use_evidence_search: bool
-    online_search_enabled: bool
-    evidence_search_url: str
-    evidence_search_use_preferred_domains: EvidencePreferredDomainsMode
-    evidence_search_preferred_profile_id: str
-    private_key: Optional[str] = None
+    validator_type_name: str
+    evidence_search_strategy: Optional[EvidenceSearchStrategy]
     account_address: str
-    api_key: Optional[str] = None
+    credentials_configured: dict[str, bool]
 
 class AdminConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Optional[str] = None
     model: Optional[str] = None
-    categories: Optional[List[CategoryId]] = None
-    api_url: Optional[str] = None
-    service_url: Optional[str] = None
-    validator_type: Optional[int] = None
-    evidence_search_url: Optional[str] = None
-    evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
-    evidence_search_preferred_profile_id: Optional[str] = None
-    private_key: Optional[str] = None
-    account_address: Optional[str] = None
-    api_key: Optional[str] = None
+    temperature: Optional[float] = None
+    config_version: Optional[int] = None
 
 # =========================================================
 # AI Validators
 # =========================================================
 class AIValidator(ABC):
     @abstractmethod
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> BaseModel:
         pass
+
+
+class SourceRouterRequestError(RuntimeError):
+    def __init__(self, cause: Exception):
+        self.response = getattr(cause, "response", None)
+        self.status_code = getattr(cause, "status_code", None) or getattr(self.response, "status_code", None)
+        self.detail = getattr(cause, "detail", None)
+        super().__init__(str(cause) or cause.__class__.__name__)
+
+
+class EvidenceSearchRequestError(RuntimeError):
+    def __init__(self, cause: Exception, evidence_response: Optional[Dict[str, Any]] = None):
+        self.response = getattr(cause, "response", None)
+        self.status_code = getattr(cause, "status_code", None) or getattr(self.response, "status_code", None)
+        self.detail = getattr(cause, "detail", None)
+        self.evidence_response = evidence_response
+        super().__init__(str(cause) or cause.__class__.__name__)
 
 
 def is_automatic_validator() -> bool:
@@ -258,38 +250,36 @@ def selected_validation_prompt() -> str:
     return LLM_MEMORY_VALIDATION_PROMPT
 
 
-def current_evidence_search_preferred_profile_id() -> str:
-    return str(os.getenv("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID) or "").strip() or "default"
-
-
-def current_evidence_search_use_preferred_domains() -> EvidencePreferredDomainsMode:
-    raw = str(os.getenv("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", EvidencePreferredDomainsMode.NONE.value) or "").strip().upper()
+def current_evidence_search_strategy() -> Optional[EvidenceSearchStrategy]:
+    if not uses_evidence_search():
+        return None
+    raw = str(os.getenv("EVIDENCE_SEARCH_STRATEGY", "") or "").strip().upper()
+    if not raw:
+        raise RuntimeError("EVIDENCE_SEARCH_STRATEGY is required for RAG_EVIDENCE_VALIDATION")
     try:
-        return EvidencePreferredDomainsMode(raw)
+        return EvidenceSearchStrategy(raw)
     except ValueError as exc:
-        allowed = ", ".join(mode.value for mode in EvidencePreferredDomainsMode)
-        raise RuntimeError(f"EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS invalido: {raw}. Valores permitidos: {allowed}") from exc
+        allowed = ", ".join(strategy.value for strategy in EvidenceSearchStrategy)
+        raise RuntimeError(f"EVIDENCE_SEARCH_STRATEGY invalido: {raw}. Valores permitidos: {allowed}") from exc
 
 
-def ensure_local_mode_supported(validator_type: ValidatorType, mode: EvidencePreferredDomainsMode) -> None:
-    if not local_preferred_domains_supported(validator_type, mode):
+def ensure_evidence_strategy_supported(validator_type: ValidatorType, strategy: Optional[EvidenceSearchStrategy]) -> None:
+    if validator_type == ValidatorType.RAG_EVIDENCE_VALIDATION and not evidence_search_strategy_supported(validator_type, strategy):
         raise HTTPException(
             status_code=400,
             detail={
-                "code": "LOCAL_PREFERRED_DOMAINS_UNSUPPORTED_VALIDATOR_TYPE",
-                "message": "LOCAL preferred domains are only supported for RAG_EVIDENCE_VALIDATION validators.",
+                "code": "RAG_EVIDENCE_STRATEGY_REQUIRED",
+                "message": "RAG_EVIDENCE_VALIDATION requires an evidence search strategy.",
             },
         )
-
-
-def mask_secret(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return value
-    return "*" * 8
-
-
-def is_masked_secret(value: Optional[str]) -> bool:
-    return bool(value) and set(str(value)) == {"*"}
+    if validator_type != ValidatorType.RAG_EVIDENCE_VALIDATION and strategy is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "EVIDENCE_STRATEGY_UNSUPPORTED_VALIDATOR_TYPE",
+                "message": "Evidence search strategies are only valid for RAG_EVIDENCE_VALIDATION validators.",
+            },
+        )
 
 
 def set_runtime_env(name: str, value: Any) -> None:
@@ -327,18 +317,16 @@ def normalize_admin_config_response() -> AdminConfigResponse:
     return AdminConfigResponse(
         provider=AI_PROVIDER,
         model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+        temperature=TEMPERATURE,
+        config_version=LLM_CONFIG_VERSION,
         categories=VALIDATOR_CATEGORIES,
-        api_url=API_URL,
-        service_url=VALIDATOR_SERVICE_URL or None,
         validator_type=int(VALIDATOR_TYPE),
-        use_evidence_search=uses_evidence_search(),
-        online_search_enabled=uses_online_search(),
-        evidence_search_url=EVIDENCE_SEARCH_URL,
-        evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
-        evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
-        private_key=mask_secret(PRIVATE_KEY),
+        validator_type_name=VALIDATOR_TYPE.name,
+        evidence_search_strategy=current_evidence_search_strategy(),
         account_address=ACCOUNT_ADDRESS,
-        api_key=mask_secret(API_KEY),
+        credentials_configured={
+            AI_PROVIDER: bool(os.getenv(f"{AI_PROVIDER.upper()}_API_KEY") or API_KEY),
+        },
     )
 
 
@@ -349,58 +337,6 @@ def normalize_assertion_input(texto: Any, contexto: Optional[str] = None) -> Tup
         return str(text_value), contexto or json.dumps(metadata, ensure_ascii=False)
     return str(texto or ""), contexto
 
-
-def format_evidences_for_prompt(evidences: Optional[List[Dict[str, Any]]]) -> str:
-    if not evidences:
-        return "No hay evidencias disponibles."
-    blocks = []
-    for idx, source in enumerate(evidences, start=1):
-        source_id = source.get("source_id") or f"source-{idx}"
-        source_lines = [
-            f"FUENTE {idx}",
-            f"source_id: {source_id}",
-            f"title: {source.get('title', '')}",
-            f"url: {source.get('url', '')}",
-            f"domain: {source.get('domain', '')}",
-            f"source_type: {source.get('source_type', '')}",
-            f"trust_score: {source.get('trust_score', '')}",
-            f"why_selected: {source.get('why_selected', '')}",
-        ]
-
-        contexts = source.get("contexts") or []
-        chunks = source.get("chunks") or []
-        if contexts:
-            for context_idx, context in enumerate(contexts, start=1):
-                source_lines.extend([
-                    f"CONTEXTO {context_idx}",
-                    f"context_id: {context.get('context_id', '')}",
-                    f"origin: {context.get('origin', '')}",
-                    f"score: {context.get('score', '')}",
-                    f"included_chunk_ids: {context.get('included_chunk_ids', [])}",
-                    f"text: {context.get('text', '')}",
-                ])
-        elif chunks:
-            for chunk_idx, chunk in enumerate(chunks, start=1):
-                source_lines.extend([
-                    f"CONTEXTO {chunk_idx}",
-                    f"context_id: {chunk.get('context_id') or chunk.get('chunk_id', '')}",
-                    f"origin: {chunk.get('origin', 'chunk')}",
-                    f"score: {chunk.get('score', '')}",
-                    f"included_chunk_ids: {chunk.get('included_chunk_ids') or [chunk.get('chunk_id')] if chunk.get('chunk_id') else []}",
-                    f"text: {chunk.get('text', '')}",
-                ])
-        else:
-            snippet = source.get("snippet") or source.get("excerpt") or source.get("content") or ""
-            source_lines.extend([
-                "CONTEXTO 1",
-                "context_id: ",
-                "origin: legacy_snippet",
-                "score: ",
-                "included_chunk_ids: []",
-                f"text: {snippet}",
-            ])
-        blocks.append("\n".join(source_lines))
-    return "\n\n".join(blocks)
 
 
 def build_prompt_content(texto: Any, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
@@ -433,6 +369,104 @@ class ValidationExecutionFailure(Exception):
         self.evidence_response = evidence_response
 
 
+def has_citable_evidence(evidences: List[Dict[str, Any]]) -> bool:
+    """A RAG verdict can only be requested when a citable context was delivered."""
+    return any(
+        context.get("citation_eligible") is True
+        for evidence in evidences if isinstance(evidence, dict)
+        for context in evidence.get("contexts") or [] if isinstance(context, dict)
+    )
+
+
+def no_citable_evidence_result(payload_v2: AssertionValidationPayloadV2) -> tuple[Validacion, str, Dict[str, Any]]:
+    """Create the deterministic abstention used when retrieval produced no citable context."""
+    issue = {
+        "code": "NO_CITABLE_EVIDENCE",
+        "message": "Evidence Search no entregó contextos citables al validador RAG.",
+    }
+    extras: Dict[str, Any] = {
+        "confidence": "LOW",
+        "sources": [],
+        "sources_declared": [],
+        "evidence_used": [],
+        "evidence_validation": {
+            "status": "NOT_REQUIRED",
+            "basis": "NO_CITABLE_EVIDENCE",
+            "original_verdict": "UNKNOWN",
+            "effective_verdict": "UNKNOWN",
+            "claimed_count": 0,
+            "verified_count": 0,
+            "rejected_count": 0,
+            "issues": [issue],
+        },
+    }
+    if evaluation_headers_for_payload(payload_v2):
+        extras["evaluation_citation_trace"] = {"claims": [], "issues": [issue]}
+    return (
+        Validacion.UNKNOWN,
+        "No se llamó al LLM: Evidence Search no entregó contextos citables para validar la afirmación.",
+        extras,
+    )
+
+
+def router_no_source_result(payload_v2: AssertionValidationPayloadV2) -> tuple[Validacion, str, Dict[str, Any]]:
+    """Create the deterministic abstention used when required local routing has no result."""
+    issue = {
+        "code": "ROUTER_NO_SOURCE",
+        "message": "Source Router no entregó dominios elegibles para la búsqueda local.",
+    }
+    extras: Dict[str, Any] = {
+        "confidence": "LOW",
+        "sources": [],
+        "sources_declared": [],
+        "evidence_used": [],
+        "evidence_validation": {
+            "status": "NOT_REQUIRED",
+            "basis": "ROUTER_NO_SOURCE",
+            "original_verdict": "UNKNOWN",
+            "effective_verdict": "UNKNOWN",
+            "claimed_count": 0,
+            "verified_count": 0,
+            "rejected_count": 0,
+            "issues": [issue],
+        },
+    }
+    if evaluation_headers_for_payload(payload_v2):
+        extras["evaluation_citation_trace"] = {"claims": [], "issues": [issue]}
+    return (
+        Validacion.UNKNOWN,
+        "No se llamó a Evidence Search ni al LLM: Source Router no entregó dominios elegibles.",
+        extras,
+    )
+
+
+def evaluation_citation_claims(claimed_evidence: Any, canonical_evidence: Any) -> list[Dict[str, Any]]:
+    """Build evaluation citations with server-resolved IDs without masking claims."""
+    canonical_by_context = {
+        str(item.get("context_id")): item
+        for item in canonical_evidence if isinstance(item, dict) and item.get("context_id")
+    } if isinstance(canonical_evidence, list) else {}
+    claims: list[Dict[str, Any]] = []
+    for item in claimed_evidence if isinstance(claimed_evidence, list) else []:
+        if not isinstance(item, dict):
+            claims.append({"invalid_item_type": type(item).__name__})
+            continue
+        context_id = item.get("context_id")
+        canonical = canonical_by_context.get(str(context_id)) if context_id else None
+        source_id = item.get("source_id")
+        # The RAG contract asks the model for context_id only. Fill the missing
+        # source_id from the server-owned canonical evidence, but retain any
+        # non-empty model-provided ID so invented IDs remain diagnosable.
+        if not source_id and canonical:
+            source_id = canonical.get("source_id")
+        claims.append({
+            "source_id": source_id,
+            "context_id": context_id,
+            "supports": item.get("supports"),
+        })
+    return claims
+
+
 def validation_error_details(failure: ValidationExecutionFailure) -> ValidationErrorDetails:
     cause = failure.cause
     response = getattr(cause, "response", None)
@@ -448,8 +482,14 @@ def validation_error_details(failure: ValidationExecutionFailure) -> ValidationE
     else:
         message = str(cause) or cause.__class__.__name__
 
-    if failure.stage == "EVIDENCE_SEARCH" and status_code:
+    if failure.stage == "SOURCE_ROUTER" and status_code:
+        code = f"SOURCE_ROUTER_HTTP_{status_code}"
+    elif failure.stage == "SOURCE_ROUTER":
+        code = "SOURCE_ROUTER_FAILED"
+    elif failure.stage == "EVIDENCE_SEARCH" and status_code:
         code = f"EVIDENCE_SEARCH_HTTP_{status_code}"
+    elif failure.stage == "EVIDENCE_SEARCH" and isinstance(cause, httpx.TimeoutException):
+        code = "EVIDENCE_SEARCH_TIMEOUT"
     elif failure.stage == "EVIDENCE_SEARCH":
         code = "EVIDENCE_SEARCH_FAILED"
     elif failure.stage == "LLM_REQUEST" and status_code:
@@ -458,7 +498,11 @@ def validation_error_details(failure: ValidationExecutionFailure) -> ValidationE
         code = "LLM_INVALID_RESPONSE"
     else:
         code = "VALIDATION_EXECUTION_ERROR"
-    retryable = status_code in {408, 429} or bool(status_code and status_code >= 500)
+    retryable = (
+        isinstance(cause, (httpx.TimeoutException, httpx.NetworkError))
+        or status_code in {408, 429}
+        or bool(status_code and status_code >= 500)
+    )
     return ValidationErrorDetails(
         stage=failure.stage,
         code=code,
@@ -474,24 +518,111 @@ def validate_payload_v2(payload_v2: AssertionValidationPayloadV2) -> tuple[Valid
     logger.info(f"[validate-asertions] received assertion-validation-payload-v2 mode={payload_v2.mode} assertion_id={payload_v2.assertion.assertion_id}")
     try:
         evidences, evidence_response = fetch_evidences_for_payload(payload_v2)
+    except SourceRouterRequestError as exc:
+        raise ValidationExecutionFailure("SOURCE_ROUTER", exc, [], None) from exc
+    except EvidenceSearchRequestError as exc:
+        raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], exc.evidence_response) from exc
     except Exception as exc:
         raise ValidationExecutionFailure("EVIDENCE_SEARCH", exc, [], None) from exc
-    try:
-        result_text = ai_validator.verificar_asercion(
-            payload_v2.assertion.text,
-            payload_context_for_prompt(payload_v2),
-            evidences,
+    if evidence_response is not None:
+        evidence_response["validator_input_evidence_bundle_hash"] = evidence_bundle_hash(evidences)
+        evidence_response["validator_input_evidence_bundle_hash_v2"] = evidence_bundle_hash_v2(evidences)
+        prompt_context = payload_context_for_prompt(payload_v2)
+        evidence_response["validator_input"] = {
+            "context": prompt_context,
+            "response_schema_hash": hashlib.sha256(json.dumps(RAGValidatorAPIResponse.model_json_schema(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "prompt_hash": hashlib.sha256(build_prompt_content(payload_v2.assertion.text, prompt_context, evidences).encode("utf-8")).hexdigest(),
+            "prompt_template_hash": hashlib.sha256(selected_validation_prompt().encode("utf-8")).hexdigest(),
+        }
+        logger.info("evidence_handoff assertion_id=%s retrieval_hash=%s validator_input_hash=%s",
+                    payload_v2.assertion.assertion_id, evidence_response.get("evidence_bundle_hash"),
+                    evidence_response["validator_input_evidence_bundle_hash"])
+    if (uses_evidence_search()
+            and evidence_response is not None
+            and evidence_response.get("search_skipped") == "no_eligible_local_sources"):
+        logger.info(
+            "[validate-asertions] downstream_skipped=true reason=ROUTER_NO_SOURCE assertion_id=%s",
+            payload_v2.assertion.assertion_id,
         )
+        verdict, description, extras = router_no_source_result(payload_v2)
+        return verdict, description, extras, evidence_response
+    if uses_evidence_search() and not has_citable_evidence(evidences):
+        logger.info(
+            "[validate-asertions] llm_skipped=true reason=NO_CITABLE_EVIDENCE assertion_id=%s",
+            payload_v2.assertion.assertion_id,
+        )
+        verdict, description, extras = no_citable_evidence_result(payload_v2)
+        return verdict, description, extras, evidence_response
+    try:
+        if isinstance(ai_validator, ConfiguredAIValidator):
+            result_text, llm_usage, resolved_model = ai_validator.verificar_asercion_con_uso(
+                payload_v2.assertion.text, payload_context_for_prompt(payload_v2), evidences)
+        else:
+            result_text = ai_validator.verificar_asercion(
+                payload_v2.assertion.text, payload_context_for_prompt(payload_v2), evidences)
+            llm_usage, resolved_model = None, None
     except Exception as exc:
         raise ValidationExecutionFailure("LLM_REQUEST", exc, evidences, evidence_response) from exc
     try:
         verdict, description, extras = parse_validator_api_response(result_text)
     except Exception as exc:
         raise ValidationExecutionFailure("LLM_RESPONSE_PARSE", exc, evidences, evidence_response) from exc
-    if evidences and not extras.get("sources"):
-        extras["sources"] = evidences
-    if evidences and not extras.get("evidence_used"):
-        extras["evidence_used"] = evidences
+    if llm_usage is not None:
+        extras["llm_usage"] = llm_usage
+    if resolved_model:
+        extras["resolved_model"] = resolved_model
+
+    # A prompt is not a security boundary: verify documentary citations on the
+    # server and never infer that every retrieved source was used by the model.
+    # Only RAG has a server-retrieved corpus. Online-search validators are a
+    # useful provider signal, but their private search trace is not documentary
+    # evidence that this service can verify.
+    documentary_validator = uses_evidence_search()
+    declared_sources = extras.get("sources") or []
+    claimed_evidence = extras.get("evidence_used") or []
+    if uses_online_search():
+        claimed_evidence = declared_sources
+    elif not documentary_validator:
+        claimed_evidence = claimed_evidence or declared_sources
+    grounding = evaluate_evidence_grounding(
+        verdict,
+        claimed_evidence,
+        evidences,
+        require_grounding=documentary_validator,
+        non_documentary_basis=(
+            "PROVIDER_SEARCH_UNVERIFIED" if uses_online_search() else "MODEL_KNOWLEDGE"
+        ),
+    )
+    extras["sources"] = []
+    extras["sources_declared"] = declared_sources if uses_online_search() else []
+    extras["evidence_used"] = grounding["evidence_used"]
+    extras["evidence_validation"] = grounding["validation"]
+    if evaluation_headers_for_payload(payload_v2):
+        extras["evaluation_citation_trace"] = {
+            "claims": evaluation_citation_claims(claimed_evidence, grounding["evidence_used"]),
+            "issues": grounding["validation"].get("issues", []),
+        }
+    effective_verdict = Validacion[grounding["effective_verdict"]]
+    if effective_verdict == Validacion.UNKNOWN and verdict in {Validacion.TRUE, Validacion.FALSE}:
+        extras["evidence_validation"].update({
+            "original_description": description,
+            "claimed_evidence": claimed_evidence,
+            "provided_evidence_text": format_evidences_for_prompt(evidences),
+        })
+        description = (
+            f"La IA respondió {verdict.name}, pero su cita no ha podido verificarse "
+            "como soporte de la decisión. Este resultado no cuenta como voto "
+            "decisivo en el consenso documental. "
+            f"Se proporcionaron {len(evidences)} fuentes al modelo. "
+            f"Justificación original de la IA: {description}"
+        )
+        logger.warning(
+            "[validate-asertions] unsupported_documentary_verdict=true "
+            f"assertion_id={payload_v2.assertion.assertion_id} "
+            f"original_verdict={verdict.name} "
+            f"issues={grounding['validation'].get('issues', [])}"
+        )
+    verdict = effective_verdict
     return verdict, description, extras, evidence_response
 
 def openrouter_model_for_current_type(model: str) -> str:
@@ -501,113 +632,235 @@ def openrouter_model_for_current_type(model: str) -> str:
 
 
 def current_evidence_search_policy() -> Dict[str, Any]:
-    preferred_domains_mode = current_evidence_search_use_preferred_domains()
-    ensure_local_mode_supported(VALIDATOR_TYPE, preferred_domains_mode)
+    strategy = current_evidence_search_strategy()
+    ensure_evidence_strategy_supported(VALIDATOR_TYPE, strategy)
     policy = {
-        "mode": "official_first",
-        "use_preferred_domains": preferred_domains_mode.value,
+        "strategy": strategy.value,
         "max_domains": int(os.getenv("EVIDENCE_SEARCH_MAX_DOMAINS", "8")),
         "max_results": int(os.getenv("EVIDENCE_SEARCH_MAX_SOURCES", "5")),
-        "max_queries_per_domain": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN", "2")),
-        "fallback_to_general_search": True,
+        "max_queries": int(os.getenv("EVIDENCE_SEARCH_MAX_QUERIES", "2")),
+        "preferred_sources": [],
     }
-    if preferred_domains_mode == EvidencePreferredDomainsMode.LOCAL:
-        policy["preferred_profile_id"] = current_evidence_search_preferred_profile_id()
     return policy
+
+
+def source_route_payload(payload_v2: AssertionValidationPayloadV2) -> Dict[str, Any]:
+    assertion = payload_v2.assertion
+    entities = getattr(assertion.context, "entities", []) or []
+    hints = getattr(assertion, "search_hints", None)
+    search_terms = []
+    if hints is not None:
+        search_terms.extend(getattr(hints, "search_keywords", []) or [])
+        search_terms.extend(getattr(hints, "suggested_queries", []) or [])
+    return {
+        "topic_code": assertion.topic_code.value,
+        "evidence_kind": assertion.evidence_kind.value,
+        "jurisdiction": assertion.context.jurisdiction.model_dump(mode="json"),
+        "language": assertion.context.language,
+        "discovery_context": {
+            "entity_terms": [str(entity.name) for entity in entities if str(getattr(entity, "name", "")).strip()][:5],
+            "search_terms": [str(value) for value in search_terms if str(value).strip()][:6],
+        },
+    }
+
+
+def evaluation_headers_for_payload(payload_v2: AssertionValidationPayloadV2) -> Dict[str, str]:
+    if (getattr(payload_v2, "mode", None) != ValidationMode.LIGHT
+            or os.getenv("EVALUATION_CAPTURE_PIPELINE", "false").lower() != "true"):
+        return {}
+    order_id = getattr(getattr(payload_v2, "correlation", None), "order_id", None)
+    try:
+        if not order_id:
+            return {}
+        headers = {"X-Evaluation-Run-ID": str(uuid.UUID(str(order_id)))}
+        if os.getenv("EVALUATION_CAPTURE_COLD", "false").lower() == "true":
+            headers["X-Evaluation-Cache"] = "COLD"
+        return headers
+    except (TypeError, ValueError):
+        return {}
+
+
+def resolve_local_sources(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    logger.info("[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling source-router before evidence-search")
+    try:
+        request_options = {"timeout": SOURCE_ROUTER_TIMEOUT_SECONDS}
+        headers = evaluation_headers_for_payload(payload_v2)
+        if headers:
+            request_options["headers"] = headers
+        response = httpx.post(
+            f"{SOURCE_ROUTER_URL.rstrip('/')}/routes/resolve",
+            json=source_route_payload(payload_v2),
+            **request_options,
+        )
+        response.raise_for_status()
+        route = response.json()
+    except Exception as exc:
+        raise SourceRouterRequestError(exc) from exc
+    return route.get("sources") or [], route
+
+
+class EvidenceSearchCircuitOpenError(RuntimeError):
+    """The local process is temporarily shedding a repeatedly failing dependency."""
+
+
+def _is_retryable_evidence_search_error(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)) or (
+        isinstance(status_code, int) and (status_code in {408, 429} or status_code >= 500)
+    )
+
+
+def _evidence_search_circuit_is_open(now: float) -> bool:
+    with _evidence_search_circuit_lock:
+        return _evidence_search_circuit["open_until"] > now
+
+
+def _record_evidence_search_success() -> None:
+    with _evidence_search_circuit_lock:
+        _evidence_search_circuit.update(failures=0, open_until=0.0)
+
+
+def _record_evidence_search_failure(now: float) -> None:
+    with _evidence_search_circuit_lock:
+        failures = _evidence_search_circuit["failures"] + 1
+        _evidence_search_circuit["failures"] = failures
+        if failures >= EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD:
+            _evidence_search_circuit["open_until"] = now + EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS
+
+
+def request_evidence_search(request_payload: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+    """Call Evidence Search with a bounded retry budget and local circuit breaker.
+
+    The budget covers all HTTP attempts and backoff.  This prevents a transient
+    upstream outage from making every queued validation wait for a full timeout.
+    """
+    started_at = time.monotonic()
+    deadline = started_at + EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS
+    attempts = 0
+    last_error = None
+    while attempts < EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS:
+        now = time.monotonic()
+        if _evidence_search_circuit_is_open(now):
+            raise EvidenceSearchCircuitOpenError("Evidence Search circuit is open after repeated retryable failures")
+        remaining = deadline - now
+        if remaining <= 0:
+            break
+        attempts += 1
+        request_options: Dict[str, Any] = {"timeout": min(EVIDENCE_SEARCH_TIMEOUT_SECONDS, remaining)}
+        if headers:
+            request_options["headers"] = headers
+        try:
+            response = httpx.post(
+                f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, **request_options,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if not isinstance(body, dict):
+                raise ValueError("Evidence Search returned a non-object response")
+            if attempts > 1:
+                body["request_recovery"] = {"attempts": attempts, "recovered": True}
+            _record_evidence_search_success()
+            return body
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_evidence_search_error(exc):
+                raise
+            now = time.monotonic()
+            if attempts >= EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS:
+                break
+            delay = min(
+                EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS * (2 ** (attempts - 1)),
+                max(0.0, deadline - now),
+            )
+            if delay:
+                time.sleep(delay)
+    _record_evidence_search_failure(time.monotonic())
+    if last_error is not None:
+        raise last_error
+    raise httpx.TimeoutException("Evidence Search request budget exhausted")
 
 
 def fetch_evidences_for_payload(payload_v2: AssertionValidationPayloadV2) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if not uses_evidence_search():
         return [], None
     search_policy = current_evidence_search_policy()
+    route_response = None
+    if current_evidence_search_strategy() == EvidenceSearchStrategy.LOCAL:
+        sources, route_response = resolve_local_sources(payload_v2)
+        if not sources:
+            return [], {"route": route_response, "evidences": [], "search_skipped": "no_eligible_local_sources"}
+        search_policy["preferred_sources"] = sources
     request_payload = {
         "schema_version": "evidence-search-request-v2",
         "assertion": payload_v2.assertion.model_dump(mode="json"),
+        "origin_document": payload_v2.origin_document.model_dump(mode="json"),
         "search_policy": search_policy,
     }
     try:
         logger.info(f"[validate-asertions] validator_type=RAG_EVIDENCE_VALIDATION calling evidence-search")
-        resp = httpx.post(f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, timeout=30.0)
-        resp.raise_for_status()
-        response = resp.json()
+        headers = evaluation_headers_for_payload(payload_v2)
+        response = request_evidence_search(request_payload, headers)
         response.setdefault("search_policy", search_policy)
-        return response.get("evidences", []) or response.get("sources", []) or [], response
+        if route_response is not None:
+            response["route"] = route_response
+        return response.get("evidences", []) or [], response
+    except httpx.HTTPStatusError as exc:
+        detail = None
+        try:
+            detail = exc.response.json().get("detail")
+        except Exception:
+            pass
+        evidence_response = None
+        if isinstance(detail, dict) and isinstance(detail.get("provider_trace"), dict):
+            evidence_response = {
+                "schema_version": "evidence-search-response-v2",
+                "assertion_id": str(getattr(payload_v2.assertion, "assertion_id", "")),
+                "search_policy": search_policy,
+                "evidences": [],
+                "cached": False,
+                "provider_trace": detail["provider_trace"],
+            }
+            if route_response is not None:
+                evidence_response["route"] = route_response
+        logger.exception("Evidence search failed")
+        raise EvidenceSearchRequestError(exc, evidence_response) from exc
     except Exception:
         logger.exception("Evidence search failed")
         raise
 
-class MistralValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        self.api_url = api_url
-        self.api_key = api_key
+def validation_response_model() -> type[BaseModel]:
+    if uses_evidence_search():
+        return RAGValidatorAPIResponse
+    return ValidatorAPIResponse
+
+
+class ConfiguredAIValidator(AIValidator):
+    """Provider-neutral validator backed by the shared structured LLM layer."""
+
+    def __init__(self, provider: str, model: str, temperature: float = 0.3):
+        self.provider = provider
         self.model = model
         self.temperature = temperature
 
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        import requests
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        contenido = build_prompt_content(texto, contexto, evidences)
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
-        resp = requests.post(self.api_url, headers=headers, json=data)
-        if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> BaseModel:
+        model = openrouter_model_for_current_type(self.model) if self.provider == "openrouter" else self.model
+        request = LLMRequest(
+            prompt=build_prompt_content(texto, contexto, evidences),
+            model=model,
+            temperature=self.temperature,
+            response_model=validation_response_model(),
+        )
+        return complete_structured(self.provider, request)
 
-class GeminiValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        self.api_url = api_url
-        self.api_key = api_key
-        self.model = model
-        self.temperature = temperature
-
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        prompt = build_prompt_content(texto, contexto, evidences)
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": self.temperature, "topK": 40, "topP": 0.8},
-        }
-        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
-        resp = httpx.post(f"{self.api_url}/models/{self.model}:generateContent", headers=headers, json=payload)
-        if resp.status_code == 200:
-            result = resp.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
-
-class OpenRouterValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        self.api_url = api_url
-        self.api_key = api_key
-        self.model = model
-        self.temperature = temperature
-
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        contenido = build_prompt_content(texto, contexto, evidences)
-        data = {"model": openrouter_model_for_current_type(self.model), "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
-        resp = httpx.post(self.api_url, headers=headers, json=data)
-        if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
-
-class GrokValidator(AIValidator):
-    def __init__(self, api_url: str, api_key: str, model: str, temperature: float = 0.3):
-        # xAI usa el formato estándar de OpenAI
-        self.api_url = api_url if api_url else "https://api.x.ai/v1/chat/completions"
-        self.api_key = api_key
-        self.model = model
-        self.temperature = temperature
-
-    def verificar_asercion(self, texto: str, contexto: Optional[str] = None, evidences: Optional[List[Dict[str, Any]]] = None) -> str:
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        contenido = build_prompt_content(texto, contexto, evidences)
-        data = {"model": self.model, "messages": [{"role": "user", "content": contenido}], "temperature": self.temperature}
-        
-        # Usamos httpx igual que en OpenRouter
-        resp = httpx.post(self.api_url, headers=headers, json=data, timeout=30.0)
-        
-        if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    def verificar_asercion_con_uso(self, texto: str, contexto: Optional[str] = None,
+                                  evidences: Optional[List[Dict[str, Any]]] = None):
+        model = openrouter_model_for_current_type(self.model) if self.provider == "openrouter" else self.model
+        request = LLMRequest(prompt=build_prompt_content(texto, contexto, evidences), model=model,
+                             temperature=self.temperature, response_model=validation_response_model())
+        response = complete(self.provider, request)
+        usage = response.usage.model_dump(mode="json") if response.usage else None
+        return parse_response(request, response), usage, response.model
     
 def build_ai_validator() -> Optional[AIValidator]:
     if not is_automatic_validator():
@@ -615,16 +868,17 @@ def build_ai_validator() -> Optional[AIValidator]:
         return None
     if AI_PROVIDER == "none":
         raise RuntimeError("AI_PROVIDER must be different from 'none' for LLM validator types")
-    if AI_PROVIDER == "mistral":
-        return MistralValidator(API_URL, API_KEY, os.getenv("MODEL", "mistral-tiny"), TEMPERATURE)
-    elif AI_PROVIDER == "gemini":
-        return GeminiValidator(API_URL, API_KEY, os.getenv("MODEL", "gemini-1.5-flash"), TEMPERATURE)
-    elif AI_PROVIDER == "openrouter":
-        return OpenRouterValidator(API_URL, API_KEY, os.getenv("MODEL", "gpt-4o-mini"), TEMPERATURE)
-    elif AI_PROVIDER == "grok":
-        return GrokValidator(API_URL, API_KEY, os.getenv("MODEL", "grok-beta"), TEMPERATURE)
-    else:
+    if uses_online_search() and AI_PROVIDER != "openrouter":
+        raise RuntimeError("LLM_SEARCH_VALIDATION currently requires AI_PROVIDER=openrouter")
+    defaults = {
+        "mistral": "mistral-tiny",
+        "gemini": "gemini-1.5-flash",
+        "openrouter": "gpt-4o-mini",
+        "grok": "grok-beta",
+    }
+    if AI_PROVIDER not in defaults:
         raise RuntimeError(f"AI_PROVIDER desconocido: {AI_PROVIDER}")
+    return ConfiguredAIValidator(AI_PROVIDER, os.getenv("MODEL", defaults[AI_PROVIDER]), TEMPERATURE)
 
 def clean_ai_response_text(text: str) -> str:
     return strip_json_markdown(text)
@@ -644,18 +898,20 @@ def kafka_security_kwargs():
     )
 
 
-def parse_validator_api_response(result_text: str) -> Tuple[Validacion, str, Dict[str, Any]]:
-    parsed_result = ValidatorAPIResponse(**json.loads(clean_ai_response_text(result_text)))
-    normalized = parsed_result.resultado.upper()
+def parse_validator_api_response(result: str | BaseModel) -> Tuple[Validacion, str, Dict[str, Any]]:
+    response_model = validation_response_model()
+    parsed_result = result if isinstance(result, response_model) else response_model.model_validate_json(clean_ai_response_text(result))
+    normalized = parsed_result.resultado
+    dumped = parsed_result.model_dump(mode="json")
     extras = {
         "resultado_raw": parsed_result.resultado,
         "confidence": parsed_result.confidence,
-        "sources": parsed_result.sources or [],
-        "evidence_used": parsed_result.evidence_used or [],
+        "sources": dumped.get("sources") or [],
+        "evidence_used": dumped.get("evidence_used") or [],
     }
-    if normalized in {"TRUE"}:
+    if normalized == "TRUE":
         return Validacion.TRUE, parsed_result.descripcion, extras
-    if normalized in {"FALSE"}:
+    if normalized == "FALSE":
         return Validacion.FALSE, parsed_result.descripcion, extras
     return Validacion.UNKNOWN, parsed_result.descripcion, extras
 
@@ -692,6 +948,7 @@ async def publish_validator_config_event(
     try:
         producer = AIOKafkaProducer(
             bootstrap_servers=KAFKA_BROKER,
+            max_request_size=KAFKA_MAX_MESSAGE_BYTES,
             **kafka_security_kwargs()
         )
         await producer.start()
@@ -768,12 +1025,20 @@ async def handle_light_validation_request(req: LightValidationRequest):
             "assertion_index": payload.assertion_index,
             "idAssertion": payload.idAssertion,
             "validator_id": ACCOUNT_ADDRESS,
+            "llm_provider": AI_PROVIDER,
+            "llm_model": ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+            "llm_config_version": LLM_CONFIG_VERSION,
             "categoryId": payload.categoryId,
             "verdict": verdict,
             "description": description,
             "confidence": extras.get("confidence"),
             "sources": extras.get("sources", []),
+            "sources_declared": extras.get("sources_declared", []),
             "evidence_used": extras.get("evidence_used", []),
+            "evidence_validation": extras.get("evidence_validation"),
+            "evaluation_citation_trace": extras.get("evaluation_citation_trace"),
+            "llm_usage": extras.get("llm_usage"),
+            "resolved_model": extras.get("resolved_model"),
             "assertion_validation_payload": payload.assertion_validation_payload.model_dump(mode="json") if payload.assertion_validation_payload else None,
             "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
@@ -794,6 +1059,7 @@ async def handle_light_validation_request(req: LightValidationRequest):
 
 async def consume_light_validation_requests():
     global light_consumer, light_producer
+    max_in_flight = max(1, int(os.getenv("LIGHT_VALIDATION_MAX_IN_FLIGHT", "1")))
     light_consumer = AIOKafkaConsumer(
         TOPIC_LIGHT_VALIDATION_REQUESTS,
         bootstrap_servers=KAFKA_BROKER,
@@ -803,6 +1069,7 @@ async def consume_light_validation_requests():
     )
     light_producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BROKER,
+        max_request_size=KAFKA_MAX_MESSAGE_BYTES,
         **kafka_security_kwargs()
     )
 
@@ -810,26 +1077,42 @@ async def consume_light_validation_requests():
     await light_producer.start()
     logger.info(f"[LIGHT] Kafka consumer subscribed to {TOPIC_LIGHT_VALIDATION_REQUESTS} as {ACCOUNT_ADDRESS}")
 
+    in_flight: set[asyncio.Task] = set()
+    slots = asyncio.Semaphore(max_in_flight)
+
+    async def process_message(msg):
+        try:
+            data = json.loads(msg.value.decode("utf-8"))
+            req = LightValidationRequest(**data)
+            if req.payload.validation_mode == ValidationMode.LIGHT:
+                await handle_light_validation_request(req)
+        except ValidationError as exc:
+            logger.warning("[LIGHT] Invalid Kafka request ignored: %s", exc)
+        except Exception:
+            logger.exception("[LIGHT] Error processing Kafka request")
+        finally:
+            slots.release()
+
     try:
         async for msg in light_consumer:
-            try:
-                data = json.loads(msg.value.decode("utf-8"))
-                req = LightValidationRequest(**data)
-                if req.payload.validation_mode != ValidationMode.LIGHT:
-                    continue
-                await handle_light_validation_request(req)
-            except ValidationError as e:
-                logger.warning(f"[LIGHT] Invalid Kafka request ignored: {e}")
-            except Exception as e:
-                logger.exception(f"[LIGHT] Error processing Kafka request: {e}")
+            await slots.acquire()
+            task = asyncio.create_task(process_message(msg))
+            in_flight.add(task)
+            task.add_done_callback(in_flight.discard)
     finally:
+        if in_flight:
+            await asyncio.gather(*in_flight, return_exceptions=True)
         await light_consumer.stop()
         await light_producer.stop()
 
 # =========================================================
 # Web3 + contrato
 # =========================================================
-reload_blockchain_client()
+if BLOCKCHAIN_ENABLED:
+    reload_blockchain_client()
+else:
+    w3 = None
+    contract = None
 
 # =========================================================
 # FastAPI app
@@ -843,7 +1126,7 @@ def verificar_asercion_con_evidencias(texto: Any, contexto: Optional[str] = None
     if isinstance(texto, dict) and texto.get("schema_version") == "assertion-validation-payload-v2":
         payload_v2 = AssertionValidationPayloadV2(**texto)
         verdict, description, extras, _evidence_response = validate_payload_v2(payload_v2)
-        return json.dumps({"resultado": verdict.name, "descripcion": description, **extras}, ensure_ascii=False), extras.get("sources", []) or extras.get("evidence_used", []) or []
+        return json.dumps({"resultado": verdict.name, "descripcion": description, **extras}, ensure_ascii=False), extras.get("evidence_used", []) or extras.get("sources_declared", []) or extras.get("sources", []) or []
     raise ValueError("validate-asertions accepts assertion-validation-payload-v2 for automatic validation flows")
 
 
@@ -867,15 +1150,13 @@ def build_validator_config(status: ValidatorStatus = ValidatorStatus.Registered,
         type=VALIDATOR_TYPE,
         provider=AI_PROVIDER,
         model=ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+        config_version=LLM_CONFIG_VERSION,
         service_url=VALIDATOR_SERVICE_URL or None,
         active_date=VALIDATOR_ACTIVE_DATE,
         updated_date=updated_date or VALIDATOR_UPDATED_DATE,
         end_date=end_date,
         status=status,
-        use_evidence_search=uses_evidence_search(),
-        evidence_search_use_preferred_domains=current_evidence_search_use_preferred_domains(),
-        evidence_search_preferred_profile_id=current_evidence_search_preferred_profile_id(),
-        online_search_enabled=uses_online_search(),
+        evidence_search_strategy=current_evidence_search_strategy(),
         evidence_search_url=EVIDENCE_SEARCH_URL,
     )
 
@@ -922,7 +1203,11 @@ async def registrar_validacion_internal(
             "estado": int(veredicto.estado),
             "descripcion": veredicto.texto,
             "sources": extras.get("sources", []),
+            "sources_declared": extras.get("sources_declared", []),
             "evidence_used": extras.get("evidence_used", []),
+            "evidence_validation": extras.get("evidence_validation"),
+            "llm_usage": extras.get("llm_usage"),
+            "resolved_model": extras.get("resolved_model"),
             "evidence_search_response": evidence_response,
             "search_policy": current_evidence_search_policy() if uses_evidence_search() else None,
         }
@@ -1076,6 +1361,8 @@ def endpoint_verificar(body: VerifyInputModel):
 
 @app.get("/tx/status/{tx_hash}")
 async def endpoint_tx_status(tx_hash: str):
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
     receipt = w3.eth.get_transaction_receipt(tx_hash)
     if receipt is None:
         return {"status": "pending", "result": False, "tx_hash": tx_hash}
@@ -1085,6 +1372,8 @@ async def endpoint_tx_status(tx_hash: str):
 # ✅ Usando ValidatorRegistrationInput
 async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
     """Registra validador (usa VALIDATOR_CATEGORIES si no se pasan). Espera minado."""
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
     categorias = input.categories if input.categories is not None else VALIDATOR_CATEGORIES
     try:
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered)
@@ -1102,6 +1391,8 @@ async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
 # ✅ Usando ValidatorRegistrationInput
 async def endpoint_desregistrar_validador():
     """Desregistra validador. Espera minado."""
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
     try:
         end_date = datetime.now(timezone.utc).isoformat()
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Unregistered, end_date=end_date, updated_date=end_date)
@@ -1145,121 +1436,51 @@ async def update_admin_config(config: AdminConfigUpdate):
     Modifica la configuración runtime del validador.
     Refresca la configuración IPFS/blockchain cuando cambian los campos públicos del validador.
     """
-    global AI_PROVIDER, API_URL, API_KEY, PRIVATE_KEY, ACCOUNT_ADDRESS, VALIDATOR_TYPE, VALIDATOR_SERVICE_URL
-    global EVIDENCE_SEARCH_URL, EVIDENCE_SEARCH_PREFERRED_PROFILE_ID
-    global ai_validator, VALIDATOR_CATEGORIES
-
+    global AI_PROVIDER, TEMPERATURE, LLM_CONFIG_VERSION, ai_validator
 
     old_provider = AI_PROVIDER
     old_model = ai_validator.model if ai_validator else os.getenv("MODEL", "none")
-    old_validator_type = VALIDATOR_TYPE
-    old_service_url = VALIDATOR_SERVICE_URL
-    old_evidence_search_url = EVIDENCE_SEARCH_URL
-    old_use_preferred_domains = current_evidence_search_use_preferred_domains()
-    old_preferred_profile_id = current_evidence_search_preferred_profile_id()
-    old_categories = list(VALIDATOR_CATEGORIES)
-
-    new_provider = config.provider.lower() if config.provider else AI_PROVIDER
-    new_model = config.model if config.model else old_model
-    new_validator_type = normalize_validator_type(config.validator_type) if config.validator_type is not None else VALIDATOR_TYPE
-    new_api_url = config.api_url if config.api_url is not None else API_URL
-    new_service_url = config.service_url if config.service_url is not None else VALIDATOR_SERVICE_URL
-    new_api_key = API_KEY if config.api_key is None or is_masked_secret(config.api_key) else config.api_key
-
-    new_preferred_domains_mode = (
-        config.evidence_search_use_preferred_domains
-        if config.evidence_search_use_preferred_domains is not None
-        else current_evidence_search_use_preferred_domains()
-    )
-    ensure_local_mode_supported(new_validator_type, new_preferred_domains_mode)
-
+    new_provider = config.provider.lower().strip() if config.provider else AI_PROVIDER
+    new_model = config.model.strip() if config.model else old_model
     allowed_providers = {"mistral", "gemini", "openrouter", "grok"}
-    if new_validator_type in AUTOMATIC_VALIDATOR_TYPES and new_provider not in allowed_providers:
+    if new_provider not in allowed_providers:
         raise HTTPException(status_code=400, detail=f"Provider desconocido: {new_provider}")
+    if not new_model:
+        raise HTTPException(status_code=400, detail="MODEL no puede estar vacío")
+    if VALIDATOR_TYPE == ValidatorType.LLM_SEARCH_VALIDATION and new_provider != "openrouter":
+        raise HTTPException(status_code=400, detail="LLM_SEARCH_VALIDATION currently requires provider=openrouter")
 
-    ai_client_changed = any([
-        new_provider != old_provider,
-        new_model != old_model,
-        new_validator_type != old_validator_type,
-        new_api_url != API_URL,
-        new_api_key != API_KEY,
-    ])
-
-    if config.account_address is not None:
-        ACCOUNT_ADDRESS = normalize_account_address(config.account_address)
-        set_runtime_env("ACCOUNT_ADDRESS", ACCOUNT_ADDRESS)
-
-    if config.private_key is not None and not is_masked_secret(config.private_key):
-        PRIVATE_KEY = config.private_key
-        set_runtime_env("PRIVATE_KEY", PRIVATE_KEY)
-
-    if config.api_url is not None:
-        API_URL = new_api_url
-        set_runtime_env("API_URL", API_URL or "")
-
-    if config.service_url is not None:
-        VALIDATOR_SERVICE_URL = new_service_url
-        set_runtime_env("VALIDATOR_SERVICE_URL", VALIDATOR_SERVICE_URL or "")
-
-    if config.api_key is not None and not is_masked_secret(config.api_key):
-        API_KEY = new_api_key
-        set_runtime_env("API_KEY", API_KEY or "")
-
-    if config.validator_type is not None:
-        VALIDATOR_TYPE = new_validator_type
-        set_runtime_env("VALIDATOR_TYPE", int(VALIDATOR_TYPE))
-
-    if config.evidence_search_url is not None:
-        EVIDENCE_SEARCH_URL = config.evidence_search_url
-        set_runtime_env("EVIDENCE_SEARCH_URL", EVIDENCE_SEARCH_URL)
-
-    if config.evidence_search_use_preferred_domains is not None:
-        set_runtime_env("EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS", config.evidence_search_use_preferred_domains.value)
-
-    if config.evidence_search_preferred_profile_id is not None:
-        EVIDENCE_SEARCH_PREFERRED_PROFILE_ID = config.evidence_search_preferred_profile_id
-        set_runtime_env("EVIDENCE_SEARCH_PREFERRED_PROFILE_ID", EVIDENCE_SEARCH_PREFERRED_PROFILE_ID)
-
+    ai_client_changed = new_provider != old_provider or new_model != old_model
     if config.provider is not None:
         AI_PROVIDER = new_provider
         set_runtime_env("AI_PROVIDER", AI_PROVIDER)
-
     if config.model is not None:
         set_runtime_env("MODEL", new_model)
-
-    if config.categories is not None:
-        VALIDATOR_CATEGORIES = [int(category) for category in config.categories]
-        set_runtime_env("VALIDATOR_CATEGORIES", json.dumps(VALIDATOR_CATEGORIES))
+    if config.temperature is not None:
+        if not math.isfinite(config.temperature) or config.temperature < 0:
+            raise HTTPException(status_code=400, detail="TEMPERATURE debe ser finita y no negativa")
+        TEMPERATURE = float(config.temperature)
+        set_runtime_env("TEMPERATURE", TEMPERATURE)
+    if config.config_version is not None:
+        if int(config.config_version) <= 0:
+            raise HTTPException(status_code=400, detail="LLM_CONFIG_VERSION debe ser positivo")
+        LLM_CONFIG_VERSION = int(config.config_version)
+        set_runtime_env("LLM_CONFIG_VERSION", LLM_CONFIG_VERSION)
 
     try:
         if ai_client_changed:
             ai_validator = build_ai_validator()
-            logger.info(
-                f"🔄 AI Validator actualizado en memoria: "
-                f"type={VALIDATOR_TYPE.name} provider={AI_PROVIDER.upper()} model={new_model}"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
+            logger.info("AI validator hot-updated type=%s provider=%s model=%s version=%s",
+                        VALIDATOR_TYPE.name, AI_PROVIDER, new_model, LLM_CONFIG_VERSION)
+    except Exception as exc:
         logger.exception("Error al instanciar el nuevo AI Validator")
-        raise HTTPException(status_code=500, detail=f"Error al cambiar la configuración de IA: {e}")
+        raise HTTPException(status_code=500, detail="Error al cambiar la configuración de IA") from exc
 
-    reload_blockchain_client()
-
-    public_config_changed = any([
-        new_provider != old_provider,
-        new_model != old_model,
-        VALIDATOR_CATEGORIES != old_categories,
-        VALIDATOR_TYPE != old_validator_type,
-        VALIDATOR_SERVICE_URL != old_service_url,
-        EVIDENCE_SEARCH_URL != old_evidence_search_url,
-        current_evidence_search_use_preferred_domains() != old_use_preferred_domains,
-        current_evidence_search_preferred_profile_id() != old_preferred_profile_id,
-    ])
+    public_config_changed = new_provider != old_provider or new_model != old_model
     metrics_reset_at = datetime.now(timezone.utc).isoformat() if public_config_changed else None
     blockchain_receipts = {}
 
-    if public_config_changed:
+    if public_config_changed and BLOCKCHAIN_ENABLED:
         updated_date = datetime.now(timezone.utc).isoformat()
         ipfs_config_hash = await upload_validator_config(status=ValidatorStatus.Registered, updated_date=updated_date)
         current_ipfs_hash = validator_config_ipfs_hash_from_chain()
@@ -1275,7 +1496,10 @@ async def update_admin_config(config: AdminConfigUpdate):
             blockchain_receipts["ipfs_config_hash"] = ipfs_config_hash
             logger.info("✅ Configuración IPFS ya registrada en blockchain; no se actualiza.")
 
-    event_ipfs_hash = blockchain_receipts.get("ipfs_config_hash") if blockchain_receipts else validator_config_ipfs_hash_from_chain()
+    event_ipfs_hash = (
+        blockchain_receipts.get("ipfs_config_hash") if blockchain_receipts
+        else validator_config_ipfs_hash_from_chain() if BLOCKCHAIN_ENABLED else None
+    )
     await publish_validator_config_event(event_ipfs_hash, source="admin_config", metrics_reset_at=metrics_reset_at)
 
     return {
@@ -1310,6 +1534,9 @@ async def publish_blockchain_validation_error(
         payload={
             "postId": str(post_id),
             "idValidator": ACCOUNT_ADDRESS,
+            "llm_provider": AI_PROVIDER,
+            "llm_model": ai_validator.model if ai_validator else os.getenv("MODEL", "none"),
+            "llm_config_version": LLM_CONFIG_VERSION,
             "idAssertion": str(assertion_id),
             "approval": None,
             "text": error_details.message,
@@ -1326,6 +1553,7 @@ async def publish_blockchain_validation_error(
     )
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BROKER,
+        max_request_size=KAFKA_MAX_MESSAGE_BYTES,
         **kafka_security_kwargs(),
     )
     await producer.start()
@@ -1353,7 +1581,10 @@ class BlockchainEventAgent:
 
         while True:
             for event in event_filter.get_new_entries():
-                await self.process_event(event)
+                try:
+                    await self.process_event(event)
+                except Exception:
+                    logger.exception("Error no recuperable procesando evento blockchain; se continúa con el siguiente")
             await asyncio.sleep(2)
 
     async def process_event(self, event):
@@ -1370,26 +1601,10 @@ class BlockchainEventAgent:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{self.ipfs_api}/ipfs/{cid}")
             resp.raise_for_status()
-            post_json = json.loads(resp.text)
-            logger.info("🧩 JSON parseado correctamente desde IPFS")
+            post_json = unwrap_ipfs_content(resp.text)
+            logger.info("🧩 Documento JSON desempaquetado correctamente desde IPFS")
             
-            if isinstance(post_json, dict) and post_json.get("schema_version") == "assertions-document-v2":
-                content_obj = post_json
-            elif isinstance(post_json, dict) and "assertions" in post_json and "text" in post_json:
-                content_obj = post_json
-            else:
-                content_obj = json.loads(post_json.get("content", "{}"))
-
-            if isinstance(content_obj, dict) and "assertions" in content_obj and "post" not in content_obj:
-                logger.info(f"[validate-asertions] detected minimal document shape from IPFS cid={cid}, reconstructing AssertionsDocumentV2")
-                assertions_document = build_assertions_document_v2(
-                    text=content_obj.get("text", ""),
-                    assertions=content_obj.get("assertions", []),
-                    mode=ValidationMode.BLOCKCHAIN,
-                    provider="news-handler",
-                )
-            else:
-                assertions_document = AssertionsDocumentV2(**content_obj)
+            assertions_document = AssertionsDocumentV2(**post_json)
             logger.info(f"[validate-asertions] loaded assertions-document-v2 from IPFS cid={cid}")
 
             assertion = next((item for item in assertions_document.assertions if int(item.assertion_index) == int(assertion_index)), None)
@@ -1404,6 +1619,8 @@ class BlockchainEventAgent:
                 post_id=post_id,
                 cid=cid,
                 order_id=None,
+                origin_url=assertions_document.post.source_url,
+                origin_domain=assertions_document.post.source_domain,
             )
 
         try:
@@ -1427,17 +1644,33 @@ class BlockchainEventAgent:
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
+    override = await fetch_llm_runtime_override(
+        os.getenv("ADMIN_URL", "http://admin-service.apis.svc.cluster.local:8400"),
+        f"llm:validator:{ACCOUNT_ADDRESS.lower()}",
+        logger,
+    )
+    if override:
+        try:
+            await update_admin_config(AdminConfigUpdate(**override))
+            logger.info("Applied persisted LLM runtime override validator=%s", ACCOUNT_ADDRESS)
+        except Exception as exc:
+            logger.warning("Invalid persisted LLM override; using deployment defaults: %s", exc.__class__.__name__)
     ipfs_api_url = os.getenv("IPFS_API_URL", "http://127.0.0.1:8000")
-    if is_automatic_validator():
+    if is_automatic_validator() and BLOCKCHAIN_ENABLED:
         agent = BlockchainEventAgent(w3, contract, ACCOUNT_ADDRESS, ipfs_api_url)
         asyncio.create_task(agent.start())
         logger.info("🟢 Blockchain Event Agent iniciado")
+    if is_automatic_validator():
         asyncio.create_task(consume_light_validation_requests())
         logger.info("[LIGHT] Kafka validation request listener started")
     else:
         logger.info(f"Validator type {VALIDATOR_TYPE.name}; automatic blockchain/Kafka validation listeners disabled")
     
         # registrar validador en startup (si no está registrado)
+
+    if not BLOCKCHAIN_ENABLED:
+        await publish_validator_config_event(None, source="startup_light")
+        return
 
     try:
         # Comprobar registro existente (si la llamada falla, procedemos a registrar)
@@ -1476,4 +1709,3 @@ async def startup_event():
             logger.error("Registro de validador en startup falló.")
     except Exception as e:
         logger.exception(f"Error en startup registrar validador: {e}")
-

@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "id": "gold-v0-eu-renewable-target-false-v1",
+  "title": "Confusión entre objetivo vinculante y aspiración renovable",
+  "language": "es",
+  "description": "Caso atómico falso: convierte la aspiración del 45 % en el umbral jurídicamente vinculante.",
+  "news": "La Directiva (UE) 2023/2413 establece un objetivo jurídicamente vinculante del 45 % de energía renovable para 2030.",
+  "tags": ["suite:official-gold-v0", "lang:es", "jurisdiction:EU", "topic:energy", "difficulty:hard", "temporal:historical", "evidence:official", "expected:decisive", "status:candidate"],
+  "assertions": [{
+    "id": "EU_RENEWABLE_TARGET_2030_FALSE",
+    "text": "La Directiva (UE) 2023/2413 establece un objetivo jurídicamente vinculante del 45 % de energía renovable para 2030.",
+    "source_excerpt": "La Directiva (UE) 2023/2413 establece un objetivo jurídicamente vinculante del 45 % de energía renovable para 2030.",
+    "expected_verdict": "FALSE",
+    "category_ids": [9],
+    "expected_topic_code": "ENERGY",
+    "expected_evidence_kind": "LEGAL_TEXT",
+    "expected_context": {"entities": ["Unión Europea", "Directiva (UE) 2023/2413"], "temporal_context": ["2030"], "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}},
+    "pipeline_assertion": {"assertion_id": "EU_RENEWABLE_TARGET_2030_FALSE", "assertion_index": 0, "text": "La Directiva (UE) 2023/2413 establece un objetivo jurídicamente vinculante del 45 % de energía renovable para 2030.", "categoryId": 9, "topic_code": "ENERGY", "evidence_kind": "LEGAL_TEXT", "context": {"language": "es", "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}}},
+    "required_terms": ["Directiva", "2023/2413", "vinculante", "45", "2030"],
+    "acceptable_domains": ["eur-lex.europa.eu"],
+    "reference_facts": ["La obligación es al menos 42,5 %; la Directiva solo pide esforzarse por llegar al 45 %."],
+    "reference_sources": [{"id": "red-iii", "url": "https://eur-lex.europa.eu/legal-content/ES/ALL/?uri=CELEX:32023L2413", "title": "Directiva (UE) 2023/2413"}],
+    "reference_evidence": [{"source": "red-iii", "relation": "CONTRADICTS", "text": "La obligación colectiva es al menos 42,5 %; el 45 % se expresa como una meta a la que procurar llegar."}]
+  }]
+}

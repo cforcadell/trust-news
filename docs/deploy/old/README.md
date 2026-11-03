@@ -1,18 +1,21 @@
-# Documentación de despliegue archivada — no usar
+# Filed deployment documentation — not to use
 
 > [!WARNING]
-> Este directorio conserva referencias históricas. Sus comandos, perfiles,
-> topología, TLS y componentes pueden estar obsoletos y no constituyen un
+> This directory retains historical references. Its commands, profiles,
+> topology, TLS and components may be obsolete and do not constitute a
 > procedimiento operativo.
 
-Las fuentes vigentes son:
+The current sources are:
 
-- [`skaffold-local.md`](../skaffold-local.md) para Kind dentro de la VM local;
-- [`skaffold-server.md`](../skaffold-server.md) para Hetzner;
-- [`k8s-common.md`](../k8s-common.md) para procedimientos compartidos;
+- [`skaffold-local.md`](../skaffold-local.md) for Kind within the local VM;
+- [`skaffold-server.md`](../skaffold-server.md) for Hetzner;
+- [`k8s-common.md`](../k8s-common.md) for shared procedures;
 - [`gitlab-github-release-workflow.md`](../gitlab-github-release-workflow.md)
-  para despliegue, promoción y release.
+for deployment, promotion and release.
 
-No copiar desde estos archivos listeners `0.0.0.0`, imágenes `latest`,
-configuración ZooKeeper, opciones TLS inseguras ni comandos destructivos sin
-contrastarlos con las fuentes vigentes.
+The active runbooks document `BLOCKCHAIN_ENABLED=OFF` as the normal LIGHT
+mode and `scripts/k8s/set-blockchain-mode.sh` as the required procedure to
+start or stop Geth and `news-chain`. Historical blockchain commands in this
+directory must not be used.
+
+Do not copy from these files listeners `0.0.0.0`, `latest` images, ZooKeeper configuration, unsafe TLS options or destructive commands without contrasting them with current sources.

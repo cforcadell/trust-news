@@ -383,7 +383,7 @@ sequenceDiagram
 
 1. A client submits a news item through the Gateway.
 2. The `generate-assertions` service extracts atomic assertions and optional search hints.
-3. RAG evidence search retrieves supporting evidence according to `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS`.
+3. RAG evidence search retrieves supporting evidence according to the required `EVIDENCE_SEARCH_STRATEGY`.
 4. The generated document is stored in IPFS.
 5. The `news-chain` service registers the post in the smart contract.
 6. The contract assigns validators based on assertion categories and emits validation request events.
@@ -397,36 +397,33 @@ sequenceDiagram
 
 ## 🔎 Evidence Search Configuration
 
-RAG validators call `evidence-search` through the v2 endpoint:
+RAG validators call `evidence-search` through the v2 endpoint. In LOCAL they
+first resolve domains through `source-router`:
 
 ```http
 POST /search/evidence
 ```
 
-The service resolves preferred domains from MongoDB collection:
+Dynamic routes are stored in:
 
 ```text
-newsdb.evidence_domain_profiles
-```
-
-Normalization configuration is stored in:
-
-```text
-newsdb.evidence_normalization_configs
+newsdb.source_routes_v2
+newsdb.domain_profiles_v1
 ```
 
 Search responses are cached separately in:
 
 ```text
-newsdb.evidence_search_cache
+newsdb.evidence_search_cache_v2
 ```
 
 The cache key includes:
 
 * Normalized assertion text.
 * The v2 search policy.
-* The preferred-domain mode.
-* The domain profile version.
+* The required RAG strategy.
+* Routed `preferred_sources` and their profile versions for `LOCAL`.
+* The submitted document URL/domain when known.
 * Search backend settings.
 * Full-text enrichment settings.
 
@@ -436,14 +433,9 @@ The cache expires with:
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS
 ```
 
-LOCAL domain scoring uses one complete MongoDB document per profile plus independent normalization documents for subcategories, location scopes and source types.
-
-To validate or refresh the versioned JSON seeds:
-
-```bash
-python scripts/k8s/apis/init-evidence-search-domains.py --dry-run
-python scripts/k8s/apis/init-evidence-search-domains.py --refresh --confirm
-```
+LOCAL has no static profile or seed. Source Router discovers real candidates,
+classifies them once per batch and applies deterministic jurisdiction eligibility
+and ranking. Evidence Search only retrieves content from selected domains.
 
 ---
 
@@ -484,26 +476,26 @@ This keeps `generate-assertions` as the preferred source of search intent, while
 
 ---
 
-## RAG Preferred Domains Strategy
+## RAG Evidence Strategy
 
 Evidence search is controlled by:
 
 ```env
-EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+EVIDENCE_SEARCH_STRATEGY
 ```
 
-This setting defines how Assermetry handles `preferred_domains` before calling the configured evidence-search provider.
+This setting is required only for `RAG_EVIDENCE_VALIDATION`. The validator type
+already determines whether Evidence Search participates in the flow.
 
 The effective request policy field is:
 
 ```text
-use_preferred_domains
+strategy
 ```
 
 The supported modes are:
 
 ```text
-NONE
 LOCAL
 EXT_OFFICIAL_FIRST
 EXT_ONLY_OFFICIAL
@@ -513,69 +505,38 @@ EXT_ONLY_OFFICIAL
 
 ### Strategy Summary
 
-| Mode | Uses generated search suggestions | MongoDB profile enrichment | Provider domain behavior | General fallback | Typical use case |
-|---|---:|---:|---|---:|---|
-| `NONE` | ✅ | ❌ | No preferred-domain enrichment. Search uses generated suggestions or fallback query. | Depends on policy | Generic evidence search |
-| `LOCAL` | ✅ | ✅ | Resolves local preferred domains and passes them as `include_domains`. | When local routing needs fallback | Client/org-specific trusted source routing |
-| `EXT_OFFICIAL_FIRST` | ✅ | ❌ | Sends `external_source_policy=official_first` to the provider. | Can be enabled by policy | Prefer official sources without losing recall |
-| `EXT_ONLY_OFFICIAL` | ✅ | ❌ | Sends `external_source_policy=only_official` to the provider. | ❌ Disabled by code | Official-source-only validation |
-
----
-
-### `NONE`
-
-`NONE` disables preferred-domain enrichment.
-
-In this mode:
-
-* No MongoDB domain profile is loaded.
-* No local preferred domains are resolved.
-* No official-source external provider policy is applied.
-* Evidence search uses the query suggested by `generate-assertions`.
-* If no suggested query exists, the service builds a fallback query from the assertion text and metadata.
-
-```mermaid
-flowchart TD
-    A[generate-assertions] --> B[Suggested query / fallback query]
-    B --> C[Search provider]
-    C --> D[Evidence results]
-```
-
-This mode is useful for generic evidence search where no domain policy should be applied.
+| Strategy | Uses generated search suggestions | Local routing | Provider behavior | General fallback |
+|---|---:|---:|---|---:|
+| `LOCAL` | Yes | Yes | Restricts retrieval to routed `preferred_sources`. | No |
+| `EXT_OFFICIAL_FIRST` | Yes | No | Sends `official_first`, then performs a general request. | Yes |
+| `EXT_ONLY_OFFICIAL` | Yes | No | Sends `only_official` and filters non-official results afterwards. | No |
 
 ---
 
 ### `LOCAL`
 
-`LOCAL` enables MongoDB-backed domain routing.
+`LOCAL` enables dynamic routing orchestrated by the validator.
 
 In this mode:
 
-* The service loads a domain profile from `newsdb.evidence_domain_profiles`.
-* The service loads normalization configs from `newsdb.evidence_normalization_configs`.
-* The assertion is normalized.
-* Contextual preferred domains are resolved from the local profile.
-* Selected domains are passed to the provider as `include_domains`.
-* Local domain scoring is enabled.
-* The effective policy is marked as `local_scored_domains`.
+* The validator calls Source Router before Evidence Search.
+* Source Router reads `source_routes_v2` and `domain_profiles_v1`; FRESH performs no external calls.
+* MISSING/STALE discovers real URLs and performs one batch LLM classification.
+* Code applies geographic eligibility and deterministic ranking.
+* The validator passes complete routed entries as `preferred_sources`.
+* Evidence Search restricts retrieval to those domains without general fallback.
 
 ```mermaid
 flowchart TD
-    A[generate-assertions] --> B[Suggested query / fallback query]
-    B --> C[MongoDB profile lookup]
-    C --> D[Domain normalization and scoring]
-    D --> E[Selected include_domains]
-    E --> F[Search provider]
+    A[Validator RAG LOCAL] --> B[Source Router]
+    B --> C[source_routes_v2 + domain_profiles_v1]
+    C --> D[Discovery plus batch classification if needed]
+    D --> E[Eligibility and ranking]
+    E --> F[Evidence Search preferred_sources]
     F --> G[Evidence results]
 ```
 
-This mode is useful for:
-
-* Client-specific trusted source profiles.
-* Organization-specific source policies.
-* Category-based domain routing.
-* Enterprise validation environments.
-* Centralized LIGHT mode deployments.
+There is no allowlist, static fallback, truth score or LLM-controlled query generation.
 
 ---
 
@@ -593,7 +554,7 @@ In this mode:
 
 * The generated search query is still used.
 * No local domain profile is loaded.
-* No `include_domains` list is produced from MongoDB.
+* No local `preferred_sources` list is produced.
 * The provider is asked to prioritize official sources when supported.
 * Non-official sources may still appear if relevant or if the provider treats the policy as a ranking hint.
 
@@ -623,9 +584,10 @@ In this mode:
 
 * The generated search query is still used.
 * No local MongoDB domain profile is loaded.
-* No local `include_domains` list is generated.
+* No local `preferred_sources` list is generated.
 * The provider is asked to restrict results to official sources when supported.
 * General fallback searches are not added by the code.
+* Results whose normalized `source_type` is not official are removed after retrieval.
 
 ```mermaid
 flowchart TD
@@ -654,7 +616,7 @@ Each search request may include:
 {
   "query": "official statistics youth unemployment Spain 2025",
   "include_domains": ["ine.es", "eurostat.ec.europa.eu"],
-  "mode": "preferred_domains",
+  "mode": "local_routed",
   "external_source_policy": "none"
 }
 ```
@@ -693,13 +655,16 @@ A normalized evidence item can include:
   "title": "Source title",
   "url": "https://example.org/source",
   "domain": "example.org",
-  "source_type": "official",
+  "source_type": "STATISTICAL_OFFICE",
   "snippet": "Relevant excerpt or summary",
   "rank": 1,
-  "trust_score": 0.87,
+  "authority_level": "NATIONAL_PRIMARY",
+  "route_score": 0.87,
   "retrieved_at": "2026-01-01T12:00:00Z",
   "why_selected": "Matched contextual search policy",
-  "matched_profiles": ["default"]
+  "profile_version": "source-router-v2",
+  "document_type": "UNKNOWN",
+  "relationship_to_origin": "INDEPENDENT"
 }
 ```
 
@@ -717,15 +682,20 @@ When full-text enrichment is enabled, evidence may also include selected context
         "source-1-chunk-4"
       ],
       "text": "Selected context window used by the validator.",
+      "text_sha256": "...",
       "score": 0.91,
-      "origin": "full_text",
+      "origin": "fetched_document",
+      "citation_eligible": true,
       "char_length": 850
     }
   ]
 }
 ```
 
-If full-text retrieval is disabled or fails, the service falls back to the provider snippet.
+If full-text retrieval is disabled or fails, the service retains provider
+metadata for diagnostics but exposes no citable context. The validator selects
+only server-issued `context_id` values; URL and evidence text are reconstructed
+from the canonical context after the model responds.
 
 ---
 
@@ -889,7 +859,7 @@ Main local URLs exposed by Skaffold:
 
 | Service | URL |
 |---|---|
-| Frontend | https://localhost:7443 |
+| Frontend | https://localhost:7443/gui/ |
 | Keycloak admin console | https://localhost:7443/auth/admin/master/console/ |
 | Admin API | http://localhost:8400/docs |
 | Gateway | http://localhost:8500/docs |
@@ -936,11 +906,10 @@ APP_MODE=LIGHT
 
 VALIDATOR_TYPE=3
 EVIDENCE_SEARCH_URL=http://evidence-search.apis.svc.cluster.local:8074
-EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL
-# EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE
-# EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_OFFICIAL_FIRST
-# EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_ONLY_OFFICIAL
-EVIDENCE_SEARCH_PREFERRED_PROFILE_ID=default
+SOURCE_ROUTER_URL=http://source-router.apis.svc.cluster.local:8075
+EVIDENCE_SEARCH_STRATEGY=LOCAL
+# EVIDENCE_SEARCH_STRATEGY=EXT_OFFICIAL_FIRST
+# EVIDENCE_SEARCH_STRATEGY=EXT_ONLY_OFFICIAL
 
 EVIDENCE_SEARCH_CACHE_TTL_SECONDS=86400
 
@@ -976,26 +945,27 @@ ACCOUNT_ADDRESS=...
 
 ### Validator behavior variables
 
-`VALIDATOR_TYPE` is the source of truth for the validator behavior. `USE_EVIDENCE_SEARCH` and `ONLINE_SEARCH_ENABLED` are no longer configured as environment variables; their effective values are derived from the validator type and may still appear in API/config responses for backward compatibility.
+`VALIDATOR_TYPE` is the sole source of truth for validator behavior. Type `2`
+uses provider-managed web search; type `3` requires exactly one
+`EVIDENCE_SEARCH_STRATEGY`. No derived compatibility flags are published.
 
 | Variable | Supported values | Activates / controls | Incompatibilities and notes |
 |---|---|---|---|
 | `VALIDATOR_TYPE` | `1`, `2`, `3`, `4`, `5` | Selects the validation algorithm. | Only `1`, `2` and `3` run automatic validation in `validate-asertions`. |
 | `VALIDATOR_TYPE=1` | `LLM_MEMORY_VALIDATION` | LLM memory validation with `LLM_MEMORY_VALIDATION_PROMPT`. | Does not call `evidence-search` and does not enable online model mode. |
-| `VALIDATOR_TYPE=2` | `LLM_SEARCH_VALIDATION` | LLM online-search validation with `LLM_SEARCH_VALIDATION_PROMPT`. | In OpenRouter, the worker sends the model as `MODEL:online` automatically. |
-| `VALIDATOR_TYPE=3` | `RAG_EVIDENCE_VALIDATION` | RAG validation: always calls `EVIDENCE_SEARCH_URL` and injects returned evidences into `RAG_EVIDENCE_VALIDATION_PROMPT`. | Requires `evidence-search` to be reachable. Preferred-domain variables only matter for this type. |
+| `VALIDATOR_TYPE=2` | `LLM_SEARCH_VALIDATION` | LLM online-search validation with `LLM_SEARCH_VALIDATION_PROMPT`. | Requires OpenRouter; the worker sends the model as `MODEL:online` automatically. |
+| `VALIDATOR_TYPE=3` | `RAG_EVIDENCE_VALIDATION` | RAG validation; `LOCAL` resolves Source Router first, external strategies call Evidence Search directly. | Requires exactly one evidence strategy; `LOCAL` also requires `source-router`. |
 | `VALIDATOR_TYPE=4` | `DETERMINISTIC_VALIDATION` | Registers/configures a deterministic validator. | No automatic listener/LLM validation is implemented in this worker. |
 | `VALIDATOR_TYPE=5` | `HUMAN` | Registers/configures a human/manual validator. | No automatic listener/LLM validation is implemented in this worker. |
 | `EVIDENCE_SEARCH_URL` | URL | Evidence-search service endpoint. | Used only by `VALIDATOR_TYPE=3`. |
-| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS` | `NONE`, `LOCAL`, `EXT_OFFICIAL_FIRST`, `EXT_ONLY_OFFICIAL` | Evidence source strategy sent to `evidence-search`. | Used only by `VALIDATOR_TYPE=3`; invalid values fail validation. |
-| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=NONE` | `NONE` | Generic evidence search without local preferred-domain scoring. | Does not use `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID`. |
-| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL` | `LOCAL` | Loads MongoDB domain profiles and scores preferred domains locally. | Only valid for RAG/type `3`; uses `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID`. |
-| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_OFFICIAL_FIRST` | `EXT_OFFICIAL_FIRST` | Asks the external provider to prioritize official sources. | Does not use local profile scoring. |
-| `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=EXT_ONLY_OFFICIAL` | `EXT_ONLY_OFFICIAL` | Asks the external provider to restrict results to official sources when supported. | General fallback search is disabled by code for this mode. |
-| `EVIDENCE_SEARCH_PREFERRED_PROFILE_ID` | String, default `default` | Selects the local MongoDB domain profile. | Used only with `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=LOCAL`. |
+| `SOURCE_ROUTER_URL` | URL | Source-router internal endpoint. | Used only by `VALIDATOR_TYPE=3` plus LOCAL. |
+| `EVIDENCE_SEARCH_STRATEGY` | `LOCAL`, `EXT_OFFICIAL_FIRST`, `EXT_ONLY_OFFICIAL` | Required evidence strategy. | Valid only for `VALIDATOR_TYPE=3`; missing or invalid values fail validation. |
+| `EVIDENCE_SEARCH_STRATEGY=LOCAL` | `LOCAL` | Dynamic discovery/classification/routing followed by restricted evidence retrieval. | Uses Source Router and complete routed-source metadata. |
+| `EVIDENCE_SEARCH_STRATEGY=EXT_OFFICIAL_FIRST` | `EXT_OFFICIAL_FIRST` | Asks the external provider to prioritize official sources. | Does not use local profile scoring. |
+| `EVIDENCE_SEARCH_STRATEGY=EXT_ONLY_OFFICIAL` | `EXT_ONLY_OFFICIAL` | Requests and then enforces official sources. | General fallback is disabled; non-official normalized types are filtered. |
 | `EVIDENCE_SEARCH_MAX_DOMAINS` | Integer, default `8` | Max preferred domains sent in the evidence policy. | Used only by RAG/type `3`. |
 | `EVIDENCE_SEARCH_MAX_SOURCES` | Integer, default `5` | Max evidence results requested by the validator. | Used only by RAG/type `3`. |
-| `EVIDENCE_SEARCH_MAX_QUERIES_PER_DOMAIN` | Integer, default `2` | Query fan-out limit. | Used only by RAG/type `3`. |
+| `EVIDENCE_SEARCH_MAX_QUERIES` | Integer, default `2` | Query fan-out limit. | Used only by RAG/type `3`. |
 | `AI_PROVIDER` | `mistral`, `gemini`, `openrouter`, `grok` | LLM provider for automatic validators. | Automatic types reject unknown providers and `none`. |
 | `MODEL` | Provider-specific model id | LLM model. | With `VALIDATOR_TYPE=2` and OpenRouter, `:online` is appended at request time unless already present. |
 
@@ -1055,7 +1025,7 @@ Relevant test areas include:
 * Assertion generation.
 * Gateway-authenticated flows.
 * Quota setup and consumption.
-* Evidence search using `NONE`.
+* Evidence search for all three explicit RAG strategies.
 * Evidence search using `LOCAL`.
 * Evidence search using `EXT_OFFICIAL_FIRST`.
 * Evidence search using `EXT_ONLY_OFFICIAL`.
@@ -1156,14 +1126,16 @@ It is a flexible automated validation platform that can operate in two ways:
 It also supports RAG-assisted evidence search when `VALIDATOR_TYPE=3`. Source strategy is controlled by:
 
 ```env
-EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS
+EVIDENCE_SEARCH_STRATEGY
 ```
 
-Supported preferred-domain modes:
+Supported RAG strategies:
 
-* **`NONE`**: use only the search suggested by `generate-assertions` or the fallback assertion query.
-* **`LOCAL`**: enrich preferred domains using MongoDB-stored profiles and pass them as `include_domains`.
+* **`LOCAL`**: route normalized domain profiles locally and pass complete `preferred_sources` metadata.
 * **`EXT_OFFICIAL_FIRST`**: ask the provider to prioritize official sources.
-* **`EXT_ONLY_OFFICIAL`**: ask the provider to restrict results to official sources when supported.
+* **`EXT_ONLY_OFFICIAL`**: request official sources and enforce the normalized source-type filter after retrieval.
+
+Provider-managed web search without Evidence Search is represented by
+`VALIDATOR_TYPE=2`; it is not a RAG strategy.
 
 This makes TrustNews suitable both for lightweight integration into existing centralized platforms and for advanced scenarios where validation results must be independently auditable.

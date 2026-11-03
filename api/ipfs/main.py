@@ -15,6 +15,7 @@ from pydantic import ValidationError
 # Importar modelos comunes
 from common.models.async_models import UploadIpfsRequest, IpfsUploadedResponse, Metadata, Document
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_IPFS, DEFAULT_TOPIC_RESPONSES
+from common.utils.logging_utils import configure_single_line_json_logging
 
 # -----------------------------
 # Configuración inicial
@@ -23,14 +24,8 @@ load_dotenv()
 
 # Configuración de logging desde .env
 log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-log_format = os.getenv("LOG_FORMAT", "%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-
 numeric_level = getattr(logging, log_level, logging.INFO)
-logging.basicConfig(
-    level=numeric_level,
-    format=log_format,
-    handlers=[logging.StreamHandler()]
-)
+configure_single_line_json_logging(numeric_level)
 
 logger = logging.getLogger("ipfs-agent")
 

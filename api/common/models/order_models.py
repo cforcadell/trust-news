@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 from common.models.async_models import Assertion, ValidationErrorDetails, ValidationExecutionStatus, ValidationMode, ValidatorConfig
 from common.models.veredicto import Validacion
 from common.models.protocol_models import CategoryId
+from common.utils.evidence import EvidenceItem
 
 
 class EventRecord(BaseModel):
@@ -26,13 +27,23 @@ class ValidationRecord(BaseModel):
     categoryId: Optional[CategoryId] = None
     assertion_index: Optional[int] = None
     correlation_id: Optional[str] = None
-    sources: List[Dict[str, Any]] = Field(default_factory=list)
-    evidence_used: List[Dict[str, Any]] = Field(default_factory=list)
+    sources: List[EvidenceItem] = Field(default_factory=list)
+    sources_declared: List[EvidenceItem] = Field(default_factory=list)
+    evidence_used: List[EvidenceItem] = Field(default_factory=list)
+    evidence_validation: Optional[Dict[str, Any]] = None
+    llm_usage: Optional[Dict[str, Optional[int]]] = None
+    resolved_model: Optional[str] = None
     confidence: Optional[float | str] = None
     execution_status: ValidationExecutionStatus
     error: Optional[str] = None
     error_details: Optional[ValidationErrorDetails] = None
     response_time_seconds: Optional[float] = None
+    validator_type: Optional[str] = None
+    validator_type_weight: Optional[float] = None
+    reputation_at_validation: Optional[float] = None
+    effective_weight: Optional[float] = None
+    weights_policy_version: Optional[str] = None
+    legacy_dynamic_weight: bool = False
 
     @model_validator(mode="after")
     def validate_execution_result(self):
@@ -61,21 +72,34 @@ class AssertionResultDetail(BaseModel):
     validator_type: str
     validator_type_weight: float
     reputation: float
+    reputation_at_validation: Optional[float] = None
     effective_weight: float
+    weights_policy_version: Optional[str] = None
+    legacy_dynamic_weight: bool = False
     result: str
     description: str = ""
-    sources: List[Dict[str, Any]] = Field(default_factory=list)
-    evidence_used: List[Dict[str, Any]] = Field(default_factory=list)
+    sources: List[EvidenceItem] = Field(default_factory=list)
+    sources_declared: List[EvidenceItem] = Field(default_factory=list)
+    evidence_used: List[EvidenceItem] = Field(default_factory=list)
+    evidence_validation: Optional[Dict[str, Any]] = None
 
 
 class AssertionResult(BaseModel):
     assertion_id: str
+    verdict: str = "UNKNOWN"
+    decision_status: str = "NO_VALID_RESPONSES"
+    reason_code: str = "ALL_VALIDATIONS_FAILED"
+    distribution: Dict[str, Any] = Field(default_factory=dict)
+    counts: Dict[str, int] = Field(default_factory=dict)
+    consensus_policy: Dict[str, Any] = Field(default_factory=dict)
+    consensus_policy_version: str = "consensus-v2"
     scores: Dict[str, float] = Field(default_factory=lambda: {"TRUE": 0.0, "FALSE": 0.0, "UNKNOWN": 0.0})
     winner: Optional[str] = None
     validations_count: int = 0
     responses_count: int = 0
     errors_count: int = 0
     excluded_validators: List[str] = Field(default_factory=list)
+    legacy_dynamic_weight: bool = False
     details: List[AssertionResultDetail] = Field(default_factory=list)
 
 

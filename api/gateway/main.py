@@ -1,8 +1,9 @@
 import os
 import logging
 from typing import Any, List
+from urllib.parse import urlencode, quote
 import aiohttp
-from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, status
+from fastapi import FastAPI, Request, HTTPException, Depends, APIRouter, Query, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from jose import jwt
 from gateway.security import RequestSecurityMiddleware
+from common.utils.logging_utils import configure_single_line_json_logging
 from common.models.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -26,7 +28,7 @@ load_dotenv()
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 
-logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+configure_single_line_json_logging(log_level)
 logger = logging.getLogger("api-gateway")
 
 
@@ -71,6 +73,18 @@ NEWS_HANDLER_URL = os.getenv("NEWS_HANDLER_URL", "http://news-handler.apis.svc.c
 NEWS_CHAIN_URL = os.getenv("NEWS_CHAIN_URL", "http://news-chain.apis.svc.cluster.local:8073")
 IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.local:8060")
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
+ADMIN_URL = os.getenv("ADMIN_URL", "http://admin-service.apis.svc.cluster.local:8400")
+BLOCKCHAIN_ENABLED = os.getenv("BLOCKCHAIN_ENABLED", "false").strip().lower() in {"1", "true", "on", "yes"}
+
+
+@app.get("/capabilities", tags=["Capabilities"])
+async def capabilities():
+    return {"blockchain_enabled": BLOCKCHAIN_ENABLED}
+
+
+def require_blockchain_enabled() -> None:
+    if not BLOCKCHAIN_ENABLED:
+        raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
 
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "TrustNews")
 KEYCLOAK_ISSUER_URL = os.getenv(
@@ -85,6 +99,22 @@ KEYCLOAK_JWKS_URL = os.getenv(
     "KEYCLOAK_JWKS_URL",
     f"{KEYCLOAK_SERVER_INNER_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs",
 ).rstrip("/")
+KEYCLOAK_EXPECTED_AUDIENCE = os.getenv("KEYCLOAK_EXPECTED_AUDIENCE", "TrustNewsGateway").strip()
+KEYCLOAK_ALLOWED_CLIENT_IDS = {
+    value.strip()
+    for value in os.getenv("KEYCLOAK_ALLOWED_CLIENT_IDS", "TrustNewsWeb,TrustNewsApi").split(",")
+    if value.strip()
+}
+
+
+def presenting_client_id(payload: dict[str, Any]) -> str:
+    return str(payload.get("azp") or payload.get("client_id") or "").strip()
+
+
+def validate_presenting_client(payload: dict[str, Any]) -> None:
+    client_id = presenting_client_id(payload)
+    if not client_id or client_id not in KEYCLOAK_ALLOWED_CLIENT_IDS:
+        raise HTTPException(status_code=401, detail="Cliente JWT no autorizado")
 
 # ============================================================
 # Autenticación (Simple Bearer para Swagger)
@@ -111,29 +141,15 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
         if not rsa_key:
             raise HTTPException(status_code=401, detail="Clave de token no válida")
 
-        # ============================================================
-        # INICIO: Logs añadidos para aud y iss
-        # ============================================================
-        unverified_claims = jwt.get_unverified_claims(token)
-        token_iss = unverified_claims.get("iss", "No especificado")
-        token_aud = unverified_claims.get("aud", "No especificado")
-        
-        logger.info("=== Debug de JWT ===")
-        logger.info(f"Issuer recibido (iss): {token_iss}")
-        logger.info(f"Issuer esperado      : {KEYCLOAK_ISSUER_URL}")
-        logger.info(f"Audience (aud)       : {token_aud}")
-        logger.info("====================")
-        # ============================================================
-        # FIN: Logs añadidos para aud y iss
-        # ============================================================
-
         payload = jwt.decode(
             token,
             rsa_key,
             algorithms=["RS256"],
             issuer=KEYCLOAK_ISSUER_URL,
-            options={"verify_aud": False}
+            audience=KEYCLOAK_EXPECTED_AUDIENCE,
+            options={"verify_aud": True, "require_aud": True},
         )
+        validate_presenting_client(payload)
         
         user = payload.get('preferred_username') or payload.get('client_id') or "service-account"
         logger.info(f"Token validado para: {user}")
@@ -178,6 +194,8 @@ async def proxy_request(request: Request, target_url: str):
 # Función auxiliar para extraer el client_id con la fórmula solicitada
 def get_computed_client_id(payload: dict) -> str:
     sub = payload.get("sub", "unknown_sub")
+    # Keep the historical owner key stable; azp/client_id is only an
+    # authentication constraint, not part of the user's effective identity.
     token_client_id = payload.get("client_id")
     
     if token_client_id:
@@ -191,10 +209,86 @@ def is_admin_user(payload: dict) -> bool:
     roles = realm_access.get("roles", [])
     return "trust-admin" in roles
 
+
+async def require_admin_user(auth_payload: dict = Depends(get_current_user)) -> dict:
+    """Require a verified JWT with the realm role for every LLM admin route."""
+    if not is_admin_user(auth_payload):
+        raise HTTPException(status_code=403, detail="Se requiere el rol trust-admin")
+    return auth_payload
+
+
+async def proxy_admin_request(request: Request, target_url: str, auth_payload: dict):
+    """Forward only safe transport headers and a Gateway-derived audit identity."""
+    body = await request.body()
+    headers = {"Content-Type": request.headers.get("content-type", "application/json")}
+    request_id = request.headers.get("x-request-id")
+    if request_id:
+        headers["X-Request-ID"] = request_id
+    headers["X-Assermetry-Admin-User"] = str(
+        auth_payload.get("preferred_username") or auth_payload.get("sub") or "gateway-admin"
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.request(request.method, target_url, headers=headers, data=body) as response:
+                content = await response.read()
+                try:
+                    return JSONResponse(content=await response.json(), status_code=response.status)
+                except Exception:
+                    return JSONResponse(content=content.decode(), status_code=response.status)
+    except Exception as exc:
+        logger.error("Error connecting to Admin LLM API: %s", exc.__class__.__name__)
+        raise HTTPException(status_code=502, detail="Error de comunicación interna") from exc
+
 # ============================================================
 # Router Principal
 # ============================================================
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+admin_llm_router = APIRouter(
+    prefix="/admin/llm",
+    tags=["LLM Administration"],
+    dependencies=[Depends(require_admin_user)],
+)
+
+
+def admin_target(path: str, query: str = "") -> str:
+    suffix = f"?{query}" if query else ""
+    return f"{ADMIN_URL.rstrip('/')}/llm/{path}{suffix}"
+
+
+@admin_llm_router.get("/components")
+async def list_llm_components(request: Request, auth_payload: dict = Depends(require_admin_user)):
+    return await proxy_admin_request(request, admin_target("components"), auth_payload)
+
+
+@admin_llm_router.get("/models/openrouter")
+async def list_openrouter_models(request: Request, auth_payload: dict = Depends(require_admin_user)):
+    query = request.url.query
+    target = f"{ADMIN_URL.rstrip('/')}/ai/openrouter/recommendations"
+    if query:
+        target = f"{target}?{query}"
+    return await proxy_admin_request(request, target, auth_payload)
+
+
+@admin_llm_router.api_route("/components/{component}", methods=["GET", "PUT"])
+async def llm_component(component: str, request: Request, auth_payload: dict = Depends(require_admin_user)):
+    return await proxy_admin_request(request, admin_target(f"components/{quote(component, safe='')}"), auth_payload)
+
+
+@admin_llm_router.get("/validators")
+async def list_llm_validators(
+    request: Request,
+    type: str | None = Query(None),
+    strategy: str | None = Query(None),
+    auth_payload: dict = Depends(require_admin_user),
+):
+    query = urlencode({key: value for key, value in {"type": type, "strategy": strategy}.items() if value is not None})
+    return await proxy_admin_request(request, admin_target("validators", query), auth_payload)
+
+
+@admin_llm_router.api_route("/validators/{validator_id}", methods=["GET", "PUT"])
+async def llm_validator(validator_id: str, request: Request, auth_payload: dict = Depends(require_admin_user)):
+    return await proxy_admin_request(request, admin_target(f"validators/{quote(validator_id, safe='')}"), auth_payload)
 
 @router.get("/auth/is-admin", tags=["Auth"])
 async def check_admin_status(auth_payload: dict = Depends(get_current_user)):
@@ -285,6 +379,7 @@ async def proxy_get_ipfs(cid: str, request: Request):
 
 @router.get("/blockchain/tx/{hash}", tags=["Blockchain"])
 async def proxy_get_tx(hash: str, request: Request):
+    require_blockchain_enabled()
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/tx/{hash}")
 
 @router.get("/blockchain/block/{block_id}", tags=["Blockchain"])
@@ -292,6 +387,7 @@ async def proxy_get_block(block_id: int, request: Request):
     """
     Obtiene información detallada de un bloque específico y sus transacciones.
     """
+    require_blockchain_enabled()
     # Cambia NEWS_CHAIN_URL por la URL de tu microservicio de blockchain
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/block/{block_id}")
 
@@ -301,6 +397,7 @@ async def proxy_get_blockchain_post(post_id: int, request: Request):
     Recupera la información completa de un Post directamente desde el Smart Contract,
     incluyendo su CID de IPFS, aserciones y todas las validaciones asociadas.
     """
+    require_blockchain_enabled()
     # Se redirige al microservicio que maneja la lógica de web3 (news-chain)
     return await proxy_request(request, f"{NEWS_CHAIN_URL}/blockchain/post/{post_id}")
 
@@ -345,16 +442,21 @@ async def proxy_get_validator_cache_validations(
     """
     Enruta la petición para recuperar las validaciones asociadas a un validador cacheado.
     """
-    query_params = [
-        f"include_validations={str(include_validations).lower()}",
-        f"include_order_link={str(include_order_link).lower()}"
-    ]
+    # This endpoint is owner-scoped, including for trust-admin. Never forward
+    # a client-supplied identity or use a realm role as global data access.
+    if not isinstance(auth_payload.get("sub"), str) or not auth_payload["sub"].strip():
+        raise HTTPException(status_code=401, detail="Identidad autenticada ausente")
+    query_params = {
+        "client_id": get_computed_client_id(auth_payload),
+        "include_validations": str(include_validations).lower(),
+        "include_order_link": str(include_order_link).lower(),
+    }
     if provider:
-        query_params.append(f"provider={provider}")
+        query_params["provider"] = provider
     if model:
-        query_params.append(f"model={model}")
+        query_params["model"] = model
 
-    target_url = f"{NEWS_HANDLER_URL}/validators/cache/{validator_hash}/validations?{'&'.join(query_params)}"
+    target_url = f"{NEWS_HANDLER_URL}/validators/cache/{quote(validator_hash, safe='')}/validations?{urlencode(query_params)}"
     return await proxy_request(request, target_url)
 
 @router.get("/orders/{order_id}", tags=["Orders"])
@@ -374,6 +476,7 @@ async def proxy_check_order_consistency(
     """
     Enruta la petición para comprobar la consistencia de una orden (Order -> IPFS -> Blockchain).
     """
+    require_blockchain_enabled()
     client_id = get_computed_client_id(auth_payload)
     admin = str(is_admin_user(auth_payload)).lower()
     
@@ -390,7 +493,15 @@ async def proxy_get_news_events(order_id: str, request: Request, auth_payload: d
     return await proxy_request(request, target_url)
 
 app.include_router(router)
+app.include_router(admin_llm_router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8500")))
+    # La configuración común ya está instalada. Evita que Uvicorn vuelva a
+    # sustituirla por sus formatters de texto en el arranque programático.
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8500")),
+        log_config=None,
+    )

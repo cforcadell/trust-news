@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "synthetic-light-01",
+  "organization": "org-alpha",
+  "mode": "LIGHT",
+  "identity": {
+    "alias": "org-alpha-user",
+    "usernameEnv": "ASSERMETRY_ORG_ALPHA_USERNAME",
+    "passwordEnv": "ASSERMETRY_ORG_ALPHA_PASSWORD"
+  },
+  "newsFile": "light-news.txt",
+  "timeoutMs": 300000,
+  "expected": {
+    "terminalStatuses": ["VALIDATED"],
+    "minimumAssertions": 1,
+    "minimumValidations": 1,
+    "validatorsPending": 0,
+    "requiredTabs": ["summary", "assertions", "evidence", "process", "technical", "ipfs", "events"],
+    "disabledTabs": ["ipfs"],
+    "requiredOrderFields": ["order_id", "status", "validation_mode"],
+    "allowedHttpFailures": [
+      {
+        "status": 404,
+        "pathPattern": "^/backend/orders/[^/]+/events$"
+      }
+    ],
+    "allowedConsoleErrors": []
+  }
+}

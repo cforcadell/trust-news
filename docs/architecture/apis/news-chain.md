@@ -1,36 +1,36 @@
 # News Chain
 
-## Descripción
+## Description
 
-`api/news-chain` es la capa HTTP/Kafka sobre el smart contract TrustNews. Registra noticias en blockchain, consulta transacciones, bloques, posts y validadores, y escucha eventos del contrato para propagar solicitudes o resultados de validación al flujo Kafka.
+`api/news-chain` is the HTTP/Kafka layer on the smart contract TrustNews. It registers news in blockchain, consults transactions, blocks, posts and validators, and listens to contract events to propagate requests or validation results to the Kafka flow.
 
 ## Endpoints
 
-- `POST /registerNew`: envía una transacción `registerNew` al contrato para registrar una noticia/documento y devuelve `tx_hash`.
-- `GET /tx/status/{tx_hash}`: comprueba si una transacción está pendiente, minada o fallida, y extrae eventos relevantes si existen.
-- `GET /tx/{tx_hash}`: devuelve detalle de transacción y receipt.
-- `GET /block/{block_id}`: devuelve información de bloque y sus transacciones.
-- `GET /blockchain/post/{post_id}`: recupera post, CID, aserciones y validaciones desde el contrato.
-- `GET /blockchain/validators`: lista validadores registrados y opcionalmente recupera su configuración desde IPFS.
-- `GET /blockchain/validators/{validator_address}`: recupera un validador concreto y su configuración.
+- `POST /registerNew`: Sends a `registerNew` transaction to the contract to register a noticia/documento and returns `tx_hash`.
+- `GET /tx/status/{tx_hash}`: Checks if a transaction is pending, mined or failed, and extracts relevant events if they exist.
+- `GET /tx/{tx_hash}`: returns transaction detail and recipit.
+- `GET /block/{block_id}`: returns block information and its transactions.
+- `GET /blockchain/post/{post_id}`: recovers post, CID, assertions and validations from the contract.
+- `GET /blockchain/validators`: list of validators registered and optionally retrieves their settings from IPFS.
+- `GET /blockchain/validators/{validator_address}`: Recovers a concrete validator and its configuration.
 
 ## Daemons
 
-- `blockchain_event_listener`: escucha eventos blockchain relacionados con validaciones, especialmente resultados `ValidationSubmitted`, y publica mensajes de validación completada en Kafka.
-- Consumidor Kafka `consume_register_kafka`: escucha `KAFKA_REQUEST_TOPIC` con `group_id=trustnews-api-group`. Recibe solicitudes de registro blockchain, llama a `registerNew`, espera confirmación, parsea eventos y publica `blockchain_registered` en `KAFKA_RESPONSE_TOPIC`.
+- `blockchain_event_listener`: listens to blockchain events related to validations, especially `ValidationSubmitted` results, and publishes validation messages completed in Kafka.
+- Consumer Kafka `consume_register_kafka`: listen to `KAFKA_REQUEST_TOPIC` with `group_id=trustnews-api-group`. Receive blockchain registration requests, call `registerNew`, wait for confirmation, parse events and publish `blockchain_registered` in `KAFKA_RESPONSE_TOPIC`.
 
-## Inicialización
+## Initialisation
 
-Al cargar el módulo valida la conexión Web3 con `RPC_URL`, carga el ABI, crea la instancia del contrato y comprueba que hay bytecode desplegado en `CONTRACT_ADDRESS`. Si falla, termina el proceso. En `startup` lanza el listener de eventos blockchain y el consumidor Kafka en segundo plano.
+When loading the module validates the Web3 connection with `RPC_URL`, load the ABI, create the instance of the contract and check that there is bytecode deployed in `CONTRACT_ADDRESS`. If it fails, the process ends. In `startup` launches the blockchain event lister and the Kafka consumer in the background.
 
-## Variables de entorno
+## Environment variables
 
 - `RPC_URL`: endpoint RPC Ethereum.
 - `PRIVATE_KEY`: clave privada usada para firmar transacciones.
 - `ACCOUNT_ADDRESS`: cuenta emisora.
-- `CONTRACT_ADDRESS`: dirección del contrato TrustNews.
-- `CONTRACT_ABI_PATH`: ruta al ABI del contrato.
+- `CONTRACT_ADDRESS`: address of TrustNews contract.
+- `CONTRACT_ABI_PATH`: route to ABI of the contract.
 - `KAFKA_BOOTSTRAP`: bootstrap Kafka.
-- `KAFKA_REQUEST_TOPIC`: tópico de solicitudes de registro blockchain.
-- `KAFKA_RESPONSE_TOPIC`: tópico de respuestas.
-- `IPFS_FASTAPI_URL`: URL del servicio IPFS para recuperar documentos/configuraciones.
+- `KAFKA_REQUEST_TOPIC`: Topical blockchain registration requests.
+- `KAFKA_RESPONSE_TOPIC`: topic of answers.
+- `IPFS_FASTAPI_URL`: IPFS service URL to recover documentos/configuraciones.

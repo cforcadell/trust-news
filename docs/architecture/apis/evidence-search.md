@@ -1,42 +1,45 @@
 # Evidence Search
 
-## Descripción
+`api/evidence-search` recovers specific documents for RAG validators. It does not uncover authorities, does not classify domains, and does not consult `source-router`.
 
-`api/evidence-search` busca evidencias externas para validar aserciones. Usa perfiles de dominios preferentes guardados en MongoDB, resuelve dominios relevantes para una aserción y consulta Tavily cuando hay API key configurada. Cachea respuestas para reducir coste y latencia.
+## Contract v2
 
-## Endpoints
+`POST /search/evidence` recibe:
 
-- `GET /health`: devuelve estado básico del servicio.
-- `POST /search/evidence`: recibe una aserción y una política de búsqueda, resuelve dominios preferentes, genera queries, consulta Tavily o devuelve dominios seleccionados como fallback, normaliza evidencias y cachea la respuesta.
-- `DELETE /admin/cache`: vacía la colección de cache de búsquedas y devuelve el número de documentos eliminados. No elimina perfiles de dominios ni recrea índices.
+- `assertion`: Full `assertions-document-v2` assertion.
+- `origin_document`: URL/dominio of the news, or both to `null` if unknown.
+- `search_policy`: A RAG strategy, boundaries and `preferred_sources`.
 
-## Daemons
+There are only three strategies:
 
-No ejecuta consumidores ni productores Kafka. Su cometido es responder bajo demanda a validadores RAG o clientes internos.
+| Estrategia | Dominios | Plan |
+|---|---|---|
+| `LOCAL` | Required `preferred_sources` produced by Source Router | Restricted search and refill within those same domains |
+| `EXT_OFFICIAL_FIRST` | No acepta `preferred_sources` | Preferential official request and then general search |
+| `EXT_ONLY_OFFICIAL` | No acepta `preferred_sources` | Official single request and subsequent deterministic filter by `source_type` |
 
-## Inicialización
+`NONE` does not exist. The autonomous web search is already represented by `LLM_SEARCH_VALIDATION` and does not go through this service.
 
-En `startup` conecta a MongoDB, inicializa colecciones de perfiles de dominio y cache, y crea índices únicos para documentos de perfiles/subsets e índices de cache con TTL. En `shutdown` cierra MongoDB.
+The answer contains the plan executed as structured objects, the resolution of normalized domains and evidences. Each evidence retains `source_type`, `authority_level`, `route_score`, `profile_version` and `relationship_to_origin`. The original document may appear as context, but grounding does not admit it as independent decisive evidence.
 
-## Variables de entorno
+`provider_trace` is the stable audit trail for calls to Exa/Tavily. Every planned request has a `plan_sequence`; every HTTP request actually attempted also has a sequential `provider_call_id`, `call_sequence`, UTC start/end timestamps, duration and an `EXECUTED` or `FAILED` status. `SKIPPED` requests have no call identifier and do not count as provider calls. Every returned URL records its provider rank and decision (`RETAINED`, `DUPLICATE`, policy drop or budget exclusion), while every final evidence contains all its `provider_call_ids` and its first provider call.
 
-- `MONGO_URI` o variables `MONGO_APP_*`: conexión MongoDB.
-- `MONGO_DBNAME`: base de datos.
-- `EVIDENCE_DOMAIN_CONFIG_COLLECTION` o `MONGO_EVIDENCE_DOMAIN_PROFILES_COLLECTION`: colección de perfiles de dominio.
-- `EVIDENCE_SEARCH_CACHE_COLLECTION`: colección de cache de búsquedas.
-- `EVIDENCE_SEARCH_CACHE_TTL_SECONDS`: duración del cache.
-- `TAVILY_API_URL`: endpoint de Tavily.
-- `TAVILY_SEARCH_DEPTH`: profundidad de búsqueda.
-- `TAVILY_INCLUDE_ANSWER`: incluye respuesta sintética de Tavily.
-- `TAVILY_INCLUDE_RAW_CONTENT`: incluye contenido bruto.
-- `TAVILY_MAX_RESULTS`: máximo de resultados por llamada Tavily.
-- `TAVILY_TIMEOUT`: timeout de Tavily.
-- `TAVILY_API_KEY`: API key de Tavily. Si no está configurada, el servicio devuelve evidencias fallback basadas en dominios preferentes.
+On a cache hit, `provider_trace.requests` is empty and its summary reports zero calls for the current validation. If the cached entry was created with the current contract, `cached_origin_requests` preserves the historical calls that originally retrieved those URLs. Legacy cache entries explicitly report `NOT_RECORDED_LEGACY_CACHE`; the service and viewer never infer a call count from a query plan or from the number of URLs.
 
-## Preferred domains y normalización
+A source is citable when Evidence Search obtains document text under the configured extraction policy and generates contexts with `context_id`, `text_sha256` and `citation_eligible=true`. The default `DIRECT` mode downloads the URL and produces `origin=fetched_document`. Optional `SMART` mode can use full `raw_content` already returned by Search and produces `origin=provider_extracted`. With `EVIDENCE_ALLOW_PROVIDER_EXTRACT=true`, SMART can call the provider's URL extractor after direct HTTP fails; `PROVIDER` can use Search text or that extractor without direct HTTP. This extra call has a per-request budget. Highlights and snippets alone never qualify. A Search copy carries `freshness_status=UNKNOWN`; requiring known freshness makes SMART use direct HTTP, then a provider URL extraction only if its adapter proves a live read. If no method succeeds, URL, title and snippet remain for diagnosis but contexts are empty and `citation_status=unavailable`. See [implementation plan and progress](../evidence-retrieval-engine-plan.md).
 
-`LOCAL` es el único modo que lee MongoDB y activa scoring. `evidence_domain_profiles` almacena un documento completo por perfil; `evidence_normalization_configs` almacena documentos independientes para `subcategories`, `location_types` y `source_types`. No se admite el esquema legacy por subsets.
+Each attempted source reports `acquisition_attempts` and `document_provenance` (method, provider, URLs, reception time, freshness status, text hash and optional snapshot ID). The response carries both the legacy `evidence_bundle_hash` and additive `evidence_bundle_hash_v2`, which binds delivered context text to declared provenance. Full document text is stored in content-addressed MongoDB snapshots when it fits the configured limit; a snapshot ID supports later verification of the declared document hash. This establishes integrity of the acquired copy, not authenticity of the original website.
 
-`NONE` mantiene búsqueda abierta. `EXT_OFFICIAL_FIRST` y `EXT_ONLY_OFFICIAL` siguen delegando la política de fuentes al proveedor sin scoring local. `LOCAL` solo es válido para `RAG_EVIDENCE_VALIDATION` y se usa igual en LIGHT y BLOCKCHAIN.
+`extraction_policy` records the effective mode, provider extraction allowance and budget, freshness requirement and snapshot reuse age in each response. It lets evaluators compare campaigns without guessing the active service configuration.
 
-La respuesta incluye `search_policy.selected_domains` con score base, score final y señales coincidentes. Las versiones del perfil y taxonomías forman parte de la clave de caché.
+The retrieval pipeline detects HTML, PDF and textual payloads from their content before trusting the HTTP header. Each source reports the effective format/extractor, HTTP status, downloaded bytes, individual attempts and a stable failure object (`stage`, `code`, `retryable`). Candidate selection is round-robin by domain and limits concentration from one host.
+
+If the first documents do not yield enough citationable contexts, the service first consumes unused candidates already returned by the provider. This does not issue another search and never downloads the same URL twice. Only after that pool is exhausted does the existing policy-safe provider refill run: `LOCAL` remains inside the routed domains and `EXT_ONLY_OFFICIAL` remains official-only. The response exposes `retrieval_summary` (budgets, extracted/citationable documents, failure counts and stop reason) and `cache_policy`.
+
+The validator selects only `context_id`; it does not control the URL or the text that persists. Validate Asers reconstructs `evidence_used` from the canonical context and rejects missing or ambiguous identifiers.
+
+MongoDB saves `evidence_search_cache_v2` and the short-lived shared URL outcome collection `evidence_unusable_urls_v1`, both with TTL. The latter lets every replica defer a recently unusable URL in favour of another candidate from the same provider response. The response-cache key includes standardized assertion, origin, full strategy, routed profiles and search backend settings, including the retrieval contract version. Changing any of them separates the cache entry. Positive responses use the normal TTL; empty or retryable failures use a short negative TTL; non-retryable unusable documents use an intermediate TTL. The new version does not reuse old responses, so it does not require deleting the collection.
+
+Relevant tuning variables are `EVIDENCE_CANDIDATE_MULTIPLIER`, `EVIDENCE_MAX_RESULTS_PER_DOMAIN`, `EVIDENCE_TARGET_CITABLE_SOURCES`, `EVIDENCE_SEARCH_TRANSIENT_FAILURE_TTL_SECONDS`, `EVIDENCE_SEARCH_UNUSABLE_TTL_SECONDS`, `EVIDENCE_UNUSABLE_URL_TTL_SECONDS` and `EVIDENCE_UNUSABLE_URL_MAX_ENTRIES`.
+
+`DELETE /admin/cache` empties that cache exclusively. Old collections are removed by `scripts/k8s/realign-source-routing-mongodb.sh`.

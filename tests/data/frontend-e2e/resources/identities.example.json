@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "description": "Identidades pseudónimas de regresión. Este fichero no contiene credenciales.",
+  "organizations": [
+    {
+      "id": "org-alpha",
+      "identities": {
+        "administrator": {
+          "alias": "org-alpha-admin",
+          "usernameEnv": "ASSERMETRY_ORG_ALPHA_ADMIN_USERNAME",
+          "passwordEnv": "ASSERMETRY_ORG_ALPHA_ADMIN_PASSWORD"
+        },
+        "user": {
+          "alias": "org-alpha-user",
+          "usernameEnv": "ASSERMETRY_ORG_ALPHA_USERNAME",
+          "passwordEnv": "ASSERMETRY_ORG_ALPHA_PASSWORD"
+        },
+        "apiClient": {
+          "alias": "org-alpha-api",
+          "clientIdEnv": "ASSERMETRY_ORG_ALPHA_CLIENT_ID",
+          "clientSecretEnv": "ASSERMETRY_ORG_ALPHA_CLIENT_SECRET"
+        }
+      }
+    },
+    {
+      "id": "org-beta",
+      "identities": {
+        "administrator": {
+          "alias": "org-beta-admin",
+          "usernameEnv": "ASSERMETRY_ORG_BETA_ADMIN_USERNAME",
+          "passwordEnv": "ASSERMETRY_ORG_BETA_ADMIN_PASSWORD"
+        },
+        "user": {
+          "alias": "org-beta-user",
+          "usernameEnv": "ASSERMETRY_ORG_BETA_USERNAME",
+          "passwordEnv": "ASSERMETRY_ORG_BETA_PASSWORD"
+        },
+        "apiClient": {
+          "alias": "org-beta-api",
+          "clientIdEnv": "ASSERMETRY_ORG_BETA_CLIENT_ID",
+          "clientSecretEnv": "ASSERMETRY_ORG_BETA_CLIENT_SECRET"
+        }
+      }
+    }
+  ]
+}

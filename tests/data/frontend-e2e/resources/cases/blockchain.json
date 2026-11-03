@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "synthetic-blockchain-01",
+  "organization": "org-beta",
+  "mode": "BLOCKCHAIN",
+  "identity": {
+    "alias": "org-beta-user",
+    "usernameEnv": "ASSERMETRY_ORG_BETA_USERNAME",
+    "passwordEnv": "ASSERMETRY_ORG_BETA_PASSWORD"
+  },
+  "newsFile": "blockchain-news.txt",
+  "timeoutMs": 420000,
+  "expected": {
+    "terminalStatuses": ["VALIDATED"],
+    "minimumAssertions": 1,
+    "minimumValidations": 1,
+    "validatorsPending": 0,
+    "requiredTabs": ["summary", "assertions", "evidence", "process", "technical", "ipfs", "events"],
+    "enabledTabs": ["ipfs"],
+    "requiredOrderFields": ["order_id", "status", "validation_mode", "cid", "post_id", "tx_hash"],
+    "allowedHttpFailures": [
+      {
+        "status": 404,
+        "pathPattern": "^/backend/orders/[^/]+/events$"
+      }
+    ],
+    "allowedConsoleErrors": []
+  }
+}

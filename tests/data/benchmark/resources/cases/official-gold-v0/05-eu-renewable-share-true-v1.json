@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "id": "gold-v0-eu-renewable-share-true-v1",
+  "title": "Cuota renovable de la Unión Europea en 2023",
+  "language": "es",
+  "description": "Caso atómico real basado en la publicación estadística de Eurostat.",
+  "news": "En 2023, las renovables representaron el 24,5 % del consumo final bruto de energía de la Unión Europea.",
+  "tags": ["suite:official-gold-v0", "lang:es", "jurisdiction:EU", "topic:energy", "difficulty:medium", "temporal:historical", "evidence:official", "expected:decisive", "status:candidate"],
+  "assertions": [{
+    "id": "EU_RENEWABLE_SHARE_2023_TRUE",
+    "text": "En 2023, las renovables representaron el 24,5 % del consumo final bruto de energía de la Unión Europea.",
+    "source_excerpt": "En 2023, las renovables representaron el 24,5 % del consumo final bruto de energía de la Unión Europea.",
+    "expected_verdict": "TRUE",
+    "category_ids": [9],
+    "expected_topic_code": "ENERGY",
+    "expected_evidence_kind": "STATISTICAL_DATA",
+    "expected_context": {"entities": ["Unión Europea", "Eurostat"], "temporal_context": ["2023"], "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}},
+    "pipeline_assertion": {"assertion_id": "EU_RENEWABLE_SHARE_2023_TRUE", "assertion_index": 0, "text": "En 2023, las renovables representaron el 24,5 % del consumo final bruto de energía de la Unión Europea.", "categoryId": 9, "topic_code": "ENERGY", "evidence_kind": "STATISTICAL_DATA", "context": {"language": "es", "jurisdiction": {"scope": "SUPRANATIONAL", "jurisdiction_code": "EU"}}},
+    "required_terms": ["2023", "renovables", "24,5", "consumo final bruto", "Unión Europea"],
+    "acceptable_domains": ["ec.europa.eu"],
+    "reference_facts": ["Eurostat publicó una cuota del 24,5 % para el consumo final bruto de energía de la UE en 2023."],
+    "reference_sources": [{"id": "eurostat-renewables-2023", "url": "https://ec.europa.eu/eurostat/en/web/products-eurostat-news/w/ddn-20241219-3", "title": "Renewables account for 24.5% of EU energy use in 2023"}],
+    "reference_evidence": [{"source": "eurostat-renewables-2023", "relation": "SUPPORTS", "text": "In 2023, 24.5% of EU gross final energy consumption came from renewable sources."}]
+  }]
+}

@@ -51,6 +51,11 @@ spec:
               value: "true"
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "1" # Crucial porque solo tienes 1 nodo
+            # Must be at least as large as the maximum application message.
+            - name: KAFKA_MESSAGE_MAX_BYTES
+              value: "4194304"
+            - name: KAFKA_REPLICA_FETCH_MAX_BYTES
+              value: "8388608"
             - name: KAFKA_HEAP_OPTS
               value: "-Xms256m -Xmx512m"
           volumeMounts:

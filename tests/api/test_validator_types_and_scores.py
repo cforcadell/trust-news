@@ -1,0 +1,56 @@
+from common.models.async_models import (
+    ValidatorType,
+    get_validator_type_weight,
+    normalize_validation_result,
+)
+
+
+def test_validator_type_has_no_legacy_aliases():
+    for legacy_name in ("General_AI", "Trained_AI", "Dedicated_Agent", "Human"):
+        assert legacy_name not in ValidatorType.__members__
+
+
+def test_validator_type_weights():
+    assert get_validator_type_weight(ValidatorType.LLM_MEMORY_VALIDATION) == 0.25
+    assert get_validator_type_weight(ValidatorType.LLM_SEARCH_VALIDATION) == 0.5
+    assert get_validator_type_weight(ValidatorType.RAG_EVIDENCE_VALIDATION) == 1.0
+    assert get_validator_type_weight(ValidatorType.DETERMINISTIC_VALIDATION) == 1.0
+    assert get_validator_type_weight(ValidatorType.HUMAN) == 0.1
+    assert get_validator_type_weight(
+        ValidatorType.RAG_EVIDENCE_VALIDATION,
+        {"RAG_EVIDENCE_VALIDATION": 0.6},
+    ) == 0.6
+
+
+def test_result_normalization():
+    assert normalize_validation_result("SUPPORTED") == "UNKNOWN"
+    assert normalize_validation_result("REFUTED") == "UNKNOWN"
+    assert normalize_validation_result("INSUFFICIENT") == "UNKNOWN"
+    assert normalize_validation_result(1) == "TRUE"
+    assert normalize_validation_result(2) == "FALSE"
+    assert normalize_validation_result(3) == "UNKNOWN"
+
+
+def test_weighted_score_formula_preserves_raw_weight():
+    validations = [
+        (ValidatorType.LLM_MEMORY_VALIDATION, 1.0, "TRUE"),
+        (ValidatorType.LLM_SEARCH_VALIDATION, 1.0, "TRUE"),
+        (ValidatorType.RAG_EVIDENCE_VALIDATION, 1.0, "FALSE"),
+    ]
+    scores = {"TRUE": 0.0, "FALSE": 0.0, "UNKNOWN": 0.0}
+    for validator_type, reputation, result in validations:
+        scores[normalize_validation_result(result)] += get_validator_type_weight(validator_type) * reputation
+
+    assert scores["TRUE"] == 0.75
+    assert scores["FALSE"] == 1.0
+    assert max(scores, key=scores.get) == "FALSE"
+
+
+def test_evidence_search_strategies_only_apply_to_rag():
+    from common.models.async_models import EvidenceSearchStrategy, evidence_search_strategy_supported
+
+    for strategy in EvidenceSearchStrategy:
+        assert evidence_search_strategy_supported(ValidatorType.RAG_EVIDENCE_VALIDATION, strategy)
+        assert not evidence_search_strategy_supported(ValidatorType.LLM_MEMORY_VALIDATION, strategy)
+        assert not evidence_search_strategy_supported(ValidatorType.LLM_SEARCH_VALIDATION, strategy)
+    assert not evidence_search_strategy_supported(ValidatorType.RAG_EVIDENCE_VALIDATION, "NONE")

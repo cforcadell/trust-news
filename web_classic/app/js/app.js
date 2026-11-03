@@ -4,6 +4,7 @@
 // CONFIGURACIÓN GLOBAL
 // =========================================================
 const BACKEND_BASE = "/backend";
+const FRONTEND_BASE_PATH = "/gui/";
 
 const API = BACKEND_BASE;
 const TX_API = BACKEND_BASE;
@@ -11,11 +12,20 @@ const IPFS_API = BACKEND_BASE;
 const GENERATE_API = BACKEND_BASE;
 
 const MAX_EVENTS_ROWS = 15;
-const POLLING_DURATION = 0; // 20 segundos
-const POLLING_INTERVAL = 1000;  // 1 segundo
+const ASSERTIONS_REQUEST_TIMEOUT_MS = 90000;
+const ASSERTIONS_PROGRESS_SLOW_AFTER_MS = 20000;
+const POLLING_DURATION = 5 * 60 * 1000;
+const POLLING_INTERVAL = 3000;
+const POLLING_REQUEST_TIMEOUT_MS = 15000;
+const POLLING_MAX_CONSECUTIVE_ERRORS = 3;
 
 const TABLE_PAGE_SIZE_ORDERS = 10;   // cantidad por página
 let TABLE_PAGE_ORDERS = 1;           // página actual
+let TABLE_FILTERS_ORDERS = {};        // filtros activos por columna
+const VALIDATOR_VALIDATIONS_PAGE_SIZE = 5;
+let VALIDATOR_VALIDATIONS_PAGE = 1;
+let VALIDATOR_VALIDATIONS_FILTERS = {};
+let VALIDATOR_VALIDATIONS_EXPANDED = new Set();
 
 const CATEGORY_IDS = window.I18N?.getCategoryIds() || [];
 
@@ -81,6 +91,8 @@ function alertMessage(message, type = 'info', duration = 3000) {
 let currentOrderData = {};
 let currentOrderEvents = [];
 let restoringHistoryState = false;
+let assertionsGenerationInProgress = false;
+let activeOrderPollingSession = null;
 
 function buildHistoryUrl(state) {
     if (!state?.section) return window.location.pathname;
@@ -159,18 +171,33 @@ function shortHex(value) {
 }
 
 function getSelectedValidationMode() {
-    return document.getElementById("validationMode")?.value || "BLOCKCHAIN";
+    return document.getElementById("validationMode")?.checked ? "BLOCKCHAIN" : "LIGHT";
+}
+
+async function loadCapabilities() {
+    try {
+        const response = await fetch(`${BACKEND_BASE}/capabilities`, {
+            headers: { Authorization: `Bearer ${keycloak.token}` }
+        });
+        if (!response.ok) return;
+        const { blockchain_enabled: enabled } = await response.json();
+        if (enabled) return;
+        const modeCheckbox = document.getElementById("validationMode");
+        if (modeCheckbox) {
+            modeCheckbox.checked = false;
+            modeCheckbox.closest(".validation-mode-panel").style.display = "none";
+        }
+        for (const section of ["tx", "blocks", "contract", "consistency"]) {
+            document.querySelectorAll(`button[onclick="showSection('${section}')"]`)
+                .forEach(button => { button.style.display = "none"; });
+        }
+    } catch (error) {
+        console.warn("No se pudieron cargar las capacidades del servicio", error);
+    }
 }
 
 function isLightOrder(order) {
     return String(order?.validation_mode || "BLOCKCHAIN").toUpperCase() === "LIGHT";
-}
-
-function updateValidationModeHelp() {
-    const selected = getSelectedValidationMode();
-    document.querySelectorAll("[data-mode-help]").forEach(el => {
-        el.hidden = el.getAttribute("data-mode-help") !== selected;
-    });
 }
 
 function getValidationLiteral(value) {
@@ -226,7 +253,10 @@ function showSection(sectionId, reset = true, updateHistory = true) {
     if(reset) {
         // ===== RESET de inputs de usuario =====
         const inputs = activeSection.querySelectorAll("input:not([type=button]):not([type=submit]), textarea");
-        inputs.forEach(input => input.value = "");
+        inputs.forEach(input => {
+            if (input.type === "checkbox" || input.type === "radio") input.checked = false;
+            else input.value = "";
+        });
 
         // ===== RESET de tablas generadas dinámicamente =====
         const tables = activeSection.querySelectorAll("table");
@@ -245,6 +275,10 @@ function showSection(sectionId, reset = true, updateHistory = true) {
             listOrders();
         }
 
+        if (sectionId === "llm-config" && IS_ADMIN) {
+            refreshLLMAdminView();
+        }
+
         if (sectionId === "validators" && reset) {
             listValidatorsCache();
         }
@@ -257,38 +291,318 @@ function showSection(sectionId, reset = true, updateHistory = true) {
 // =========================================================
 // POLLING DE ÓRDENES
 // =========================================================
-async function pollOrder(orderId, startTime) {
-    const start = startTime || Date.now();
-    await loadOrderById(orderId, false);
+function isTerminalOrderStatus(status) {
+    const normalized = String(status || "").toUpperCase();
+    return normalized.startsWith("VALIDATED") || [
+        "ASSERTIONS_NOT_AVAILABLE",
+        "QUOTA_EXCEDED",
+        "NO_VALIDATORS_AVAILABLE",
+        "FAILED",
+        "ERROR"
+    ].includes(normalized);
+}
 
-    const detailsContainer = document.getElementById("fixedDetailsContainer");
-    const statusElement = detailsContainer.querySelector('.status-value') || document.querySelector('#tabContent .status-value');
-    const currentStatus = statusElement?.getAttribute('data-status') || 'UNKNOWN';
+function stopOrderPolling(session = activeOrderPollingSession) {
+    if (!session) return;
+    session.stopped = true;
+    if (session.timerId) window.clearTimeout(session.timerId);
+    if (session.controller) session.controller.abort();
+    if (activeOrderPollingSession === session) activeOrderPollingSession = null;
+}
 
-    if (currentStatus === 'VALIDATED' || (Date.now() - start > POLLING_DURATION)) {
-        statusElement?.classList.remove('polling', 'blinking');
-        console.log(`Polling finalizado para ${orderId}. Estado: ${currentStatus}`);
-        if (currentStatus === 'VALIDATED') await loadOrderById(orderId, true);
+function getLatestOrderEvent(events = []) {
+    if (!Array.isArray(events) || events.length === 0) return null;
+
+    let latestEvent = events.at(-1);
+    let latestTimestamp = Number.NEGATIVE_INFINITY;
+    events.forEach(event => {
+        const timestamp = parseApiTimestamp(event?.timestamp)?.getTime();
+        if (Number.isFinite(timestamp) && timestamp >= latestTimestamp) {
+            latestEvent = event;
+            latestTimestamp = timestamp;
+        }
+    });
+    return latestEvent;
+}
+
+function summarizeOrderEvent(event) {
+    if (!event) return t("messages.verificationNoEvents");
+
+    const action = String(event.action || "").trim().toLowerCase();
+    const translationKey = `eventActions.${action}`;
+    const translatedAction = t(translationKey);
+    const actionSummary = translatedAction === translationKey
+        ? action.replaceAll("_", " ") || t("messages.verificationUnknownEvent")
+        : translatedAction;
+    const assertionId = event.payload?.idAssertion ?? event.payload?.assertion_id;
+
+    return assertionId === undefined || assertionId === null || assertionId === ""
+        ? actionSummary
+        : t("messages.verificationEventAssertion", { event: actionSummary, id: assertionId });
+}
+
+function formatPollingEventDate(value) {
+    const date = parseApiTimestamp(value);
+    if (!date) return "—";
+    const language = window.I18N?.getLanguage?.() === "en" ? "en-GB" : "es-ES";
+    return date.toLocaleString(language, {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+    });
+}
+
+function resetPublishedOrderView() {
+    currentOrderData = {};
+    currentOrderEvents = [];
+    ["orderTabs", "fixedDetailsContainer", "tabContent"].forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = "";
+    });
+}
+
+function renderOrderPollingState(type, session, status = "") {
+    const container = document.getElementById("fixedDetailsContainer");
+    if (!container || !session) return;
+
+    const elapsedSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
+    const latestEvent = getLatestOrderEvent(currentOrderEvents);
+    const progressDetail = t("messages.verificationElapsed", {
+        count: elapsedSeconds,
+        date: formatPollingEventDate(latestEvent?.timestamp),
+        event: summarizeOrderEvent(latestEvent)
+    });
+    const isError = type === "connection-error" || type === "terminal-error";
+    const messages = {
+        checking: {
+            title: t("messages.verificationChecking"),
+            detail: progressDetail
+        },
+        retrying: {
+            title: t("messages.verificationConnectionRetry", { current: session.consecutiveErrors, total: POLLING_MAX_CONSECUTIVE_ERRORS }),
+            detail: t("messages.verificationOrderPreserved", { orderId: session.orderId })
+        },
+        timeout: {
+            title: t("messages.verificationTimeoutTitle"),
+            detail: t("messages.verificationTimeoutError", { minutes: Math.round(POLLING_DURATION / 60000), orderId: session.orderId })
+        },
+        "connection-error": {
+            title: t("messages.verificationConnectionErrorTitle"),
+            detail: t("messages.verificationConnectionError", { orderId: session.orderId })
+        },
+        "terminal-error": {
+            title: t("messages.verificationTerminalErrorTitle"),
+            detail: t("messages.verificationTerminalError", { status: status || "-", orderId: session.orderId })
+        }
+    };
+    const copy = messages[type] || messages.checking;
+    const canRetry = type === "timeout" || type === "connection-error";
+
+    container.innerHTML = `
+        <div class="order-polling-notice ${isError ? "error" : type === "retrying" ? "warning" : "active"}" role="${isError ? "alert" : "status"}">
+            <span class="${isError ? "order-polling-icon" : "loading-spinner"}" aria-hidden="true">${isError ? "!" : ""}</span>
+            <div>
+                <strong>${safeText(copy.title)}</strong>
+                <p>${safeText(copy.detail)}</p>
+                ${canRetry ? `<button type="button" class="btn-secondary btn-retry-verification">${safeText(t("messages.retryVerification"))}</button>` : ""}
+            </div>
+        </div>
+        ${renderGlobalOrderStatus(currentOrderData)}
+    `;
+
+    container.querySelector(".btn-retry-verification")?.addEventListener("click", () => pollOrder(session.orderId, {
+        followProcess: session.followProcess
+    }));
+}
+
+async function runOrderPollingCycle(session) {
+    if (session.stopped || activeOrderPollingSession !== session) return;
+
+    if (Date.now() - session.startedAt >= POLLING_DURATION) {
+        stopOrderPolling(session);
+        activateOrderTab("process");
+        renderOrderPollingState("timeout", session, currentOrderData?.status);
+        alertMessage(t("messages.verificationTimeoutTitle"), "info", 7000);
         return;
     }
 
-    setTimeout(() => pollOrder(orderId, start), POLLING_INTERVAL);
+    renderOrderPollingState(session.consecutiveErrors ? "retrying" : "checking", session, currentOrderData?.status);
+    const controller = new AbortController();
+    session.controller = controller;
+    const requestTimeoutId = window.setTimeout(() => controller.abort(), POLLING_REQUEST_TIMEOUT_MS);
+    const result = await loadOrderById(session.orderId, false, {
+        signal: controller.signal,
+        background: true,
+        preferredTabKey: session.followProcess && !session.processShown ? "process" : null,
+        isCurrent: () => activeOrderPollingSession === session && !session.stopped
+    });
+    window.clearTimeout(requestTimeoutId);
+    session.controller = null;
+
+    if (session.stopped || activeOrderPollingSession !== session) return;
+
+    if (result?.ok) {
+        session.processShown = true;
+        session.consecutiveErrors = 0;
+        const status = String(result.data?.status || "UNKNOWN").toUpperCase();
+        if (isTerminalOrderStatus(status)) {
+            stopOrderPolling(session);
+            console.log(`Polling finalizado para ${session.orderId}. Estado: ${status}`);
+            if (status.startsWith("VALIDATED")) {
+                await loadOrderById(session.orderId, true, { preferredTabKey: "summary" });
+                activateOrderTab("summary");
+            } else {
+                renderOrderPollingState("terminal-error", session, status);
+                alertMessage(t("messages.verificationTerminalErrorTitle"), "error", 7000);
+            }
+            return;
+        }
+        renderOrderPollingState("checking", session, status);
+    } else {
+        session.consecutiveErrors += 1;
+        if (session.consecutiveErrors >= POLLING_MAX_CONSECUTIVE_ERRORS) {
+            stopOrderPolling(session);
+            renderOrderPollingState("connection-error", session, currentOrderData?.status);
+            alertMessage(t("messages.verificationConnectionErrorTitle"), "error", 7000);
+            return;
+        }
+        renderOrderPollingState("retrying", session, currentOrderData?.status);
+    }
+
+    session.timerId = window.setTimeout(() => runOrderPollingCycle(session), POLLING_INTERVAL);
+}
+
+function pollOrder(orderId, options = {}) {
+    stopOrderPolling();
+    if (options.resetView) resetPublishedOrderView();
+    const session = {
+        orderId,
+        startedAt: Date.now(),
+        consecutiveErrors: 0,
+        timerId: null,
+        controller: null,
+        followProcess: Boolean(options.followProcess),
+        stopped: false
+    };
+    activeOrderPollingSession = session;
+    runOrderPollingCycle(session);
 }
 
 // ========================================================
 // OPERACIONES DE ASSERTIONS
 // ========================================================
 
-function renderAssertionsProgress(container, message, percent = 0) {
-    if (!container) return;
+function startAssertionsProgress(container) {
+    if (!container) return { stop() {} };
+
+    const startedAt = Date.now();
+    const stages = [
+        { after: 0, label: t("messages.assertionStageAnalyzing") },
+        { after: 6000, label: t("messages.assertionStageExtracting") },
+        { after: 15000, label: t("messages.assertionStagePreparing") }
+    ];
+
     container.innerHTML = `
-        <div class="validation-progress">
-            <span>${escapeHTML(message)}</span>
-            <div class="validation-progress-bar">
-                <div class="validation-progress-fill" style="width:${Math.min(100, Math.max(0, percent))}%;"></div>
+        <div class="assertion-generation-progress" role="status" aria-live="polite" aria-busy="true">
+            <div class="assertion-generation-heading">
+                <span class="loading-spinner" aria-hidden="true"></span>
+                <div>
+                    <strong data-generation-stage>${safeText(stages[0].label)}</strong>
+                    <span data-generation-elapsed aria-hidden="true"></span>
+                </div>
+            </div>
+            <div class="validation-progress-bar" aria-hidden="true">
+                <div class="validation-progress-fill indeterminate"></div>
+            </div>
+            <ol class="assertion-generation-stages" aria-hidden="true">
+                ${stages.map((stage, index) => `<li data-generation-step="${index}" class="${index === 0 ? "active" : ""}">${safeText(stage.label)}</li>`).join("")}
+            </ol>
+            <p data-generation-slow-note hidden>${safeText(t("messages.assertionsTakingLonger"))}</p>
+        </div>
+    `;
+
+    const update = () => {
+        const elapsed = Date.now() - startedAt;
+        const activeIndex = stages.reduce((selected, stage, index) => elapsed >= stage.after ? index : selected, 0);
+        const stageElement = container.querySelector("[data-generation-stage]");
+        const elapsedElement = container.querySelector("[data-generation-elapsed]");
+        const slowNote = container.querySelector("[data-generation-slow-note]");
+
+        if (stageElement) stageElement.textContent = stages[activeIndex].label;
+        if (elapsedElement) elapsedElement.textContent = t("messages.assertionElapsed", { count: Math.floor(elapsed / 1000) });
+        container.querySelectorAll("[data-generation-step]").forEach((step, index) => {
+            step.classList.toggle("completed", index < activeIndex);
+            step.classList.toggle("active", index === activeIndex);
+        });
+        if (slowNote) slowNote.hidden = elapsed < ASSERTIONS_PROGRESS_SLOW_AFTER_MS;
+    };
+
+    update();
+    const intervalId = window.setInterval(update, 1000);
+    return { stop: () => window.clearInterval(intervalId) };
+}
+
+function createFrontendRequestError(code, status = null) {
+    const error = new Error(code);
+    error.code = code;
+    error.status = status;
+    return error;
+}
+
+function assertionsErrorMessage(error) {
+    switch (error?.code) {
+        case "quota": return t("ui.quotaReached");
+        case "timeout": return t("messages.assertionTimeoutError", { seconds: Math.round(ASSERTIONS_REQUEST_TIMEOUT_MS / 1000) });
+        case "authentication": return t("messages.assertionAuthenticationError");
+        case "server": return t("messages.assertionServerError");
+        case "invalid_response": return t("messages.assertionInvalidResponseError");
+        case "request": return t("messages.assertionRequestError", { status: error.status || "-" });
+        default: return t("messages.assertionNetworkError");
+    }
+}
+
+function setAssertionsButtonLoading(loading) {
+    const button = document.getElementById("btn-generateAssertions");
+    if (!button) return;
+    button.disabled = loading;
+    button.classList.toggle("is-loading", loading);
+    button.setAttribute("aria-busy", String(loading));
+    button.innerHTML = loading
+        ? `<span class="button-spinner" aria-hidden="true"></span>${safeText(t("messages.generatingAssertions"))}`
+        : safeText(t("sections.generateAssertions"));
+}
+
+function renderAssertionsGenerationResult(container, count) {
+    if (!container) return;
+    const empty = count === 0;
+    container.insertAdjacentHTML("afterbegin", `
+        <div class="assertion-generation-result ${empty ? "empty" : "success"}" role="status">
+            <span aria-hidden="true">${empty ? "ⓘ" : "✓"}</span>
+            <div>
+                <strong>${safeText(empty ? t("messages.noAssertionsFound") : t("messages.assertionsGeneratedCount", { count }))}</strong>
+                <p>${safeText(empty ? t("messages.noAssertionsFoundHelp") : t("messages.assertionsReviewHelp"))}</p>
+            </div>
+        </div>
+    `);
+}
+
+function renderAssertionsGenerationError(container, error) {
+    if (!container) return;
+    const message = assertionsErrorMessage(error);
+    container.innerHTML = `
+        <div class="assertion-generation-error" role="alert">
+            <span class="assertion-generation-error-icon" aria-hidden="true">!</span>
+            <div>
+                <strong>${safeText(t("messages.assertionGenerationErrorTitle"))}</strong>
+                <p>${safeText(message)}</p>
+                <button type="button" class="btn-secondary btn-retry-assertions">${safeText(t("messages.retry"))}</button>
             </div>
         </div>
     `;
+    container.querySelector(".btn-retry-assertions")?.addEventListener("click", handleGenerateAssertions);
 }
 
 function normalizeGeneratedAssertion(assertion, fallbackIndex = 0) {
@@ -305,17 +619,10 @@ function normalizeGeneratedAssertion(assertion, fallbackIndex = 0) {
 }
 
 function generatedAssertionsFromResponse(data) {
-    const payload = data?.payload || data || {};
-    const candidates = [
-        payload.assertions,
-        payload.assertions_document?.assertions,
-        payload.assertionsDocument?.assertions,
-        data?.assertions,
-        data?.assertions_document?.assertions
-    ].filter(Array.isArray);
-
-    const best = candidates.reduce((selected, current) => current.length > selected.length ? current : selected, []);
-    return best.map((assertion, index) => normalizeGeneratedAssertion(assertion, index));
+    const assertions = data?.payload?.assertions_document?.assertions;
+    return Array.isArray(assertions)
+        ? assertions.map((assertion, index) => normalizeGeneratedAssertion(assertion, index))
+        : [];
 }
 
 function encodeAssertionDraft(assertion) {
@@ -337,33 +644,83 @@ function decodeAssertionDraft(value) {
     }
 }
 
-async function generateAssertionsFromText(text) {
+async function generateAssertionsFromText(text, signal) {
+    const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
+        method: "POST",
+        headers: {
+            "Accept": "application/json"
+        },
+        body: JSON.stringify({ text }),
+        signal
+    });
+
+    if (!response) throw createFrontendRequestError("authentication");
+    if (response.status === 429) throw createFrontendRequestError("quota", response.status);
+    if (response.status === 401 || response.status === 403) throw createFrontendRequestError("authentication", response.status);
+    if (response.status === 408 || response.status === 504) throw createFrontendRequestError("timeout", response.status);
+    if (response.status >= 500) throw createFrontendRequestError("server", response.status);
+    if (!response.ok) throw createFrontendRequestError("request", response.status);
+
+    let data;
     try {
-        const response = await fetchWithAuth(`${GENERATE_API}/assertions/generate`, {
-            method: "POST",
-            headers: {
-                "Accept": "application/json"
-            },
-            body: JSON.stringify({ text })
-        });
+        data = await response.json();
+    } catch (error) {
+        throw createFrontendRequestError("invalid_response", response.status);
+    }
 
-        // 🟢 NUEVO: Detectar si el usuario se ha quedado sin cuota (Status 429)
-        if (response.status === 429) {
-            alertMessage(t("ui.quotaReached"), "error", 5000);
-            return []; // Devolvemos un array vacío para no romper la tabla de la interfaz
-        }
+    const assertions = generatedAssertionsFromResponse(data);
+    console.info(`Aserciones generadas recibidas: ${assertions.length}`);
+    return assertions;
+}
 
-        // Si es otro tipo de error (500, 404, etc.)
-        if (!response.ok) throw new Error(`Error API: ${response.status}`);
+async function handleGenerateAssertions() {
+    if (assertionsGenerationInProgress) return;
 
-        const data = await response.json();
-        const assertions = generatedAssertionsFromResponse(data);
-        console.info(`Aserciones generadas recibidas: ${assertions.length}`);
-        return assertions;
-    } catch (err) {
-        console.error("Error al generar aserciones:", err);
-        alertMessage(t("ui.assertionsServiceError"), "error");
-        return [];
+    const text = document.getElementById("newsText")?.value.trim() || "";
+    const container = document.getElementById("news-assertions-container");
+    if (!text) {
+        alertMessage(t("messages.writeNews"), "error");
+        return;
+    }
+
+    assertionsGenerationInProgress = true;
+    setAssertionsButtonLoading(true);
+    const progress = startAssertionsProgress(container);
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, ASSERTIONS_REQUEST_TIMEOUT_MS);
+
+    alertMessage(t("messages.generatingAssertions"), "info");
+
+    try {
+        const assertions = await generateAssertionsFromText(text, controller.signal);
+        progress.stop();
+        renderAssertionsTable(container, assertions);
+        renderAssertionsGenerationResult(container, assertions.length);
+        alertMessage(
+            assertions.length
+                ? t("messages.assertionsGeneratedCount", { count: assertions.length })
+                : t("messages.noAssertionsFound"),
+            assertions.length ? "success" : "info",
+            4500
+        );
+    } catch (error) {
+        progress.stop();
+        let normalizedError = error;
+        if (timedOut || error?.name === "AbortError") normalizedError = createFrontendRequestError("timeout");
+        else if (!error?.code) normalizedError = createFrontendRequestError("network");
+
+        console.error("Error al generar aserciones:", error);
+        renderAssertionsGenerationError(container, normalizedError);
+        alertMessage(assertionsErrorMessage(normalizedError), "error", 7000);
+    } finally {
+        window.clearTimeout(timeoutId);
+        progress.stop();
+        assertionsGenerationInProgress = false;
+        setAssertionsButtonLoading(false);
     }
 }
 
@@ -378,49 +735,10 @@ function attachAssertionTableEvents(container) {
         });
     });
 
-    // ======================
-    // Añadir fila nueva
-    // ======================
-    const addBtn = container.querySelector("#btn-add-row");
-    if (!addBtn) return;  // seguridad
-
-    addBtn.addEventListener("click", () => {
-
-        const tbody = container.querySelector("tbody");
-
-        // Calcular último ID numérico existente
-        let lastId = 0;
-        tbody.querySelectorAll("tr").forEach(row => {
-            const cell = row.children[0]?.textContent.trim();
-            if (cell && !isNaN(cell)) {
-                lastId = Math.max(lastId, parseInt(cell, 10));
-            }
-        });
-
-        const nextId = lastId + 1;
-
-        // Crear fila nueva
-        const row = document.createElement("tr");
-        row.setAttribute("data-id", nextId);
-
-        row.innerHTML = `
-            <td>${nextId}</td>
-            <td contenteditable="true" class="editable-text"></td>
-            <td>${renderCategorySelect(1)}</td>
-            <td><button class="btn-delete-row">✖</button></td>
-        `;
-
-        tbody.appendChild(row);
-
-        // Añadir evento borrar a la nueva fila
-        row.querySelector(".btn-delete-row").addEventListener("click", () => {
-            row.remove();
-        });
-    });
 }
 
 
-function renderEditableAssertionsTable(container, assertions) {
+function renderAssertionsTable(container, assertions) {
     container.innerHTML = `
         <table class="compact-table">
             <thead>
@@ -437,19 +755,18 @@ function renderEditableAssertionsTable(container, assertions) {
                     return `
                     <tr data-id="${safeText(assertionId)}" data-assertion="${safeText(encodeAssertionDraft(a))}">
                         <td>${safeText(assertionId)}</td>
-                        <td contenteditable="true" class="editable-text">${safeText(extractAssertionText(a))}</td>
-                        <td>${renderCategorySelect(getAssertionCategory(a) || 1)}</td>
+                        <td class="assertion-text">${safeText(extractAssertionText(a))}</td>
+                        <td>${safeText(categoryLabel(getAssertionCategory(a) || 1))}</td>
                         <td><button class="btn-delete-row">✖</button></td>
                     </tr>`;
                 }).join("")}
             </tbody>
         </table>
 
-        <button id="btn-add-row" class="btn btn-tertiary">+</button>
         <button id="btn-publish-with-assertions" class="btn btn-tertiary">${t("ui.publishWithAssertions")}</button>
     `;
 
-    // Conectar los eventos de edición y borrado
+    // Conectar el borrado de aserciones sin alterar sus metadatos normalizados.
     attachAssertionTableEvents(container);
 
     // -----------------------------
@@ -466,19 +783,6 @@ function renderEditableAssertionsTable(container, assertions) {
         });
     }
 }
-
-
-function renderCategorySelect(selected) {
-    return `
-        <select class="category-select">
-            ${CATEGORY_IDS
-                .map(id => `
-                    <option value="${id}" ${selected == id ? "selected" : ""}>${categoryLabel(id)}</option>`
-                ).join("")}
-        </select>
-    `;
-}
-
 
 
 // =========================================================
@@ -508,7 +812,7 @@ async function publishNew() {
     document.getElementById("orderId").value = newOrderId;
     updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
     alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
-    pollOrder(newOrderId);
+    pollOrder(newOrderId, { resetView: true, followProcess: true });
 }
 
 async function publishWithAssertions() {
@@ -524,15 +828,14 @@ async function publishWithAssertions() {
     rows.forEach(row => {
         const originalAssertion = decodeAssertionDraft(row.dataset.assertion);
         const idAssertion = row.dataset.id || originalAssertion.idAssertion || originalAssertion.assertion_id || crypto.randomUUID();
-        const textCell = row.querySelector(".editable-text");
-        const categorySelect = row.querySelector(".category-select");
+        const textCell = row.querySelector(".assertion-text");
 
-        if (textCell && categorySelect) {
+        if (textCell) {
             const assertion = {
                 ...originalAssertion,
                 idAssertion: String(idAssertion),
                 text: textCell.innerText.trim(),
-                categoryId: parseInt(categorySelect.value)
+                categoryId: Number(originalAssertion.categoryId)
             };
             if (assertion.assertion_id == null && /^\d+$/.test(String(idAssertion))) {
                 assertion.assertion_id = Number(idAssertion);
@@ -570,7 +873,7 @@ async function publishWithAssertions() {
         document.getElementById("orderId").value = newOrderId;
         updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
         alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
-        pollOrder(newOrderId);
+        pollOrder(newOrderId, { resetView: true, followProcess: true });
 
         return data;
     } catch (error) {
@@ -654,38 +957,58 @@ async function findOrder() {
 // =========================================================
 // CARGA CENTRAL DE ÓRDENES
 // =========================================================
-async function loadOrderById(orderId, cleanup = true) {
+async function loadOrderById(orderId, cleanup = true, options = {}) {
     const tabs = document.getElementById("orderTabs");
     const detailsContainer = document.getElementById("fixedDetailsContainer");
     const tabContent = document.getElementById("tabContent");
+    const orderSection = document.getElementById("order");
+    const background = Boolean(options.background);
+    const ownedController = options.signal ? null : new AbortController();
+    const requestSignal = options.signal || ownedController.signal;
+    const requestOptions = { signal: requestSignal };
+    const requestTimeoutId = ownedController
+        ? window.setTimeout(() => ownedController.abort(), POLLING_REQUEST_TIMEOUT_MS)
+        : null;
 
-    if (cleanup) tabs.innerHTML = '';
+    if (cleanup && !background) stopOrderPolling();
+
+    if (cleanup) {
+        tabs.innerHTML = '';
+        if (orderSection) {
+            delete orderSection.dataset.renderedOrderId;
+            delete orderSection.dataset.renderedOrderStatus;
+        }
+    }
 
     if (cleanup) {
         detailsContainer.innerHTML = `<div class="p-4 text-center text-gray-400">${safeText(t("messages.loadingOrder", { orderId }))}</div>`;
     }
 
     try {
-        const res = await fetchWithAuth(`${API}/orders/${orderId}`);
+        const res = await fetchWithAuth(`${API}/orders/${orderId}`, requestOptions);
+
+        if (!res) throw createFrontendRequestError("authentication");
 
         if (!res.ok) {
             const errorText = await res.text();
-            detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
-                Error ${res.status}: No se pudo encontrar la orden <strong>${safeText(orderId)}</strong>.<br>
-                Mensaje: ${safeText(errorText || 'Error desconocido')}
-            </div>`;
-            tabs.innerHTML = tabContent.innerHTML = '';
-            alertMessage(t("messages.orderNotFound", { orderId }), 'error');
-            return;
+            if (!background) {
+                detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
+                    Error ${res.status}: No se pudo encontrar la orden <strong>${safeText(orderId)}</strong>.<br>
+                    Mensaje: ${safeText(errorText || 'Error desconocido')}
+                </div>`;
+                tabs.innerHTML = tabContent.innerHTML = '';
+                alertMessage(t("messages.orderNotFound", { orderId }), 'error');
+            }
+            return { ok: false, status: res.status };
         }
 
         let data;
         if (res.status !== 304) {
             data = await res.json();
-            currentOrderData = data;
+            if (background && options.isCurrent && !options.isCurrent()) return { ok: false, stale: true };
         } else {
             data = currentOrderData;
-            if (!data.order_id) return;
+            if (!data.order_id) return { ok: false, status: res.status };
         }
 
         let eventsData = currentOrderEvents;
@@ -693,9 +1016,11 @@ async function loadOrderById(orderId, cleanup = true) {
         if (cleanup || res.status !== 304) {
             eventsData = [];
             try {
-                const resEv = await fetchWithAuth(`${API}/orders/${orderId}/events`);
+                const resEv = await fetchWithAuth(`${API}/orders/${orderId}/events`, requestOptions);
                 if (resEv.ok) eventsData = await resEv.json();
             } catch(e){ console.error("Error cargando eventos:", e); }
+            if (background && options.isCurrent && !options.isCurrent()) return { ok: false, stale: true };
+            currentOrderData = data;
             currentOrderEvents = eventsData;
 
             const lightMode = isLightOrder(data);
@@ -712,7 +1037,8 @@ async function loadOrderById(orderId, cleanup = true) {
 
             if (cleanup || tabs.children.length === 0) {
                 tabs.innerHTML = '';
-                const defaultTabKey = String(data.status || "").startsWith("VALIDATED") ? "summary" : "process";
+                const defaultTabKey = options.preferredTabKey
+                    || (String(data.status || "").startsWith("VALIDATED") ? "summary" : "process");
                 sections.forEach((s) => {
                     const btn = document.createElement("button");
                     btn.innerText = s.name;
@@ -727,14 +1053,21 @@ async function loadOrderById(orderId, cleanup = true) {
                         if (s.disabled) return;
                         document.querySelectorAll("#orderTabs button").forEach(b => b.classList.remove("activeTab"));
                         btn.classList.add("activeTab");
-                        renderTabContent(s.key, s.data, orderAssertions, data, eventsData);
+                        renderCurrentOrderTab(s.key);
                     };
                     if(s.key === defaultTabKey) btn.classList.add("activeTab");
                     tabs.appendChild(btn);
                     if(s.key === defaultTabKey) renderTabContent(s.key, s.data, orderAssertions, data, eventsData);
                 });
             } else {
-                const activeTab = tabs.querySelector('.activeTab');
+                const preferredTab = options.preferredTabKey
+                    ? tabs.querySelector(`[data-tab-key="${options.preferredTabKey}"]`)
+                    : null;
+                if (preferredTab && !preferredTab.disabled) {
+                    tabs.querySelectorAll(".activeTab").forEach(button => button.classList.remove("activeTab"));
+                    preferredTab.classList.add("activeTab");
+                }
+                const activeTab = preferredTab || tabs.querySelector('.activeTab');
                 if (activeTab) {
                     const sec = sections.find(s => s.key === activeTab.dataset.tabKey);
                     if (sec && !sec.disabled) renderTabContent(sec.key, sec.data, orderAssertions, data, eventsData);
@@ -742,20 +1075,54 @@ async function loadOrderById(orderId, cleanup = true) {
             }
         }
 
-        detailsContainer.innerHTML = '<span class="status-value" data-status="' + safeText(data.status || "UNKNOWN") + '"></span>';
+        detailsContainer.innerHTML = renderGlobalOrderStatus(data);
+        if (orderSection) {
+            orderSection.dataset.renderedOrderId = String(data.order_id || orderId);
+            orderSection.dataset.renderedOrderStatus = String(data.status || "UNKNOWN").toUpperCase();
+        }
+        return { ok: true, data };
     } catch (error) {
-        detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
-            Error de conexión o JSON inválido: ${safeText(error.message)}
-        </div>`;
-        tabs.innerHTML = tabContent.innerHTML = '';
+        if (!background) {
+            const errorMessage = error?.name === "AbortError"
+                ? t("messages.orderLoadTimeoutError", { seconds: Math.round(POLLING_REQUEST_TIMEOUT_MS / 1000) })
+                : t("ui.connectionJsonError", { message: error.message || t("ui.unknownError") });
+            detailsContainer.innerHTML = `<div class="p-3 rounded-lg bg-red-800 border border-red-500 text-red-100">
+                ${safeText(errorMessage)}
+            </div>`;
+            tabs.innerHTML = tabContent.innerHTML = '';
+            alertMessage(t("messages.criticalOrderError"), 'error');
+        }
         console.error(error);
-        alertMessage(t("messages.criticalOrderError"), 'error');
+        return { ok: false, error };
+    } finally {
+        if (requestTimeoutId) window.clearTimeout(requestTimeoutId);
     }
 }
 
 // =========================================================
 // RENDER TAB CONTENT
 // =========================================================
+function orderValidationPending(order) {
+    return Boolean(order?.status) && !isTerminalOrderStatus(String(order.status).toUpperCase());
+}
+
+function renderGlobalOrderStatus(order) {
+    if (!order?.order_id) return "";
+    const summary = buildVerificationSummary(order, currentOrderEvents);
+    return `<div class="order-global-status" role="status">${renderStatusBadge(order.status)}
+        <span>${safeText(t(orderValidationPending(order) ? "ui.provisionalResult" : "ui.result"))}: ${safeText(summary.statusLabel)}</span>
+        <span>${safeText(t("ui.validationProgressCount", { completed: summary.completedValidations, total: summary.totalValidations }))}</span>
+        <span class="status-value" data-status="${safeText(order.status)}"></span></div>`;
+}
+
+function renderCurrentOrderTab(key) {
+    const order = currentOrderData;
+    const assertions = collectOrderAssertions(order.assertions, order);
+    const values = { summary: order, assertions, evidence: order.validations || {}, process: currentOrderEvents,
+        technical: order, ipfs: order.document || null, events: currentOrderEvents };
+    renderTabContent(key, values[key], assertions, order, currentOrderEvents);
+}
+
 function renderTabContent(tabName, data, assertions=[], orderData=null, events=[]) {
     const container = document.getElementById("tabContent");
     container.innerHTML = "";
@@ -775,6 +1142,10 @@ function renderTabContent(tabName, data, assertions=[], orderData=null, events=[
             `;
             break;
         case "evidence":
+            if (orderValidationPending(orderData) && !Object.keys(data || {}).length) {
+                container.innerHTML = `<p class="empty-state">${safeText(t("ui.waitingEvidence"))}</p>`;
+                break;
+            }
             renderValidationsTree(container, data, assertions, orderData);
             break;
         case "process":
@@ -856,7 +1227,7 @@ function formatMaxTwoDecimals(value) {
     return (Math.round(n * 100) / 100).toFixed(2).replace(/\.?0+$/, "");
 }
 
-function parseEventTimestamp(value) {
+function parseApiTimestamp(value) {
     if (value === null || value === undefined || value === "") return null;
 
     if (typeof value === "number") {
@@ -866,29 +1237,9 @@ function parseEventTimestamp(value) {
     }
 
     const raw = String(value).trim();
-    const eventMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (eventMatch) {
-        const [, month, day, year, hours, minutes, seconds = "0"] = eventMatch;
-        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds));
-        return Number.isNaN(date.getTime()) ? null : date;
-    }
-
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw)) return null;
     const date = new Date(raw);
     return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function parseOrderTimestamp(value) {
-    if (value === null || value === undefined || value === "") return null;
-
-    const raw = String(value).trim();
-    const orderMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (orderMatch) {
-        const [, day, month, year, hours, minutes, seconds = "0"] = orderMatch;
-        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds));
-        return Number.isNaN(date.getTime()) ? null : date;
-    }
-
-    return parseEventTimestamp(value);
 }
 
 function formatDurationMinutesSeconds(milliseconds) {
@@ -911,18 +1262,18 @@ function getEndToEndValidationDuration(order, events = []) {
     const completionActions = new Set(["validation_completed", "light_validation_completed"]);
     const validationStarts = events
         .filter(event => startActions.has(event?.action))
-        .map(event => parseEventTimestamp(event.timestamp))
+        .map(event => parseApiTimestamp(event.timestamp))
         .filter(Boolean);
     const validationCompletions = events
         .filter(event => completionActions.has(event?.action))
-        .map(event => parseEventTimestamp(event.timestamp))
+        .map(event => parseApiTimestamp(event.timestamp))
         .filter(Boolean);
 
     if (validationCompletions.length === 0) return "";
 
     const startDate = validationStarts.length
         ? new Date(Math.min(...validationStarts.map(date => date.getTime())))
-        : parseOrderTimestamp(order.created || order.created_at || order.createdAt);
+        : parseApiTimestamp(order.created_at);
     const endDate = new Date(Math.max(...validationCompletions.map(date => date.getTime())));
 
     if (!startDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "";
@@ -932,6 +1283,16 @@ function getEndToEndValidationDuration(order, events = []) {
 function getAssertionId(assertion, fallbackIndex) {
     if (!assertion || typeof assertion !== "object") return String(fallbackIndex);
     return String(assertion.idAssertion ?? assertion.id ?? assertion.assertion_id ?? fallbackIndex);
+}
+
+function assertionDeduplicationKey(assertion, fallbackIndex) {
+    const explicitId = assertion?.idAssertion ?? assertion?.id ?? assertion?.assertion_id;
+    if (explicitId !== null && explicitId !== undefined && String(explicitId).trim()) {
+        return `id:${String(explicitId).trim()}`;
+    }
+
+    const normalizedText = extractAssertionText(assertion).replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    return normalizedText ? `text:${normalizedText}` : `position:${fallbackIndex}`;
 }
 
 function collectOrderAssertions(assertions = [], orderData = null) {
@@ -949,7 +1310,10 @@ function collectOrderAssertions(assertions = [], orderData = null) {
         if (!Array.isArray(source)) return;
         source.forEach((assertion, index) => {
             if (!assertion || typeof assertion !== "object") return;
-            const key = `${getAssertionId(assertion, index)}:${assertion.assertion_index ?? ""}:${extractAssertionText(assertion)}`;
+            // `order.assertions` is a UI projection while `document.assertions`
+            // is the canonical protocol document. They may differ only in
+            // assertion_index, so that field must not create a second card.
+            const key = assertionDeduplicationKey(assertion, index);
             if (seen.has(key)) return;
             seen.add(key);
             collected.push(assertion);
@@ -1027,11 +1391,11 @@ function buildVerificationSummary(order, events = []) {
     }, 0);
 
     const expectedValidations = getExpectedValidationCount(order);
-    const completedValidations = Object.values(validations).reduce((sum, validators) => {
+    const receivedValidationCount = Object.values(validations).reduce((sum, validators) => {
         return sum + (validators && typeof validators === "object" ? Object.keys(validators).length : 0);
     }, 0);
-    const totalValidations = validationRequestCount || expectedValidations || Math.max(completedValidations + Number(order.validators_pending || 0), 0);
-    const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - completedValidations, 0);
+    const totalValidations = validationRequestCount || expectedValidations || Math.max(receivedValidationCount + Number(order.validators_pending || 0), 0);
+    const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - receivedValidationCount, 0);
     const errorValidations = Object.values(validations).reduce((sum, validators) => {
         return sum + Object.values(validators || {}).filter(isValidationError).length;
     }, 0);
@@ -1043,18 +1407,26 @@ function buildVerificationSummary(order, events = []) {
     let confirmedAssertions = 0;
     let contradictedAssertions = 0;
     let inconclusiveAssertions = 0;
+    let noConsensusAssertions = 0;
+    let insufficientEvidenceAssertions = 0;
+    let noValidResponsesAssertions = 0;
 
     assertionIds.forEach(assertionId => {
         const weighted = weightedResults[String(assertionId)];
         if (weighted) {
-            if (!Number(weighted.validations_count || 0)) return;
-            const scores = weighted.scores || {};
+            const scores = weighted.distribution?.raw_weight || weighted.scores || {};
             validatorVotes.true += scores.TRUE || 0;
             validatorVotes.false += scores.FALSE || 0;
             validatorVotes.unknown += scores.UNKNOWN || 0;
-            if (weighted.winner === "TRUE") confirmedAssertions++;
-            else if (weighted.winner === "FALSE") contradictedAssertions++;
-            else inconclusiveAssertions++;
+            const verdict = weighted.verdict || weighted.winner || "UNKNOWN";
+            if (verdict === "TRUE") confirmedAssertions++;
+            else if (verdict === "FALSE") contradictedAssertions++;
+            else {
+                inconclusiveAssertions++;
+                if (weighted.decision_status === "NO_CONSENSUS") noConsensusAssertions++;
+                else if (weighted.decision_status === "NO_VALID_RESPONSES") noValidResponsesAssertions++;
+                else insufficientEvidenceAssertions++;
+            }
             return;
         }
 
@@ -1083,36 +1455,46 @@ function buildVerificationSummary(order, events = []) {
     const totalAssertions = assertionIds.size;
     const scoredAssertions = confirmedAssertions + contradictedAssertions + inconclusiveAssertions;
     const unscoredAssertions = Math.max(0, totalAssertions - scoredAssertions);
-    const hasMixedResult = [confirmedAssertions, contradictedAssertions, inconclusiveAssertions].filter(Boolean).length > 1;
     let statusKey = "inconclusive";
+    let documentStatus = "INCONCLUSIVE";
 
-    if (totalValidations > 0 && completedValidations < totalValidations) {
+    if (totalValidations > 0 && receivedValidationCount < totalValidations) {
         statusKey = "pending";
     } else if (scoredAssertions === 0 && errorValidations > 0) {
         statusKey = "error";
     } else if (totalAssertions === 0) {
-        statusKey = completedValidations > 0 ? "inconclusive" : "pending";
-    } else if (contradictedAssertions > confirmedAssertions && contradictedAssertions >= inconclusiveAssertions) {
-        statusKey = "contradicted";
-    } else if (inconclusiveAssertions > confirmedAssertions && inconclusiveAssertions >= contradictedAssertions) {
-        statusKey = "inconclusive";
-    } else if (confirmedAssertions > 0 && contradictedAssertions === 0 && confirmedAssertions >= inconclusiveAssertions) {
-        statusKey = inconclusiveAssertions > 0 ? "partial" : "verified";
-    } else if (hasMixedResult) {
+        statusKey = receivedValidationCount > 0 ? "inconclusive" : "pending";
+    } else if (confirmedAssertions > 0 && contradictedAssertions > 0) {
+        statusKey = "mixed";
+        documentStatus = "MIXED";
+    } else if (inconclusiveAssertions > 0 && (confirmedAssertions > 0 || contradictedAssertions > 0)) {
         statusKey = "partial";
+        documentStatus = "PARTIALLY_VERIFIED";
+    } else if (contradictedAssertions > 0) {
+        statusKey = "contradicted";
+        documentStatus = "CONTRADICTED";
+    } else if (confirmedAssertions > 0) {
+        statusKey = "verified";
+        documentStatus = "SUPPORTED";
     }
 
     const statusMap = {
         verified: { statusLabel: t("summary.verified"), statusIcon: "🟢" },
         partial: { statusLabel: t("summary.partial"), statusIcon: "🟡" },
+        mixed: { statusLabel: t("summary.mixed"), statusIcon: "🟡" },
         contradicted: { statusLabel: t("summary.contradicted"), statusIcon: "🔴" },
         inconclusive: { statusLabel: t("summary.inconclusive"), statusIcon: "🟠" },
         pending: { statusLabel: t("summary.pending"), statusIcon: "⚪" },
         error: { statusLabel: "Validation error", statusIcon: "🔴" }
     };
 
-    const joinWord = window.I18N?.getLanguage() === "en" ? " and " : " y ";
-    const assertionBreakdown = `${pluralizeEs(confirmedAssertions, t("summary.confirmedOne"), t("summary.confirmedMany"))}, ${pluralizeEs(contradictedAssertions, t("summary.disprovedOne"), t("summary.disprovedMany"))}${joinWord}${pluralizeEs(inconclusiveAssertions, t("summary.inconclusiveOne"), t("summary.inconclusiveMany"))}`;
+    const assertionBreakdown = [
+        pluralizeEs(confirmedAssertions, t("summary.confirmedOne"), t("summary.confirmedMany")),
+        pluralizeEs(contradictedAssertions, t("summary.disprovedOne"), t("summary.disprovedMany")),
+        pluralizeEs(noConsensusAssertions, t("summary.noConsensusOne"), t("summary.noConsensusMany")),
+        pluralizeEs(insufficientEvidenceAssertions, t("summary.insufficientOne"), t("summary.insufficientMany")),
+        pluralizeEs(noValidResponsesAssertions, t("summary.noResponsesOne"), t("summary.noResponsesMany"))
+    ].join(", ");
     const knownAssertions = confirmedAssertions + contradictedAssertions;
     const confidenceLabel = knownAssertions > 0
         ? t("summary.confirmedAmongVerified", { confirmed: confirmedAssertions, known: knownAssertions })
@@ -1120,14 +1502,14 @@ function buildVerificationSummary(order, events = []) {
 
     let conclusionText;
     if (statusKey === "pending") {
-        conclusionText = t("summary.pendingConclusion", { completed: completedValidations, total: totalValidations || completedValidations });
+        conclusionText = t("summary.pendingConclusion", { completed: receivedValidationCount, total: totalValidations || receivedValidationCount });
     } else if (statusKey === "error") {
         conclusionText = `No valid result was produced; ${errorValidations} validation(s) ended in error.`;
     } else if (statusKey === "verified") {
         conclusionText = t("summary.verifiedConclusion", { breakdown: assertionBreakdown });
     } else if (statusKey === "contradicted") {
         conclusionText = t("summary.disprovedConclusion", { breakdown: assertionBreakdown });
-    } else if (statusKey === "partial") {
+    } else if (statusKey === "partial" || statusKey === "mixed") {
         conclusionText = t("summary.partialConclusion", { breakdown: assertionBreakdown });
     } else {
         conclusionText = t("summary.inconclusiveConclusion", { breakdown: assertionBreakdown });
@@ -1135,6 +1517,7 @@ function buildVerificationSummary(order, events = []) {
 
     return {
         statusKey,
+        documentStatus,
         statusLabel: statusMap[statusKey].statusLabel,
         statusIcon: statusMap[statusKey].statusIcon,
         confidenceLabel,
@@ -1143,13 +1526,16 @@ function buildVerificationSummary(order, events = []) {
         confirmedAssertions,
         contradictedAssertions,
         inconclusiveAssertions,
+        noConsensusAssertions,
+        insufficientEvidenceAssertions,
+        noValidResponsesAssertions,
         unscoredAssertions,
         errorValidations,
-        validValidations: completedValidations - errorValidations,
+        validValidations: receivedValidationCount - errorValidations,
         totalValidations,
-        completedValidations,
+        completedValidations: receivedValidationCount,
         pendingValidations,
-        validationDuration: pendingValidations === 0 && completedValidations > 0
+        validationDuration: pendingValidations === 0 && receivedValidationCount > 0
             ? getEndToEndValidationDuration(order, events)
             : "",
         validatorVotes
@@ -1159,12 +1545,18 @@ function buildVerificationSummary(order, events = []) {
 
 function assertionOutcome(orderData, assertionId) {
     const result = getAssertionResult(orderData, assertionId);
-    if (result?.winner === "TRUE") return "confirmed";
-    if (result?.winner === "FALSE") return "contradicted";
-    if (result?.winner === "UNKNOWN") return "inconclusive";
+    const waiting = orderValidationPending(orderData);
+    if (waiting && result?.decision_status === "NO_VALID_RESPONSES") return "pending";
+    if (result) {
+        const verdict = result.verdict || result.winner || "UNKNOWN";
+        if (verdict === "TRUE") return "confirmed";
+        if (verdict === "FALSE") return "contradicted";
+        return result.decision_status === "NO_VALID_RESPONSES" ? "error" : "inconclusive";
+    }
 
     const validators = orderData?.validations?.[String(assertionId)] || {};
     const completed = completedValidations(validators);
+    if (waiting && !completed.length) return "pending";
     if (!completed.length && Object.values(validators).some(isValidationError)) return "error";
     const votes = completed.map(item => getValidationLiteral(item?.approval));
     const approved = votes.filter(vote => vote === "True").length;
@@ -1176,6 +1568,7 @@ function assertionOutcome(orderData, assertionId) {
 
 function outcomeMeta(outcome) {
     const values = {
+        pending: { label: t("ui.awaitingValidation"), icon: "…", className: "inconclusive" },
         confirmed: { label: t("ui.confirmed"), icon: "✓", className: "confirmed" },
         contradicted: { label: t("ui.disproved"), icon: "×", className: "contradicted" },
         inconclusive: { label: t("summary.inconclusive"), icon: "?", className: "inconclusive" },
@@ -1197,9 +1590,10 @@ function renderOrderSummary(container, data, events = []) {
     const contradictedPercent = percentage(summary.contradictedAssertions, scoredAssertions);
     const inconclusivePercent = scoredAssertions > 0 ? Math.max(0, 100 - confirmedPercent - contradictedPercent) : 0;
     const totalWeight = summary.validatorVotes.true + summary.validatorVotes.false + summary.validatorVotes.unknown;
-    const truePercent = percentage(summary.validatorVotes.true, totalWeight);
-    const falsePercent = percentage(summary.validatorVotes.false, totalWeight);
-    const unknownPercent = totalWeight > 0 ? Math.max(0, 100 - truePercent - falsePercent) : 0;
+    const decisiveWeight = summary.validatorVotes.true + summary.validatorVotes.false;
+    const truePercent = percentage(summary.validatorVotes.true, decisiveWeight);
+    const falsePercent = decisiveWeight > 0 ? Math.max(0, 100 - truePercent) : 0;
+    const unknownPercent = percentage(summary.validatorVotes.unknown, totalWeight);
     const progressPercent = percentage(summary.completedValidations, summary.totalValidations || summary.completedValidations);
     const problematic = assertions
         .map((assertion, index) => ({ assertion, assertionId: getAssertionId(assertion, index + 1) }))
@@ -1233,7 +1627,7 @@ function renderOrderSummary(container, data, events = []) {
                     <div class="assertion-counts">
                         <div><i class="confirmed">✓</i><strong>${summary.confirmedAssertions} ${t("ui.confirmed")}</strong><small>${t("ui.confirmedHelp")}</small></div>
                         <div><i class="contradicted">×</i><strong>${summary.contradictedAssertions} ${t("ui.disproved")}</strong><small>${t("ui.disprovedHelp")}</small></div>
-                        <div><i class="inconclusive">?</i><strong>${summary.inconclusiveAssertions} ${t("ui.inconclusive")}</strong><small>${t("ui.inconclusiveHelp")}</small></div>
+                        <div><i class="inconclusive">?</i><strong>${summary.inconclusiveAssertions} ${t("ui.inconclusive")}</strong><small>${summary.noConsensusAssertions} ${t("decision.noConsensusShort")} · ${summary.insufficientEvidenceAssertions} ${t("decision.insufficientShort")} · ${summary.noValidResponsesAssertions} ${t("decision.noResponsesShort")}</small></div>
                     </div>
                 </article>
 
@@ -1242,10 +1636,10 @@ function renderOrderSummary(container, data, events = []) {
                     <div class="vote-content">
                         <div class="vote-donut" style="--true:${truePercent * 3.6}deg;--false:${(truePercent + falsePercent) * 3.6}deg"><span>◎</span></div>
                         <div class="vote-legend">
-                            <div><i class="confirmed"></i><span>${t("ui.inFavor")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.true)} (${truePercent}%)</b></div>
-                            <div><i class="contradicted"></i><span>${t("ui.against")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.false)} (${falsePercent}%)</b></div>
-                            <div><i class="inconclusive"></i><span>${t("ui.noConclusion")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.unknown)} (${unknownPercent}%)</b></div>
-                            <strong>${t("ui.weightedTotal")}: ${formatMaxTwoDecimals(totalWeight)}</strong>
+                            <div><i class="confirmed"></i><span>TRUE · ${t("decision.weight")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.true)} (${truePercent}% ${t("decision.ofDecisiveWeight")})</b></div>
+                            <div><i class="contradicted"></i><span>FALSE · ${t("decision.weight")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.false)} (${falsePercent}% ${t("decision.ofDecisiveWeight")})</b></div>
+                            <div><i class="inconclusive"></i><span>UNKNOWN · ${t("decision.abstentionWeight")}</span><b>${formatMaxTwoDecimals(summary.validatorVotes.unknown)} (${unknownPercent}% ${t("decision.ofCompletedWeight")})</b></div>
+                            <strong>${t("decision.completedWeight")}: ${formatMaxTwoDecimals(totalWeight)}</strong>
                         </div>
                     </div>
                 </article>
@@ -1304,7 +1698,7 @@ function renderOrderAssertions(container, assertions, orderData) {
             <button type="button" onclick="activateOrderTab('evidence')">${t("ui.viewDetail")}</button>
         </article>`;
     }).join("");
-    container.innerHTML = `<div class="assertions-toolbar"><strong>${assertions.length} ${t("ui.assertions").toLowerCase()}</strong><span>${t("ui.weightedValidatorVote")}</span></div><div class="assertion-card-list">${cards}</div>`;
+    container.innerHTML = `<div class="assertions-toolbar"><strong>${assertions.length} ${t("ui.assertions").toLowerCase()}</strong><span>${t(orderValidationPending(orderData) ? "ui.provisionalResult" : "ui.weightedValidatorVote")}</span></div><div class="assertion-card-list">${cards}</div>`;
 }
 
 function buildOrderProcessRows(orderData, events = []) {
@@ -1324,14 +1718,14 @@ function buildOrderProcessRows(orderData, events = []) {
         assertions_not_generated: ["ASSERTIONS_NOT_AVAILABLE"]
     };
     const sorted = [...(events || [])].sort((x, y) =>
-        (parseEventTimestamp(x?.timestamp)?.getTime() || 0) - (parseEventTimestamp(y?.timestamp)?.getTime() || 0)
+        (parseApiTimestamp(x?.timestamp)?.getTime() || 0) - (parseApiTimestamp(y?.timestamp)?.getTime() || 0)
     );
     const rows = [];
     const add = (status, date, action) => {
         if (!status || rows.at(-1)?.status === status) return;
         rows.push({ status, label: labels[status] || status.replaceAll("_", " "), date, action });
     };
-    add("CREATED", orderData?.created_at || orderData?.created, "Creación de la orden");
+    add("CREATED", orderData?.created_at, "Creación de la orden");
     sorted.forEach(event => (transitions[event.action] || []).forEach(status => add(status, event.timestamp, event.action)));
     add(orderData?.status, orderData?.updated_at || sorted.at(-1)?.timestamp || orderData?.created_at, "Estado actual");
     return rows;
@@ -1359,18 +1753,73 @@ function countProcessVotes(orderData) {
     return counts;
 }
 function getProcessElapsedTime(orderData) {
-    const start = parseOrderTimestamp(orderData?.created_at || orderData?.created || orderData?.createdAt);
+    const start = parseApiTimestamp(orderData?.created_at);
     if (!start) return "-";
-    const final = String(orderData?.status || "").toUpperCase().startsWith("VALIDATED");
-    const end = final ? parseOrderTimestamp(orderData?.updated_at || orderData?.updatedAt) || new Date() : new Date();
+    const final = isTerminalOrderStatus(orderData?.status);
+    const end = final ? parseApiTimestamp(orderData?.updated_at) || new Date() : new Date();
     return formatDurationMinutesSeconds(Math.max(0, end.getTime() - start.getTime()));
 }
 function getLastValidationAge(events = []) {
     const actions = new Set(["validation_completed", "light_validation_completed"]);
-    const dates = events.filter(event => actions.has(event?.action)).map(event => parseEventTimestamp(event.timestamp)).filter(Boolean);
+    const dates = events.filter(event => actions.has(event?.action)).map(event => parseApiTimestamp(event.timestamp)).filter(Boolean);
     if (!dates.length) return t("ui.noValidationYet");
     const seconds = Math.max(0, Math.round((Date.now() - Math.max(...dates.map(date => date.getTime()))) / 1000));
     return seconds < 60 ? t("ui.lastValidationSeconds", { count: seconds }) : t("ui.lastValidationMinutes", { count: Math.floor(seconds / 60) });
+}
+function buildProcessResultPresentation(orderData, summary) {
+    const terminal = isTerminalOrderStatus(orderData?.status);
+    const trend = summary.inconclusiveAssertions === 0 && summary.confirmedAssertions > 0 && summary.contradictedAssertions === 0
+        ? { label: t("ui.clearTrend"), className: "confirmed" }
+        : summary.inconclusiveAssertions === 0 && summary.contradictedAssertions > 0 && summary.confirmedAssertions === 0
+            ? { label: t("ui.disprovedTrend"), className: "contradicted" }
+            : { label: t("ui.noClearTrend"), className: "inconclusive" };
+
+    if (!terminal) {
+        return {
+            terminal: false,
+            ...trend,
+            title: t("ui.provisionalResult"),
+            badge: t("ui.provisional"),
+            notice: t("ui.provisionalNotice"),
+            activity: summary.pendingValidations
+                ? t("ui.waitingValidations", { count: summary.pendingValidations })
+                : t("ui.waitingUpdate"),
+            decision: t("ui.consensusOpen"),
+            resultState: t("ui.provisionalMayChange")
+        };
+    }
+
+    const noValidDecision = summary.validValidations <= 0
+        && summary.confirmedAssertions === 0
+        && summary.contradictedAssertions === 0;
+    const inconclusive = summary.noConsensusAssertions > 0
+        || summary.insufficientEvidenceAssertions > 0
+        || summary.noValidResponsesAssertions > 0
+        || (summary.inconclusiveAssertions > 0 && summary.confirmedAssertions === 0 && summary.contradictedAssertions === 0);
+    const normalizedStatus = String(orderData?.status || "").toUpperCase();
+    const completedWithErrors = summary.errorValidations > 0
+        || normalizedStatus === "VALIDATED_WITH_ERRORS"
+        || !normalizedStatus.startsWith("VALIDATED");
+
+    return {
+        terminal: true,
+        label: noValidDecision ? t("ui.noDecisionAvailable") : trend.label,
+        className: noValidDecision || inconclusive ? "inconclusive" : trend.className,
+        title: t("ui.finalResult"),
+        badge: completedWithErrors ? t("ui.completedWithIssues") : t("ui.definitive"),
+        notice: noValidDecision
+            ? t("ui.finalNoValidResponsesNotice")
+            : summary.noConsensusAssertions > 0
+                ? t("ui.finalNoConsensusNotice")
+                : inconclusive
+                    ? t("ui.finalInsufficientEvidenceNotice")
+                    : completedWithErrors
+                        ? t("ui.finalWithErrorsNotice")
+                        : t("ui.finalResultNotice"),
+        activity: completedWithErrors ? t("ui.validationsCompletedWithIssues") : t("ui.validationCollectionFinished"),
+        decision: t("ui.decisionClosed"),
+        resultState: noValidDecision ? t("ui.noDecisionAvailable") : t("ui.definitiveResult")
+    };
 }
 function renderOrderProcess(container, orderData, events = []) {
     const mode = isLightOrder(orderData) ? "LIGHT" : "BLOCKCHAIN";
@@ -1389,9 +1838,9 @@ function renderOrderProcess(container, orderData, events = []) {
     const confirmedPercent = percentage(votes.confirmed, validResponses);
     const contradictedPercent = percentage(votes.contradicted, validResponses);
     const pending = summary.pendingValidations;
-    const complete = String(orderData?.status || "").toUpperCase().startsWith("VALIDATED");
+    const resultPresentation = buildProcessResultPresentation(orderData, summary);
+    const complete = resultPresentation.terminal;
     const currentStage = stages[stage.currentIndex]?.label || t("ui.process");
-    const provisional = summary.confirmedAssertions > summary.contradictedAssertions ? { label: t("ui.clearTrend"), className: "confirmed" } : summary.contradictedAssertions > summary.confirmedAssertions ? { label: t("ui.disprovedTrend"), className: "contradicted" } : { label: t("ui.noClearTrend"), className: "inconclusive" };
     const recent = rows.slice(-4).reverse();
     const ratio = total ? `${received}/${total}` : String(received);
     const stageHtml = stages.map((item, index) => {
@@ -1400,12 +1849,12 @@ function renderOrderProcess(container, orderData, events = []) {
     }).join("");
     container.innerHTML = `
         <div class="process-dashboard mode-${mode.toLowerCase()}">
-            <section class="process-hero"><div class="process-radar"><span></span></div><div><div class="process-mode-label">${t("ui.mode").toUpperCase()} ${mode}</div><h2>${complete ? t("ui.verificationCompleted") : t("ui.verificationInProgress")}</h2><p>${complete ? t("ui.completedExplanation") : t("ui.progressExplanation")}</p></div><div class="process-live"><strong>${complete ? t("ui.completed") : t("ui.inProgress")}</strong><small>${t("ui.lastUpdate")}: ${formatAnyDate(orderData?.updated_at || events.at(-1)?.timestamp || orderData?.created_at)}</small></div></section>
+            <section class="process-hero"><div class="process-radar"><span></span></div><div><div class="process-mode-label">${t("ui.mode").toUpperCase()} ${mode}</div><h2>${complete ? t("ui.verificationCompleted") : t("ui.verificationInProgress")}</h2><p>${complete ? safeText(resultPresentation.notice) : t("ui.progressExplanation")}</p></div><div class="process-live"><strong>${complete ? t("ui.completed") : t("ui.inProgress")}</strong><small>${t("ui.lastUpdate")}: ${formatAnyDate(orderData?.updated_at || events.at(-1)?.timestamp || orderData?.created_at)}</small></div></section>
             <section class="process-stage-card" data-process-widget="flow"><div class="process-section-title"><strong>${t("ui.visualStageFlow", { mode })}</strong><span>${stage.reached}/${stages.length}</span></div><div class="process-stages">${stageHtml}</div><div class="process-progress-header"><strong>${t("ui.processProgress")}</strong><span>${processPercent}%</span></div><div class="process-progress-copy"><span><b>${t("ui.stagesReached", { reached: stage.reached, total: stages.length })}</b></span><span>${t("ui.currentPhase")}: <b>${safeText(currentStage)}</b></span></div><div class="process-progress-track" role="progressbar" aria-label="${safeText(t("ui.processProgress"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${processPercent}"><span style="width:${processPercent}%"></span></div></section>
             <div class="process-main-grid">
-                <section class="process-card process-now" data-process-widget="current-activity"><h3>${t("ui.currentActivity")}</h3><ul><li><i>◷</i><span>${complete ? t("ui.allValidationsReceived") : pending ? t("ui.waitingValidations", { count: pending }) : t("ui.waitingUpdate")}</span></li><li><i>◎</i><span>${complete ? t("ui.consensusClosed") : t("ui.consensusOpen")}</span></li><li><i>↻</i><span>${safeText(getLastValidationAge(events))}</span></li><li><i>◇</i><span>${complete ? t("ui.definitiveResult") : t("ui.provisionalMayChange")}</span></li></ul></section>
+                <section class="process-card process-now" data-process-widget="current-activity"><h3>${t("ui.currentActivity")}</h3><ul><li><i>◷</i><span>${safeText(resultPresentation.activity)}</span></li><li><i>◎</i><span>${safeText(resultPresentation.decision)}</span></li><li><i>↻</i><span>${safeText(getLastValidationAge(events))}</span></li><li><i>◇</i><span>${safeText(resultPresentation.resultState)}</span></li></ul></section>
                 <section class="process-card process-validations"><h3>${t("ui.receivedValidations")}</h3><div class="process-validation-content"><div class="process-donut" style="--confirmed:${confirmedPercent * 3.6}deg;--contradicted:${(confirmedPercent + contradictedPercent) * 3.6}deg"><span><b>${safeText(ratio)}</b><small>${t("ui.percentCompleted", { percent: validationPercent })}</small></span></div><div class="process-validation-breakdown"><div><i class="confirmed"></i><span>${t("ui.confirmed")}</span><b>${votes.confirmed}</b></div><div><i class="contradicted"></i><span>${t("ui.disproved")}</span><b>${votes.contradicted}</b></div><div><i class="inconclusive"></i><span>${t("ui.inconclusive")}</span><b>${votes.inconclusive}</b></div><div><i class="validation-error-text"></i><span>Error</span><b>${votes.errors}</b></div><strong>${t("ui.pendingCount", { count: pending })}</strong></div></div></section>
-                <section class="process-card process-provisional"><div class="process-section-title"><h3>${t("ui.provisionalResult")}</h3><span>${t("ui.provisional")}</span></div><strong class="provisional-result ${provisional.className}">${safeText(provisional.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>${t("ui.confirmed")}</small></div><div><b>${summary.contradictedAssertions}</b><small>${t("ui.disproved")}</small></div><div><b>${summary.inconclusiveAssertions}</b><small>${t("ui.inconclusive")}</small></div></div><p>${t("ui.provisionalNotice")}</p></section>
+                <section class="process-card process-provisional"><div class="process-section-title"><h3>${safeText(resultPresentation.title)}</h3><span>${safeText(resultPresentation.badge)}</span></div><strong class="provisional-result ${resultPresentation.className}">${safeText(resultPresentation.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>${t("ui.confirmed")}</small></div><div><b>${summary.contradictedAssertions}</b><small>${t("ui.disproved")}</small></div><div><b>${summary.inconclusiveAssertions}</b><small>${t("ui.inconclusive")}</small></div></div><p>${safeText(resultPresentation.notice)}</p></section>
                 <section class="process-card process-activity" data-process-widget="recent-activity"><div class="process-section-title"><h3>${t("ui.recentActivity")}</h3><span>${t("ui.changesCount", { count: rows.length })}</span></div><ol>${recent.map(row => `<li><i>•</i><span><b>${safeText(row.label)}</b><small>${formatAnyDate(row.date)}</small></span></li>`).join("") || `<li>${t("ui.noActivity")}</li>`}</ol></section>
             </div>
             <div class="process-kpi-grid"><article><i>V</i><div><small>${t("ui.validationSummary")}</small><strong>${safeText(ratio)}</strong><span>${t("ui.percentCompleted", { percent: validationPercent })}</span></div></article><article><i>◷</i><div><small>${t("ui.elapsedTime")}</small><strong>${safeText(getProcessElapsedTime(orderData))}</strong><span>${t("ui.sinceOrderCreation")}</span></div></article><article><i>◎</i><div><small>${t("ui.currentStatus")}</small><strong>${safeText(currentStage)}</strong><span>${pending ? t("ui.pendingCount", { count: pending }) : complete ? t("ui.consensusComplete") : t("ui.updating")}</span></div></article><article><i>↻</i><div><small>${t("ui.statusChanges")}</small><strong>${rows.length}</strong><span>${t("ui.untilNow")}</span></div></article></div>
@@ -1504,7 +1953,7 @@ function renderDetails(container, data, events = []) {
                 <span class="summary-kicker">${t("summary.resultByAssertion")}</span>
                 <span class="summary-chip chip-confirmed">✅ ${t("summary.confirmed")}: ${summary.confirmedAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
                 <span class="summary-chip chip-contradicted">❌ ${t("summary.disproved")}: ${summary.contradictedAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
-                <span class="summary-chip chip-inconclusive">❔ ${t("summary.notConclusive")}: ${summary.inconclusiveAssertions} ${t("summary.of")} ${summary.totalAssertions}</span>
+                <span class="summary-chip chip-inconclusive">❔ ${t("summary.notConclusive")}: ${summary.inconclusiveAssertions} ${t("summary.of")} ${summary.totalAssertions} · ${summary.noConsensusAssertions} ${t("decision.noConsensusShort")} · ${summary.insufficientEvidenceAssertions} ${t("decision.insufficientShort")}</span>
             </div>
             <div class="verification-ai-row">
                 <div class="validation-progress">
@@ -1771,6 +2220,21 @@ function renderTableData(container, data) {
 function changeTablePage(delta) {
     TABLE_PAGE_ORDERS += delta;
 
+    const container = document.getElementById("listTabContent");
+    renderTableData(container, container._fullData);
+}
+
+function goToTablePage(page) {
+    TABLE_PAGE_ORDERS = Math.max(1, Number(page) || 1);
+    const container = document.getElementById("listTabContent");
+    renderTableData(container, container._fullData);
+}
+
+function setOrdersColumnFilter(column, value) {
+    const text = String(value || "").trim();
+    if (text) TABLE_FILTERS_ORDERS[column] = text;
+    else delete TABLE_FILTERS_ORDERS[column];
+    TABLE_PAGE_ORDERS = 1;
     const container = document.getElementById("listTabContent");
     renderTableData(container, container._fullData);
 }
@@ -2577,10 +3041,459 @@ async function checkAdminStatus() {
             // Si es admin, mostramos el checkbox en la vista de órdenes
             if (IS_ADMIN) {
                 document.getElementById('admin-view-container').style.display = 'flex';
+                document.getElementById('llm-admin-nav').style.display = 'block';
             }
         }
     } catch (error) {
         console.error("Error comprobando el rol de administrador:", error);
+    }
+}
+
+function llmConfigValue(config, key) {
+    return config && config[key] !== undefined && config[key] !== null ? config[key] : "";
+}
+
+let ACTIVE_LLM_ADMIN_TAB = "configuration";
+let SELECTED_LLM_VALIDATOR_ID = "";
+
+function llmTypeSummary(validator) {
+    const type = validator?.validator_type || {};
+    const typeLabel = type.id !== undefined && type.id !== null
+        ? t(`ui.validatorTypes.${type.id}`)
+        : type.name || t("llm.status.UNKNOWN");
+    const strategy = validator?.evidence_search_strategy ? ` — ${llmStrategyLabel(validator.evidence_search_strategy)}` : "";
+    return `${typeLabel}${strategy}`;
+}
+
+function llmStatusBadge(status) {
+    const value = String(status || "UNKNOWN").toUpperCase();
+    const statusClass = value === "APPLIED" || value === "ACTIVE"
+        ? "success"
+        : value === "PENDING" ? "warning" : value === "ERROR" || value === "INACTIVE" ? "error" : "neutral";
+    const label = t(`llm.status.${value}`);
+    return `<span class="llm-status ${statusClass}"><i></i>${safeText(label === `llm.status.${value}` ? value : label)}</span>`;
+}
+
+function llmProviderOptions(selected) {
+    const current = String(selected || "").toLowerCase();
+    const providers = ["openrouter", "gemini", "mistral", "grok"];
+    if (current && !providers.includes(current)) providers.unshift(current);
+    return providers.map(provider => `<option value="${safeText(provider)}" ${provider === current ? "selected" : ""}>${safeText(provider.charAt(0).toUpperCase() + provider.slice(1))}</option>`).join("");
+}
+
+function llmCategoryLabel(category) {
+    if (category === null || category === undefined) return "";
+    if (typeof category !== "object") return String(category);
+    const id = category.id ?? category.categoryId ?? category.category_id ?? category.value;
+    const name = category.name ?? category.label ?? category.description;
+    const label = id !== undefined ? categoryLabel(id) : name;
+    if (id !== undefined && name) return `${id} · ${label === `ui.categoriesMap.${id}` ? name : label}`;
+    if (id !== undefined) return label === `ui.categoriesMap.${id}` ? String(id) : label;
+    if (name) return String(name);
+    return JSON.stringify(category);
+}
+
+function renderLLMCategories(categories) {
+    const values = (Array.isArray(categories) ? categories : []).map(llmCategoryLabel).filter(Boolean);
+    if (!values.length) return `<span class="llm-empty-value">${safeText(t("llm.noCategories"))}</span>`;
+    return `<div class="llm-category-list">${values.map(value => `<span>${safeText(value)}</span>`).join("")}</div>`;
+}
+
+function llmComponentTitle(component) {
+    return component === "generate-asertions" ? t("llm.generateAssertions") : component === "source-router" ? t("llm.sourceRouter") : component;
+}
+
+function llmStrategyLabel(strategy) {
+    if (!strategy) return t("llm.notApplicable");
+    const label = t(`ui.sourcePolicies.${strategy}.label`);
+    return label === `ui.sourcePolicies.${strategy}.label` ? String(strategy) : label;
+}
+
+function renderLLMComponent(component) {
+    const actual = component.actual || {};
+    const id = safeText(component.component || "");
+    const title = llmComponentTitle(component.component || "");
+    const initials = title.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
+    const description = component.component === "source-router"
+        ? t("llm.sourceRouterDescription")
+        : t("llm.generateAssertionsDescription");
+    return `<article class="llm-config-card">
+        <header class="llm-card-head">
+            <div class="llm-service-mark">${safeText(initials)}</div>
+            <div><h3>${safeText(title)}</h3><p>${safeText(description)}</p></div>
+            ${llmStatusBadge(component.status)}
+        </header>
+        <div class="llm-form-grid">
+            <label><span>${safeText(t("llm.provider"))}</span><select id="llm-provider-${id}">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
+            <label class="llm-field-wide"><span>${safeText(t("llm.model"))}</span><input list="llm-model-catalog" id="llm-model-${id}" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
+            <label><span>${safeText(t("llm.temperature"))}</span><input id="llm-temperature-${id}" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
+        </div>
+        <footer class="llm-card-actions"><span>${safeText(t("llm.effectiveVersion"))} <strong>${safeText(component.config_version ?? 0)}</strong></span><button class="btn-primary" onclick="applyLLMComponent('${id}', this)">${safeText(t("llm.applyChanges"))}</button></footer>
+    </article>`;
+}
+
+function renderLLMValidatorDetail(detail) {
+    const actual = detail.actual || {};
+    const validatorId = String(detail.validator_id || "");
+    const escapedId = validatorId.replace(/'/g, "\\'");
+    const validatorType = detail.validator_type?.id !== undefined
+        ? t(`ui.validatorTypes.${detail.validator_type.id}`)
+        : detail.validator_type?.name || t("llm.status.UNKNOWN");
+    const strategy = llmStrategyLabel(detail.evidence_search_strategy);
+    return `<article class="llm-validator-detail">
+        <header class="llm-card-head">
+            <div class="llm-service-mark validator">V</div>
+            <div><h3>${safeText(t("llm.selectedValidator"))}</h3><p class="llm-address">${safeText(validatorId)}</p></div>
+            ${llmStatusBadge(detail.status)}
+        </header>
+        <div class="llm-validator-layout">
+            <div class="llm-readonly-panel">
+                <dl class="llm-meta-grid">
+                    <div><dt>${safeText(t("llm.type"))}</dt><dd>${safeText(validatorType)}</dd></div>
+                    <div><dt>${safeText(t("llm.strategy"))}</dt><dd>${safeText(strategy)}</dd></div>
+                    <div><dt>${safeText(t("llm.version"))}</dt><dd>${safeText(detail.config_version ?? 0)}</dd></div>
+                    <div class="llm-meta-wide"><dt>${safeText(t("llm.categories"))}</dt><dd>${renderLLMCategories(detail.categories)}</dd></div>
+                </dl>
+            </div>
+            <div class="llm-edit-panel">
+                <h4>${safeText(t("llm.effectiveConfiguration"))}</h4>
+                <div class="llm-form-grid">
+                    <label><span>${safeText(t("llm.provider"))}</span><select id="llm-validator-provider">${llmProviderOptions(llmConfigValue(actual, "provider"))}</select></label>
+                    <label class="llm-field-wide"><span>${safeText(t("llm.model"))}</span><input list="llm-model-catalog" id="llm-validator-model" type="text" value="${safeText(llmConfigValue(actual, "model"))}" autocomplete="off"></label>
+                    <label><span>${safeText(t("llm.temperature"))}</span><input id="llm-validator-temperature" type="number" min="0" step="0.01" value="${safeText(llmConfigValue(actual, "temperature"))}"></label>
+                </div>
+                <div class="llm-card-actions"><span>${safeText(t("llm.readOnlyTypeStrategy"))}</span><button class="btn-primary" onclick="applyLLMValidator('${escapedId}', this)">${safeText(t("llm.applyChanges"))}</button></div>
+            </div>
+        </div>
+    </article>`;
+}
+
+async function loadLLMValidatorDetail(validatorId) {
+    const detail = document.getElementById("llmValidatorDetail");
+    if (!validatorId || !detail) return;
+    SELECTED_LLM_VALIDATOR_ID = validatorId;
+    detail.innerHTML = `<p class="empty-state">${safeText(t("llm.loadingEffectiveConfiguration"))}</p>`;
+    try {
+        const response = await fetchWithAuth(`${API}/admin/llm/validators/${encodeURIComponent(validatorId)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        detail.innerHTML = renderLLMValidatorDetail(await response.json());
+    } catch (error) {
+        detail.innerHTML = `<p class="empty-state">${safeText(t("llm.validatorLoadError"))}</p>`;
+    }
+}
+
+async function loadLLMConfiguration() {
+    if (!IS_ADMIN) return;
+    const container = document.getElementById("llmConfigContainer");
+    if (!container) return;
+    container.innerHTML = `<p class="empty-state">${safeText(t("llm.loadingConfiguration"))}</p>`;
+    try {
+        const [componentsResponse, validatorsResponse, modelsResponse] = await Promise.all([
+            fetchWithAuth(`${API}/admin/llm/components`),
+            fetchWithAuth(`${API}/admin/llm/validators`),
+            fetchWithAuth(`${API}/admin/llm/models/openrouter?limit=20`).catch(() => null),
+        ]);
+        if (!componentsResponse.ok || !validatorsResponse.ok) throw new Error("configuration unavailable");
+        const components = (await componentsResponse.json()).components || [];
+        const validators = (await validatorsResponse.json()).validators || [];
+        const recommendations = modelsResponse?.ok ? (await modelsResponse.json()).recommendations || [] : [];
+        const options = validators.map(v => `<option value="${safeText(v.validator_id)}">${safeText(v.validator_id)} — ${safeText(llmTypeSummary(v))}</option>`).join("");
+        const models = recommendations.map(item => `<option value="${safeText(item.model || "")}"></option>`).join("");
+        container.innerHTML = `<datalist id="llm-model-catalog">${models}</datalist>
+            <div class="llm-config-section">
+                <div class="llm-section-heading"><div><span>${safeText(t("llm.components"))}</span><h3>${safeText(t("llm.platformServices"))}</h3></div><p>${safeText(t("llm.configurableServices", {count: components.length}))}</p></div>
+                <div class="llm-component-grid">${components.map(renderLLMComponent).join("")}</div>
+            </div>
+            <div class="llm-config-section llm-validator-section">
+                <div class="llm-section-heading"><div><span>${safeText(t("llm.validators"))}</span><h3>${safeText(t("llm.configurationByIdentity"))}</h3></div><p>${safeText(t("llm.availableValidators", {count: validators.length}))}</p></div>
+                <div class="llm-selector-control">
+                    <label for="llm-validator-selector">${safeText(t("llm.selectRegisteredValidator"))}</label>
+                    <select id="llm-validator-selector"><option value="">${safeText(t("llm.selectValidatorPlaceholder"))}</option>${options}</select>
+                    <small>${safeText(t("llm.validatorResolutionHelp"))}</small>
+                </div>
+                <div id="llmValidatorDetail" class="llm-validator-detail-host"><div class="llm-selection-placeholder"><span>◇</span><strong>${safeText(t("llm.selectValidator"))}</strong><p>${safeText(t("llm.selectValidatorHelp"))}</p></div></div>
+            </div>`;
+        const selector = document.getElementById("llm-validator-selector");
+        selector?.addEventListener("change", event => loadLLMValidatorDetail(event.target.value));
+        if (SELECTED_LLM_VALIDATOR_ID && validators.some(item => item.validator_id === SELECTED_LLM_VALIDATOR_ID)) {
+            selector.value = SELECTED_LLM_VALIDATOR_ID;
+            await loadLLMValidatorDetail(SELECTED_LLM_VALIDATOR_ID);
+        }
+    } catch (error) {
+        container.innerHTML = `<p class="empty-state">${safeText(t("llm.configurationLoadError"))}</p>`;
+    }
+}
+
+function formatLLMNumber(value, decimals = 2) {
+    if (value === null || value === undefined || value === "") return "—";
+    const number = Number(value);
+    const locale = window.I18N?.getLanguage?.() === "en" ? "en-US" : "es-ES";
+    return Number.isFinite(number) ? number.toLocaleString(locale, {maximumFractionDigits: decimals}) : "—";
+}
+
+function formatLLMCurrency(value, decimals = 4) {
+    if (value === null || value === undefined || value === "") return "—";
+    const number = Number(value);
+    const locale = window.I18N?.getLanguage?.() === "en" ? "en-US" : "es-ES";
+    return Number.isFinite(number) ? number.toLocaleString(locale, {style: "currency", currency: "USD", maximumFractionDigits: decimals}) : "—";
+}
+
+function llmGenericRecommendationReason(item) {
+    const prompt = Number(item.price?.prompt_per_million_usd);
+    const completion = Number(item.price?.completion_per_million_usd);
+    if (prompt === 0 && completion === 0) return t("llm.genericReasonFree");
+    if (Number(item.quality_score) >= 90) return t("llm.genericReasonHighQuality");
+    if (prompt <= 0.5 && completion <= 2) return t("llm.genericReasonLowCost");
+    return t("llm.genericReasonBalanced");
+}
+
+function renderLLMRecommendationOption(option) {
+    if (!option) return `<span class="llm-empty-value">${safeText(t("llm.noTierOption"))}</span>`;
+    const delta = Number(option.estimated_cost_delta_usd);
+    const hasDelta = option.estimated_cost_delta_usd !== null && option.estimated_cost_delta_usd !== undefined && Number.isFinite(delta);
+    const deltaClass = hasDelta ? (delta > 0 ? "increase" : delta < 0 ? "decrease" : "neutral") : "unknown";
+    const deltaPrefix = hasDelta && delta > 0 ? "+" : "";
+    const percent = hasDelta && option.estimated_cost_delta_percent !== null
+        ? `${Number(option.estimated_cost_delta_percent) > 0 ? "+" : ""}${formatLLMNumber(option.estimated_cost_delta_percent, 1)} %`
+        : t("llm.currentPriceUnavailable");
+    return `<div class="llm-recommendation-option">
+        <strong class="llm-model-name">${safeText(option.name || option.model)}</strong><code>${safeText(option.model)}</code>
+        <span>${formatLLMCurrency(option.estimated_cost_usd, 6)}</span><small>${safeText(t("llm.estimatedPerExecution"))}</small>
+        <span class="llm-cost-delta ${deltaClass}">${hasDelta ? `${deltaPrefix}${formatLLMCurrency(delta, 6)}` : "—"}</span><small>${safeText(percent)}</small>
+    </div>`;
+}
+
+const LLM_NEWS_ASSERTION_COUNT = 5;
+let LLM_RECOMMENDATIONS_REQUEST_ID = 0;
+
+function parseLLMNewsBudget(value) {
+    let normalized = String(value ?? "").trim().replace(/\s/g, "");
+    if (!normalized) return null;
+    if (normalized.includes(",") && normalized.includes(".")) {
+        if (normalized.lastIndexOf(",") > normalized.lastIndexOf(".")) {
+            normalized = normalized.replace(/\./g, "").replace(",", ".");
+        } else {
+            normalized = normalized.replace(/,/g, "");
+        }
+    } else if (normalized.includes(",")) {
+        normalized = normalized.replace(",", ".");
+    }
+    const budget = Number(normalized);
+    return Number.isFinite(budget) && budget > 0 ? budget : null;
+}
+
+function llmNewsExecutionCount(item, deployed) {
+    if (item.target_id === "generate-asertions") return 1;
+    if (item.target_id === "source-router") {
+        const localRagValidators = deployed.filter(candidate =>
+            candidate.target_kind === "validator" && candidate.workload_key === "ragLocal"
+        ).length;
+        return LLM_NEWS_ASSERTION_COUNT * localRagValidators;
+    }
+    if (item.target_kind === "validator") return LLM_NEWS_ASSERTION_COUNT;
+    return 0;
+}
+
+function estimateLLMNewsCost(deployed, tier = "current") {
+    let total = 0;
+    for (const item of deployed) {
+        const executions = llmNewsExecutionCount(item, deployed);
+        if (!executions) continue;
+        const option = tier === "current" ? null : (item.options || []).find(candidate => candidate.tier === tier);
+        const rawCost = option?.estimated_cost_usd ?? item.estimated_current_cost_usd;
+        const cost = Number(rawCost);
+        if (rawCost === null || rawCost === undefined || !Number.isFinite(cost)) return null;
+        total += cost * executions;
+    }
+    return total;
+}
+
+function enforceLLMRecommendationBudget(payload) {
+    const maxCost = Number(payload?.max_news_cost_usd);
+    if (payload?.max_news_cost_usd === null || payload?.max_news_cost_usd === undefined
+        || !Number.isFinite(maxCost) || maxCost <= 0) return payload;
+
+    let deployed = (payload.deployment_recommendations || []).map(item => ({
+        ...item,
+        options: [...(item.options || [])],
+    }));
+    const costs = {
+        ...(payload.estimated_news_costs_usd || {}),
+        current: estimateLLMNewsCost(deployed),
+    };
+    for (const tier of ["premium", "similar", "budget"]) {
+        let total = estimateLLMNewsCost(deployed, tier);
+        if (total === null || !Number.isFinite(total) || total > maxCost + Number.EPSILON) {
+            deployed = deployed.map(item => ({
+                ...item,
+                options: item.options.filter(option => option.tier !== tier),
+            }));
+            total = estimateLLMNewsCost(deployed, tier);
+        }
+        costs[tier] = total !== null && Number.isFinite(total) && total <= maxCost + Number.EPSILON
+            ? total
+            : null;
+    }
+    return {...payload, deployment_recommendations: deployed, estimated_news_costs_usd: costs};
+}
+
+function renderLLMNewsCost(value, contextKey) {
+    return `<strong class="llm-news-cost-value">${formatLLMCurrency(value, 6)}</strong><small>${safeText(t(contextKey))}</small>`;
+}
+
+function renderLLMRecommendations(payload) {
+    payload = enforceLLMRecommendationBudget(payload);
+    const deployed = payload.deployment_recommendations || [];
+    if (deployed.length) {
+        const rows = deployed.map(item => {
+            const workload = item.workload_key ? t(`llm.workloads.${item.workload_key}`) : item.workload;
+            const reason = item.reason_key ? t(`llm.reasons.${item.reason_key}`) : item.reason;
+            const options = Object.fromEntries((item.options || []).map(option => [option.tier, option]));
+            return `<tr>
+                <td><strong>${safeText(llmComponentTitle(item.target_id))}</strong><small>${safeText(item.target_kind === "validator" ? t("llm.validator") : t("llm.component"))}</small></td>
+                <td><strong>${safeText(workload)}</strong><small>${safeText(t("llm.inputOutputSample", {input: formatLLMNumber(item.input_tokens, 0), output: formatLLMNumber(item.output_tokens, 0)}))}</small></td>
+                <td><code>${safeText(item.current_model || "—")}</code><small>${safeText(item.current_provider || "—")}</small><strong>${formatLLMCurrency(item.estimated_current_cost_usd, 6)}</strong><small>${safeText(t("llm.estimatedPerExecution"))}</small></td>
+                <td>${renderLLMRecommendationOption(options.premium)}</td>
+                <td>${renderLLMRecommendationOption(options.similar)}</td>
+                <td>${renderLLMRecommendationOption(options.budget)}</td>
+                <td class="llm-reason">${safeText(reason || "—")}</td>
+            </tr>`;
+        }).join("");
+        const newsCosts = payload.estimated_news_costs_usd || {
+            current: estimateLLMNewsCost(deployed),
+            premium: estimateLLMNewsCost(deployed, "premium"),
+            similar: estimateLLMNewsCost(deployed, "similar"),
+            budget: estimateLLMNewsCost(deployed, "budget"),
+        };
+        const budgetContext = payload.max_news_cost_usd == null
+            ? t("llm.newsCostNoLimit")
+            : t("llm.newsCostLimit", {cost: formatLLMCurrency(payload.max_news_cost_usd, 6)});
+        const newsCostRow = `<tr class="llm-news-cost-row">
+            <td><strong>${safeText(t("llm.newsCostTitle"))}</strong><small>${safeText(t("llm.newsCostSample"))}</small></td>
+            <td>${safeText(t("llm.newsCostWorkload"))}</td>
+            <td>${renderLLMNewsCost(newsCosts.current, "llm.newsCostCurrent")}</td>
+            <td>${renderLLMNewsCost(newsCosts.premium, "llm.newsCostPremium")}</td>
+            <td>${renderLLMNewsCost(newsCosts.similar, "llm.newsCostSimilar")}</td>
+            <td>${renderLLMNewsCost(newsCosts.budget, "llm.newsCostBudget")}</td>
+            <td class="llm-reason"><strong>${safeText(t("llm.newsCostContextLabel"))}</strong><small>${safeText(budgetContext)}</small><small>${safeText(t("llm.newsCostContext"))}</small></td>
+        </tr>`;
+        return `<div class="llm-recommendations-head"><div><span>${safeText(t("llm.deployedCatalog"))}</span><h3>${safeText(t("llm.deployedRecommendationsTitle"))}</h3><p>${safeText(t("llm.deployedRecommendationsHelp"))}</p></div><div class="llm-generated-at">${safeText(t("ui.updated"))}<br><strong>${safeText(formatPollingEventDate(payload.generated_at))}</strong></div></div>
+            <div class="table-shell llm-recommendations-table"><table><thead><tr><th>${safeText(t("llm.deployedLlm"))}</th><th>${safeText(t("llm.workloadAndSample"))}</th><th>${safeText(t("llm.currentModel"))}<small>${safeText(t("llm.currentCost"))}</small></th><th>${safeText(t("llm.premiumTier"))}<small>${safeText(t("llm.premiumTierHelp"))}</small></th><th>${safeText(t("llm.similarTier"))}<small>${safeText(t("llm.similarTierHelp"))}</small></th><th>${safeText(t("llm.budgetTier"))}<small>${safeText(t("llm.budgetTierHelp"))}</small></th><th>${safeText(t("llm.reason"))}</th></tr></thead><tbody>${rows}</tbody><tfoot>${newsCostRow}</tfoot></table></div>
+            <div class="llm-catalog-notes"><p>${safeText(t("llm.pricingNote"))}</p><p>${safeText(t("llm.estimationNote"))}</p><p>${safeText(t("llm.benchmarkNotice"))}</p></div>`;
+    }
+
+    const rows = (payload.recommendations || []).map(item => `<tr>
+        <td><span class="llm-rank">${safeText(item.rank)}</span></td>
+        <td><strong class="llm-model-name">${safeText(item.name || item.model)}</strong><code>${safeText(item.model)}</code></td>
+        <td><strong>${formatLLMNumber(item.quality_score, 1)}</strong><small>${safeText(t("llm.quality"))}</small></td>
+        <td><strong>${formatLLMNumber(item.value_score, 1)}</strong><small>${safeText(t("llm.value"))}</small></td>
+        <td>${formatLLMNumber(item.context_length, 0)}</td>
+        <td><span>${formatLLMCurrency(item.price?.prompt_per_million_usd)}</span><small>${safeText(t("llm.inputPerMillion"))}</small><span>${formatLLMCurrency(item.price?.completion_per_million_usd)}</span><small>${safeText(t("llm.outputPerMillion"))}</small></td>
+        <td><strong>${formatLLMCurrency(item.estimated_validation_cost_usd, 6)}</strong><small>${safeText(t("llm.estimatedPerValidation"))}</small></td>
+        <td class="llm-reason">${safeText(llmGenericRecommendationReason(item))}</td>
+    </tr>`).join("");
+    return `<div class="llm-recommendations-head"><div><span>${safeText(t("llm.catalog"))}</span><h3>${safeText(t("llm.recommendedModelsTitle"))}</h3><p>${safeText(t("llm.recommendedModelsHelp"))}</p></div><div class="llm-generated-at">${safeText(t("ui.updated"))}<br><strong>${safeText(formatPollingEventDate(payload.generated_at))}</strong></div></div>
+        <div class="table-shell llm-recommendations-table"><table><thead><tr><th>${safeText(t("llm.rank"))}</th><th>${safeText(t("llm.model"))}</th><th>${safeText(t("llm.quality"))}</th><th>${safeText(t("llm.value"))}</th><th>${safeText(t("llm.context"))}</th><th>${safeText(t("llm.price"))}</th><th>${safeText(t("llm.estimatedCost"))}</th><th>${safeText(t("llm.reason"))}</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="empty-state">${safeText(t("llm.noRecommendations"))}</td></tr>`}</tbody></table></div>
+        <div class="llm-catalog-notes"><p>${safeText(t("llm.pricingNote"))}</p><p>${safeText(t("llm.estimationNote"))}</p></div>`;
+}
+
+async function loadLLMRecommendations() {
+    if (!IS_ADMIN) return;
+    const requestId = ++LLM_RECOMMENDATIONS_REQUEST_ID;
+    const container = document.getElementById("llmRecommendationsContainer");
+    if (!container) return;
+    container.innerHTML = `<p class="empty-state">${safeText(t("llm.loadingRecommendations"))}</p>`;
+    try {
+        const params = new URLSearchParams({limit: "20"});
+        const budgetInput = document.getElementById("llm-max-news-cost");
+        const rawBudget = budgetInput?.value.trim() || "";
+        let requestedBudget = null;
+        if (rawBudget) {
+            requestedBudget = parseLLMNewsBudget(rawBudget);
+            if (requestedBudget === null) {
+                budgetInput.setCustomValidity(t("llm.invalidNewsCost"));
+                budgetInput.reportValidity();
+                container.innerHTML = "";
+                return;
+            }
+            budgetInput.setCustomValidity("");
+            params.set("max_news_cost_usd", String(requestedBudget));
+        }
+        const response = await fetchWithAuth(`${API}/admin/llm/models/openrouter?${params}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        if (requestId !== LLM_RECOMMENDATIONS_REQUEST_ID) return;
+        if (requestedBudget !== null) {
+            const echoedBudget = Number(payload.max_news_cost_usd);
+            if (!Number.isFinite(echoedBudget)
+                || Math.abs(echoedBudget - requestedBudget) > Number.EPSILON) {
+                throw new Error("El endpoint no aplicó el presupuesto solicitado");
+            }
+        }
+        container.innerHTML = renderLLMRecommendations(payload);
+    } catch (error) {
+        if (requestId !== LLM_RECOMMENDATIONS_REQUEST_ID) return;
+        container.innerHTML = `<div class="llm-error-state"><strong>${safeText(t("llm.recommendationsLoadErrorTitle"))}</strong><p>${safeText(t("llm.recommendationsLoadErrorHelp"))}</p></div>`;
+    }
+}
+
+function showLLMAdminTab(tab) {
+    ACTIVE_LLM_ADMIN_TAB = tab === "recommendations" ? "recommendations" : "configuration";
+    document.querySelectorAll("[data-llm-tab]").forEach(button => {
+        const active = button.dataset.llmTab === ACTIVE_LLM_ADMIN_TAB;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+    });
+    const configPanel = document.getElementById("llmConfigurationPanel");
+    const recommendationsPanel = document.getElementById("llmRecommendationsPanel");
+    if (configPanel) configPanel.hidden = ACTIVE_LLM_ADMIN_TAB !== "configuration";
+    if (recommendationsPanel) recommendationsPanel.hidden = ACTIVE_LLM_ADMIN_TAB !== "recommendations";
+    refreshLLMAdminView();
+}
+
+function refreshLLMAdminView() {
+    return ACTIVE_LLM_ADMIN_TAB === "recommendations" ? loadLLMRecommendations() : loadLLMConfiguration();
+}
+
+async function applyLLMComponent(component, button) {
+    if (button) button.disabled = true;
+    try {
+        const payload = {
+            provider: document.getElementById(`llm-provider-${component}`).value.trim(),
+            model: document.getElementById(`llm-model-${component}`).value.trim(),
+            temperature: Number(document.getElementById(`llm-temperature-${component}`).value),
+        };
+        const response = await fetchWithAuth(`${API}/admin/llm/components/${encodeURIComponent(component)}`, {
+            method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        alertMessage(t("llm.configurationApplied"), "success");
+        await loadLLMConfiguration();
+    } catch (error) {
+        alertMessage(t("llm.configurationApplyError"), "error");
+    } finally {
+        if (button?.isConnected) button.disabled = false;
+    }
+}
+
+async function applyLLMValidator(validatorId, button) {
+    if (button) button.disabled = true;
+    try {
+        const payload = {
+            provider: document.getElementById("llm-validator-provider").value.trim(),
+            model: document.getElementById("llm-validator-model").value.trim(),
+            temperature: Number(document.getElementById("llm-validator-temperature").value),
+        };
+        const response = await fetchWithAuth(`${API}/admin/llm/validators/${encodeURIComponent(validatorId)}`, {
+            method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        alertMessage(t("llm.validatorConfigurationApplied"), "success");
+        await loadLLMConfiguration();
+    } catch (error) {
+        alertMessage(t("llm.validatorConfigurationApplyError"), "error");
+    } finally {
+        if (button?.isConnected) button.disabled = false;
     }
 }
 
@@ -2609,6 +3522,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Extraemos la lógica original a una función aparte
 function initializeApp() {
+    loadCapabilities();
     // 1. Mostrar quién está logueado (Opcional pero recomendado)
     console.log("User:", keycloak.tokenParsed.preferred_username);
 
@@ -2626,31 +3540,15 @@ function initializeApp() {
     document.getElementById('btn-importarNew').addEventListener('click', importarNoticia);
     document.getElementById('btn-publishNew').addEventListener('click', publishNew);
     document.getElementById('btn-clearNews')?.addEventListener('click', clearNewsForm);
-    document.getElementById('validationMode')?.addEventListener('change', updateValidationModeHelp);
-    updateValidationModeHelp();
-
-    document.getElementById("btn-generateAssertions").addEventListener("click", async () => {
-        const text = document.getElementById("newsText").value.trim();
-        const container = document.getElementById("news-assertions-container");
-        if (!text) {
-            alertMessage(t("messages.writeNews"), "warning");
-            return;
-        }
-        if (container) {
-            renderAssertionsProgress(container, t("messages.generatingAssertions"), 20);
-        }
-        alertMessage(t("messages.generatingAssertions"), "info");
-        const assertions = await generateAssertionsFromText(text);
-        if (container) {
-            if (!assertions || assertions.length === 0) {
-                renderAssertionsProgress(container, t("messages.assertionsGenerated"), 100);
-                container.innerHTML += `<div class="mt-4">${t("messages.noAssertionsFound") || "No se generaron aserciones."}</div>`;
-            } else {
-                renderAssertionsProgress(container, t("messages.assertionsGenerated"), 100);
-            }
-        }
-        renderEditableAssertionsTable(container, assertions);
-        alertMessage(t("messages.assertionsGenerated"), "success");
+    document.getElementById("btn-generateAssertions").addEventListener("click", handleGenerateAssertions);
+    document.getElementById("btn-refresh-llm-config")?.addEventListener("click", refreshLLMAdminView);
+    document.getElementById("btn-apply-llm-budget")?.addEventListener("click", loadLLMRecommendations);
+    document.getElementById("llm-max-news-cost")?.addEventListener("input", event => event.target.setCustomValidity(""));
+    document.getElementById("llm-max-news-cost")?.addEventListener("keydown", event => {
+        if (event.key === "Enter") loadLLMRecommendations();
+    });
+    document.querySelectorAll("[data-llm-tab]").forEach(button => {
+        button.addEventListener("click", () => showLLMAdminTab(button.dataset.llmTab));
     });
 
     // 4. El resto de tus Listeners (Orders, TX, IPFS...)
@@ -2687,8 +3585,7 @@ function safeText(value) {
     return escapeHTML(String(value));
 }
 
-function validatorTypeLabel(value) {
-    if (value === null || value === undefined || value === "") return "-";
+function validatorTypeId(value) {
     const enumToId = {
         LLM_MEMORY_VALIDATION: 1,
         LLM_SEARCH_VALIDATION: 2,
@@ -2696,7 +3593,12 @@ function validatorTypeLabel(value) {
         DETERMINISTIC_VALIDATION: 4,
         HUMAN: 5
     };
-    const typeId = enumToId[value] || Number(value);
+    return enumToId[value] || Number(value);
+}
+
+function validatorTypeLabel(value) {
+    if (value === null || value === undefined || value === "") return "-";
+    const typeId = validatorTypeId(value);
     return Number.isFinite(typeId) && typeId >= 1 && typeId <= 5 ? t(`ui.validatorTypes.${typeId}`) : String(value);
 }
 
@@ -2781,15 +3683,13 @@ function renderStatusBadge(status) {
 
 function formatAnyDate(value) {
     if (!value) return "N/A";
-    const raw = String(value);
-    const date = new Date(raw);
-    if (!Number.isNaN(date.getTime())) {
-        return date.toLocaleString("es-ES", {
-            day: "2-digit", month: "2-digit", year: "numeric",
-            hour: "2-digit", minute: "2-digit"
-        });
-    }
-    return safeText(raw);
+    const date = parseApiTimestamp(value);
+    if (!date) return "—";
+    const language = window.I18N?.getLanguage?.() === "en" ? "en-GB" : "es-ES";
+    return date.toLocaleString(language, {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+    });
 }
 
 function shortValue(value, size = 18) {
@@ -2806,7 +3706,7 @@ function renderVotePill(count, label, className) {
 
 function renderSummaryVoteChip(value, label, className) {
     const zeroClass = Number(value || 0) === 0 ? " summary-chip-zero" : "";
-    return `<span class="summary-chip ${className}${zeroClass}">${formatMaxTwoDecimals(value)} ${safeText(label)}</span>`;
+    return `<span class="summary-chip ${className}${zeroClass}">${safeText(label)} · ${safeText(t("decision.weight"))} ${formatMaxTwoDecimals(value)}</span>`;
 }
 
 function compactText(value, size = 90) {
@@ -2817,20 +3717,12 @@ function compactText(value, size = 90) {
 
 // Tabla de órdenes/listados con columnas más visuales, badges de estado y hashes compactos.
 function renderTableData(container, data) {
+    const isOrdersContainer = container.id === "listTabContent";
     if (!data?.length) {
         container.innerHTML = `<p class="empty-state">${safeText(t("ui.noData"))}</p>`;
         container._fullData = data || [];
         return;
     }
-
-    const isOrdersContainer = container.id === "listTabContent";
-    const totalItems = data.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / TABLE_PAGE_SIZE_ORDERS));
-    if (TABLE_PAGE_ORDERS < 1) TABLE_PAGE_ORDERS = 1;
-    if (TABLE_PAGE_ORDERS > totalPages) TABLE_PAGE_ORDERS = totalPages;
-
-    const start = (TABLE_PAGE_ORDERS - 1) * TABLE_PAGE_SIZE_ORDERS;
-    const pageData = data.slice(start, start + TABLE_PAGE_SIZE_ORDERS);
 
     let keys;
     if (isOrdersContainer) {
@@ -2844,6 +3736,22 @@ function renderTableData(container, data) {
         data.forEach(row => Object.keys(row).forEach(k => keysSet.add(k)));
         keys = Array.from(keysSet);
     }
+
+    const filteredData = isOrdersContainer ? data.filter(row => Object.entries(TABLE_FILTERS_ORDERS).every(([key, filter]) => {
+        const value = row[key];
+        const display = [value, (key === "status" ? t(`status.${value}`) : ""), (key === "created_at" || key === "updated_at" ? formatAnyDate(value) : "")]
+            .filter(item => item !== null && item !== undefined)
+            .map(item => typeof item === "object" ? JSON.stringify(item) : String(item))
+            .join(" ");
+        return display.toLocaleLowerCase().includes(filter.toLocaleLowerCase());
+    })) : data;
+    const totalItems = filteredData.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / TABLE_PAGE_SIZE_ORDERS));
+    if (TABLE_PAGE_ORDERS < 1) TABLE_PAGE_ORDERS = 1;
+    if (TABLE_PAGE_ORDERS > totalPages) TABLE_PAGE_ORDERS = totalPages;
+
+    const start = (TABLE_PAGE_ORDERS - 1) * TABLE_PAGE_SIZE_ORDERS;
+    const pageData = filteredData.slice(start, start + TABLE_PAGE_SIZE_ORDERS);
 
     const headerLabels = {
         order_id: "Order ID",
@@ -2901,17 +3809,19 @@ function renderTableData(container, data) {
                     return `<td>${safeText(val)}</td>`;
             }
         }).join("")}</tr>`;
-    }).join("");
+    }).join("") || `<tr><td class="table-no-results" colspan="${keys.length}">${safeText(t("ui.noFilterResults"))}</td></tr>`;
 
     container.innerHTML = `
         <table class="compact-table visual-orders-table">
-            <thead><tr>${keys.map(k => `<th>${headerLabels[k] || safeText(k)}</th>`).join("")}</tr></thead>
+            <thead><tr>${keys.map(k => `<th><span>${headerLabels[k] || safeText(k)}</span>${isOrdersContainer ? `<input class="table-column-filter" type="search" value="${safeText(TABLE_FILTERS_ORDERS[k] || "")}" oninput="setOrdersColumnFilter('${safeText(k)}', this.value)" placeholder="${safeText(t("ui.filter"))}" aria-label="${safeText(t("ui.filterColumn", { column: headerLabels[k] || k }))}">` : ""}</th>`).join("")}</tr></thead>
             <tbody>${rows}</tbody>
         </table>
         <div class="pagination">
+            <button onclick="goToTablePage(1)" ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}>${t("ui.firstPage")}</button>
             <button onclick="changeTablePage(-1)" ${TABLE_PAGE_ORDERS === 1 ? "disabled" : ""}>${t("ui.previous")}</button>
             <span class="vote-pill vote-true">${t("ui.pageOf", { page: TABLE_PAGE_ORDERS, total: totalPages })}</span>
             <button onclick="changeTablePage(1)" ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}>${t("ui.next")}</button>
+            <button onclick="goToTablePage(${totalPages})" ${TABLE_PAGE_ORDERS === totalPages ? "disabled" : ""}>${t("ui.lastPage")}</button>
         </div>
         <p style="color:var(--text-secondary);font-size:.82rem;margin:10px 0 0;">${t("ui.showingOrders", { shown: pageData.length, total: totalItems })}</p>
     `;
@@ -2924,6 +3834,21 @@ function getAssertionResult(orderData, assertionId) {
     return orderData?.assertion_results?.[String(assertionId)] || null;
 }
 
+function assertionStatusClass(assertionResult, approvedCount, rejectedCount, unknownCount, errorCount) {
+    if (assertionResult) {
+        const verdict = assertionResult.verdict || assertionResult.winner || "UNKNOWN";
+        if (verdict === "TRUE") return "true";
+        if (verdict === "FALSE") return "false";
+        if (assertionResult.decision_status === "NO_VALID_RESPONSES") return "error";
+        return "unknown";
+    }
+    if (approvedCount > rejectedCount) return "true";
+    if (rejectedCount > approvedCount) return "false";
+    if (unknownCount > 0) return "unknown";
+    if (errorCount > 0) return "error";
+    return "unknown";
+}
+
 function isValidationError(validation = {}) {
     return validation.execution_status === "ERROR";
 }
@@ -2932,108 +3857,140 @@ function completedValidations(validators = {}) {
     return Object.values(validators).filter(validation => validation?.execution_status === "COMPLETED");
 }
 
-function scorePercent(value) {
-    const n = Number(value || 0);
-    return `${formatMaxTwoDecimals(n * 100)}%`;
+function formatWeightPercent(value) {
+    const formatted = formatMaxTwoDecimals(Number(value || 0) * 100);
+    return `${window.I18N?.getLanguage?.() === "es" ? formatted.replace(".", ",") : formatted} %`;
 }
 
 function renderScorePill(value, label, className) {
-    const roundedPercent = Number(formatMaxTwoDecimals(Number(value || 0) * 100));
-    const zeroClass = roundedPercent === 0 ? " vote-pill-zero" : "";
-    return `<span class="vote-pill ${className}${zeroClass}">${safeText(label)} ${scorePercent(value)}</span>`;
+    const numericWeight = Number(value || 0);
+    const zeroClass = numericWeight === 0 ? " vote-pill-zero" : "";
+    return `<span class="vote-pill ${className}${zeroClass}">${safeText(label)} · ${safeText(t("decision.weight"))} ${formatMaxTwoDecimals(numericWeight)}</span>`;
+}
+
+function decisionPresentation(result = {}) {
+    const verdict = result.verdict || result.winner || "UNKNOWN";
+    const status = result.decision_status || (verdict === "UNKNOWN" ? "INSUFFICIENT_EVIDENCE" : "WEIGHTED_MAJORITY");
+    const reason = result.reason_code || "";
+    const distribution = result.distribution || {};
+    const share = distribution.decisive_share?.[verdict] || 0;
+    const coverage = distribution.decisive_coverage || 0;
+    const counts = result.counts || {
+        decisive: result.validations_count || 0,
+        abstentions: 0,
+        errors: result.errors_count || 0
+    };
+    const titleKeys = {
+        "TRUE:CONSENSUS": "decision.trueConsensus",
+        "FALSE:CONSENSUS": "decision.falseConsensus",
+        "TRUE:WEIGHTED_MAJORITY": "decision.trueMajority",
+        "FALSE:WEIGHTED_MAJORITY": "decision.falseMajority",
+        "UNKNOWN:NO_CONSENSUS": "decision.noConsensus",
+        "UNKNOWN:INSUFFICIENT_EVIDENCE": "decision.insufficientEvidence",
+        "UNKNOWN:NO_VALID_RESPONSES": "decision.noValidResponses"
+    };
+    let explanation = "";
+    if (status === "WEIGHTED_MAJORITY") {
+        explanation = t("decision.winnerShare", { percent: formatWeightPercent(share) });
+    } else if (reason === "TRUE_FALSE_WEIGHT_TIE") {
+        explanation = t("decision.tieReason");
+    } else if (reason === "DECISIVE_COVERAGE_TOO_LOW") {
+        explanation = t("decision.lowCoverageReason", { percent: formatWeightPercent(coverage) });
+    } else if (reason === "NO_DECISIVE_VALIDATIONS") {
+        explanation = t("decision.noDecisiveReason");
+    } else if (reason === "ALL_VALIDATIONS_FAILED") {
+        explanation = t("decision.allFailedReason");
+    } else if (reason === "NO_COMPLETED_VALIDATIONS") {
+        explanation = t("decision.noCompletedReason");
+    }
+    return {
+        verdict,
+        status,
+        title: t(titleKeys[`${verdict}:${status}`] || "decision.inconclusive"),
+        explanation,
+        countsText: t("decision.counts", {
+            decisive: Number(counts.decisive || 0),
+            abstentions: Number(counts.abstentions || 0),
+            errors: Number(counts.errors || 0)
+        })
+    };
 }
 
 function renderScorePills(result) {
-    const scores = result?.scores || {TRUE: 0, FALSE: 0, UNKNOWN: 0};
-    const errors = Number(result?.errors_count || 0);
+    const scores = result?.distribution?.raw_weight || result?.scores || {TRUE: 0, FALSE: 0, UNKNOWN: 0};
+    const errors = Number(result?.counts?.errors ?? result?.errors_count ?? 0);
+    const decision = decisionPresentation(result);
     return `
-        <div class="vote-pills score-pills">
-            ${renderScorePill(scores.TRUE, "TRUE", "vote-true")}
-            ${renderScorePill(scores.FALSE, "FALSE", "vote-false")}
-            ${renderScorePill(scores.UNKNOWN, "UNKNOWN", "vote-unknown")}
-            ${errors ? `<span class="vote-pill vote-error">ERROR ${errors}</span>` : ""}
+        <div class="consensus-result">
+            <div class="consensus-decision"><strong>${safeText(decision.title)}</strong>${decision.explanation ? `<span>${safeText(decision.explanation)}</span>` : ""}<small>${safeText(decision.countsText)}</small></div>
+            <div class="vote-pills score-pills">
+                ${renderScorePill(scores.TRUE, "TRUE", "vote-true")}
+                ${renderScorePill(scores.FALSE, "FALSE", "vote-false")}
+                ${renderScorePill(scores.UNKNOWN, "UNKNOWN", "vote-unknown")}
+                ${errors ? `<span class="vote-pill vote-error">ERROR ${errors}</span>` : ""}
+            </div>
         </div>
     `;
 }
 
-function preferredDomainsStatusFromPolicy(usePreferredDomains) {
-    const mode = String(usePreferredDomains || "NONE").toUpperCase();
-    const labels = {
-        NONE: "No",
-        LOCAL: "Local",
-        EXT_OFFICIAL_FIRST: "Official first",
-        EXT_ONLY_OFFICIAL: "Only official",
-    };
-    if (!labels[mode]) return null;
+function evidenceStrategyStatus(value) {
+    const strategy = normalizeEvidenceStrategy(value);
+    if (!strategy) return null;
     return {
-        enabled: mode !== "NONE",
-        label: labels[mode],
-        title: `EVIDENCE_SEARCH_USE_PREFERRED_DOMAINS=${mode}`,
-        className: mode === "NONE" ? "preferred-domains-off" : "preferred-domains-on",
+        enabled: true,
+        label: t(`ui.sourcePolicies.${strategy}.label`),
+        title: t(`ui.sourcePolicies.${strategy}.hint`),
+        className: "preferred-domains-on",
     };
 }
 
-function normalizePreferredDomainsMode(value) {
+function normalizeEvidenceStrategy(value) {
     if (typeof value !== "string") return null;
-    const mode = value.trim().toUpperCase();
-    return ["NONE", "LOCAL", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"].includes(mode) ? mode : null;
+    const strategy = value.trim().toUpperCase();
+    return ["LOCAL", "EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"].includes(strategy) ? strategy : null;
 }
 
-function preferredDomainsStatusFromEvidenceResponse(response) {
+function evidenceStrategyFromResponse(response) {
     if (!response || typeof response !== "object") return null;
-
-    const explicitPolicy = normalizePreferredDomainsMode(response.search_policy?.use_preferred_domains);
-    const fromPolicy = preferredDomainsStatusFromPolicy(explicitPolicy);
-    if (fromPolicy) return fromPolicy;
-
-    const resolution = response.domain_resolution || {};
-    const fromResolutionMode = preferredDomainsStatusFromPolicy(normalizePreferredDomainsMode(resolution.preferred_domains_mode));
-    if (fromResolutionMode) return fromResolutionMode;
-
-    const preferredDomains = Array.isArray(resolution.preferred_domains) ? resolution.preferred_domains : [];
-    const queries = Array.isArray(response.queries_executed) ? response.queries_executed : [];
-    const hasSiteQueries = queries.some(query => String(query || "").trim().startsWith("site:"));
-
-    if (preferredDomains.length || hasSiteQueries) {
-        return {
-            enabled: true,
-            label: preferredDomains.length ? `${t("ui.yes")} (${preferredDomains.length})` : t("ui.yes"),
-            title: preferredDomains.map(item => item.domain).filter(Boolean).join(", "),
-            className: "preferred-domains-on"
-        };
-    }
-
-    return null;
+    return evidenceStrategyStatus(response.search_policy?.strategy)
+        || evidenceStrategyStatus(response.domain_resolution?.strategy);
 }
 
-function preferredDomainsInfoForValidation(info = {}) {
+function evidenceStrategyInfoForValidation(info = {}) {
     const config = info.validator_config?.config || info.config || info.validator_config || {};
-    const explicitPolicy = normalizePreferredDomainsMode(
-        info.search_policy?.use_preferred_domains
-        ?? info.payload?.search_policy?.use_preferred_domains
-        ?? config.evidence_search_use_preferred_domains
+    const explicitStrategy = normalizeEvidenceStrategy(
+        info.search_policy?.strategy
+        ?? info.payload?.search_policy?.strategy
+        ?? config.evidence_search_strategy
     );
-    return preferredDomainsStatusFromPolicy(explicitPolicy)
-        || preferredDomainsStatusFromEvidenceResponse(info.evidence_search_response || info.payload?.evidence_search_response)
-        || { enabled: null, label: t("ui.noRecord"), title: "Sin política explícita en esta validación", className: "preferred-domains-unknown" };
+    return evidenceStrategyStatus(explicitStrategy)
+        || evidenceStrategyFromResponse(info.evidence_search_response || info.payload?.evidence_search_response)
+        || { enabled: null, label: t("ui.noRecord"), title: t("ui.sourcePolicyUnknown"), className: "preferred-domains-unknown" };
 }
 
 function renderPreferredDomainsBadge(info) {
     if (!info) return "";
     const title = info.title ? ` title="${safeText(info.title)}"` : "";
-    return `<span class="preferred-domains-badge ${info.className}"${title}>preferred domains: ${safeText(info.label)}</span>`;
+    return `<span class="preferred-domains-badge ${info.className}" tabindex="0"${title} aria-label="${safeText(info.title || info.label)}">${safeText(info.label)}</span>`;
 }
 
 function validationEvidenceItems(info = {}) {
+    return validationEvidenceSelection(info).items;
+}
+
+function validationEvidenceSelection(info = {}) {
     const candidates = [
-        info.evidence_used,
-        info.payload?.evidence_used,
-        info.sources,
-        info.payload?.sources,
-        info.evidence_search_response?.evidences,
-        info.payload?.evidence_search_response?.evidences
+        { kind: "used", items: info.evidence_used },
+        { kind: "used", items: info.payload?.evidence_used },
+        { kind: "provider-declared", items: info.sources_declared },
+        { kind: "provider-declared", items: info.payload?.sources_declared },
+        { kind: "legacy-declared", items: info.sources },
+        { kind: "legacy-declared", items: info.payload?.sources },
+        { kind: "retrieved", items: info.evidence_search_response?.evidences },
+        { kind: "retrieved", items: info.payload?.evidence_search_response?.evidences }
     ];
-    return candidates.find(items => Array.isArray(items) && items.length) || [];
+    return candidates.find(candidate => Array.isArray(candidate.items) && candidate.items.length)
+        || { kind: "none", items: [] };
 }
 
 function isGenericEvidenceLabel(value) {
@@ -3044,6 +4001,18 @@ function isGenericEvidenceLabel(value) {
 function evidenceUrlHost(url) {
     try {
         return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+        return "";
+    }
+}
+
+function safeEvidenceUrl(value) {
+    try {
+        if (typeof value !== "string") return "";
+        const text = value.trim();
+        if (!/^https?:\/\/[^/?#]/i.test(text) || /[\s\u0000-\u001f\u007f\\]/u.test(text)) return "";
+        const url = new URL(text);
+        return ["http:", "https:"].includes(url.protocol) && url.hostname ? url.href : "";
     } catch {
         return "";
     }
@@ -3083,15 +4052,94 @@ function evidenceSupportsLabel(value) {
     return "";
 }
 
+function evidenceAcquisitionLabel(src = {}) {
+    const provenance = src.document_provenance;
+    if (!provenance || typeof provenance !== "object") return "";
+    const method = provenance.method === "direct_fetch" ? t("ui.evidenceDirectFetch")
+        : provenance.method === "provider_search_text" ? t("ui.evidenceProviderText")
+        : provenance.method === "provider_extract" ? t("ui.evidenceProviderExtract")
+        : provenance.method === "document_cache" ? t("ui.evidenceDocumentCache") : "";
+    if (!method) return "";
+    const freshness = provenance.freshness_status === "UNKNOWN"
+        ? t("ui.evidenceFreshnessUnknown")
+        : provenance.freshness_status === "OBSERVED_NOW"
+            ? t("ui.evidenceObservedAtRetrieval")
+            : provenance.freshness_status === "CACHED_KNOWN_AGE"
+                ? t("ui.evidenceCachedKnownAge") : "";
+    return [method, freshness].filter(Boolean).join(" · ");
+}
+
 function allValidationEvidenceItems(info = {}) {
     return [
         info.evidence_used,
         info.payload?.evidence_used,
+        info.sources_declared,
+        info.payload?.sources_declared,
         info.sources,
         info.payload?.sources,
         info.evidence_search_response?.evidences,
         info.payload?.evidence_search_response?.evidences
     ].filter(items => Array.isArray(items) && items.length).flat();
+}
+
+function evidenceValidationResult(info = {}) {
+    return info.evidence_validation || info.payload?.evidence_validation || null;
+}
+
+function unverifiedModelOpinion(info = {}) {
+    const result = evidenceValidationResult(info);
+    return result?.basis === "RETRIEVED_EVIDENCE"
+        && result.effective_verdict === "UNKNOWN"
+        && ["TRUE", "FALSE"].includes(result.original_verdict) ? result : null;
+}
+
+function renderModelOpinionAudit(info, opinion) {
+    const response = info.evidence_search_response || info.payload?.evidence_search_response;
+    const provided = opinion.provided_evidence_text;
+    const sources = response?.evidences || [];
+    const issues = (opinion.issues || []).map(issue => {
+        const key = `ui.citationIssues.${issue.code}`;
+        const label = t(key);
+        return `<li>${safeText(label === key ? issue.code : label)}${issue.source_id ? ` (${safeText(issue.source_id)})` : ""}</li>`;
+    }).join("");
+    const claims = opinion.claimed_evidence;
+    return `<details class="validator-evidence-summary model-opinion-audit">
+        <summary>${safeText(t("ui.opinionAudit"))}</summary>
+        <p>${safeText(t("ui.opinionExcluded"))}</p>
+        <h4>${safeText(t("ui.originalModelReason"))}</h4>
+        <p>${safeText(opinion.original_description || t("ui.auditNotRecorded"))}</p>
+        <h4>${safeText(t("ui.citationCheck"))}</h4><ul>${issues}</ul>
+        <h4>${safeText(t("ui.modelCitations"))}</h4>
+        <pre>${safeText(claims == null ? t("ui.auditNotRecorded") : JSON.stringify(claims, null, 2))}</pre>
+        <h4>${safeText(t("ui.providedEvidence"))}</h4>
+        ${provided ? `<pre>${safeText(provided)}</pre>` : `<p>${safeText(t("ui.auditNotRecorded"))}</p><pre>${safeText(JSON.stringify(sources, null, 2))}</pre>`}
+    </details>`;
+}
+
+function renderEvidenceValidationBadge(info = {}) {
+    const validation = evidenceValidationResult(info);
+    if (!validation) return "";
+    const basisLabels = {
+        RETRIEVED_EVIDENCE: t("ui.retrievedEvidenceBasis"),
+        PROVIDER_SEARCH_UNVERIFIED: t("ui.providerSearchUnverified"),
+        MODEL_KNOWLEDGE: t("ui.modelKnowledgeBasis")
+    };
+    const statusLabels = {
+        VERIFIED: t("ui.evidenceVerified"),
+        PARTIALLY_VERIFIED: t("ui.evidencePartiallyVerified"),
+        UNSUPPORTED: t("ui.evidenceUnsupported"),
+        INVALID: t("ui.evidenceInvalid")
+    };
+    const basisLabel = basisLabels[validation.basis] || validation.basis || "";
+    const statusLabel = statusLabels[validation.status] || "";
+    const label = [basisLabel, statusLabel].filter(Boolean).join(" · ") || validation.status;
+    const details = [
+        validation.status,
+        validation.original_verdict && validation.effective_verdict
+            ? `${validation.original_verdict} → ${validation.effective_verdict}`
+            : ""
+    ].filter(Boolean).join(" · ");
+    return `<span class="evidence-validation-badge" title="${safeText(details)}">${safeText(label)}</span>`;
 }
 
 function evidenceReferenceLabel(info = {}, sourceNumber = 0) {
@@ -3114,11 +4162,22 @@ function replaceGenericEvidenceReferences(text, info = {}) {
 }
 
 function renderEvidenceLinks(info = {}) {
-    const items = validationEvidenceItems(info);
+    const selection = validationEvidenceSelection(info);
+    const items = selection.items;
     if (!items.length) return "";
 
+    const summaryLabel = selection.kind === "used"
+        ? t("ui.usedEvidence", { count: items.length })
+        : selection.kind === "retrieved"
+            ? t("ui.retrievedEvidenceNotUsed", { count: items.length })
+            : selection.kind === "provider-declared"
+                ? t("ui.providerDeclaredSources", { count: items.length })
+                : t("ui.declaredEvidence", { count: items.length });
+
     const rows = items.slice(0, 6).map((src, index) => {
-        const url = src.url || src.source_url || "";
+        const linkUrl = src.url || src.source_url || "";
+        const url = linkUrl || src.url_text || src.source_url_text || "";
+        const safeUrl = safeEvidenceUrl(linkUrl);
         const title = evidenceDisplayTitle(src, index, url);
         const excerpt = evidenceDecisionText(src);
         const reason = src.reason || src.why_selected || src.description || "";
@@ -3127,6 +4186,7 @@ function renderEvidenceLinks(info = {}) {
         const chunkId = src.chunk_id || (Array.isArray(src.included_chunk_ids) ? src.included_chunk_ids.join(", ") : "");
         const meta = [
             supports,
+            evidenceAcquisitionLabel(src),
             src.source_type,
             src.reliability,
             contextId ? `context ${contextId}` : "",
@@ -3136,7 +4196,7 @@ function renderEvidenceLinks(info = {}) {
         ].filter(Boolean).join(" · ");
         return `
             <li>
-                <div class="evidence-title">${url ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer">${safeText(title)}</a>` : safeText(title)}</div>
+                <div class="evidence-title">${safeUrl ? `<a href="${safeText(safeUrl)}" target="_blank" rel="noopener noreferrer">${safeText(title)}</a>` : safeText(title)}</div>
                 ${url ? `<div class="evidence-url">${safeText(url)}</div>` : ""}
                 ${excerpt ? `<div class="evidence-reason"><strong>Fragmento:</strong> ${safeText(compactText(excerpt, 260))}</div>` : ""}
                 ${reason ? `<div class="evidence-reason"><strong>Motivo:</strong> ${safeText(compactText(reason, 220))}</div>` : ""}
@@ -3147,7 +4207,7 @@ function renderEvidenceLinks(info = {}) {
 
     return `
         <details class="validator-evidence-summary">
-            <summary>${t("ui.viewEvidence", { count: items.length })}</summary>
+            <summary>${safeText(summaryLabel)}</summary>
             <ul>${rows}</ul>
         </details>
     `;
@@ -3172,7 +4232,11 @@ function renderValidationsTree(container, validations, assertions, orderData = n
     for (const [assertionId, validatorsObj] of Object.entries(validations)) {
         const assertionText = resolveAssertionText(assertionId, assertions, orderData, validatorsObj);
 
-        const assertionResult = getAssertionResult(orderData, assertionId);
+        const recordedResult = getAssertionResult(orderData, assertionId);
+        const awaitingResponses = orderValidationPending(orderData)
+            && (!recordedResult || recordedResult.decision_status === "NO_VALID_RESPONSES")
+            && !completedValidations(validatorsObj).length;
+        const assertionResult = awaitingResponses ? null : recordedResult;
         const completed = completedValidations(validatorsObj);
         const literals = completed.map(v => getValidationLiteral(v.approval));
         const approvedCount = literals.filter(v => v === "True").length;
@@ -3180,41 +4244,46 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         const unknownCount = literals.filter(v => v === "Unknown").length;
         const errorCount = Object.values(validatorsObj).filter(isValidationError).length;
 
-        let status = "unknown";
-        if (assertionResult?.winner === "TRUE") status = "true";
-        else if (assertionResult?.winner === "FALSE") status = "false";
-        else if (approvedCount > rejectedCount) status = "true";
-        else if (rejectedCount > approvedCount) status = "false";
-        else if (unknownCount > 0) status = "pending";
-        else if (errorCount > 0) status = "error";
+        const status = assertionStatusClass(
+            assertionResult,
+            approvedCount,
+            rejectedCount,
+            unknownCount,
+            errorCount
+        );
 
         const validatorsHtml = Object.entries(validatorsObj).map(([validator, info]) => {
             const validationError = isValidationError(info);
+            const opinion = validationError ? null : unverifiedModelOpinion(info);
             const lit = validationError ? "ERROR" : getValidationLiteral(info.approval);
             const litClass = validationError ? "validation-error-text" : lit === "True" ? "true-news" : lit === "False" ? "false-news" : "partial-news";
             let desc = validationError ? (info.error_details?.message || info.error || info.text || "Validation failed") : (info.text || t("ui.noDescription"));
             if (typeof desc === "object") desc = JSON.stringify(desc, null, 2);
             desc = replaceGenericEvidenceReferences(desc, info);
-            const tx = info.tx_hash ? `<a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a>` : "-";
+            const tx = info.tx_hash ? `<div class="validator-tx" title="${safeText(t("ui.transactionHash"))}"><a href="#" onclick="event.preventDefault(); navigateToTx('${String(info.tx_hash).replace(/'/g, "\\'")}')">${shortValue(info.tx_hash, 18)}</a></div>` : "";
             const responseTime = formatDurationSeconds(info.response_time_seconds);
             const validatorTooltip = renderValidatorProviderModelTitle(info);
             const weightedDetail = assertionResult?.details?.find(d => String(d.validator).toLowerCase() === String(validator).toLowerCase());
-            const typeLabel = weightedDetail ? validatorTypeLabel(weightedDetail.validator_type) : validatorTypeLabel(info.validator_config?.config?.type || info.config?.type || info.validator_type);
-            const preferredDomainsBadge = renderPreferredDomainsBadge(preferredDomainsInfoForValidation(info));
-            const reputationHtml = weightedDetail ? `<span>rep ${safeText(formatMaxTwoDecimals(weightedDetail.reputation))}</span>` : "";
-            const weightHtml = `<div class="validator-weights"><span>${safeText(typeLabel)}</span>${reputationHtml}${preferredDomainsBadge}</div>`;
+            const type = weightedDetail?.validator_type ?? info.validator_config?.config?.type ?? info.config?.type ?? info.validator_config?.type ?? info.validator_type;
+            const typeId = validatorTypeId(type);
+            const typeLabel = typeId >= 1 && typeId <= 5 ? validatorTypeLabel(type) : t("ui.validatorUnknown");
+            const typeHint = t(typeId >= 1 && typeId <= 5 ? `ui.validatorTypeHints.${typeId}` : "ui.validatorUnknownHint");
+            const typeBadge = `<span class="validator-type-badge" tabindex="0" title="${safeText(typeHint)}" aria-label="${safeText(`${typeLabel}. ${typeHint}`)}">${safeText(typeLabel)}<span aria-hidden="true" class="validator-type-info">ⓘ</span></span>`;
+            const preferredDomainsBadge = typeId === 3 ? renderPreferredDomainsBadge(evidenceStrategyInfoForValidation(info)) : "";
+            const evidenceHtml = opinion ? renderModelOpinionAudit(info, opinion) : renderEvidenceLinks(info);
             return `
-                <div class="validator-card${validationError ? " validation-error-card" : ""}">
+                <div class="validator-card${validationError ? " validation-error-card" : ""}${tx ? " has-transaction" : ""}">
                     <div class="validator-name"><a href="#" ${validatorTooltip} onclick="event.preventDefault(); showValidatorDetail('${validatorHashForJs(validator)}')">${safeText(info.validator_alias || validator)}</a></div>
-                    <div class="validator-result ${litClass}">${lit}</div>
-                    <div class="validator-desc">${safeText(desc)}</div>
+                    <div class="validator-result ${opinion ? "partial-news" : litClass}">${opinion ? safeText(t("ui.modelOpinion", { verdict: opinion.original_verdict })) : lit}</div>
+                    <div class="validator-desc">${opinion ? `<p class="model-opinion-notice">${safeText(t("ui.unverifiedCitation"))} · ${safeText(t("ui.opinionExcluded"))}</p>` : ""}${safeText(desc)}</div>
                     <div class="validator-meta">
+                        ${typeBadge}
+                        ${preferredDomainsBadge}
                         ${validationError ? `<span class="validation-error-badge">${safeText(info.error_details?.stage || "VALIDATION")} · ${safeText(info.error_details?.code || "ERROR")}</span>` : ""}
-                        ${weightHtml}
-                        <div class="validator-response-time" title="${safeText(t("ui.requestResponseTime"))}"><span class="clock-icon" aria-hidden="true"></span>${safeText(responseTime)}</div>
+                        <div class="validator-response-time" title="${safeText(t("ui.requestResponseTime"))}"><span class="clock-icon" aria-hidden="true"></span><span class="validator-duration-label">${safeText(t("ui.validationDuration"))}</span> ${safeText(responseTime)}</div>
                     </div>
-                    <div class="validator-tx" title="${safeText(t("ui.transactionHash"))}">${tx}</div>
-                    ${renderEvidenceLinks(info)}
+                    ${tx}
+                    ${evidenceHtml}
                 </div>
             `;
         }).join("");
@@ -3222,8 +4291,8 @@ function renderValidationsTree(container, validations, assertions, orderData = n
         html += `
             <details class="validation-node">
                 <summary class="validation-summary">
-                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult?.winner ? ` → ${safeText(assertionResult.winner)}` : errorCount ? " → ERROR" : ""}</div>
-                    ${assertionResult ? renderScorePills(assertionResult) : `<div class="vote-pills">
+                    <div class="assertion-title ${status}">▸ ${safeText(assertionId)}. ${safeText(assertionText)}${assertionResult ? ` → ${safeText(assertionResult.verdict || assertionResult.winner || "UNKNOWN")}` : errorCount ? " → ERROR" : ""}</div>
+                    ${awaitingResponses ? `<span class="vote-pill vote-unknown">${safeText(t("ui.awaitingValidation"))}</span>` : assertionResult ? renderScorePills(assertionResult) : `<div class="vote-pills">
                         ${renderVotePill(approvedCount, "True", "vote-true")}
                         ${renderVotePill(rejectedCount, "False", "vote-false")}
                         ${renderVotePill(unknownCount, "Unknown", "vote-unknown")}
@@ -3247,39 +4316,98 @@ function renderValidatorValidationsByOrder(container, groupedOrders) {
         return;
     }
 
-    let html = `<div class="validation-tree">`;
+    const orders = Object.entries(groupedOrders).map(([orderId, orderData]) => {
+        const validations = Object.values(orderData.validations || {}).flatMap(validators => Object.values(validators || {}));
+        const literals = validations.map(validation => getValidationLiteral(validation.approval));
+        return {
+            orderId,
+            orderData,
+            title: compactText(orderData.text || t("ui.noNewsTextShort"), 110),
+            assertionsCount: Object.keys(orderData.validations || {}).length,
+            trueCount: literals.filter(value => value === "True").length,
+            falseCount: literals.filter(value => value === "False").length,
+            unknownCount: literals.filter(value => value === "Unknown").length
+        };
+    });
+    const filteredOrders = orders.filter(order => Object.entries(VALIDATOR_VALIDATIONS_FILTERS).every(([column, filter]) => {
+        const values = {
+            order: order.orderId,
+            text: order.title,
+            assertions: order.assertionsCount,
+            result: `${order.trueCount} True ${order.falseCount} False ${order.unknownCount} Unknown`
+        };
+        return String(values[column] ?? "").toLocaleLowerCase().includes(filter.toLocaleLowerCase());
+    }));
+    const totalPages = Math.max(1, Math.ceil(filteredOrders.length / VALIDATOR_VALIDATIONS_PAGE_SIZE));
+    VALIDATOR_VALIDATIONS_PAGE = Math.min(Math.max(1, VALIDATOR_VALIDATIONS_PAGE), totalPages);
+    const visibleOrders = filteredOrders.slice((VALIDATOR_VALIDATIONS_PAGE - 1) * VALIDATOR_VALIDATIONS_PAGE_SIZE, VALIDATOR_VALIDATIONS_PAGE * VALIDATOR_VALIDATIONS_PAGE_SIZE);
+    const columns = [
+        ["order", t("ui.order")], ["text", t("ui.newsSummary")], ["assertions", t("ui.assertions")], ["result", t("ui.validationResult")], ["actions", t("ui.actions")]
+    ];
+    const filterInput = (column, label) => column === "actions" ? "" : `<input class="table-column-filter" type="search" value="${safeText(VALIDATOR_VALIDATIONS_FILTERS[column] || "")}" oninput="setValidatorValidationsFilter('${column}', this.value)" placeholder="${safeText(t("ui.filter"))}" aria-label="${safeText(t("ui.filterColumn", { column: label }))}">`;
+    const rows = visibleOrders.map(order => {
+        const safeOrder = String(order.orderId).replace(/'/g, "\\'");
+        const isExpanded = VALIDATOR_VALIDATIONS_EXPANDED.has(order.orderId);
+        return `<tr>
+            <td><a class="order-id-link" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${safeOrder}')">${t("ui.order")} ${shortValue(order.orderId, 20)}</a></td>
+            <td>${safeText(order.title)}</td>
+            <td><span class="vote-pill vote-unknown">${order.assertionsCount}</span></td>
+            <td><div class="vote-pills validation-result-pills">${renderVotePill(order.trueCount, "True", "vote-true")}${renderVotePill(order.falseCount, "False", "vote-false")}${renderVotePill(order.unknownCount, "Unknown", "vote-unknown")}</div></td>
+            <td><button class="btn-secondary btn-small" onclick="toggleValidatorValidationDetails('${safeOrder}')">${isExpanded ? t("ui.hideDetails") : t("ui.viewDetails")}</button></td>
+        </tr>`;
+    }).join("") || `<tr><td class="table-no-results" colspan="${columns.length}">${safeText(t("ui.noFilterResults"))}</td></tr>`;
 
-    for (const [orderId, orderData] of Object.entries(groupedOrders)) {
-        const assertionsCount = Object.keys(orderData.validations || {}).length;
-        const titleText = compactText(orderData.text || t("ui.noNewsTextShort"), 110);
-        const safeOrder = String(orderId).replace(/'/g, "\\'");
-        html += `
-            <details class="validation-node order-validation-node" open>
-                <summary class="validation-summary order-validation-summary">
-                    <div>
-                        <div class="assertion-title">${t("ui.order")} ${shortValue(orderId, 26)}</div>
-                        <div class="text-muted">(${safeText(titleText)})</div>
-                    </div>
-                    <div class="vote-pills">
-                        <span class="vote-pill vote-unknown">${assertionsCount} ${t("ui.assertions").toLowerCase()}</span>
-                        <a class="btn-secondary btn-small" href="#" onclick="event.preventDefault(); navigateToOrderDetails('${safeOrder}');">${t("ui.viewOrder")}</a>
-                    </div>
-                </summary>
-                <div class="order-validation-content">
-                    <div id="validator-order-${safeText(orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}"></div>
-                </div>
-            </details>
-        `;
-    }
+    container.innerHTML = `
+        <div class="table-shell validator-validations-table-shell">
+            <table class="compact-table visual-orders-table">
+                <thead><tr>${columns.map(([column, label]) => `<th><span>${safeText(label)}</span>${filterInput(column, label)}</th>`).join("")}</tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <button onclick="goToValidatorValidationsPage(1)" ${VALIDATOR_VALIDATIONS_PAGE === 1 ? "disabled" : ""}>${t("ui.firstPage")}</button>
+            <button onclick="goToValidatorValidationsPage(${VALIDATOR_VALIDATIONS_PAGE - 1})" ${VALIDATOR_VALIDATIONS_PAGE === 1 ? "disabled" : ""}>${t("ui.previous")}</button>
+            <span class="vote-pill vote-true">${t("ui.pageOf", { page: VALIDATOR_VALIDATIONS_PAGE, total: totalPages })}</span>
+            <button onclick="goToValidatorValidationsPage(${VALIDATOR_VALIDATIONS_PAGE + 1})" ${VALIDATOR_VALIDATIONS_PAGE === totalPages ? "disabled" : ""}>${t("ui.next")}</button>
+            <button onclick="goToValidatorValidationsPage(${totalPages})" ${VALIDATOR_VALIDATIONS_PAGE === totalPages ? "disabled" : ""}>${t("ui.lastPage")}</button>
+        </div>
+        <p class="table-result-count">${safeText(t("ui.showingOrders", { shown: visibleOrders.length, total: filteredOrders.length }))}</p>
+        <div class="validator-validation-details"></div>`;
+    container._groupedOrders = groupedOrders;
+    renderExpandedValidatorValidationDetails(container, visibleOrders);
+}
 
-    html += `</div>`;
-    container.innerHTML = html;
+function renderExpandedValidatorValidationDetails(container, visibleOrders) {
+    const details = container.querySelector(".validator-validation-details");
+    if (!details) return;
+    const expandedOrders = visibleOrders.filter(order => VALIDATOR_VALIDATIONS_EXPANDED.has(order.orderId));
+    details.innerHTML = expandedOrders.map(order => `<div class="order-validation-content"><h4>${t("ui.order")} ${shortValue(order.orderId, 26)}</h4><div id="validator-order-${safeText(order.orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}"></div></div>`).join("");
+    expandedOrders.forEach(order => {
+        const target = document.getElementById(`validator-order-${String(order.orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+        if (target) renderValidationsTree(target, order.orderData.validations, order.orderData.assertions, order.orderData);
+    });
+}
 
-    for (const [orderId, orderData] of Object.entries(groupedOrders)) {
-        const targetId = `validator-order-${String(orderId).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-        const target = document.getElementById(targetId);
-        if (target) renderValidationsTree(target, orderData.validations, orderData.assertions, orderData);
-    }
+function setValidatorValidationsFilter(column, value) {
+    const text = String(value || "").trim();
+    if (text) VALIDATOR_VALIDATIONS_FILTERS[column] = text;
+    else delete VALIDATOR_VALIDATIONS_FILTERS[column];
+    VALIDATOR_VALIDATIONS_PAGE = 1;
+    const container = document.getElementById("validatorValidationsTree");
+    if (container?._groupedOrders) renderValidatorValidationsByOrder(container, container._groupedOrders);
+}
+
+function goToValidatorValidationsPage(page) {
+    VALIDATOR_VALIDATIONS_PAGE = Math.max(1, Number(page) || 1);
+    const container = document.getElementById("validatorValidationsTree");
+    if (container?._groupedOrders) renderValidatorValidationsByOrder(container, container._groupedOrders);
+}
+
+function toggleValidatorValidationDetails(orderId) {
+    if (VALIDATOR_VALIDATIONS_EXPANDED.has(orderId)) VALIDATOR_VALIDATIONS_EXPANDED.delete(orderId);
+    else VALIDATOR_VALIDATIONS_EXPANDED.add(orderId);
+    const container = document.getElementById("validatorValidationsTree");
+    if (container?._groupedOrders) renderValidatorValidationsByOrder(container, container._groupedOrders);
 }
 
 
@@ -3476,7 +4604,9 @@ async function showValidatorValidations(validatorHash) {
                 order_id: v.order_id,
                 response_time_seconds: v.response_time_seconds,
                 sources: v.sources || v.payload?.sources || [],
+                sources_declared: v.sources_declared || v.payload?.sources_declared || [],
                 evidence_used: v.evidence_used || v.payload?.evidence_used || [],
+                evidence_validation: v.evidence_validation || v.payload?.evidence_validation || null,
                 evidence_search_response: v.evidence_search_response || v.payload?.evidence_search_response || null,
                 search_policy: v.search_policy || v.payload?.search_policy || null,
                 payload: v.payload || {}
@@ -3492,6 +4622,9 @@ async function showValidatorValidations(validatorHash) {
         `;
 
         if (validations.length) {
+            VALIDATOR_VALIDATIONS_PAGE = 1;
+            VALIDATOR_VALIDATIONS_FILTERS = {};
+            VALIDATOR_VALIDATIONS_EXPANDED = new Set();
             const tree = document.getElementById("validatorValidationsTree");
             renderValidatorValidationsByOrder(tree, groupedOrders);
         }
@@ -3522,7 +4655,13 @@ window.addEventListener("trustnews:languagechange", () => {
             if (translatedName) button.textContent = translatedName;
         });
 
-        if (detailsContainer) {
+        if (detailsContainer && activeOrderPollingSession) {
+            renderOrderPollingState(
+                activeOrderPollingSession.consecutiveErrors ? "retrying" : "checking",
+                activeOrderPollingSession,
+                currentOrderData.status
+            );
+        } else if (detailsContainer) {
             detailsContainer.innerHTML = `<span class="status-value" data-status="${safeText(currentOrderData.status || "UNKNOWN")}"></span>`;
         }
 
@@ -3546,6 +4685,8 @@ window.addEventListener("trustnews:languagechange", () => {
         if (listContainer?._fullData) renderTableData(listContainer, listContainer._fullData);
     } else if (activeSectionId === "validators") {
         listValidatorsCache();
+    } else if (activeSectionId === "llm-config" && IS_ADMIN) {
+        refreshLLMAdminView();
     }
 
     const badge = document.getElementById("sessionBadge");
@@ -3571,7 +4712,9 @@ initializeApp = function initializeAppUXIntegrated() {
     const logoutBtn = document.getElementById("btn-logout");
     if (logoutBtn && !logoutBtn.dataset.bound) {
         logoutBtn.dataset.bound = "true";
-        logoutBtn.addEventListener("click", () => keycloak.logout({ redirectUri: window.location.origin }));
+        logoutBtn.addEventListener("click", () => keycloak.logout({
+            redirectUri: new URL(FRONTEND_BASE_PATH, window.location.origin).href
+        }));
     }
 
     const badge = document.getElementById("sessionBadge");

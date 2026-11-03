@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "current-openrouter",
+  "description": "Línea base: conserva cada modelo efectivo, exigiendo que todos sean OpenRouter.",
+  "components": {
+    "generate-asertions": {
+      "provider": "openrouter",
+      "model": "$current"
+    },
+    "source-router": {
+      "provider": "openrouter",
+      "model": "$current"
+    }
+  },
+  "validators": [
+    {
+      "selector": {
+        "types": [
+          "LLM_MEMORY_VALIDATION",
+          "LLM_SEARCH_VALIDATION",
+          "RAG_EVIDENCE_VALIDATION"
+        ]
+      },
+      "provider": "openrouter",
+      "model": "$current"
+    }
+  ]
+}

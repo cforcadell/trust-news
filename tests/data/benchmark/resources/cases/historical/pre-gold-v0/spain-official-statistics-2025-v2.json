@@ -1,0 +1,87 @@
+{
+  "schema_version": 2,
+  "id": "spain-official-statistics-2025-v2",
+  "title": "Estadísticas oficiales españolas de 2025",
+  "language": "es",
+  "description": "Recurso de benchmark con referencias oficiales del INE y de Red Eléctrica y afirmaciones gold alineadas con el texto de entrada.",
+  "news": "Las estadísticas oficiales situaron la población residente de España en 49.077.984 habitantes al comienzo de 2025, por encima de 49 millones. En 2024, las fuentes renovables aportaron el 56,8 % de toda la electricidad generada en España, algo más de la mitad del mix de generación. España no superó los 60 millones de residentes al comienzo de 2025.",
+  "tags": [
+    "lang:es",
+    "jurisdiction:ES",
+    "topic:statistics",
+    "temporal:historical",
+    "evidence:official",
+    "expected:decisive"
+  ],
+  "assertions": [
+    {
+      "id": "ES_POPULATION_ABOVE_49M_2025",
+      "text": "La población residente de España superó los 49 millones de habitantes al comienzo de 2025.",
+      "expected_verdict": "TRUE",
+      "expected_topic_code": "DEMOGRAPHY",
+      "expected_evidence_kind": "STATISTICAL_DATA",
+      "required_terms": ["España", "población residente", "49 millones", "comienzo", "2025"],
+      "acceptable_domains": ["ine.es"],
+      "reference_sources": [
+        {
+          "id": "ine-population-2025",
+          "url": "https://www.ine.es/dyngs/Prensa/en/ECP4T24.htm",
+          "title": "Continuous Population Statistics - 1 January 2025 - INE"
+        }
+      ],
+      "reference_evidence": [
+        {
+          "source": "ine-population-2025",
+          "relation": "SUPPORTS",
+          "text": "Spain's resident population stood at 49,077,984 inhabitants on 1 January 2025."
+        }
+      ]
+    },
+    {
+      "id": "ES_RENEWABLE_GENERATION_56_8_2024",
+      "text": "Las fuentes renovables aportaron el 56,8 % de toda la electricidad generada en España en 2024.",
+      "expected_verdict": "TRUE",
+      "expected_topic_code": "ENERGY",
+      "expected_evidence_kind": "STATISTICAL_DATA",
+      "required_terms": ["renovables", "56,8", "electricidad generada", "España", "2024"],
+      "acceptable_domains": ["ree.es"],
+      "reference_sources": [
+        {
+          "id": "ree-renewables-2024",
+          "url": "https://www.ree.es/en/press-office/news/press-release/2025/03/electricity-generation-from-renewable-energies-in-spain-grows-by-10-3-in-2024-reaching-record-levels",
+          "title": "Electricity generation from renewable energies in Spain grows by 10.3% in 2024 - Red Eléctrica"
+        }
+      ],
+      "reference_evidence": [
+        {
+          "source": "ree-renewables-2024",
+          "relation": "SUPPORTS",
+          "text": "56.8% of all electricity generated in Spain in 2024 came from renewable sources."
+        }
+      ]
+    },
+    {
+      "id": "ES_POPULATION_BELOW_60M_2025",
+      "text": "España no superó los 60 millones de residentes al comienzo de 2025.",
+      "expected_verdict": "TRUE",
+      "expected_topic_code": "DEMOGRAPHY",
+      "expected_evidence_kind": "STATISTICAL_DATA",
+      "required_terms": ["España", "no superó", "60 millones", "residentes", "comienzo", "2025"],
+      "acceptable_domains": ["ine.es"],
+      "reference_sources": [
+        {
+          "id": "ine-population-2025",
+          "url": "https://www.ine.es/dyngs/Prensa/en/ECP4T24.htm",
+          "title": "Continuous Population Statistics - 1 January 2025 - INE"
+        }
+      ],
+      "reference_evidence": [
+        {
+          "source": "ine-population-2025",
+          "relation": "SUPPORTS",
+          "text": "Spain's resident population stood at 49,077,984 inhabitants on 1 January 2025, below 60 million."
+        }
+      ]
+    }
+  ]
+}

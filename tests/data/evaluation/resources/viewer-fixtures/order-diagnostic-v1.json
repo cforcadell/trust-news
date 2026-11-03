@@ -1,0 +1,404 @@
+{
+  "schema_version": "order-diagnostic-v1",
+  "identity": {
+    "campaign_id": "fixture-campaign",
+    "dataset_id": "fixture-dataset",
+    "order_id": "fixture-order",
+    "repetition": 1,
+    "parent_run_id": "fixture-parent"
+  },
+  "artifact_refs": {
+    "order": "fixture-parent-order.json",
+    "results": [
+      {
+        "run_id": "run-a",
+        "path": "run-a.json"
+      },
+      {
+        "run_id": "run-b",
+        "path": "run-b.json"
+      }
+    ]
+  },
+  "order": {
+    "status": "VALIDATED",
+    "original_text": "En 2025 la población superó los cinco millones. La inflación fue positiva en 2025.",
+    "generation": {
+      "execution_status": "COMPLETED",
+      "assessment": "PARTIAL",
+      "observations": {
+        "provider": "example",
+        "model": "example/generator",
+        "expected_assertions": [
+          {
+            "case_id": "population",
+            "text": "La población superó los cinco millones en 2025."
+          },
+          {
+            "case_id": "inflation",
+            "text": "La inflación fue positiva en 2025."
+          }
+        ],
+        "generated_assertions": [
+          {
+            "assertion_id": "1",
+            "text": "La población superó los cinco millones en 2025."
+          },
+          {
+            "assertion_id": "2",
+            "text": "La inflación fue positiva."
+          }
+        ],
+        "matches": [
+          {
+            "case_id": "population",
+            "assertion_id": "1",
+            "status": "PASS"
+          },
+          {
+            "case_id": "inflation",
+            "assertion_id": "2",
+            "status": "PARTIAL"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "code": "TEMPORAL_CONTEXT_MISSING",
+          "status": "PARTIAL",
+          "detail": "Assertion 2 omits the year from the original text.",
+          "observation_refs": [
+            "/order/generation/observations/generated_assertions/1"
+          ]
+        }
+      ]
+    },
+    "assertions": [
+      {
+        "assertion_id": "1",
+        "text": "La población superó los cinco millones en 2025.",
+        "expected_case_id": "population"
+      },
+      {
+        "assertion_id": "2",
+        "text": "La inflación fue positiva.",
+        "expected_case_id": "inflation"
+      }
+    ]
+  },
+  "validations": [
+    {
+      "run_id": "run-a",
+      "assertion_id": "1",
+      "validator_id": "validator-a",
+      "stages": {
+        "router": {
+          "execution_status": "COMPLETED",
+          "assessment": "PASS",
+          "observations": {
+            "route_state": "FRESH",
+            "cache_hit": true,
+            "queries": [],
+            "selected_domains": [
+              "estadistica.example.org"
+            ],
+            "cache_origin": "prior route resolution"
+          },
+          "checks": [
+            {
+              "code": "ACCEPTABLE_DOMAIN_FOUND",
+              "status": "PASS",
+              "detail": "Selected domain is annotated as acceptable."
+            }
+          ]
+        },
+        "evidence_search": {
+          "execution_status": "COMPLETED",
+          "assessment": "PARTIAL",
+          "observations": {
+            "cached": false,
+            "queries": [
+              {
+                "query_id": "q1",
+                "query": "población 2025",
+                "executed": true,
+                "include_domains": [
+                  "estadistica.example.org"
+                ],
+                "returned_urls": [
+                  "https://estadistica.example.org/poblacion",
+                  "https://estadistica.example.org/informe.pdf"
+                ]
+              }
+            ],
+            "sources": [
+              {
+                "source_id": "source-1",
+                "url": "https://estadistica.example.org/poblacion",
+                "fetch_status": "ok",
+                "chunks_total": 2,
+                "chunks": [
+                  {
+                    "chunk_id": "source-1-chunk-1",
+                    "text": "La población superó los cinco millones en 2025.",
+                    "rank": 1,
+                    "lexical_score": 1.4,
+                    "boosts": {
+                      "number": 1.0,
+                      "temporal": 1.2
+                    },
+                    "score": 3.6,
+                    "selected": true,
+                    "selection_reason": "highest score"
+                  },
+                  {
+                    "chunk_id": "source-1-chunk-2",
+                    "text": "La serie anterior se publicó en 2024.",
+                    "rank": 2,
+                    "lexical_score": 0.3,
+                    "boosts": {},
+                    "score": 0.3,
+                    "selected": false,
+                    "selection_reason": "context limit reached"
+                  }
+                ],
+                "contexts": [
+                  {
+                    "context_id": "source-1-context-1",
+                    "selected_chunk_id": "source-1-chunk-1",
+                    "included_chunk_ids": [
+                      "source-1-chunk-1"
+                    ],
+                    "text": "La población superó los cinco millones en 2025.",
+                    "citation_eligible": true
+                  }
+                ]
+              },
+              {
+                "source_id": "source-2",
+                "url": "https://estadistica.example.org/informe.pdf",
+                "fetch_status": "failed",
+                "chunks_total": 0,
+                "chunks": [],
+                "contexts": []
+              }
+            ]
+          },
+          "checks": [
+            {
+              "code": "FETCH_FAILURE",
+              "status": "PARTIAL",
+              "detail": "The PDF could not be fetched.",
+              "observation_refs": [
+                "/validations/0/stages/evidence_search/observations/sources/1"
+              ]
+            }
+          ]
+        },
+        "handoff": {
+          "execution_status": "COMPLETED",
+          "assessment": "PASS",
+          "observations": {
+            "retrieval_hash": "sha256:example-equal",
+            "validator_input_hash": "sha256:example-equal"
+          },
+          "checks": [
+            {
+              "code": "BUNDLE_HASH_MATCH",
+              "status": "PASS",
+              "detail": "Recorded boundary hashes match."
+            }
+          ]
+        },
+        "llm": {
+          "execution_status": "COMPLETED",
+          "assessment": "PASS",
+          "observations": {
+            "model": "example/model-a",
+            "original_verdict": "TRUE",
+            "effective_verdict": "TRUE"
+          },
+          "checks": [
+            {
+              "code": "VERDICT_MATCH",
+              "status": "PASS",
+              "detail": "Verdict matches the reference."
+            }
+          ]
+        },
+        "citations": {
+          "execution_status": "COMPLETED",
+          "assessment": "PASS",
+          "observations": {
+            "citations": [
+              {
+                "source_id": "source-1",
+                "context_id": "source-1-context-1",
+                "valid_identity": true
+              }
+            ]
+          },
+          "checks": [
+            {
+              "code": "CITATION_ID_VALID",
+              "status": "PASS",
+              "detail": "Cited context was delivered and eligible."
+            }
+          ]
+        },
+        "consensus": {
+          "execution_status": "COMPLETED",
+          "assessment": "PASS",
+          "observations": {
+            "verdict": "TRUE",
+            "decision_status": "CONSENSUS",
+            "validator_count": 1
+          },
+          "checks": [
+            {
+              "code": "CONSENSUS_MATCH",
+              "status": "PASS",
+              "detail": "Aggregate verdict matches the reference."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "run-b",
+      "assertion_id": "2",
+      "validator_id": "validator-b",
+      "stages": {
+        "router": {
+          "execution_status": "NOT_RECORDED",
+          "assessment": "NOT_EVALUATED",
+          "observations": {
+            "selected_domains": []
+          },
+          "checks": [],
+          "missing_reason": "Router response was not persisted."
+        },
+        "evidence_search": {
+          "execution_status": "COMPLETED",
+          "assessment": "PASS",
+          "observations": {
+            "cached": true,
+            "queries": [
+              {
+                "query_id": "q1",
+                "query": "inflación 2025",
+                "executed": false,
+                "reason": "cache_hit"
+              }
+            ],
+            "sources": [
+              {
+                "source_id": "source-1",
+                "url": "https://estadistica.example.org/inflacion",
+                "fetch_status": "ok",
+                "chunks_total": 1,
+                "chunks": [
+                  {
+                    "chunk_id": "source-1-chunk-1",
+                    "text": "La inflación fue positiva en 2025.",
+                    "rank": 1,
+                    "lexical_score": 1.0,
+                    "boosts": {
+                      "temporal": 1.2
+                    },
+                    "score": 2.2,
+                    "selected": true,
+                    "selection_reason": "only citable chunk"
+                  }
+                ],
+                "contexts": [
+                  {
+                    "context_id": "source-1-context-1",
+                    "selected_chunk_id": "source-1-chunk-1",
+                    "included_chunk_ids": [
+                      "source-1-chunk-1"
+                    ],
+                    "text": "La inflación fue positiva en 2025.",
+                    "citation_eligible": true
+                  }
+                ]
+              }
+            ]
+          },
+          "checks": [
+            {
+              "code": "CACHED_RESULT",
+              "status": "PASS",
+              "detail": "Stored evidence was delivered without a search."
+            }
+          ]
+        },
+        "handoff": {
+          "execution_status": "COMPLETED",
+          "assessment": "NOT_EVALUATED",
+          "observations": {
+            "retrieval_hash": null,
+            "validator_input_hash": null
+          },
+          "checks": [],
+          "missing_reason": "Boundary hashes were not recorded."
+        },
+        "llm": {
+          "execution_status": "COMPLETED",
+          "assessment": "FAIL",
+          "observations": {
+            "model": "example/model-b",
+            "original_verdict": "FALSE",
+            "effective_verdict": "UNKNOWN"
+          },
+          "checks": [
+            {
+              "code": "WRONG_VERDICT",
+              "status": "FAIL",
+              "detail": "Effective verdict differs from reference."
+            }
+          ]
+        },
+        "citations": {
+          "execution_status": "COMPLETED",
+          "assessment": "FAIL",
+          "observations": {
+            "citations": [
+              {
+                "source_id": "source-9",
+                "context_id": "source-9-context-1",
+                "valid_identity": false
+              }
+            ]
+          },
+          "checks": [
+            {
+              "code": "INVALID_SOURCE_ID",
+              "status": "FAIL",
+              "detail": "source-9 was not delivered.",
+              "observation_refs": [
+                "/validations/1/stages/citations/observations/citations/0"
+              ]
+            }
+          ]
+        },
+        "consensus": {
+          "execution_status": "COMPLETED",
+          "assessment": "PARTIAL",
+          "observations": {
+            "verdict": "UNKNOWN",
+            "decision_status": "INSUFFICIENT_EVIDENCE",
+            "validator_count": 1
+          },
+          "checks": [
+            {
+              "code": "CONSENSUS_UNKNOWN",
+              "status": "PARTIAL",
+              "detail": "Invalid citation degraded the verdict."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

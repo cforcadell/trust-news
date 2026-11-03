@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Literal, Optional
 from enum import Enum, IntEnum
 from common.models.veredicto import Validacion
 from common.models.protocol_models import (
@@ -14,6 +14,8 @@ from common.models.protocol_models import (
     build_assertions_document_v2,
     build_assertion_validation_payload_v2,
 )
+from common.routing_taxonomy import TAXONOMY_VERSION, EvidenceKind, TopicCode
+from common.utils.evidence import EvidenceItem
 
 
 # ============================================================
@@ -42,8 +44,10 @@ class Assertion(BaseModel):
     categoryId: CategoryId
     assertion_id: Optional[int | str] = None
     assertion_index: Optional[int] = None
-    subcategory: str = "unknown"
-    context: AssertionContext = Field(default_factory=AssertionContext)
+    topic_code: TopicCode
+    evidence_kind: EvidenceKind
+    taxonomy_version: Literal["routing-taxonomy-v2"] = TAXONOMY_VERSION
+    context: AssertionContext
     search_hints: SearchHints = Field(default_factory=SearchHints)
     context_confidence: ContextConfidence = Field(default_factory=ContextConfidence)
 
@@ -64,7 +68,9 @@ class Assertion(BaseModel):
             assertion_index=self.assertion_index or 0,
             text=self.text,
             categoryId=self.categoryId,
-            subcategory=self.subcategory,
+            topic_code=self.topic_code,
+            evidence_kind=self.evidence_kind,
+            taxonomy_version=self.taxonomy_version,
             context=self.context,
             search_hints=self.search_hints,
             context_confidence=self.context_confidence,
@@ -147,20 +153,19 @@ class ValidatorType(IntEnum):
     HUMAN = 5
 
 
-class EvidencePreferredDomainsMode(str, Enum):
-    NONE = "NONE"
+class EvidenceSearchStrategy(str, Enum):
     LOCAL = "LOCAL"
     EXT_OFFICIAL_FIRST = "EXT_OFFICIAL_FIRST"
     EXT_ONLY_OFFICIAL = "EXT_ONLY_OFFICIAL"
 
 
-def local_preferred_domains_supported(validator_type: ValidatorType | int, mode: EvidencePreferredDomainsMode | str) -> bool:
+def evidence_search_strategy_supported(validator_type: ValidatorType | int, strategy: EvidenceSearchStrategy | str | None) -> bool:
     try:
         parsed_type = validator_type if isinstance(validator_type, ValidatorType) else ValidatorType(int(validator_type))
-        parsed_mode = mode if isinstance(mode, EvidencePreferredDomainsMode) else EvidencePreferredDomainsMode(str(mode).upper())
+        parsed_strategy = strategy if isinstance(strategy, EvidenceSearchStrategy) else EvidenceSearchStrategy(str(strategy).upper())
     except (TypeError, ValueError):
         return False
-    return parsed_mode != EvidencePreferredDomainsMode.LOCAL or parsed_type == ValidatorType.RAG_EVIDENCE_VALIDATION
+    return parsed_type == ValidatorType.RAG_EVIDENCE_VALIDATION and parsed_strategy is not None
 
 
 
@@ -225,16 +230,14 @@ class ValidatorConfig(BaseModel):
     type: ValidatorType = ValidatorType.LLM_MEMORY_VALIDATION
     provider: str
     model: str
+    config_version: int = 0
     service_url: Optional[str] = None
     active_date: str
     updated_date: str
     end_date: Optional[str] = None
     status: ValidatorStatus = ValidatorStatus.Registered
-    use_evidence_search: Optional[bool] = None
-    online_search_enabled: Optional[bool] = None
     evidence_search_url: Optional[str] = None
-    evidence_search_use_preferred_domains: Optional[EvidencePreferredDomainsMode] = None
-    evidence_search_preferred_profile_id: Optional[str] = None
+    evidence_search_strategy: Optional[EvidenceSearchStrategy] = None
 
 
 class ValidatorConfigOnChain(BaseModel):
@@ -276,12 +279,16 @@ class TextoEntrada(BaseModel):
 
 class PublishRequest(BaseModel):
     text: str
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    validation_mode: ValidationMode = ValidationMode.LIGHT
+    source_url: Optional[str] = None
+    source_domain: Optional[str] = None
 
 
 class GenerateAssertionsPayload(BaseModel):
     text: str
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    validation_mode: ValidationMode = ValidationMode.LIGHT
+    source_url: Optional[str] = None
+    source_domain: Optional[str] = None
 
 
 class GenerateAssertionsRequest(BaseModel):
@@ -290,12 +297,45 @@ class GenerateAssertionsRequest(BaseModel):
     payload: GenerateAssertionsPayload
 
 
+class GenerationValidationIssue(BaseModel):
+    """Sanitized schema failure for one generated assertion."""
+
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    assertion_index: Optional[int] = None
+    assertion_id: Optional[str] = None
+    location: str
+    message: str
+    jurisdiction_scope: Optional[str] = None
+    present_jurisdiction_fields: List[str] = Field(default_factory=list)
+
+
+class GenerationEvaluationTrace(BaseModel):
+    """Operational diagnostics; never embedded in the published assertions document."""
+
+    model_config = ConfigDict(extra="forbid")
+    provider: str
+    model: Optional[str] = None
+    temperature: float
+    config_version: int = 0
+    structured_attempts: int = 0
+    repair_used: bool = False
+    duration_seconds: float = 0.0
+    request_build_seconds: Optional[float] = None
+    structured_completion_seconds: Optional[float] = None
+    parse_seconds: Optional[float] = None
+    status: Literal["COMPLETED", "FAILED"]
+    error_type: Optional[str] = None
+    assertion_count: int = 0
+    validation_issues: List[GenerationValidationIssue] = Field(default_factory=list)
+    usage: List[Dict[str, Optional[int]]] = Field(default_factory=list)
+
+
 class AssertionGeneratedPayload(BaseModel):
-    text: str
-    assertions: List[Assertion]
-    publisher: str
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
-    assertions_document: Optional[AssertionsDocumentV2] = None
+    model_config = ConfigDict(extra="forbid")
+
+    assertions_document: AssertionsDocumentV2
+    evaluation_trace: Optional[GenerationEvaluationTrace] = None
 
 
 class AssertionsGeneratedResponse(BaseModel):
@@ -309,6 +349,7 @@ class AssertionsNotGeneratedPayload(BaseModel):
     publisher: str
     error: str
     attempts: int
+    evaluation_trace: Optional[GenerationEvaluationTrace] = None
 
 
 class AssertionsNotGeneratedResponse(BaseModel):
@@ -327,7 +368,9 @@ class PreGeneratedAssertion(Assertion):
 class PublishWithAssertionsRequest(BaseModel):
     text: str
     assertions: List[PreGeneratedAssertion]
-    validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
+    validation_mode: ValidationMode = ValidationMode.LIGHT
+    source_url: Optional[str] = None
+    source_domain: Optional[str] = None
 
 # ============================================================
 # 🔹 UPLOAD IPFS
@@ -358,9 +401,10 @@ class IpfsUploadedResponse(BaseModel):
 # ============================================================
 
 class RegisterBlockchainPayload(BaseModel):
-    text: str
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["register-blockchain-v2"] = "register-blockchain-v2"
     cid: str
-    assertions: List[Assertion]
     publisher: str
 
 
@@ -371,17 +415,44 @@ class RegisterBlockchainRequest(BaseModel):
 
 
 
+class BlockchainAssertionRegistration(BaseModel):
+    """Compact on-chain assignment; enriched assertion data remains in IPFS/MongoDB."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    idAssertion: str
+    assertion_index: int = Field(ge=0)
+    categoryId: CategoryId
+    hash_asertion: Optional[str] = None
+    validatorAddresses: List[ValidatorAddress] = Field(default_factory=list)
+
+
 class BlockchainRegisteredPayload(BaseModel):
     postId: str
+    cid: str
     hash_text: str
-    assertions: List[AssertionExtended]
+    assertions: List[BlockchainAssertionRegistration]
     tx_hash: str
+
+
+class BlockchainRegistrationFailedPayload(BaseModel):
+    stage: str
+    code: str
+    message: str
+    retryable: bool = False
+    tx_hash: Optional[str] = None
 
 
 class BlockchainRegisteredResponse(BaseModel):
     action: str = "blockchain_registered"
     order_id: str
     payload: BlockchainRegisteredPayload
+
+
+class BlockchainRegistrationFailedResponse(BaseModel):
+    action: str = "blockchain_registration_failed"
+    order_id: str
+    payload: BlockchainRegistrationFailedPayload
 
 
 
@@ -423,9 +494,16 @@ class ValidationCompletedPayload(BaseModel):
     text: str
     tx_hash: Optional[str] = None
     validator_alias: str = ""
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_usage: Optional[Dict[str, Optional[int]]] = None
+    resolved_model: Optional[str] = None
+    llm_config_version: Optional[int] = None
     validation_mode: ValidationMode = ValidationMode.BLOCKCHAIN
-    sources: Optional[List[Dict[str, Any]]] = None
-    evidence_used: Optional[List[Dict[str, Any]]] = None
+    sources: Optional[List[EvidenceItem]] = None
+    sources_declared: Optional[List[EvidenceItem]] = None
+    evidence_used: Optional[List[EvidenceItem]] = None
+    evidence_validation: Optional[Dict[str, Any]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
     search_policy: Optional[Dict[str, Any]] = None
     execution_status: ValidationExecutionStatus
@@ -481,12 +559,20 @@ class LightValidationResponsePayload(BaseModel):
     assertion_index: int
     idAssertion: str
     validator_id: str
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_usage: Optional[Dict[str, Optional[int]]] = None
+    resolved_model: Optional[str] = None
+    llm_config_version: Optional[int] = None
     categoryId: CategoryId
     verdict: Optional[Validacion] = None
     description: str
     confidence: Optional[float | str] = None
-    sources: Optional[List[Dict[str, Any]]] = None
-    evidence_used: Optional[List[Dict[str, Any]]] = None
+    sources: Optional[List[EvidenceItem]] = None
+    sources_declared: Optional[List[EvidenceItem]] = None
+    evidence_used: Optional[List[EvidenceItem]] = None
+    evidence_validation: Optional[Dict[str, Any]] = None
+    evaluation_citation_trace: Optional[Dict[str, Any]] = None
     assertion_validation_payload: Optional[Dict[str, Any]] = None
     evidence_search_response: Optional[Dict[str, Any]] = None
     search_policy: Optional[Dict[str, Any]] = None
@@ -517,11 +603,36 @@ class LightValidationResponse(BaseModel):
     payload: LightValidationResponsePayload
 
 class ValidatorAPIResponse(BaseModel):
-    resultado: str
+    model_config = ConfigDict(extra="forbid")
+
+    resultado: Literal["TRUE", "FALSE", "UNKNOWN"]
     descripcion: str
-    confidence: Optional[str] = None
-    sources: Optional[List[Dict[str, Any]]] = None
-    evidence_used: Optional[List[Dict[str, Any]]] = None
+    confidence: Optional[Literal["HIGH", "MEDIUM", "LOW"]] = None
+    sources: Optional[List[EvidenceItem]] = None
+    evidence_used: Optional[List[EvidenceItem]] = None
+
+
+class RAGValidationEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context_id: str = Field(min_length=1)
+    supports: bool
+    reason: str = Field(min_length=1)
+
+
+class RAGValidatorAPIResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resultado: Literal["TRUE", "FALSE", "UNKNOWN"]
+    descripcion: str = Field(min_length=1)
+    confidence: Literal["HIGH", "MEDIUM", "LOW"]
+    evidence_used: List[RAGValidationEvidence]
+
+    @model_validator(mode="after")
+    def require_evidence_for_decisive_verdict(self):
+        if self.resultado in {"TRUE", "FALSE"} and not self.evidence_used:
+            raise ValueError("TRUE/FALSE require at least one evidence_used entry")
+        return self
 
 # ============================================================
 # 🔹 CONSISTENCY MODELS

@@ -4,7 +4,7 @@ import os
 import requests
 
 BASE_URL = "http://127.0.0.1:8072"
-OUTPUT_DIR = "output"
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "tests", "artifacts", "historical-stats")
 
 def get_order(order_id):
     resp = requests.get(f"{BASE_URL}/orders/{order_id}")

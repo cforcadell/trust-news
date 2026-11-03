@@ -1,0 +1,581 @@
+import importlib.util
+import asyncio
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from pydantic import ValidationError
+
+
+@pytest.fixture(scope="module")
+def validator():
+    import os
+
+    root = Path(__file__).resolve().parents[2]
+    os.environ.update({
+        "ACCOUNT_ADDRESS": "0x0000000000000000000000000000000000000001",
+        "CONTRACT_ADDRESS": "0x0000000000000000000000000000000000000002",
+        "CONTRACT_ABI_PATH": str(root / "smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json"),
+        "RPC_URL": "http://127.0.0.1:1",
+        "PRIVATE_KEY": "0x" + "1" * 64,
+        "VALIDATOR_TYPE": "4",
+        "AI_PROVIDER": "none",
+    })
+    path = root / "api/validate-asertions/main.py"
+    spec = importlib.util.spec_from_file_location("source_orchestration_validator", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def minimal_payload():
+    assertion = SimpleNamespace(
+        categoryId=10,
+        topic_code=SimpleNamespace(value="DEMOGRAPHY"),
+        evidence_kind=SimpleNamespace(value="STATISTICAL_DATA"),
+        context=SimpleNamespace(
+            entities=[],
+            language="ca",
+            jurisdiction=SimpleNamespace(model_dump=lambda mode=None: {
+                "scope": "REGION", "country_code": "ES", "region_code": "ES-CT",
+            }),
+        ),
+        model_dump=lambda mode=None: {
+            "assertion_id": "1", "assertion_index": 0, "text": "Population", "categoryId": 10,
+            "topic_code": "DEMOGRAPHY", "evidence_kind": "STATISTICAL_DATA",
+            "taxonomy_version": "routing-taxonomy-v2",
+            "context": {"locations": [], "entities": [], "temporal_context": [], "language": "ca", "jurisdiction": {"scope": "REGION", "country_code": "ES", "region_code": "ES-CT"}},
+            "search_hints": {}, "context_confidence": {},
+        },
+    )
+    origin = SimpleNamespace(model_dump=lambda mode=None: {
+        "url": "https://publisher.test/story", "domain": "publisher.test",
+    })
+    return SimpleNamespace(assertion=assertion, origin_document=origin)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [1, 3])
+async def test_light_consumer_bounds_parallel_validations(validator, monkeypatch, limit):
+    monkeypatch.setenv("LIGHT_VALIDATION_MAX_IN_FLIGHT", str(limit))
+    active = 0
+    peak = 0
+    completed = []
+
+    class Consumer:
+        def __init__(self, *args, **kwargs):
+            self.index = 0
+            self.stopped = False
+
+        async def start(self):
+            pass
+
+        async def stop(self):
+            self.stopped = True
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.index == 3:
+                raise StopAsyncIteration
+            value = json.dumps({"index": self.index}).encode()
+            self.index += 1
+            return SimpleNamespace(value=value)
+
+    class Producer:
+        def __init__(self, *args, **kwargs):
+            self.stopped = False
+
+        async def start(self):
+            pass
+
+        async def stop(self):
+            self.stopped = True
+
+    async def handle(req):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        completed.append(req.index)
+        active -= 1
+
+    monkeypatch.setattr(validator, "AIOKafkaConsumer", Consumer)
+    monkeypatch.setattr(validator, "AIOKafkaProducer", Producer)
+    monkeypatch.setattr(validator, "LightValidationRequest", lambda **data: SimpleNamespace(
+        index=data["index"], payload=SimpleNamespace(validation_mode=validator.ValidationMode.LIGHT)))
+    monkeypatch.setattr(validator, "handle_light_validation_request", handle)
+
+    await validator.consume_light_validation_requests()
+
+    assert peak == limit
+    assert sorted(completed) == [0, 1, 2]
+    assert validator.light_consumer.stopped
+    assert validator.light_producer.stopped
+
+
+def test_light_worker_import_does_not_open_contract(monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("BLOCKCHAIN_ENABLED", "false")
+    monkeypatch.setenv("ACCOUNT_ADDRESS", "0x0000000000000000000000000000000000000001")
+    monkeypatch.setenv("CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000002")
+    monkeypatch.setenv("CONTRACT_ABI_PATH", "/missing/blockchain-contract.json")
+    monkeypatch.setenv("VALIDATOR_TYPE", "4")
+    monkeypatch.setenv("AI_PROVIDER", "none")
+    spec = importlib.util.spec_from_file_location(
+        "light_worker_without_chain", root / "api/validate-asertions/main.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.w3 is None
+    assert module.contract is None
+
+
+def test_source_router_payload_forwards_contextual_discovery_terms(validator):
+    payload = minimal_payload()
+    payload.assertion.context.entities = [
+        SimpleNamespace(name="Reglamento General de Protección de Datos")]
+    payload.assertion.search_hints = SimpleNamespace(
+        search_keywords=["RGPD fecha de aplicación"],
+        suggested_queries=["GDPR application date"],
+    )
+
+    route_payload = validator.source_route_payload(payload)
+
+    assert route_payload["discovery_context"] == {
+        "entity_terms": ["Reglamento General de Protección de Datos"],
+        "search_terms": ["RGPD fecha de aplicación", "GDPR application date"],
+    }
+
+
+@pytest.mark.parametrize("original", ["TRUE", "FALSE"])
+def test_unverified_opinion_preserves_audit_without_decisive_vote(validator, monkeypatch, original):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    sources = [{"source_id": "source-1", "url": "https://example.test/report", "contexts": [
+        {"context_id": "context-1", "text": "Texto recuperado exacto.", "citation_eligible": True}
+    ]}]
+    claims = [{"context_id": "context-invented", "supports": original == "TRUE"}]
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (sources, {"evidences": sources}))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(verificar_asercion=lambda *args: "response"))
+    monkeypatch.setattr(validator, "parse_validator_api_response", lambda text: (
+        validator.Validacion[original], "Razonamiento original", {"evidence_used": claims}))
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmacion"))
+    verdict, description, extras, response = validator.validate_payload_v2(payload)
+    assert verdict == validator.Validacion.UNKNOWN
+    assert extras["evidence_used"] == []
+    assert "CONTEXT_NOT_RETRIEVED" in [issue["code"] for issue in extras["evidence_validation"]["issues"]]
+    assert original in description
+    assert response["evidences"] == sources
+
+
+def test_rag_skips_llm_when_retrieval_has_no_citable_context(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    sources = [{"source_id": "source-1", "url": "https://example.test/report", "contexts": [],
+                "fetch_status": "failed"}]
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (sources, {"evidences": sources}))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(
+        verificar_asercion=lambda *args: pytest.fail("the LLM must not be called without citable evidence")
+    ))
+
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmacion"))
+    verdict, description, extras, response = validator.validate_payload_v2(payload)
+
+    assert verdict == validator.Validacion.UNKNOWN
+    assert "No se llamó al LLM" in description
+    assert extras["evidence_used"] == []
+    assert extras["evidence_validation"]["basis"] == "NO_CITABLE_EVIDENCE"
+    assert extras["evidence_validation"]["issues"][0]["code"] == "NO_CITABLE_EVIDENCE"
+    assert response["evidences"] == sources
+
+
+@pytest.mark.parametrize("validator_type", [1, 2, 4])
+def test_non_rag_calls_neither_dependency(validator, monkeypatch, validator_type):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType(validator_type))
+    monkeypatch.setattr(validator.httpx, "post", lambda *args, **kwargs: pytest.fail("external dependency called"))
+    assert validator.fetch_evidences_for_payload(minimal_payload()) == ([], None)
+
+
+def test_direct_llm_search_requires_an_implemented_online_provider(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.LLM_SEARCH_VALIDATION)
+    monkeypatch.setattr(validator, "AI_PROVIDER", "gemini")
+    with pytest.raises(RuntimeError, match="requires AI_PROVIDER=openrouter"):
+        validator.build_ai_validator()
+
+    monkeypatch.setattr(validator, "AI_PROVIDER", "openrouter")
+    assert validator.openrouter_model_for_current_type("openai/gpt-5-mini") == "openai/gpt-5-mini:online"
+    assert validator.openrouter_model_for_current_type("openai/gpt-5-mini:online") == "openai/gpt-5-mini:online"
+
+
+def test_configured_rag_validator_uses_shared_strict_schema(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    captured = {}
+    expected = validator.RAGValidatorAPIResponse(
+        resultado="UNKNOWN", descripcion="Insufficient evidence", confidence="LOW", evidence_used=[]
+    )
+
+    def fake_complete(provider, request):
+        captured.update(provider=provider, request=request)
+        return expected
+
+    monkeypatch.setattr(validator, "complete_structured", fake_complete)
+    client = validator.ConfiguredAIValidator("openrouter", "current-model", 0)
+    result = client.verificar_asercion("claim", "context", [])
+
+    assert result is expected
+    assert captured["provider"] == "openrouter"
+    assert captured["request"].response_model is validator.RAGValidatorAPIResponse
+    assert captured["request"].response_schema == validator.RAGValidatorAPIResponse.model_json_schema()
+
+
+def test_configured_validator_captures_actual_response_usage(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    expected = validator.RAGValidatorAPIResponse(
+        resultado="UNKNOWN", descripcion="Insufficient evidence", confidence="LOW", evidence_used=[])
+    captured = {}
+
+    def fake_complete(provider, request):
+        captured.update(provider=provider, request=request)
+        return SimpleNamespace(usage=SimpleNamespace(model_dump=lambda **kwargs: {
+            "prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}), model=request.model)
+
+    monkeypatch.setattr(validator, "complete", fake_complete)
+    monkeypatch.setattr(validator, "parse_response", lambda request, response: expected)
+    client = validator.ConfiguredAIValidator("openrouter", "current-model", 0)
+    result, usage, model = client.verificar_asercion_con_uso("claim", "context", [])
+
+    assert result is expected
+    assert usage == {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}
+    assert model == "current-model"
+    assert captured["provider"] == "openrouter"
+    assert captured["request"].response_model is validator.RAGValidatorAPIResponse
+
+
+def test_evaluation_citation_trace_resolves_missing_source_id_from_server_evidence(validator):
+    claims = [{"source_id": None, "context_id": "source-1-context-1", "supports": True}]
+    canonical = [{"source_id": "source-1", "context_id": "source-1-context-1", "supports": True}]
+
+    assert validator.evaluation_citation_claims(claims, canonical) == [{
+        "source_id": "source-1",
+        "context_id": "source-1-context-1",
+        "supports": True,
+    }]
+
+
+def test_evaluation_citation_trace_keeps_nonempty_claimed_source_id(validator):
+    claims = [{"source_id": "invented", "context_id": "source-1-context-1", "supports": True}]
+    canonical = [{"source_id": "source-1", "context_id": "source-1-context-1", "supports": True}]
+
+    assert validator.evaluation_citation_claims(claims, canonical)[0]["source_id"] == "invented"
+
+
+def test_rag_response_contract_rejects_unsupported_decisive_verdicts(validator):
+    with pytest.raises(ValidationError, match="at least one evidence_used"):
+        validator.RAGValidatorAPIResponse(
+            resultado="TRUE", descripcion="Claim is true", confidence="HIGH", evidence_used=[]
+        )
+
+    with pytest.raises(ValidationError):
+        validator.RAGValidatorAPIResponse(
+            resultado="MAYBE", descripcion="Unclear", confidence="LOW", evidence_used=[]
+        )
+
+
+def routed_source():
+    return {
+        "domain": "idescat.cat", "source_type": "STATISTICAL_OFFICE", "authority_level": "REGIONAL_PRIMARY",
+        "jurisdictions": [{"scope": "REGION", "country_code": "ES", "region_code": "ES-CT"}],
+        "topic_codes": ["DEMOGRAPHY"], "evidence_kinds": ["STATISTICAL_DATA"], "languages": ["ca"],
+        "route_score": 0.95, "rank": 1, "reason": "official", "profile_version": "source-router-v2",
+    }
+
+
+@pytest.mark.parametrize("diagnostic", [None, "CLASSIFICATION_PARTIAL", "PROFILE_FALLBACK"])
+def test_rag_local_calls_router_then_evidence(validator, monkeypatch, diagnostic):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
+    calls = []
+
+    class Response:
+        def __init__(self, body): self.body = body
+        def raise_for_status(self): return None
+        def json(self): return self.body
+
+    def post(url, json, timeout):
+        calls.append((url, json))
+        if "source-router" in url:
+            assert json["discovery_context"] == {"entity_terms": [], "search_terms": []}
+            return Response({"route_key": "k", "route_state": "MISSING", "router_version": "v2", "sources": [routed_source()],
+                             "degraded": diagnostic is not None, "diagnostic_code": diagnostic,
+                             "diagnostics": {"failed_domains": ["bad.example"] if diagnostic else []}})
+        assert json["search_policy"]["strategy"] == "LOCAL"
+        assert json["search_policy"]["preferred_sources"][0]["domain"] == "idescat.cat"
+        assert json["origin_document"]["domain"] == "publisher.test"
+        return Response({"evidences": [{"url": "https://idescat.cat/data"}]})
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    evidences, response = validator.fetch_evidences_for_payload(minimal_payload())
+    assert len(calls) == 2
+    assert "source-router" in calls[0][0] and "evidence-search" in calls[1][0]
+    assert evidences == [{"url": "https://idescat.cat/data"}]
+    assert response["route"]["diagnostic_code"] == diagnostic
+    assert response["route"]["diagnostics"]["failed_domains"] == (["bad.example"] if diagnostic else [])
+
+
+def test_rag_local_stops_when_router_returns_no_sources(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
+    calls = []
+
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"route_key": "k", "route_state": "MISSING", "sources": []}
+
+    def post(url, json, timeout):
+        calls.append(url)
+        assert "source-router" in url
+        return Response()
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    evidences, response = validator.fetch_evidences_for_payload(minimal_payload())
+
+    assert evidences == []
+    assert len(calls) == 1
+    assert response["search_skipped"] == "no_eligible_local_sources"
+    assert response["route"]["sources"] == []
+
+
+def test_rag_local_returns_router_no_source_without_calling_llm(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
+    response = {"route": {"sources": []}, "evidences": [],
+                "search_skipped": "no_eligible_local_sources"}
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: ([], response))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: "Contexto")
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(
+        verificar_asercion=lambda *args: pytest.fail("the LLM must not be called without routed sources")
+    ))
+
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="4", text="Afirmacion"))
+    verdict, description, extras, saved_response = validator.validate_payload_v2(payload)
+
+    assert verdict == validator.Validacion.UNKNOWN
+    assert "Evidence Search ni al LLM" in description
+    assert extras["evidence_validation"]["basis"] == "ROUTER_NO_SOURCE"
+    assert extras["evidence_validation"]["issues"][0]["code"] == "ROUTER_NO_SOURCE"
+    assert saved_response is response
+
+
+def test_source_router_http_status_is_preserved_as_retryable(validator, monkeypatch):
+    request = validator.httpx.Request("POST", "http://source-router/routes/resolve")
+    response = validator.httpx.Response(500, request=request, json={"detail": "classification failed"})
+
+    def post(*args, **kwargs):
+        raise validator.httpx.HTTPStatusError("server error", request=request, response=response)
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    with pytest.raises(validator.SourceRouterRequestError) as captured:
+        validator.resolve_local_sources(minimal_payload())
+
+    failure = validator.ValidationExecutionFailure("SOURCE_ROUTER", captured.value, [], None)
+    details = validator.validation_error_details(failure)
+    assert details.code == "SOURCE_ROUTER_HTTP_500"
+    assert details.status_code == 500
+    assert details.retryable is True
+    assert details.message == "classification failed"
+
+
+def test_source_router_uses_configured_timeout(validator, monkeypatch):
+    monkeypatch.setattr(validator, "SOURCE_ROUTER_TIMEOUT_SECONDS", 145.0)
+    observed = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"sources": []}
+
+    def post(*args, **kwargs):
+        observed.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    assert validator.resolve_local_sources(minimal_payload()) == ([], {"sources": []})
+    assert observed["timeout"] == 145.0
+
+
+def test_evidence_search_timeout_is_classified_as_retryable(validator):
+    cause = validator.httpx.ReadTimeout("timed out")
+    failure = validator.ValidationExecutionFailure("EVIDENCE_SEARCH", cause, [], None)
+
+    details = validator.validation_error_details(failure)
+
+    assert details.code == "EVIDENCE_SEARCH_TIMEOUT"
+    assert details.retryable is True
+    assert details.status_code is None
+
+
+def test_evidence_search_retries_once_with_a_shared_budget(validator, monkeypatch):
+    attempts = []
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_BUDGET_SECONDS", 5)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_RETRY_BASE_SECONDS", 0)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD", 10)
+    validator._evidence_search_circuit.update(failures=0, open_until=0.0)
+
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"evidences": []}
+
+    def post(*args, **kwargs):
+        attempts.append(kwargs["timeout"])
+        if len(attempts) == 1:
+            raise validator.httpx.ReadTimeout("temporary timeout")
+        return Response()
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    body = validator.request_evidence_search({"request": True}, {})
+
+    assert len(attempts) == 2
+    assert all(timeout <= validator.EVIDENCE_SEARCH_TIMEOUT_SECONDS for timeout in attempts)
+    assert body["request_recovery"] == {"attempts": 2, "recovered": True}
+
+
+def test_evidence_search_circuit_opens_after_repeated_retryable_failures(validator, monkeypatch):
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_REQUEST_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_CIRCUIT_FAILURE_THRESHOLD", 2)
+    monkeypatch.setattr(validator, "EVIDENCE_SEARCH_CIRCUIT_COOLDOWN_SECONDS", 60)
+    validator._evidence_search_circuit.update(failures=0, open_until=0.0)
+
+    def post(*args, **kwargs):
+        raise validator.httpx.ConnectError("service unavailable")
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    with pytest.raises(validator.httpx.ConnectError):
+        validator.request_evidence_search({}, {})
+    with pytest.raises(validator.httpx.ConnectError):
+        validator.request_evidence_search({}, {})
+    with pytest.raises(validator.EvidenceSearchCircuitOpenError):
+        validator.request_evidence_search({}, {})
+    validator._evidence_search_circuit.update(failures=0, open_until=0.0)
+
+
+@pytest.mark.parametrize("strategy", ["EXT_OFFICIAL_FIRST", "EXT_ONLY_OFFICIAL"])
+def test_rag_external_strategy_skips_router(validator, monkeypatch, strategy):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", strategy)
+    calls = []
+
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"evidences": []}
+
+    def post(url, json, timeout):
+        calls.append((url, json))
+        return Response()
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    validator.fetch_evidences_for_payload(minimal_payload())
+    assert len(calls) == 1 and "evidence-search" in calls[0][0]
+    assert calls[0][1]["search_policy"]["strategy"] == strategy
+    assert calls[0][1]["search_policy"]["preferred_sources"] == []
+
+
+def test_evidence_provider_failure_preserves_provider_trace(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "EXT_ONLY_OFFICIAL")
+    provider_trace = {
+        "provider": "exa", "cache_hit": False, "capture_status": "CAPTURED",
+        "requests": [{"provider_call_id": "exa-1", "call_sequence": 1, "status": "FAILED"}],
+        "summary": {"calls_attempted": 1, "calls_succeeded": 0, "calls_failed": 1,
+                    "requests_skipped": 0, "urls_returned": 0, "unique_urls_returned": 0},
+    }
+    request = validator.httpx.Request("POST", "http://evidence-search/search/evidence")
+    response = validator.httpx.Response(
+        502, request=request,
+        json={"detail": {"code": "EVIDENCE_PROVIDER_FAILED", "provider_trace": provider_trace}},
+    )
+    monkeypatch.setattr(validator.httpx, "post", lambda *args, **kwargs: response)
+
+    with pytest.raises(validator.EvidenceSearchRequestError) as captured:
+        validator.fetch_evidences_for_payload(minimal_payload())
+
+    assert captured.value.status_code == 502
+    assert captured.value.evidence_response["provider_trace"] == provider_trace
+    assert captured.value.evidence_response["evidences"] == []
+
+
+def test_production_handoff_can_be_replayed_with_identical_prompt(validator, monkeypatch):
+    from common.utils.evidence_bundle import evidence_bundle_hash
+    from evaluation.core.execution import execute, validator_config
+    from evaluation.core.orders import results_from_order
+    from evaluation.test_execution import case, gold_bundle, answer
+
+    dataset = case()
+    expected = dataset["assertions"][0]
+    bundle = gold_bundle(expected)
+    context = validator.json.dumps({"assertion": expected["pipeline_assertion"]})
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setattr(validator, "RAG_EVIDENCE_VALIDATION_PROMPT", validator.DEFAULT_RAG_PROMPT)
+    monkeypatch.setattr(validator, "fetch_evidences_for_payload", lambda payload: (
+        bundle, {"evidences": bundle, "evidence_bundle_hash": evidence_bundle_hash(bundle)}))
+    monkeypatch.setattr(validator, "payload_context_for_prompt", lambda payload: context)
+    monkeypatch.setattr(validator, "ai_validator", SimpleNamespace(verificar_asercion=lambda *args:
+        '{"resultado":"TRUE","descripcion":"example.org","confidence":"HIGH",'
+        '"evidence_used":[{"context_id":"gold-context-1","supports":true,"reason":"120 > 100"}]}'))
+    payload = SimpleNamespace(mode="LIGHT", assertion=SimpleNamespace(assertion_id="1", text=expected["text"]))
+    verdict, description, extras, response = validator.validate_payload_v2(payload)
+    order = {"assertions": [{"idAssertion": "1", "text": expected["text"]}],
+        "validations": {"1": {"v": {"execution_status": "COMPLETED", "approval": int(verdict),
+            "evidence_search_response": response, "evidence_validation": extras["evidence_validation"]}}}}
+    artifact = results_from_order(dataset, order)[0].to_dict()
+    result = execute(dataset, expected, validator_config("openrouter", "test"), "VALIDATOR_REPLAY",
+                     replay=artifact, template=validator.selected_validation_prompt(), complete_fn=answer)
+    assert not result.errors
+    assert result.validator_input["prompt_hash"] == response["validator_input"]["prompt_hash"]
+    assert result.validator_input["response_schema_hash"] == response["validator_input"]["response_schema_hash"]
+
+
+def test_evaluation_headers_apply_only_to_light_orders(validator, monkeypatch):
+    order_id = "123e4567-e89b-12d3-a456-426614174000"
+    payload = SimpleNamespace(mode=validator.ValidationMode.LIGHT,
+                              correlation=SimpleNamespace(order_id=order_id))
+    monkeypatch.setenv("EVALUATION_CAPTURE_PIPELINE", "true")
+    monkeypatch.setenv("EVALUATION_CAPTURE_COLD", "true")
+    assert validator.evaluation_headers_for_payload(payload) == {
+        "X-Evaluation-Run-ID": order_id, "X-Evaluation-Cache": "COLD"}
+    payload.mode = validator.ValidationMode.BLOCKCHAIN
+    assert validator.evaluation_headers_for_payload(payload) == {}
+    payload.mode = validator.ValidationMode.LIGHT
+    monkeypatch.delenv("EVALUATION_CAPTURE_PIPELINE")
+    assert validator.evaluation_headers_for_payload(payload) == {}
+
+
+def test_evaluation_headers_reach_router_and_evidence_search(validator, monkeypatch):
+    monkeypatch.setattr(validator, "VALIDATOR_TYPE", validator.ValidatorType.RAG_EVIDENCE_VALIDATION)
+    monkeypatch.setenv("EVIDENCE_SEARCH_STRATEGY", "LOCAL")
+    monkeypatch.setenv("EVALUATION_CAPTURE_PIPELINE", "true")
+    monkeypatch.setenv("EVALUATION_CAPTURE_COLD", "true")
+    payload = minimal_payload()
+    payload.mode = validator.ValidationMode.LIGHT
+    payload.correlation = SimpleNamespace(order_id="123e4567-e89b-12d3-a456-426614174000")
+    calls = []
+
+    class Response:
+        def __init__(self, body): self.body = body
+        def raise_for_status(self): return None
+        def json(self): return self.body
+
+    def post(url, json, **kwargs):
+        calls.append((url, kwargs.get("headers")))
+        return Response({"sources": [routed_source()]}) if "source-router" in url else Response({"evidences": []})
+
+    monkeypatch.setattr(validator.httpx, "post", post)
+    validator.fetch_evidences_for_payload(payload)
+    assert len(calls) == 2
+    assert calls[0][1] == calls[1][1] == {
+        "X-Evaluation-Run-ID": payload.correlation.order_id, "X-Evaluation-Cache": "COLD"}

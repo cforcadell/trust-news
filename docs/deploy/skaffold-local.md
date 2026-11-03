@@ -2,7 +2,7 @@
 
 Runbook of the local environment with Kind and non-productive profiles of Skaffold. This document contains the current photograph, repeatable procedures and next steps. Historical evidence is not preserved here.
 
-The shared procedures are in [`k8s-common.md`](k8s-common.md), the status of the current version in [`version.md`](../version.md) and the roadmap in [`next_releases.md`](../next_releases.md).
+The shared procedures are in [`k8s-common.md`](k8s-common.md), the status of the current version in [`v0.0.13.md`](../releases/v0.0.13.md) and the roadmap in [`next_releases.md`](../next_releases.md).
 
 ---
 

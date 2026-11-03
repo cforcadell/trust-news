@@ -6,7 +6,7 @@ Runbook operating the Hetzner environment. This document contains only:
 - repeatable deployment, verification and recovery procedures;
 - the next steps that have not yet been implemented.
 
-The status of the current version is in [`version.md`](../version.md), the roadmap in [`next_releases.md`](../next_releases.md), the evidence of closed versions in [`releases.md`](../releases.md) and the incidences in [`issues.md`](../issues.md). The procedures shared with local are in [`k8s-common.md`](k8s-common.md).
+The status of the current version is in [`v0.0.13.md`](../releases/v0.0.13.md), the roadmap in [`next_releases.md`](../next_releases.md), the evidence of closed versions in [`releases.md`](../releases.md) and the incidences in [`issues.md`](../issues.md). The procedures shared with local are in [`k8s-common.md`](k8s-common.md).
 
 Do not record here chronologies of tests, attempts of pipeline, identifiers, IP addresses, fingerprints, tokens, certificates or personal data.
 
@@ -94,7 +94,7 @@ Traefik is installed using the `traefik-prod` profile, fixes the `41.0.2` chart 
 
 Loki and Grafana use persistent PVC, test and store data and datasource after reacting their pods. Fluent Bit includes `kube-system` to collect Traefik logs.
 
-The latest operational measurement available is summarized in [`version.md`](../version.md): 29 pods prepared, zero resets, nine PVC `Bound` and `Ready` node. It is the stable baseline for Phase 7 closure. 76% memory, `DNSConfigForming` and Loki's transient planning failure during the rollout are still under observation; they should not become permanent figures within this runbook.
+The historical v0.0.12 operational baseline is summarized in [`v0.0.12.md`](../releases/v0.0.12.md): 29 pods prepared, zero resets, nine PVC `Bound` and `Ready` node. It is the stable baseline for Phase 7 closure. 76% memory, `DNSConfigForming` and Loki's transient planning failure during the rollout are still under observation; they should not become permanent figures within this runbook.
 
 ---
 

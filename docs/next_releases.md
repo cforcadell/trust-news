@@ -1,6 +1,6 @@
 # Next versions
 
-This document contains only versions after the current version. The status of the current version is in [`version.md`](version.md) and the versions published in [`releases.md`](releases.md).
+This document contains only versions after the current version. The status of the current version is in [`v0.0.13.md`](releases/v0.0.13.md) and the release history in [`releases.md`](releases.md).
 
 ## Summary
 

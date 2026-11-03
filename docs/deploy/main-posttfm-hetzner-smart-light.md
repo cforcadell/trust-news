@@ -1,6 +1,6 @@
 # v0.0.13: despliegue LIGHT en Hetzner desde `postTFM`
 
-**Revisión documental: 2026-11-01. Estado de v0.0.13: Deploying; no consta despliegue ni validación viva de la aplicación en Hetzner de esta revisión.** El alcance incorporado y lo pendiente están en [version.md](../version.md) e [issues.md](../issues.md). Esta guía compara el commit local `postTFM` (`20b8bb2`) con la referencia local `origin/main` (`3a7f519`); antes de operar hay que hacer `git fetch` y repetir la comparación. La rama local `main` apunta a `736cf67` (2025-07-05) y no sirve de base actual. Las referencias divergen (3 commits solo en `origin/main`, 54 solo en `postTFM`): la promoción requiere reconciliación, pruebas y revisión.
+**Revisión documental: 2026-11-02. Estado de v0.0.13: Deploying; el operador comunicó el despliegue en Hetzner y aportó comprobaciones correctas de pods, rollouts, SMART y Blockchain OFF. La validación funcional por el borde y la aceptación siguen abiertas.** El alcance incorporado y lo pendiente están en [detalle de v0.0.13](../releases/v0.0.13.md) e [issues.md](../issues.md). La comparación inicial de esta guía usó `postTFM` (`20b8bb2`) y la referencia local `origin/main` (`3a7f519`); el candidato posterior es `ad40321369bfd901022df19995369d719c65ba3a`. Antes de promover hay que hacer `git fetch` y repetir la comparación. La rama local `main` apuntaba a `736cf67` (2025-07-05) y no sirve de base actual. En la comparación inicial, las referencias divergían (3 commits solo en `origin/main`, 54 solo en `postTFM`): la promoción requiere reconciliación, pruebas y revisión.
 
 **Modo previsto de Evidence Search: SMART.** El commit `20b8bb2` y el ConfigMap actual seleccionan SMART; el overlay productivo hereda ese valor. Las campañas locales [SMART](../../tests/data/evaluation/artifacts/e2e-20261031-181209/report.md) y [DIRECT](../../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md) son diagnósticas; DIRECT obtuvo 12/22 unidades e2e estrictas y tres fallos de ejecución frente a 19/22 y cero fallos técnicos en SMART. Cambió también la configuración observada de generación. Ninguna campaña acredita por sí sola aceptación en Hetzner. Un cambio futuro a DIRECT requiere otra revisión versionada y validación.
 
@@ -375,7 +375,7 @@ Las tres consultas deben devolver direcciones del clúster, el pod debe terminar
 
 **Resultado observado:** el pod temporal terminó en `Succeeded` y las consultas a `kubernetes.default.svc.cluster.local`, `kafka.infra.svc.cluster.local` y `mongodb.infra.svc.cluster.local` devolvieron direcciones internas del clúster mediante CoreDNS (`10.43.0.10`). El pod se eliminó al terminar y el journal devolvió `no_new_kernel_oom`. La advertencia anterior `DNSConfigForming` no está impidiendo la resolución dentro del clúster y no se han producido nuevos OOM desde la parada de Geth.
 
-#### CONTINUAR AQUÍ (estado actual): revisar y publicar el commit candidato desde VM-KIND
+#### Revisar y publicar el commit candidato desde VM-KIND
 
 **[VM-KIND]** Revisar y publicar sin forzar el push:
 
@@ -395,7 +395,113 @@ git commit -m "Add controlled LIGHT deployment transition"
 git push gitlab postTFM
 ```
 
-Registrar el SHA publicado y comprobar que el pipeline de GitLab corresponde exactamente a él antes de ejecutar `build` y `deploy`.
+**Resultado observado:** el commit candidato se publicó en GitLab y GitHub. El checkout local quedó limpio en la rama `postTFM`, con `HEAD` y `origin/postTFM` en `ad40321369bfd901022df19995369d719c65ba3a` (`ad40321`, `previa a deploy`).
+
+#### Preflight de Secrets en Hetzner
+
+**[HETZNER]** Antes de iniciar el pipeline, comprobar contra K3s que todos los Secrets consumidos por `apis-frontend-prod` existen y que contienen valores no vacíos ni placeholders. El motor siguiente admite varias claves alternativas para un mismo requisito, no imprime sus valores y termina con error si falta algún requisito:
+
+```bash
+set +x
+
+secret_value_is_usable() {
+  local namespace="$1" secret="$2" key="$3" encoded value compact
+  encoded="$(kubectl get secret "$secret" -n "$namespace" -o "jsonpath={.data.${key}}" 2>/dev/null || true)"
+  [ -n "$encoded" ] || return 1
+  value="$(printf '%s' "$encoded" | base64 --decode 2>/dev/null || true)"
+  compact="${value//[$'\t\r\n ']/}"
+  value=
+  case "${compact,,}" in
+    ""|replace-me|replace_me|changeme|change-me|example|example-*|your-*|todo|xxx|xxxxxxxx)
+      return 1
+      ;;
+  esac
+}
+
+require_secret_any() {
+  local namespace="$1" secret="$2"
+  shift 2
+  if ! kubectl get secret "$secret" -n "$namespace" >/dev/null 2>&1; then
+    echo "ERROR: falta Secret $namespace/$secret" >&2
+    return 1
+  fi
+  local key
+  for key in "$@"; do
+    if secret_value_is_usable "$namespace" "$secret" "$key"; then
+      echo "OK: $namespace/$secret contiene una clave válida para $*"
+      return 0
+    fi
+  done
+  echo "ERROR: $namespace/$secret requiere al menos una clave válida entre: $*" >&2
+  return 1
+}
+
+errors=0
+require_secret_any apis source-router-enc OPENROUTER_API_KEY || errors=$((errors + 1))
+require_secret_any apis source-router-enc EXA_API_KEY API_KEY_PROVIDER || errors=$((errors + 1))
+require_secret_any apis api-keys OPENROUTER_API_KEY || errors=$((errors + 1))
+require_secret_any apis search-secret EXA_API_KEY API_KEY_PROVIDER || errors=$((errors + 1))
+
+for key in MONGO_APP_USER MONGO_APP_PWD MONGO_APP_HOST MONGO_APP_PORT MONGO_APP_DATABASE MONGO_APP_AUTHSOURCE; do
+  require_secret_any apis mongodb-app-secret "$key" || errors=$((errors + 1))
+done
+
+for worker in 1 2 3; do
+  for key in PRIVATE_KEY ACCOUNT_ADDRESS API_KEY; do
+    require_secret_any apis "validator-secret-$worker" "$key" || errors=$((errors + 1))
+  done
+done
+
+if [ "$errors" -ne 0 ]; then
+  echo "Preflight de Secrets FALLIDO: $errors requisito(s) ausente(s) o no válido(s)." >&2
+else
+  echo "Preflight de Secrets OK: no se han mostrado valores."
+fi
+test "$errors" -eq 0
+```
+
+Los requisitos cubren el nuevo LLM OpenRouter y la búsqueda Exa del Source Router, el cambio de Generate Assertions a OpenRouter, Evidence Search, MongoDB y los tres validadores incluidos en el perfil. `EXA_API_KEY` y `API_KEY_PROVIDER` son alternativas; tener una no obliga a duplicarla. Si falla el preflight, no lanzar `deploy`: crear o actualizar el Secret mediante el procedimiento privado del paso 2 y repetir el bloque completo. Esta comprobación evita claves ausentes, vacías o de ejemplo; la validez remota, el modelo habilitado, la cuota y el presupuesto se confirman en las cuentas de OpenRouter y Exa sin copiar credenciales al repositorio ni a los logs.
+
+Si se ha aprobado que Source Router comparta las mismas credenciales ya validadas de Generate Assertions y Evidence Search, **[HETZNER]** se puede crear `source-router-enc` copiando los datos codificados entre Secrets, sin decodificarlos, imprimirlos ni guardarlos en disco:
+
+```bash
+set +x
+copy_status=0
+openrouter_b64="$(kubectl get secret api-keys -n apis -o jsonpath='{.data.OPENROUTER_API_KEY}')"
+search_key=EXA_API_KEY
+search_b64="$(kubectl get secret search-secret -n apis -o jsonpath='{.data.EXA_API_KEY}')"
+if [ -z "$search_b64" ]; then
+  search_key=API_KEY_PROVIDER
+  search_b64="$(kubectl get secret search-secret -n apis -o jsonpath='{.data.API_KEY_PROVIDER}')"
+fi
+
+if [ -z "$openrouter_b64" ] || [ -z "$search_b64" ]; then
+  echo "ERROR: no se pueden reutilizar las credenciales de origen" >&2
+  copy_status=1
+else
+  cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: source-router-enc
+  namespace: apis
+type: Opaque
+data:
+  OPENROUTER_API_KEY: ${openrouter_b64}
+  ${search_key}: ${search_b64}
+EOF
+fi
+unset openrouter_b64 search_b64 search_key
+test "$copy_status" -eq 0
+```
+
+Si Source Router debe tener credenciales, cuota o trazabilidad propias, no reutilizar las anteriores: crear `source-router-enc` desde el fichero privado descrito en el paso 2. En ambos casos, repetir después **todo** el preflight y exigir el único resultado final `Preflight de Secrets OK`. No ejecutar el pipeline con un fallo aunque el shell interactivo haya vuelto al prompt.
+
+**Resultado recibido del operador:** el preflight completo terminó con `Preflight de Secrets OK: no se han mostrado valores.` Pasaron las claves requeridas de `source-router-enc` (OpenRouter y Exa/API_KEY_PROVIDER), `api-keys`, `search-secret`, `mongodb-app-secret` y los tres Secrets de validadores. Esto acredita que los Secrets existen y contienen valores no vacíos ni placeholders según el motor; no prueba que las credenciales sean aceptadas por los proveedores ni que haya cuota disponible. Se cierra el bloqueo anterior por ausencia de `source-router-enc`.
+
+#### Comprobar el SHA y ejecutar el pipeline de GitLab
+
+En GitLab, abrir el pipeline de la rama `postTFM` y comprobar antes de ejecutar `build` o `deploy` que muestra exactamente el commit `ad40321369bfd901022df19995369d719c65ba3a`. Mantener `PROFILE=apis-frontend-prod`, establecer `BLOCKCHAIN_ENABLED=OFF` y conservar activo el maintenance lock durante todo el pipeline. Si el SHA no coincide, no ejecutar los jobs y revisar la rama seleccionada y el origen del pipeline.
 
 La secuencia del job productivo para `BLOCKCHAIN_ENABLED=OFF` debe ser:
 
@@ -448,7 +554,13 @@ Ejecutar/esperar `build` y comprobar que su `build.json` pertenece al SHA elegid
 
 Si el salto incluye la migración inicial de Traefik a `/gui` y aún no está aplicada en el destino, seguir la secuencia controlada del runbook con lock habilitado: pipeline separado `PROFILE=traefik-prod`, validación, y **después** el de `apis-frontend-prod`. Si Traefik `/gui` ya existe y no cambió, no redeployar `traefik-prod` innecesariamente. Para una instalación nueva, ejecutar antes los perfiles de infraestructura según el runbook, cada uno en pipeline separado.
 
+**Resultado comunicado por el operador:** despliegue completado correctamente. No se compartieron aquí salidas de jobs ni el SHA del pipeline. Las comprobaciones posteriores de K3s se registran en el paso 5.
+
 ### 5. Verificar el estado efectivo, no solo los manifiestos
+
+**Primera comprobación comunicada:** `kubectl get pods --all-namespaces` mostró todos los pods listados en `Running` y Ready. Evidence Search tenía dos pods `1/1`; Source Router, Gateway, News Handler, Generate Assertions, los tres validadores y frontend también aparecían `1/1`, sin reinicios en sus edades actuales. Los pods antiguos de `infra` y `kube-system` mostraban reinicios de hace 26 horas, sin fallos actuales en esa salida. Esa lista no informaba réplicas deseadas ni ConfigMaps; la comprobación posterior que completa el paso está registrada a continuación.
+
+**Resultado comunicado por el operador:** los rollouts de Evidence Search, Source Router, News Handler, Gateway y frontend terminaron correctamente. El ConfigMap informa `SMART` para Evidence Search y `false` para Blockchain; el Deployment de Evidence Search está `2/2`, `news-chain` está `0/0` y los StatefulSets `geth-bootnode`, `geth-miner` y `geth-rpc-endpoint` tienen cero réplicas listas. Ambos pods de Evidence Search informan `SMART` en su entorno. Con estas salidas, el paso 5 queda verificado.
 
 **[HETZNER]** Con el K3s local del host, tras el pipeline:
 
@@ -480,13 +592,40 @@ Si SHA, ConfigMap y pod discrepan, detener la aceptación y diagnosticar el roll
 
 ### 6. Validar por el borde real y tomar la decisión
 
+**Estado comunicado por el operador:** el maintenance lock está desactivado durante una ventana de prueba de la GUI. Confirmar en Cloudflare que la regla mTLS general temporal y la administrativa siguen activas; al acabar, devolver el lock al estado operativo acordado y registrar el resultado. Una prueba funcional desde fuera requiere que el lock permita el paso y que el cliente presente un certificado mTLS válido.
+
+#### Comprobación externa de seguridad durante la ventana
+
+El [informe de evaluación externa del 2 de noviembre](pentest-externo-assermetry-2026-11-02.md) amplía las pruebas de rutas, métodos, CORS, TLS y cabeceras, con su alcance y pendientes.
+
+**2026-11-02, 18:49–18:51 UTC.** Desde VM-KIND se enviaron peticiones de solo lectura al dominio público, sin certificado cliente ni JWT y sin seguir redirecciones. Las respuestas HTTPS provinieron de Cloudflare y la verificación del certificado del servidor terminó correctamente. No se enviaron credenciales ni órdenes.
+
+| Comprobación | Resultado observado | Alcance de la conclusión |
+| --- | --- | --- |
+| `GET /` y `GET /gui` | `302` a `https://assermetry.com/gui/` | Coincide con las Single Redirects documentadas, que pueden ejecutarse antes del WAF. |
+| `GET /gui/`, discovery OIDC, `/backend/auth/is-admin` | `403` | Sin certificado cliente no se accede a estas rutas; el código HTTP no identifica por sí solo la regla exacta. |
+| `GET /auth/admin/`, `/backend/admin/llm`, `/backend/openapi.json`, `/backend/docs`, `/.git/config` | `403` | No se expusieron en esta prueba sin certificado. Hace falta atribución en Cloudflare Security Events para demostrar cada regla permanente. |
+| `GET http://assermetry.com/gui/` | `403` de Cloudflare, sin redirección HTTPS | No sirvió contenido de la aplicación por HTTP en esta ruta; comprobar por separado la política esperada de redirección. |
+| TLS 1.0 / 1.1 | Falló la negociación | El borde rechazó estas versiones desde este cliente. |
+| TLS 1.2 / 1.3 | Negociación correcta, certificado del servidor válido y respuesta `403` | Se confirmó el transporte TLS; el `403` corresponde a un control HTTP posterior. |
+
+En las respuestas `302` y `403` inspeccionadas no apareció `Strict-Transport-Security`; esto no determina si la cabecera se añade a las respuestas `200` con certificado. El operador debe comprobar en Cloudflare Security Events qué regla produjo los `403`, y probar con certificado cliente válido que la GUI/OIDC funcionan mientras las mismas rutas sin certificado siguen bloqueadas. Con certificado pero sin JWT, comprobar que Gateway rechaza una ruta protegida; comprobar también el acceso administrativo con y sin rol. No se ha comprobado la configuración efectiva del firewall de Hetzner ni el origen directo.
+
+**Prueba funcional comunicada mediante captura de la GUI:** desde `https://assermetry.com/gui/` se visualiza una sesión protegida y una orden en modo LIGHT marcada `Completada`, con 5/5 etapas y 9/9 respuestas de validación. La pantalla muestra resultado `Mixta` y, en el resumen de afirmaciones, una confirmada y dos desmentidas. El contador de respuestas de validadores muestra tres confirmadas, cinco desmentidas y una no concluyente; son agregaciones distintas en la interfaz. La última actualización visible es `02/11/2026, 19:52`. Esta captura acredita que el flujo GUI llegó a un resultado terminal por el dominio público; no permite comprobar por sí sola el certificado mTLS presentado, la atribución de reglas Cloudflare, las fuentes de la pestaña Evidencias, la exactitud factual ni el aislamiento entre usuarios. No se registra el identificador de orden ni el nombre de usuario de la captura en Git.
+
+**Segunda captura, pestaña Evidencias de la misma orden:** las tres decisiones agregadas son `TRUE` para España (>49 millones de habitantes en 2025), `FALSE` para Alemania (inflación anual negativa en 2025) y `FALSE` para Francia (100 % de electricidad renovable en 2025). Los votos visibles son 3 `TRUE`; 2 `FALSE` y 1 `UNKNOWN`; y 3 `FALSE`, respectivamente. El voto `UNKNOWN` de Alemania informa que Evidence Search no entregó contextos citables y que no se llamó al LLM para esa validación. Es una abstención explícita dentro de una orden completada, no un fallo técnico visible de toda la orden; requiere revisar trazas y cobertura documental antes de extrapolar calidad. Como contraste independiente de los hechos, el [INE](https://www.ine.es/dyngs/Prensa/es/CensoVariables2025.html) publicó 49.128.297 habitantes a 1 de enero de 2025; [Destatis](https://www.destatis.de/EN/Press/2026/01/PE26_019_611.html) informó inflación positiva del 2,2 % de media anual y del 1,8 % interanual en diciembre; [RTE](https://analysesetdonnees.rte-france.com/en/annual-review-2025/generation) informó una cuota renovable del 27 % y nuclear del 68,1 % en la generación francesa de 2025. Las tres decisiones de esta muestra concuerdan con esas fuentes oficiales. La captura enseña nombres y extractos, pero no acredita por sí sola URL, fecha, identidad del documento ni correspondencia exacta de cada cita; abrir `Verificación con fuentes` y revisar los enlaces y fragmentos de cada validador antes de dar por cerrada la trazabilidad.
+
+**Confirmación posterior del operador:** la verificación con fuentes de esta orden se ha validado. Se registra como comprobación manual comunicada por el operador, sin copia de los enlaces o fragmentos de la interfaz en este documento. La abstención de un validador por falta de contextos citables sigue siendo un dato de cobertura de esta ejecución; la aceptación del corpus y las pruebas de seguridad restantes se evalúan por separado.
+
+**Conflicto de métodos confirmado en la expresión comunicada por el operador:** la regla de Cloudflare coincide con cualquier `PUT` a `/backend` y sus subrutas, incluidos `/backend/admin/llm/components/{component}` y `/backend/admin/llm/validators/{validator_id}`. Gateway declara esos métodos y la GUI los usa para aplicar cambios de configuración LLM. Si la regla está habilitada con acción `Block`, esas actualizaciones se bloquearán en Cloudflare. Confirmar acción, estado y posibles excepciones en Cloudflare; ajustar la política para permitir solo los `PUT` administrativos necesarios con mTLS, JWT y rol antes de dar la consola LLM por operativa. Las peticiones anteriores sin certificado no verifican el efecto productivo de esta regla.
+
 Con el lock en el estado acordado y un certificado temporal autorizado, comprobar `https://assermetry.com/gui/`, recursos, login/logout, issuer OIDC canónico, Gateway con/sin JWT, ausencia de Swagger/OpenAPI público y aislamiento de rutas administrativas. Ejecutar una orden LIGHT desde la GUI; comprobar que BLOCKCHAIN no se ofrece o se rechaza para nuevas órdenes, y que la respuesta final tiene fuentes/citas trazables. Verificar también desde otra red. El acceso directo por `port-forward` solo ayuda al diagnóstico: no prueba Cloudflare, Traefik ni mTLS.
 
 **[VM-KIND]** Ejecutar una campaña publicada LIGHT sobre el corpus oficial con credenciales de prueba, cuota y ventana autorizadas, siguiendo [evaluation.md](../tests/evaluation.md); `--publish` consume proveedores. El runner documentado no implementa por sí mismo un certificado cliente mTLS, por lo que **no** usar `--no-verify-tls` como atajo de producción ni afirmar que una ejecución por túnel equivale a prueba del borde. Preparar un acceso de prueba que preserve TLS/mTLS o completar esa capacidad del runner antes de acreditar el E2E por el borde. Guardar SHA, imagen, hashes de casos, configuración de validadores, informe y errores sin secretos.
 
 Para afirmar que un modo supera al otro, ejecutar campañas frías y emparejadas en una revisión/configuración comparable, una por modo, y usar `evaluation.pipeline.compare_modes` según [el plan del motor](../architecture/evidence-retrieval-engine-plan.md#2026-10-28--subfase-4a-comparador-de-campañas). Fijar modelo, temperatura, versión de configuración y gold; comparar cobertura de fuentes citables, exactitud, rechazos/abstenciones, `freshness_status`, p50/p95, llamadas y coste. Las campañas locales del 31-10 y 01-11 son evidencia de una regresión observada, no una comparación causal cerrada. Con el ConfigMap actual `provider_extract` seguirá a cero; evaluarlo requiere un cambio versionado separado.
 
-**GO para despliegue controlado:** SHA limpio y artefactos correctos, backup MongoDB externo íntegro, snapshot del CX33 apagado disponible, actualización del host validada, acceso SSH solo por clave, firewall/K3s comprobados, migración aceptada con recuperación, CI autorizada, rollouts verdes, SMART y OFF observados en todos los pods pertinentes, borde y LIGHT funcionales. **NO GO para sacar v0.0.13 de Deploying o publicarla:** P1 sin resolver o sin aplazamiento formal, corpus no homologado, veredictos/fuentes no aceptables o pruebas requeridas en [version.md](../version.md) no acreditadas.
+**GO para despliegue controlado:** SHA limpio y artefactos correctos, backup MongoDB externo íntegro, snapshot del CX33 apagado disponible, actualización del host validada, acceso SSH solo por clave, firewall/K3s comprobados, migración aceptada con recuperación, CI autorizada, rollouts verdes, SMART y OFF observados en todos los pods pertinentes, borde y LIGHT funcionales. **NO GO para sacar v0.0.13 de Deploying o publicarla:** P1 sin resolver o sin aplazamiento formal, corpus no homologado, veredictos/fuentes no aceptables o pruebas requeridas en [detalle de v0.0.13](../releases/v0.0.13.md) no acreditadas.
 
 ### 7. Fallo y reversión
 
@@ -494,4 +633,4 @@ Si falla antes de `skaffold deploy`, conservar el estado y diagnosticar la reali
 
 Volver al tag/commit anterior y restaurar **solo** MongoDB permite recuperar código, manifiestos y esa base si también existen imágenes reconstruibles, Secrets y configuración compatibles. **No reconstruye por sí solo todo el sistema**: Keycloak usa otra base PostgreSQL con PVC, Kafka/IPFS y otros componentes tienen estado propio; certificados, credenciales, reglas Cloudflare, configuración externa y contenido de otros PVC tampoco están en Git ni en este archivo. Para reconstrucción completa hacen falta inventario y copias de esos estados, versiones de imágenes fijadas y un restore ensayado en un clúster aislado. Para un rollback de esta release, conservar el mismo corte temporal entre código y datos y validar los contratos entre servicios antes de abrir el tráfico.
 
-Solo después de validar Hetzner y cumplir la puerta de salida de Deploying en [version.md](../version.md): actualizar la evidencia de [issues.md](../issues.md), reconciliar `postTFM` con los commits exclusivos de `origin/main`, promover mediante PR/MR a `main` en ambos remotos y crear la etiqueta conforme a [gitlab-github-release-workflow.md](gitlab-github-release-workflow.md#6-release). El alcance documental está cerrado, pero no se etiqueta un commit de trabajo por el mero hecho de terminar el pipeline.
+Solo después de validar Hetzner y cumplir la puerta de salida de Deploying en [detalle de v0.0.13](../releases/v0.0.13.md): actualizar la evidencia de [issues.md](../issues.md), reconciliar `postTFM` con los commits exclusivos de `origin/main`, promover mediante PR/MR a `main` en ambos remotos y crear la etiqueta conforme a [gitlab-github-release-workflow.md](gitlab-github-release-workflow.md#6-release). El alcance documental está cerrado, pero no se etiqueta un commit de trabajo por el mero hecho de terminar el pipeline.

@@ -15,6 +15,10 @@ problem:
 > available sources of knowledge, rather than relying on a single
 > general-purpose AI model?**
 
+Version `v0.0.13` is deployed in Hetzner in LIGHT mode with SMART evidence
+acquisition and blockchain disabled. Functional validation at the public edge
+and acceptance remain pending; see the [release record](docs/releases/v0.0.13.md).
+
 Assermetry is currently a research and product-validation prototype. It is not
 yet a production fact-checking service, and its automated results should not be
 interpreted as authoritative truth.
@@ -256,11 +260,11 @@ or calibrated reputation system.
 |---|---:|---:|---|
 | `LLM_MEMORY_VALIDATION` | Yes | `0.25` | Uses internal LLM knowledge and reasoning without external evidence search |
 | `LLM_SEARCH_VALIDATION` | Yes | `0.50` | Uses online search provided by a compatible model or provider |
-| `RAG_EVIDENCE_VALIDATION` | Yes | `0.80` | Retrieves evidence through `evidence-search` before asking the LLM to assess the assertion |
+| `RAG_EVIDENCE_VALIDATION` | Yes | `1.00` | Retrieves evidence through `evidence-search` before asking the LLM to assess the assertion |
 | `DETERMINISTIC_VALIDATION` | No | `1.00` | Reserved for rules, databases, official APIs or other programmatic checks |
 | `HUMAN` | No | `0.10` | Represents a future manual-review workflow |
 
-The weights are implementation defaults, not calibrated probabilities or proof
+The weights are configurable implementation defaults, not calibrated probabilities or proof
 that one validator type is factually superior. See the
 [validator architecture summary](docs/architecture/validator-summary.md) for
 the detailed algorithms and configuration.
@@ -282,6 +286,13 @@ validator reputation
       ↓
 weighted validation signal
 ```
+
+Consensus-v2 freezes weight inputs for new validations, counts completed
+`TRUE` and `FALSE` votes and `UNKNOWN` abstentions separately, and excludes
+execution errors from voting. A tie, insufficient decisive coverage, or no
+valid response yields `UNKNOWN` with a decision status and reason. The result
+includes vote weights, counts and decision details; older records may use
+dynamic weight lookup.
 
 The resulting aggregation is an implementation mechanism, not a statistical
 proof of truth. It must be evaluated against external ground truth before its
@@ -423,8 +434,8 @@ Assermetry.
 - LLM memory validation.
 - LLM online-search validation when supported by the provider and model.
 - RAG evidence validation.
-- Weighted validator aggregation.
-- `TRUE`, `FALSE` and `UNKNOWN` results.
+- Consensus-v2 with weighted votes, abstentions, error exclusion and decision reasons.
+- `TRUE`, `FALSE` and `UNKNOWN` results, including explicit failure and retry states.
 - Operational reputation field with a default value; a mature reputation
   system is not yet implemented.
 
@@ -436,7 +447,9 @@ Assermetry.
 - Dynamic domain routing through `source-router` for the RAG `LOCAL` strategy.
 - MongoDB-backed route and domain-profile memory.
 - Official-source prioritization strategies.
-- Evidence normalization and caching.
+- Configurable `DIRECT`, `PROVIDER` and `SMART` document acquisition, including HTML/PDF extraction.
+- Versioned route and evidence caches, source provenance and retrieval diagnostics.
+- Canonical RAG citations reconstructed from eligible retrieved context IDs.
 - Provider-independent internal evidence contracts.
 
 ### Platform and Access
@@ -444,7 +457,8 @@ Assermetry.
 - Secure API Gateway.
 - OIDC frontend authentication through Keycloak.
 - OAuth 2.0 Client Credentials for controlled B2B access.
-- Client-scoped order access through the Gateway.
+- Owner-scoped order access and JWT audience/client checks through the Gateway.
+- GUI order summaries, terminal states, UTC dates and sanitized links.
 - Client quotas and quota-consumption accounting.
 - Admin API for clients, quotas and operational configuration.
 - Kafka-based asynchronous orchestration.
@@ -459,6 +473,7 @@ Assermetry.
 - WAF, rate limiting and non-public route blocking.
 - Loki/Grafana observability.
 - GitLab CI manual deployment workflow.
+- Evaluation runner, versioned artifacts, offline analysis, viewer, traces and observed costs.
 
 ### Auditability
 
@@ -588,6 +603,15 @@ Source Router; the connection is one-way from the RAG validator. See the
 [Source Router API](docs/architecture/apis/source-router.md) for the route
 contract, cache states and metadata.
 
+Document acquisition is configured separately from routing: `DIRECT` fetches
+the source URL, `PROVIDER` uses provider extraction, and `SMART` can use full
+search content before falling back to direct retrieval. Provider URL extraction
+is separately controlled and budgeted. The deployed LIGHT configuration uses
+`SMART` with provider URL extraction disabled. Snippets alone are not citable;
+RAG citations are reconstructed from eligible contexts. A valid citation
+identifies supplied evidence but does not establish semantic support or source
+independence. See the [Evidence Search API](docs/architecture/apis/evidence-search.md).
+
 The MongoDB bootstrap realigns the routing collections and indexes:
 
 ```bash
@@ -640,15 +664,14 @@ current product hypothesis.
 
 ## Version Status
 
-The latest closed version is
-[`v0.0.12 - Perimeter closure and administrative access`](docs/releases/v0.0.12.md).
-The current version is `v0.0.13`, focused on functional stabilization and a
-repeatable private demo.
-
+`v0.0.13` is deployed in Hetzner for LIGHT operation. The operator reported
+healthy rollouts, SMART and blockchain OFF; functional edge checks and formal
+acceptance are still pending. Deployment alone does not establish factual
+quality or a release tag.
 Versioned documentation:
 
-- [Current version record](docs/version.md)
-- [Published release summaries](docs/releases.md)
+- [Current version record](docs/releases/v0.0.13.md)
+- [Release history](docs/releases.md)
 - [Future roadmap](docs/next_releases.md)
 - [Known issues](docs/issues.md)
 
@@ -657,7 +680,7 @@ Planned progression:
 | Version | Status | Main objective |
 |---|---|---|
 | `v0.0.12` | Closed | Cloudflare perimeter, controlled access and administrative protection |
-| `v0.0.13` | Current | Functional stabilization and repeatable private demo |
+| `v0.0.13` | Deployed; acceptance pending | Functional stabilization and repeatable private demo |
 | `v0.0.14` | Planned | Closed beta by invitation |
 | `v0.0.15` | Planned | Design-partner pilot with explicit success criteria |
 | `v0.0.16` | Planned | Production hardening, recovery and operational readiness |
@@ -806,6 +829,7 @@ The required Kubernetes secrets and variables are documented in the
 
 Available documentation:
 
+- [Evaluation runner and artifacts](docs/tests/evaluation.md)
 - [Test notes](docs/tests/tests.md)
 - [Stats notes](docs/tests/stats.md)
 - [LLM benchmark](docs/tests/llm-benchmark.md)
@@ -817,6 +841,11 @@ Useful static checks for focused changes:
 python3 -m py_compile <python-file>
 node --check <javascript-file>
 ```
+
+The eleven-case Official Gold v0 and the recent SMART and DIRECT LIGHT
+campaigns provide diagnostic baselines, not an independently homologated
+benchmark. Their configurations differed, so their results do not isolate the
+effect of acquisition mode. See the [release evidence](docs/releases/v0.0.13.md).
 
 For deployment issues, start with the relevant runbook in `docs/deploy/` and
 then inspect live pods and logs with `kubectl`.
@@ -837,8 +866,9 @@ then inspect live pods and logs with `kubectl`.
   origin accepts application HTTPS only from verified Cloudflare networks.
 - A temporary general mTLS rule protects non-administrative routes through
   `v0.0.13`. Its controlled removal is planned for `v0.0.14`.
-- The frontend is namespaced under `/gui/`; the controlled `v0.0.14` edge
-  cutover adds exact root redirects and a default-deny path allowlist.
+- The frontend is namespaced under `/gui/`; the edge redirects the root and
+  restricts public paths. The planned `v0.0.14` cutover removes the temporary
+  general mTLS condition while retaining path restrictions.
 - Keycloak administrative routes retain permanent mTLS and still require
   Keycloak authentication after the certificate check.
 - The maintenance lock can block the complete hostname independently of OIDC,
@@ -881,8 +911,8 @@ Important limitations include:
   correctness.
 - Access remains controlled while external evaluation is prepared.
 - [`ISSUE-001`](docs/issues.md#issue-001---carrera-de-inicializacion-en-la-cache-de-validadores-light)
-  is mitigated, but its LIGHT validator-cache initialization race remains to be
-  resolved in `v0.0.13`.
+  has a refresh and event-merge implementation included; concurrent validation
+  in the target environments remains pending.
 - Memory headroom and rollout scheduling remain under observation, and the
   non-blocking `DNSConfigForming` warning is still registered.
 

@@ -1,6 +1,6 @@
 # Incidencias y alcance de v0.0.13
 
-**Revisión: 2026-11-01. v0.0.13 tiene alcance de desarrollo cerrado y estado Deploying.** «Incluido» significa que la implementación forma parte del código candidato; no significa que la incidencia esté resuelta en Hetzner ni que la calidad factual esté aceptada. Los resultados recientes son [SMART, 31-10](../tests/data/evaluation/artifacts/e2e-20261031-181209/report.md) y [DIRECT, 01-11](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md). Ambos manifiestos indican `da356fdf` y árbol sucio. [version.md](version.md) define el alcance y sus anexos. [working.md](working.md) es una propuesta independiente de generación en dos etapas, todavía sin ejecutar.
+**Estado: v0.0.13 desplegada en Hetzner; validación funcional y aceptación pendientes.** «Incluido» significa que la implementación forma parte del código candidato; no significa que la incidencia esté resuelta en Hetzner ni que la calidad factual esté aceptada. Los resultados recientes son [SMART, 31-10](../tests/data/evaluation/artifacts/e2e-20261031-181209/report.md) y [DIRECT, 01-11](../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md). Ambos manifiestos indican `da356fdf` y árbol sucio. [detalle de v0.0.13](releases/v0.0.13.md) define el alcance y sus anexos. La propuesta independiente de generación en dos etapas sigue sin ejecutar.
 
 ## Management
 
@@ -30,7 +30,7 @@ Gravity: **P0** Critical/loss commitment of datos/indisponibilidad; **P1** Safet
 | 026 | P1 | Sí: motor DIRECT medible; corrección de recuperación no incluida | Abierta: 88/139 descargas útiles y primarias inaccesibles |
 | 027 | P1 | Parcial: polling y diagnóstico | Abierta: una orden DIRECT quedó DOCUMENT_CREATED tras timeout de sondeo |
 
-**La inclusión en la release no cierra una incidencia.** Las P1 abiertas y el aplazamiento de 003/004 condicionan la salida de Deploying. La promoción exige una revisión limpia con modo de extracción elegido y observado en los pods. Una campaña corta después de cada corrección y el lote completo posterior deben conservar manifiesto, órdenes y trazas. La comparación SMART/DIRECT no aísla la adquisición: la temperatura y la versión de configuración observada de generación también cambiaron.
+**La inclusión en la release no cierra una incidencia.** Las P1 abiertas y el aplazamiento de 003/004 condicionan la aceptación. La revisión y el modo de extracción deben quedar identificados y verificados en los pods. Una campaña corta después de cada corrección y el lote completo posterior deben conservar manifiesto, órdenes y trazas. La comparación SMART/DIRECT no aísla la adquisición: la temperatura y la versión de configuración observada de generación también cambiaron.
 
 ## Incidencias previas, revisadas
 

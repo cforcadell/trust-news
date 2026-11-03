@@ -118,7 +118,7 @@ The RAG prompt requires validation only with the evidence provided. If there is 
 | RAG without search credentials | Empty `API_KEY_PROVIDER` | It fails explicitly; it does not create placeholders or static domains. |
 | RAG with Exa/Tavily | `API_KEY_PROVIDER` configurado | Run real queries, merge results, deduplicate URLs and limit results. |
 
-**Expected use:** Validator of greater operational confidence because the decision is linked to evidence explicitly recovered. Its weight is high (`1.00`).
+**Expected use:** Validator of greater operational confidence because the decision is linked to evidence explicitly recovered. Its default weight is `1.00`; this is a configurable aggregation input, not proof of factual superiority.
 
 ### 4. Deterministico (`DETERMINISTIC_VALIDATION`)
 
@@ -182,16 +182,12 @@ In Kubernetes, `k8s/apis/validate-asertions/base/configmap-common.yaml` defines 
 
 ## Scoring and weighted result
 
-The backend does not decide only by counting votes. Each validation is transformed into a weighted detail:
+Consensus-v2 freezes the validator type weight and reputation for each new
+validation. Their product is the effective weight. Legacy records without a
+snapshot use a dynamic lookup and are marked accordingly. Type weights are
+configurable; the code defaults are:
 
-```text
-effective_weight = validator_type_weight * reputation
-score_result = suma(effective_weight para ese resultado) / numero_de_validadores
-```
-
-Weights per type are:
-
-| Tipo | Peso |
+| Type | Default weight |
 |---|---:|
 | `LLM_MEMORY_VALIDATION` | 0.25 |
 | `LLM_SEARCH_VALIDATION` | 0.50 |
@@ -199,9 +195,15 @@ Weights per type are:
 | `DETERMINISTIC_VALIDATION` | 1.00 |
 | `HUMAN` | 0.10 |
 
-`reputation` lives in the backend operating cache, not in the JSON IPFS of the validator. If there is no explicit reputation, `1.0` is used.
-
-The winner by assertion is the result with the highest score between `TRUE`, `FALSE` and `UNKNOWN`. Details include type of validator, weight, reputation, effective weight, description, fonts and evidence used.
+Reputation defaults to `1.0`. Completed results contribute their effective
+weight to `TRUE`, `FALSE` or the `UNKNOWN` abstention bucket; execution errors
+are counted and excluded from voting. Decisive coverage is the combined
+`TRUE` and `FALSE` weight divided by all completed weight. No completed votes,
+no decisive votes, coverage at or below 0.5, or a weighted tie returns
+`UNKNOWN` with a corresponding status and reason. Otherwise, the greater
+decisive weight determines the verdict. The response includes distributions,
+counts, policy version and per-validator details. These weights and results are
+not calibrated probabilities or proof of factual correctness.
 
 ## Classification summary
 

@@ -51,12 +51,12 @@ remains active; the fixture must still fail soon if configuration is missing (01
 ### ISSUE-003 - IC does not authenticate the K3s API with its CA
 
 - **Confirmado:** `.gitlab-ci.yml` conserva `--insecure-skip-tls-verify=true`.
-- **Close:** verify the K3s API CA and TLS name and reject a wrong CA or server name before deployment. Objetivo adelantado de v0.0.16 a **v0.0.13b, P0/S01** según [version.md](../version.md). Sigue abierta: no ejecutar otro pipeline privilegiado con verificación omitida; demostrar rechazo antes de acciones sobre el clúster.
+- **Close:** verify the K3s API CA and TLS name and reject a wrong CA or server name before deployment. Objetivo adelantado de v0.0.16 a **v0.0.13b, P0/S01** según [version.md](version.md). Sigue abierta: no ejecutar otro pipeline privilegiado con verificación omitida; demostrar rechazo antes de acciones sobre el clúster.
 
 ### ISSUE-004 - CI does not set the server SSH key
 
 - ** Confirmed:** `.gitlab-ci.yml` feeds `known_hosts` from `ssh-keyscan`.
-- **Close:** pin the independently verified host key, reject a missing or changed key and document rotation. Objetivo adelantado de v0.0.16 a **v0.0.13b, P0/S01** según [version.md](../version.md). Sigue abierta: verificar la identidad antes de otro pipeline privilegiado y probar fallo con clave ausente/cambiada.
+- **Close:** pin the independently verified host key, reject a missing or changed key and document rotation. Objetivo adelantado de v0.0.16 a **v0.0.13b, P0/S01** según [version.md](version.md). Sigue abierta: verificar la identidad antes de otro pipeline privilegiado y probar fallo con clave ausente/cambiada.
 
 ### ISSUE-005 - Dates, time zones and time states inconsistent with the results GUI
 

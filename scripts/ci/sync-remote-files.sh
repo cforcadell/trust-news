@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: sync-remote-files.sh --host HOST --user USER --identity FILE
-                            --target-dir DIRECTORY [--port PORT]
+                            --known-hosts FILE --target-dir DIRECTORY [--port PORT]
                             [--mode OCTAL] -- FILE [FILE ...]
 
 Installs regular files on a remote host through SSH and verifies their
@@ -16,18 +16,20 @@ EOF
 host=
 user=
 identity=
+known_hosts=
 target_dir=
 port=22
 mode=0750
 
 while (($#)); do
   case "$1" in
-    --host|--user|--identity|--target-dir|--port|--mode)
+    --host|--user|--identity|--known-hosts|--target-dir|--port|--mode)
       (($# >= 2)) || { usage >&2; exit 2; }
       case "$1" in
         --host) host=$2 ;;
         --user) user=$2 ;;
         --identity) identity=$2 ;;
+        --known-hosts) known_hosts=$2 ;;
         --target-dir) target_dir=$2 ;;
         --port) port=$2 ;;
         --mode) mode=$2 ;;
@@ -50,7 +52,7 @@ while (($#)); do
 done
 
 sources=("$@")
-[[ -n $host && -n $user && -f $identity && -n $target_dir && ${#sources[@]} -gt 0 ]] || {
+[[ -n $host && -n $user && -f $identity && -f $known_hosts && -n $target_dir && ${#sources[@]} -gt 0 ]] || {
   usage >&2
   exit 2
 }
@@ -80,8 +82,36 @@ for source in "${sources[@]}"; do
   basenames[$name]=1
 done
 
-ssh_options=(-i "$identity" -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=yes)
-scp_options=(-i "$identity" -P "$port" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+ssh_options=(
+  -F /dev/null
+  -i "$identity"
+  -p "$port"
+  -o BatchMode=yes
+  -o IdentitiesOnly=yes
+  -o PreferredAuthentications=publickey
+  -o PasswordAuthentication=no
+  -o KbdInteractiveAuthentication=no
+  -o ForwardAgent=no
+  -o StrictHostKeyChecking=yes
+  -o UserKnownHostsFile="$known_hosts"
+  -o GlobalKnownHostsFile=/dev/null
+  -o UpdateHostKeys=no
+)
+scp_options=(
+  -F /dev/null
+  -i "$identity"
+  -P "$port"
+  -o BatchMode=yes
+  -o IdentitiesOnly=yes
+  -o PreferredAuthentications=publickey
+  -o PasswordAuthentication=no
+  -o KbdInteractiveAuthentication=no
+  -o ForwardAgent=no
+  -o StrictHostKeyChecking=yes
+  -o UserKnownHostsFile="$known_hosts"
+  -o GlobalKnownHostsFile=/dev/null
+  -o UpdateHostKeys=no
+)
 remote="$user@$host"
 scp_remote=$remote
 if [[ $host == *:* ]]; then

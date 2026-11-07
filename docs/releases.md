@@ -4,7 +4,7 @@ Este documento recoge las versiones desplegadas, sus límites conocidos y los si
 
 ## v0.0.13b — Cierre de seguridad previo a la beta
 
-**Estado: planificada; auditoría y plan preparados el 03-11-2026. Remediaciones pendientes.** Se ejecuta después de v0.0.13 y antes de v0.0.14. [Enfoque, ejecución y planning](../version.md) · [Auditoría contrastada Codex](security/security_review_codex.md) · [Auditoría aportada](security/security_review_aportada.md) · [Revisión Copilot](security/security_review_copilot.md).
+**Estado: planificada; S00 iniciado el 04-11-2026 con inventario local parcial. Remediaciones pendientes.** Se ejecuta después de v0.0.13 y antes de v0.0.14. La VM con kind es desarrollo local, Hetzner es preproducción y producción aún no existe; los perfiles `-prod` son nombres técnicos heredados. [Enfoque, ejecución y planning](version.md) · [Inventario S00](security/s00-inventory.md) · [Auditoría contrastada Codex](security/security_review_codex.md) · [Auditoría aportada](security/security_review_aportada.md) · [Revisión Copilot](security/security_review_copilot.md).
 
 - P0: autenticar host SSH y API K3s en todos los jobs privilegiados, adelantando ISSUE-003/004 desde el objetivo anterior v0.0.16; verificar exposición y contener cualquier secreto activo expuesto.
 - P1: motores reutilizables de descarga segura frente a SSRF/rebinding, identidad/autorización interna, segmentación declarativa, admisión y consumo idempotentes por organización y estado del cliente, Kafka autenticado y JWT/JWKS robustos.
@@ -19,7 +19,7 @@ Este documento recoge las versiones desplegadas, sus límites conocidos y los si
 
 ## v0.0.13 — Estabilización funcional
 
-**Estado: desplegada en Hetzner; validación funcional y aceptación pendientes.** El operador comunicó el despliegue y comprobaciones correctas de pods, rollouts, SMART y Blockchain OFF. El despliegue no acredita por sí solo aceptación ni una etiqueta de release. [Detalle y anexos](releases/v0.0.13.md) · [Incidencias](issues.md) · [Guía de despliegue](deploy/main-posttfm-hetzner-smart-light.md).
+**Estado: desplegada en Hetzner (preproducción); validación funcional y aceptación pendientes.** El operador comunicó el despliegue y comprobaciones correctas de pods, rollouts, SMART y Blockchain OFF. El despliegue no acredita por sí solo aceptación ni una etiqueta de release. [Detalle y anexos](releases/v0.0.13.md) · [Incidencias](issues.md) · [Guía de despliegue](deploy/main-posttfm-hetzner-smart-light.md).
 
 - Flujo LIGHT y contrato v2 de afirmaciones integrados con generación, validación, Kafka y persistencia; ruta BLOCKCHAIN por CID, IPFS y registro con estados de error y reintento.
 - Consensus-v2 con votos, pesos, abstenciones, errores y motivos explícitos; citas RAG canónicas desde contextos entregados y elegibles.

@@ -2,7 +2,7 @@
 
 This document contains only versions after the current version. The status of the current version is in [`v0.0.13.md`](releases/v0.0.13.md) and the release history in [`releases.md`](releases.md).
 
-Actualización de seguridad del 03-11-2026: **v0.0.13b precede y bloquea la apertura de v0.0.14**. El [plan de ejecución](../version.md) adelanta los controles P0/P1 antes aplazados a preparación productiva. Las versiones siguientes conservan sus objetivos; ningún cambio se considera implantado por aparecer en este roadmap.
+Actualización de seguridad del 03-11-2026: **v0.0.13b precede y bloquea la apertura de v0.0.14**. El [plan de ejecución](version.md) adelanta los controles P0/P1 antes aplazados a preparación productiva. Las versiones siguientes conservan sus objetivos; ningún cambio se considera implantado por aparecer en este roadmap.
 
 ## Summary
 
@@ -17,7 +17,7 @@ Actualización de seguridad del 03-11-2026: **v0.0.13b precede y bloquea la aper
 
 ## v0.0.13b — Cierre de seguridad previo a la beta
 
-**Planificada, sin remediaciones ejecutadas.** Contrasta al mismo nivel la auditoría aportada y la revisión Copilot mediante [análisis propio del código y docs](security/security_review_codex.md). El [enfoque, paquetes ordenados, dependencias, estimaciones y puertas](../version.md) son la referencia de ejecución.
+**Planificada, sin remediaciones ejecutadas; S00 iniciado con inventario parcial.** Contrasta al mismo nivel la auditoría aportada y la revisión Copilot mediante [análisis propio del código y docs](security/security_review_codex.md). El [enfoque, paquetes ordenados, dependencias, estimaciones y puertas](version.md) son la referencia de ejecución.
 
 - Primero identidad de CI (ISSUE-003/004), verificación de exposición e inventario de secretos activos; después SSRF, autorización/segmentación interna, cuotas/estado de cliente, Kafka, JWT/JWKS y canales de identidad protegidos.
 - Restauración aislada/cifrado externo antes de migración soportada de MongoDB y aceptación integrada del perfil LIGHT/SMART.
@@ -26,7 +26,7 @@ Actualización de seguridad del 03-11-2026: **v0.0.13b precede y bloquea la aper
 
 ## v0.0.14 - Beta closed by invitation
 
-**Prerequisito:** cerrar v0.0.13b según [version.md](../version.md), además de la aceptación funcional requerida. El corte de mTLS no se ejecuta como parte de la auditoría ni de la preparación del plan.
+**Prerequisito:** cerrar v0.0.13b según [version.md](version.md), además de la aceptación funcional requerida. El corte de mTLS no se ejecuta como parte de la auditoría ni de la preparación del plan.
 
 ### Objective
 
@@ -138,7 +138,7 @@ At least one pilot ends up with evidence of value and an explicit decision to co
 
 Converting the validated platform with customers into a service that can be operated. It is a stabilization version and does not incorporate commercial functionalities except those necessary to close a production risk.
 
-Los controles P0/P1 de [v0.0.13b](../version.md) son prerrequisitos, no trabajo aplazado hasta esta versión. Los apartados siguientes verifican su continuidad y completan el endurecimiento P2 y la preparación productiva. Si un control ya cerrado regresa, se bloquea la promoción.
+Los controles P0/P1 de [v0.0.13b](version.md) son prerrequisitos, no trabajo aplazado hasta esta versión. Los apartados siguientes verifican su continuidad y completan el endurecimiento P2 y la preparación productiva. Si un control ya cerrado regresa, se bloquea la promoción.
 
 ### Identity Hardening
 

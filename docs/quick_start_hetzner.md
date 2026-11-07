@@ -5,11 +5,16 @@ servicios internos. El runbook normativo sigue siendo
 [`deploy/skaffold-server.md`](deploy/skaffold-server.md); los secretos, la
 configuración de Cloudflare y las reconstrucciones no se resumen aquí.
 
+Hetzner es actualmente **preproducción**. La VM con kind es desarrollo local y
+aún no existe producción. Los nombres `-prod` de perfiles y overlays son
+identificadores técnicos heredados; las comprobaciones de esta guía solo
+acreditan el entorno donde se ejecutan.
+
 ## 1. Modelo operativo
 
-- El despliegue productivo se realiza mediante el pipeline protegido de
+- El despliegue de preproducción se realiza mediante el pipeline protegido de
   GitLab sobre `postTFM`.
-- Los perfiles productivos son `traefik-prod`, `infra-prod` y
+- Los perfiles de Hetzner son `traefik-prod`, `infra-prod` y
   `apis-frontend-prod`. No se usan overlays `local` ni perfiles locales.
 - La aplicación pública conserva el issuer
   `https://assermetry.com/auth/realms/TrustNews`.

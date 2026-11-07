@@ -1,6 +1,8 @@
 # v0.0.13b — Cierre de seguridad previo a la beta
 
-**Estado: planificada; auditoría y plan preparados el 03-11-2026. Remediaciones sin ejecutar ni desplegar.** Versión intermedia entre v0.0.13 y v0.0.14. La v0.0.13 consta como desplegada en Hetzner con aceptación pendiente; esta versión no declara cerrada esa aceptación.
+**Estado: planificada; S00 iniciado el 04-11-2026 con inventario local parcial. Remediaciones sin ejecutar ni desplegar.** Versión intermedia entre v0.0.13 y v0.0.14. La v0.0.13 consta como desplegada en Hetzner con aceptación pendiente; esta versión no declara cerrada esa aceptación.
+
+**Entornos reales:** la VM con kind es desarrollo local; Hetzner/K3s es preproducción; aún no existe un entorno de producción. Los nombres técnicos de perfiles y overlays terminados en `-prod` son históricos y designan aquí el despliegue de preproducción, no un entorno productivo. Toda evidencia y puerta de aceptación debe identificar el entorno observado. Una prueba en kind no acredita Hetzner, y superar las puertas en preproducción no equivale a un despliegue en producción.
 
 ## Enfoque
 
@@ -8,7 +10,11 @@ Cerrar primero las vías de compromiso del despliegue, acceso interno y abuso au
 
 El trabajo se construirá como **motores de ejecución reutilizables, parametrizados y con contratos verificables**: acceso de despliegue, descarga segura, identidad/autorización, políticas de red, admisión/consumo, aceptación de eventos y recuperación. Las diferencias por servicio, proveedor y entorno se expresarán como configuración validada. No se aceptan excepciones de seguridad escritas para una URL, cliente, modelo, noticia o caso concreto.
 
-El detalle de evidencia, disputas, condiciones y límites está en [security_review_codex.md](docs/security/security_review_codex.md). Las fuentes al mismo nivel son la [auditoría aportada](docs/security/security_review_aportada.md) y la [revisión Copilot](docs/security/security_review_copilot.md). Este archivo contiene la ejecución pendiente; los informes conservan sus conclusiones originales.
+El detalle de evidencia, disputas, condiciones y límites está en [security_review_codex.md](security/security_review_codex.md). Las fuentes al mismo nivel son la [auditoría aportada](security/security_review_aportada.md) y la [revisión Copilot](security/security_review_copilot.md). Este archivo contiene la ejecución pendiente; los informes conservan sus conclusiones originales.
+
+## Ejecución de G0
+
+S00 está **en curso**. El [inventario S00](security/s00-inventory.md) separa lo observado en kind, lo declarado por el repositorio y lo pendiente de comprobación en Hetzner/GitLab/Cloudflare. El motor S01 está integrado en el árbol local para preflight, deploy, bootstrap y rollback, pero sigue sin publicar ni activar: `postTFM` ya se restringió a Maintainers; el proyecto usa GitLab Free, que no ofrece Protected Environments. El operador acepta la procedencia TOFU de host key/CA como riesgo residual y decide conservar la credencial Kubernetes administrativa actual en CI, aceptando su alcance cluster-admin. Una sola `KUBECONFIG_DATA` y las variables comunes usarán scope `prod/*` para limitar su disponibilidad a los jobs de despliegue. Cada paso se registra con fecha y hora en [`working.md`](../working.md), sección `HISTORY`.
 
 No se añaden funcionalidades comerciales. La aceptación funcional/factual pendiente de v0.0.13 mantiene sus propios criterios. Ni una orden `VALIDATED` ni el cierre de esta auditoría acreditan por sí solos calidad factual o preparación comercial.
 
@@ -22,12 +28,12 @@ Mantener el acceso protegido mientras se ejecuta el plan. Aplicar cambios operat
 
 ## Puntos a ejecutar, de mayor a menor riesgo
 
-Todas las tareas parten **pendientes**. Los roles son responsables propuestos, no personas ya asignadas; el operador debe asignar un titular antes de iniciar cada paquete. Las horas incluyen implementación, pruebas específicas y documentación; son estimaciones, no compromisos.
+S00 ha comenzado con un inventario parcial; los demás paquetes siguen **pendientes**. Los roles son responsables propuestos, no personas ya asignadas; el operador debe asignar un titular antes de iniciar cada paquete. Las horas incluyen implementación, pruebas específicas y documentación; son estimaciones, no compromisos.
 
 | Orden / paquete | Prioridad y auditoría | Trabajo y motor resultante | Dependencias | Responsable propuesto | Horas |
 | --- | --- | --- | --- | --- | --- |
-| S00 | P0 · SEC-13/14 y contexto | Fijar SHA/digests/perfil/render; inventariar flujos, datos, reglas, secretos por entorno y permisos de CI. Comprobar origen IPv4/IPv6, puertos, Cloudflare y LIGHT/OFF. Rotar/contener de inmediato si aparece exposición activa. | Ninguna; lectura sin pipeline inseguro | Operación + seguridad | 6–10 |
-| S01 | P0 · SEC-01 · ISSUE-003/004 | Motor de acceso CI con host key independiente, SSH estricto, CA/nombre K3s válidos y mínimo privilegio. Aplicarlo a preflight, deploy, bootstrap y rollback que accedan al clúster. | S00 | Plataforma/CI | 8–14 |
+| S00 | P0 · SEC-13/14 y contexto · **en curso** | Fijar SHA/digests/perfil/render por entorno; inventariar flujos, datos, reglas, secretos sin revelar valores y permisos de CI. Comprobar en preproducción origen IPv4/IPv6, puertos, Cloudflare y LIGHT/OFF. Rotar/contener de inmediato si aparece exposición activa. | Ninguna; lectura sin pipeline inseguro | Operación + seguridad | 6–10 |
+| S01 | P0 · SEC-01 · ISSUE-003/004 · **integrado localmente; no publicado ni activado** | Motor de acceso CI con host key fijada, SSH estricto, CA/nombre K3s válidos y credenciales separadas por perfil. Conectado a preflight, deploy, bootstrap y rollback. El operador acepta la procedencia TOFU de host key/CA como riesgo residual; no se declara verificación independiente. | S00; dado GitLab Free, ramas protegidas solo para Maintainers, variables protegidas/acotadas a `prod/*` y `prod/<perfil>` y jobs privilegiados explícitos; RBAC mínimo por perfil antes de activar | Plataforma/CI | 8–14 |
 | S02 | P1 · SEC-02/19 | Motor compartido de descarga: resolución ligada a conexión, política de IP/puerto/proxy, TLS/Host/SNI, redirecciones y presupuesto total. Corregir fixture de tests que sustituye el validador real. | S00; despliegue tras S01 | Backend + seguridad | 16–28 |
 | S03 | P1 · SEC-03/16 | Motor de identidad/autorización de servicios con acciones/audiencias/recursos, asociación a organización resuelta en servidor y delegación de usuario/tenant verificables; transporte protegido para canales sensibles. Quitar `admin=True` implícito e identidad administrativa basada solo en cabecera. | S00; coordinación con S04 | Backend + plataforma | 20–36 |
 | S04 | P1 · SEC-04 | Motor declarativo de flujos por perfil; default-deny progresivo de ingreso/salida con DNS, probes, operación y destinos legítimos. Probar enforcement del controlador y denegación desde pod ajeno. | Matriz S00; validar S02/S03 | Plataforma/red | 12–24 |
@@ -85,6 +91,6 @@ Cada resultado registrará identificador de paquete/SEC, entorno, SHA, digest, r
 | S15 | SEC-15/16 restante | Política de cabeceras probada con GUI/OIDC y protección de transporte restante según datos/riesgo | Comprobar exposición en S11/S12; completar política en v0.0.16. Canales de identidad/Admin/Kafka ya incluidos en P1 |
 | S16 | SEC-18 | Gate de activación Blockchain, RPC mínimo y cliente soportado, claves/firmas y recuperación del perfil ON | Permanece OFF. Bloquea cualquier habilitación, incluso antes de v0.0.16; probar localmente en entorno aislado |
 
-No se cuentan estas ampliaciones en las 178–314 h. Se estimarán tras el inventario. AOP específico de origen, service mesh, Cloudflare Tunnel y alta disponibilidad requieren decisión técnica propia; no se imponen para resolver los defectos comprobados. El nodo único mantiene su riesgo de disponibilidad, que deberá aceptarse o corregirse en preparación productiva.
+No se cuentan estas ampliaciones en las 178–314 h. Se estimarán tras el inventario. AOP específico de origen, service mesh, Cloudflare Tunnel y alta disponibilidad requieren decisión técnica propia; no se imponen para resolver los defectos comprobados. El nodo único de preproducción mantiene su riesgo de disponibilidad, que deberá aceptarse o corregirse antes de crear producción.
 
-El [roadmap](docs/next_releases.md) y el [registro de releases](docs/releases.md) sitúan v0.0.13b antes de v0.0.14. ISSUE-003/004 se adelantan desde el objetivo anterior v0.0.16; siguen abiertas hasta su cierre demostrado. Los informes históricos no se reescriben para aparentar que estas medidas ya estaban implantadas.
+El [roadmap](next_releases.md) y el [registro de releases](releases.md) sitúan v0.0.13b antes de v0.0.14. ISSUE-003/004 se adelantan desde el objetivo anterior v0.0.16; siguen abiertas hasta su cierre demostrado. Los informes históricos no se reescriben para aparentar que estas medidas ya estaban implantadas.

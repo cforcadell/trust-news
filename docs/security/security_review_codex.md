@@ -38,7 +38,7 @@ No se ha consultado la configuración activa de Cloudflare, Hetzner, K3s, RBAC, 
 | Estado de v0.0.13 | «Continúa Deploying; sin validación completa» | Rama aún no lista para producción | La guía combina Deploying con despliegue comunicado. Releases/issues actuales indican **desplegada, aceptación pendiente**. No confundir pendiente de aceptación con no desplegada. |
 | «0 críticas confirmadas desde Internet» | Conclusión explícita | Crítica en CI | No son medidas comparables: una cuenta explotación exterior demostrada y la otra impacto de configuración. No se certifica «cero vulnerabilidades» ni se acepta una crítica remota sin prueba. |
 
-La discrepancia más importante de planificación: no resulta coherente abrir v0.0.14 dejando identidad de CI, SSRF, confianza administrativa y cuotas para v0.0.16. La nueva **v0.0.13b** adelanta ese cierre; el [plan de ejecución](../../version.md) es la referencia de prioridades. Las auditorías originales quedan conservadas como fuentes, no como planes vigentes.
+La discrepancia más importante de planificación: no resulta coherente abrir v0.0.14 dejando identidad de CI, SSRF, confianza administrativa y cuotas para v0.0.16. La nueva **v0.0.13b** adelanta ese cierre; el [plan de ejecución](../version.md) es la referencia de prioridades. Las auditorías originales quedan conservadas como fuentes, no como planes vigentes.
 
 ## Registro de hallazgos
 
@@ -220,4 +220,4 @@ Cada evidencia debe asociar SHA, digest de imágenes, perfil/render, instante UT
 
 La revisión identifica debilidades confirmadas y caminos de impacto alto, especialmente CI y la combinación descarga externa/confianza interna/mensajería. El diseño de borde y las pruebas históricas reducen superficie, pero no justifican posponer el cierre de esas rutas hasta v0.0.16. Los problemas de cuotas y baja de clientes añaden una vía de abuso autenticado que ninguna de las dos revisiones había detallado así.
 
-**No hay evidencia suficiente para declarar una vulnerabilidad crítica remota explotada, ni para certificar que no existe.** La recomendación es **NO-GO para abrir la beta mientras falten las puertas P0/P1 de [version.md](../../version.md)**. v0.0.13b permanece planificada; esta entrega aporta auditoría y planning, no implementa las remediaciones ni cambia producción. Los P2 quedan con alcance y disparadores explícitos, especialmente Blockchain OFF y rotación urgente si se encuentra una credencial activa expuesta.
+**No hay evidencia suficiente para declarar una vulnerabilidad crítica remota explotada, ni para certificar que no existe.** La recomendación es **NO-GO para abrir la beta mientras falten las puertas P0/P1 de [version.md](../version.md)**. v0.0.13b permanece planificada; esta entrega aporta auditoría y planning, no implementa las remediaciones ni cambia producción. Los P2 quedan con alcance y disparadores explícitos, especialmente Blockchain OFF y rotación urgente si se encuentra una credencial activa expuesta.

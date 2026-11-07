@@ -6,10 +6,16 @@ stages:
 
 workflow:
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PIPELINE_ACTION == "deploy"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PIPELINE_ACTION == "preflight" && $PROFILE == "apis-frontend-prod"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PIPELINE_ACTION == "preflight" && $PROFILE == "infra-prod"'
     - when: never
 
 variables:
+  PIPELINE_ACTION:
+    value: "deploy"
+    options: ["deploy", "preflight"]
+    description: "deploy construye y permite despliegue manual; preflight solo comprueba acceso y TLS de origen"
   PROFILE:
     value: "apis-frontend-prod"
     options:
@@ -63,6 +69,8 @@ build:
     - hetzner-runner
 
   rules:
+    - if: '$PIPELINE_ACTION == "preflight"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "web"'
       when: manual
     - when: never
@@ -107,6 +115,15 @@ check_phase6_origin_tls:
   extends: .kube_access
   environment:
     name: "$DEPLOY_ENVIRONMENT/$PROFILE"
+    action: verify
+  variables:
+    ORIGIN_TLS_NAMESPACE: "kube-system"
+    ORIGIN_TLS_SERVICE: "traefik"
+    ORIGIN_TLS_PORT: "443"
+    ORIGIN_TLS_SERVER_NAME: "assermetry.com"
+    ORIGIN_TLS_SECRET_NAME: "trustnews-origin-tls"
+    ORIGIN_TLS_CA_URL: "https://developers.cloudflare.com/ssl/static/origin_ca_rsa_root.pem"
+    ORIGIN_TLS_CA_FINGERPRINT: "D3:C7:E8:5C:91:70:7F:C0:A1:2A:BC:5D:88:26:67:47:AA:4F:A8:E7:B1:62:F6:33:FF:B3:C9:D9:89:94:76:20"
 
   rules:
     - if: '$PROFILE == "infra-prod" || $PROFILE == "apis-frontend-prod"'
@@ -115,13 +132,23 @@ check_phase6_origin_tls:
     - !reference [.kube_access, before_script]
 
   script:
-    - echo "Comprobando la referencia del TLSStore antes de desplegar prod-domain"
+    - echo "Comprobando TLSStore y certificado público servido antes de desplegar"
     - |
-      test "$(kubectl get tlsstore default -n kube-system -o jsonpath='{.spec.defaultCertificate.secretName}')" = "trustnews-origin-tls" || {
-        echo "ERROR: TLSStore/default no referencia trustnews-origin-tls"
+      test "$(kubectl get tlsstore default -n "$ORIGIN_TLS_NAMESPACE" -o jsonpath='{.spec.defaultCertificate.secretName}')" = "$ORIGIN_TLS_SECRET_NAME" || {
+        echo "ERROR: TLSStore/default no referencia el Secret configurado"
         exit 1
       }
-      echo "TLSStore/default referencia el Secret esperado; CI no lee el Secret ni su clave privada"
+      origin_ca_file="$DEPLOY_ACCESS_DIR/origin-ca.pem"
+      curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        --connect-timeout 10 --max-time 30 --retry 2 \
+        --output "$origin_ca_file" "$ORIGIN_TLS_CA_URL"
+      bash scripts/ci/verify-served-tls.sh \
+        --namespace "$ORIGIN_TLS_NAMESPACE" \
+        --service "$ORIGIN_TLS_SERVICE" \
+        --port "$ORIGIN_TLS_PORT" \
+        --server-name "$ORIGIN_TLS_SERVER_NAME" \
+        --ca-file "$origin_ca_file" \
+        --ca-fingerprint "$ORIGIN_TLS_CA_FINGERPRINT"
 
 # ---------------------------------------------------------
 # DEPLOY
@@ -139,6 +166,8 @@ deploy:
       optional: true
 
   rules:
+    - if: '$PIPELINE_ACTION == "preflight"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "web"'
       when: manual
     - when: never
@@ -319,12 +348,14 @@ verify_mongodb_alignment:
   extends: .kube_access
   environment:
     name: "$DEPLOY_ENVIRONMENT/$PROFILE"
+    action: verify
   needs:
     - job: deploy
 
   rules:
-    - if: '$PROFILE == "infra-prod"'
+    - if: '$PIPELINE_ACTION == "deploy" && $PROFILE == "infra-prod"'
       when: on_success
+    - when: never
 
   before_script:
     - !reference [.kube_access, before_script]
@@ -347,7 +378,10 @@ rollback:
     name: "$DEPLOY_ENVIRONMENT/$PROFILE"
   needs:
     - deploy
-  when: on_failure
+  rules:
+    - if: '$PIPELINE_ACTION == "deploy"'
+      when: on_failure
+    - when: never
 
   before_script:
     - !reference [.kube_access, before_script]

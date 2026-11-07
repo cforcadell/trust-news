@@ -119,5 +119,12 @@ observed_skip=$(kubectl --kubeconfig "$kubeconfig" config view --minify -o jsonp
   echo "ERROR: kubeconfig does not enforce the configured TLS endpoint" >&2; exit 1;
 }
 
+# Force a verified API handshake before a caller can read Secrets or apply
+# resources. A wrong CA or TLS server name must fail in this access step.
+kubectl --kubeconfig "$kubeconfig" --request-timeout=15s get --raw=/readyz >/dev/null || {
+  echo "ERROR: Kubernetes API handshake failed (CA, TLS name, connectivity or readiness)" >&2
+  exit 1
+}
+
 export KUBECONFIG="$kubeconfig"
 echo "deploy_access=ready context=${DEPLOY_ACCESS_KUBE_CONTEXT} tls_server_name=${DEPLOY_ACCESS_KUBE_TLS_SERVER_NAME}"

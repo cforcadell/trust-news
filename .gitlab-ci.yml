@@ -8,6 +8,9 @@ variables:
   PROFILE:
     value: "apis-frontend-prod"
     description: "Perfil de Skaffold"
+  DEPLOY_ENVIRONMENT:
+    value: "prod"
+    description: "Entorno GitLab asociado al destino de despliegue seleccionado"
   BLOCKCHAIN_ENABLED:
     value: "OFF"
     description: "ON habilita Geth/news-chain y órdenes auditables; OFF deja solo LIGHT"
@@ -108,6 +111,8 @@ check_phase6_origin_tls:
   tags:
     - hetzner-runner
   extends: .kube_access
+  environment:
+    name: "$DEPLOY_ENVIRONMENT"
 
   rules:
     - if: '$PROFILE == "infra-prod" || $PROFILE == "apis-frontend-prod"'
@@ -154,6 +159,8 @@ deploy:
   image: alpine:3.19
   tags:
     - hetzner-runner
+  environment:
+    name: "$DEPLOY_ENVIRONMENT"
   needs:
     - job: build
       optional: true
@@ -337,6 +344,8 @@ bootstrap_mongodb:
   tags:
     - hetzner-runner
   extends: .kube_access
+  environment:
+    name: "$DEPLOY_ENVIRONMENT"
   needs:
     - job: deploy
 
@@ -362,6 +371,8 @@ rollback:
   image: alpine:3.19
   tags:
     - hetzner-runner
+  environment:
+    name: "$DEPLOY_ENVIRONMENT"
   needs:
     - deploy
   when: on_failure

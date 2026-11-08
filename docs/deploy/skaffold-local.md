@@ -233,11 +233,46 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik
 kubectl get ingress -A
 ```
 
-Unfold APIs and frontends:
+When S03 is active and its local client files do not exist yet, first bring up
+Keycloak (`./skaffold dev -p infra`) and reconcile its service clients. This
+writes one ignored `s03-client.env` into each API overlay; Kustomize uses those
+files to generate the `s03-client-*` Secrets during the API deployment. Run the
+reconciliation from the repository root:
+
+```bash
+python3 scripts/security/reconcile_s03_keycloak.py --kind-local --local-overlays
+```
+
+Then deploy APIs and frontends:
 
 ```bash
 ./skaffold dev -p apis-frontend
 ```
+
+If the local S03 setup is active, reapply its TLS Secrets and runtime patches
+after each Skaffold deployment. The local client files remain in each API's
+ignored overlay, are mode `0600`, and are not printed or committed. The local
+Kustomize overlays persistently route Traefik to Gateway over HTTPS on port
+9443. Each API overlay persistently declares its client Secret reference, so
+Skaffold keeps `S03_CLIENT_ID` and `S03_CLIENT_SECRET` mounted. TLS sidecars and
+the remaining runtime settings are applied by the S03 activator:
+
+```bash
+python3 scripts/security/s03_local_pki.py \
+  --output-dir /tmp/s03-kind-pki \
+  --apply-kind
+python3 scripts/security/activate_s03_kind.py --apply-kind --phase infra
+kubectl rollout status deployment/keycloak -n infra
+python3 scripts/security/activate_s03_kind.py --apply-kind --phase apis
+python3 scripts/security/activate_s03_kind.py --apply-kind --phase edge
+```
+
+The Keycloak reconciliation requires Keycloak to be running and its admin
+Secret to be configured in Kind. The generated client files stay under the API
+overlays; the CA and service certificates remain in `/tmp/s03-kind-pki` and
+are reused during ordinary redeploys. The activator checks that the current
+Kubernetes context is `kind-*` and does not target preproduction. See
+[S03 local deployment details](../security/s03-design.md).
 
 Open the full entry:
 

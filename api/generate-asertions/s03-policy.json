@@ -1,0 +1,5 @@
+[
+  {"method":"GET","path":"/admin/config","action":"runtime:read","callers":["assermetry-admin"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"PUT","path":"/admin/config","action":"runtime:write","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"POST","path":"/extraer","action":"assertions:generate","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"system"}
+]

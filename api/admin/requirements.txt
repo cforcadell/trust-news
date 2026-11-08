@@ -4,3 +4,4 @@ motor
 aiokafka
 pydantic
 httpx
+python-jose

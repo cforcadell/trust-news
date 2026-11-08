@@ -14,7 +14,8 @@ from hexbytes import HexBytes
 
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from common.security.engine import configure_route_guard, require_internal_route, sync_internal_headers
 from dotenv import load_dotenv
 from web3 import Web3
 from abc import ABC, abstractmethod
@@ -685,6 +686,9 @@ def resolve_local_sources(payload_v2: AssertionValidationPayloadV2) -> tuple[Lis
     try:
         request_options = {"timeout": SOURCE_ROUTER_TIMEOUT_SECONDS}
         headers = evaluation_headers_for_payload(payload_v2)
+        headers.update(sync_internal_headers("assermetry-source-router"))
+        if os.getenv("S03_ENABLED", "false").lower() == "true":
+            request_options["verify"] = os.getenv("S03_CA_FILE") or True
         if headers:
             request_options["headers"] = headers
         response = httpx.post(
@@ -751,6 +755,10 @@ def request_evidence_search(request_payload: Dict[str, Any], headers: Dict[str, 
         if headers:
             request_options["headers"] = headers
         try:
+            if os.getenv("S03_ENABLED", "false").lower() == "true":
+                request_options["headers"] = {**(request_options.get("headers") or {}),
+                                              **sync_internal_headers("assermetry-evidence-search")}
+                request_options["verify"] = os.getenv("S03_CA_FILE") or True
             response = httpx.post(
                 f"{EVIDENCE_SEARCH_URL.rstrip('/')}/search/evidence", json=request_payload, **request_options,
             )
@@ -1117,7 +1125,10 @@ else:
 # =========================================================
 # FastAPI app
 # =========================================================
-app = FastAPI(title="Validate Asertions API")
+app = FastAPI(title="Validate Asertions API",
+              docs_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/docs",
+              redoc_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/redoc",
+              openapi_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/openapi.json")
 
 # =========================================================
 # Funciones internas
@@ -1354,12 +1365,12 @@ def desregistrar_validador_blockchain() -> Tuple[Optional[str], Optional[Dict[st
 # =========================================================
 # Endpoints HTTP
 # =========================================================
-@app.post("/verificar")
+@app.post("/verificar", dependencies=[Depends(require_internal_route)])
 def endpoint_verificar(body: VerifyInputModel):
     resultado = verificar_asercion(body.text, body.context)
     return {"verificación": resultado}
 
-@app.get("/tx/status/{tx_hash}")
+@app.get("/tx/status/{tx_hash}", dependencies=[Depends(require_internal_route)])
 async def endpoint_tx_status(tx_hash: str):
     if not BLOCKCHAIN_ENABLED:
         raise HTTPException(status_code=503, detail="BLOCKCHAIN_UNAVAILABLE")
@@ -1368,7 +1379,7 @@ async def endpoint_tx_status(tx_hash: str):
         return {"status": "pending", "result": False, "tx_hash": tx_hash}
     return {"status": "mined" if receipt.status == 1 else "failed", "tx_hash": tx_hash, "blockNumber": receipt.blockNumber}
 
-@app.post("/registrar_validador")
+@app.post("/registrar_validador", dependencies=[Depends(require_internal_route)])
 # ✅ Usando ValidatorRegistrationInput
 async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
     """Registra validador (usa VALIDATOR_CATEGORIES si no se pasan). Espera minado."""
@@ -1387,7 +1398,7 @@ async def endpoint_registrar_validador(input: ValidatorRegistrationInput):
         logger.exception(f"endpoint_registrar_validador error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/desregistrar_validador")
+@app.post("/desregistrar_validador", dependencies=[Depends(require_internal_route)])
 # ✅ Usando ValidatorRegistrationInput
 async def endpoint_desregistrar_validador():
     """Desregistra validador. Espera minado."""
@@ -1410,7 +1421,7 @@ async def endpoint_desregistrar_validador():
         logger.exception(f"endpoint_desregistrar_validador error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"])
+@app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"], dependencies=[Depends(require_internal_route)])
 def get_admin_config():
     """Consulta la configuración actual del validador AI y sus categorías."""
     return normalize_admin_config_response()
@@ -1430,7 +1441,7 @@ async def health():
         "categories": VALIDATOR_CATEGORIES,
     }
 
-@app.put("/admin/config", tags=["Admin"])
+@app.put("/admin/config", tags=["Admin"], dependencies=[Depends(require_internal_route)])
 async def update_admin_config(config: AdminConfigUpdate):
     """
     Modifica la configuración runtime del validador.
@@ -1709,3 +1720,7 @@ async def startup_event():
             logger.error("Registro de validador en startup falló.")
     except Exception as e:
         logger.exception(f"Error en startup registrar validador: {e}")
+
+
+if os.getenv("S03_ENABLED", "false").lower() == "true":
+    configure_route_guard(app, os.getenv("S03_POLICY_FILE", "/app/common/security/runtime-policy.json"))

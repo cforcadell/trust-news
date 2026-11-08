@@ -1,0 +1,8 @@
+[
+  {"method":"GET","path":"/admin/config","action":"runtime:read","callers":["assermetry-admin"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"PUT","path":"/admin/config","action":"runtime:write","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"POST","path":"/verificar","action":"validation:run","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/tx/status/{tx_hash}","action":"blockchain:status:read","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"POST","path":"/registrar_validador","action":"validators:register","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"POST","path":"/desregistrar_validador","action":"validators:unregister","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"}
+]

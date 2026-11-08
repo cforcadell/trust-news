@@ -14,7 +14,7 @@ import lxml.html
 from bs4 import BeautifulSoup
 from typing import Any, Dict, List, Optional, Tuple
 from common.utils.hash_utils import hash_text_to_multihash,hash_text_to_hash
-from fastapi import FastAPI, HTTPException, Query,APIRouter
+from fastapi import FastAPI, HTTPException, Query,APIRouter, Request
 from pydantic import ValidationError
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -75,6 +75,7 @@ from common.utils.scoring import (
 from common.utils.validator_registry import light_validators_for_category
 from common.utils.mongo import build_mongo_uri_from_env
 from common.utils.logging_utils import configure_single_line_json_logging
+from common.security.engine import AuthenticatedCall, InternalSecurity, USER_TOKEN_HEADER, settings_from_env
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     EnrichedAssertion,
@@ -140,7 +141,9 @@ IMPORT_URL_USER_AGENT = os.getenv("IMPORT_URL_USER_AGENT", "Mozilla/5.0 (compati
 # =========================================================
 # App & globals
 # =========================================================
-app = FastAPI(title="Fake News Orchestrator (Typed)")
+S03_ENABLED = os.getenv("S03_ENABLED", "false").lower() == "true"
+app = FastAPI(title="Fake News Orchestrator (Typed)", docs_url=None if S03_ENABLED else "/docs",
+              redoc_url=None if S03_ENABLED else "/redoc", openapi_url=None if S03_ENABLED else "/openapi.json")
 producer: Optional[AIOKafkaProducer] = None
 consumer: Optional[AIOKafkaConsumer] = None
 mongo_client: Optional[AsyncIOMotorClient] = None
@@ -155,6 +158,42 @@ validations_collection = None
 config_collection = None
 validator_registry_collection = None
 validator_type_weights = default_validator_type_weights()
+
+
+async def s03_owner_check(request: Request, call: AuthenticatedCall) -> bool:
+    """Resolve membership and owner from Mongo rather than forwarded identity."""
+    if db is None or not call.user_sub or not call.user_issuer:
+        return False
+    global_read_actions = {"orders:read", "orders:list", "events:read", "orders:consistency:read"}
+    if request.query_params.get("admin", "false").lower() == "true" and call.action in global_read_actions and "trust-read-all" in call.user_roles:
+        return True
+    if request.query_params.get("admin", "false").lower() == "true":
+        return False
+    memberships = await db["s03_memberships"].find(
+        {"issuer": call.user_issuer, "subject": call.user_sub, "active": True},
+        {"org_id": 1, "legacy_client_ids": 1},
+    ).to_list(length=100)
+    org_ids = {row.get("org_id") for row in memberships if row.get("org_id")}
+    client_ids = {value for row in memberships for value in row.get("legacy_client_ids", []) if isinstance(value, str)}
+    if not org_ids:
+        return False
+    requested_client = request.query_params.get("client_id")
+    if requested_client and requested_client not in client_ids:
+        return False
+    order_id = request.path_params.get("order_id")
+    if order_id:
+        order = await orders_collection.find_one({"order_id": order_id}, {"org_id": 1, "client_id": 1})
+        if not order:
+            return False
+        return (order.get("org_id") in org_ids if order.get("org_id") else order.get("client_id") in client_ids)
+    if call.action == "orders:search":
+        request.state.s03_org_ids = org_ids
+        request.state.s03_client_ids = client_ids
+        return True
+    if not requested_client or requested_client not in client_ids:
+        return False
+    request.state.s03_org_id = next((row["org_id"] for row in memberships if requested_client in row.get("legacy_client_ids", [])), None)
+    return request.state.s03_org_id is not None
 
 
 
@@ -802,12 +841,14 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
 # =========================================================
 # Función auxiliar para consultar cuotas
 # =========================================================
-async def fetch_client_quotas(client_id: str) -> dict:
-    return await fetch_admin_client_quotas(ADMIN_URL, client_id)
+async def fetch_client_quotas(client_id: str, *, order_id: str | None = None, user_token: str | None = None) -> dict:
+    return await fetch_admin_client_quotas(ADMIN_URL, client_id, order_id=order_id, user_token=user_token)
 
 
-async def update_client_consumed(client_id: str, field: str, new_value: int):
-    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value)
+async def update_client_consumed(client_id: str, field: str, new_value: int, *, order_id: str | None = None,
+                                 user_token: str | None = None):
+    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value,
+                                       order_id=order_id, user_token=user_token)
 
 # ===========================
 # manejo blockchain
@@ -944,7 +985,7 @@ async def process_kafka_message(data: dict):
             client_id = doc.get("client_id")
             if client_id:
                 try:
-                    quotas = await fetch_client_quotas(client_id)
+                    quotas = await fetch_client_quotas(client_id, order_id=order_id)
                     cons_news = quotas.get("consumed", {}).get("news_generation", 0)
                     lim_news = quotas.get("limits", {}).get("news_generation", 0)
                     
@@ -961,7 +1002,7 @@ async def process_kafka_message(data: dict):
                             "assertions": assertions_list
                         })
                         return # Finalizamos aquí.
-                    await update_client_consumed(client_id, "news_generation", cons_news + 1)
+                    await update_client_consumed(client_id, "news_generation", cons_news + 1, order_id=order_id)
                     logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
                     
                 except Exception as e:
@@ -1408,10 +1449,10 @@ async def process_kafka_message(data: dict):
                 client_id = doc.get("client_id")
                 if client_id:
                     try:
-                        quotas = await fetch_client_quotas(client_id)
+                        quotas = await fetch_client_quotas(client_id, order_id=order_id)
                         cons_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
                         
-                        await update_client_consumed(client_id, "blockchain_validation", cons_val + 1)
+                        await update_client_consumed(client_id, "blockchain_validation", cons_val + 1, order_id=order_id)
                         logger.info(f"[{order_id}] 💰 Cuota blockchain_validation incrementada a {cons_val + 1} para {client_id}")
                     except Exception as e:
                         logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
@@ -1928,10 +1969,10 @@ def normalize_api_timestamp(value: Any) -> str:
 
 
 @app.post("/publishNew", status_code=202)
-async def publish_new(req: PublishRequest, client_id: str):
+async def publish_new(req: PublishRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
     # 1. Comprobación de cuota "news_generation"
-    quotas = await fetch_client_quotas(client_id)
+    quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
     limits_news = quotas.get("limits", {}).get("news_generation", 0)
     
@@ -1947,6 +1988,7 @@ async def publish_new(req: PublishRequest, client_id: str):
         "order_id": order_id,
         "text": req.text,
         "client_id": client_id, # 🔑 Guardar el client_id para luego
+        **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
         "status": "CREATED",
         "validation_mode": validation_mode.value,
         "source_url": req.source_url,
@@ -1980,10 +2022,10 @@ async def publish_new(req: PublishRequest, client_id: str):
     return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED", "validation_mode": normalize_validation_mode(req.validation_mode).value}
 
 @app.post("/publishWithAssertions", status_code=202)
-async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
+async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
     # 1. Comprobación de cuota "blockchain_validation"
-    quotas = await fetch_client_quotas(client_id)
+    quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
     limits_val = quotas.get("limits", {}).get("blockchain_validation", 0)
     cons_news = quotas.get("consumed", {}).get("news_generation", 0)
@@ -1999,7 +2041,8 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
     
     order_id = str(uuid.uuid4())   
 
-    await update_client_consumed(client_id, "news_generation", cons_news + 1)
+    await update_client_consumed(client_id, "news_generation", cons_news + 1,
+                                 user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
     
     order_doc = {
@@ -2007,6 +2050,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         "text": req.text,
         "assertions": [a.dict() for a in req.assertions],
         "client_id": client_id, # 🔑
+        **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
         "status": "ASSERTIONS_REQUESTED",
         "validation_mode": validation_mode.value,
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -2033,7 +2077,8 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
             }
         )
 
-        await update_client_consumed(client_id, "news_generation", cons_news - 1)
+        await update_client_consumed(client_id, "news_generation", cons_news - 1,
+                                     user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
         logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
 
         await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
@@ -2049,7 +2094,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
 async def get_order(
     order_id: str, 
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     order = await orders_collection.find_one({"order_id": order_id})
     if not order:
@@ -2081,7 +2126,7 @@ async def get_order(
 async def get_news_events(
     order_id: str, 
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     # Validar primero la propiedad de la orden si no es administrador
     if not admin:
@@ -2107,7 +2152,7 @@ async def get_news_events(
 @app.get("/news")
 async def list_news(
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     # Si es admin no filtramos por client_id, si no lo es, añadimos el filtro a la query
     query = {} if admin else {"client_id": client_id}
@@ -2238,7 +2283,7 @@ async def get_validator_with_validations_cache(
 
 
 @app.post("/find-order-by-text")
-async def find_order_by_text(request: PublishRequest):
+async def find_order_by_text(request: PublishRequest, http_request: Request):
     global orders_collection
     try:
         if not request.text:
@@ -2249,8 +2294,14 @@ async def find_order_by_text(request: PublishRequest):
 
         logger.info(f"🧮 Buscando órdenes con hash_text={digest_hex}")
 
+        owner_filter = {}
+        if S03_ENABLED:
+            owner_filter = {"$or": [
+                {"org_id": {"$in": list(http_request.state.s03_org_ids)}},
+                {"org_id": {"$exists": False}, "client_id": {"$in": list(http_request.state.s03_client_ids)}},
+            ]}
         cursor = orders_collection.find(
-            {"hash_text": digest_hex},
+            {"hash_text": digest_hex, **owner_filter},
             {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1}
         )
         docs = await cursor.to_list(length=1000)
@@ -2386,7 +2437,7 @@ def extract_text_from_url(request: ExtractTextRequest):
 async def check_order_consistency(
     order_id: str,
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     # 1. Recuperar la orden para validación
     order = await orders_collection.find_one({"order_id": order_id})
@@ -2466,6 +2517,8 @@ async def startup_event():
         await validations_collection.create_index([("idValidator", 1)])
         await validations_collection.create_index([("idValidator", 1), ("order_id", 1)])
         await validations_collection.create_index([("order_id", 1), ("idAssertion", 1), ("idValidator", 1)], unique=True)
+        if S03_ENABLED:
+            await db["s03_memberships"].create_index([("issuer", 1), ("subject", 1), ("org_id", 1)], unique=True)
         logger.info("MongoDB indexes for events and validations ensured")
     except Exception as e:
         logger.warning(f"Could not create indexes: {e}")
@@ -2498,3 +2551,13 @@ async def shutdown_event():
     if mongo_client:
         mongo_client.close()
     logger.info("Shutdown complete")
+
+
+if S03_ENABLED:
+    _s03 = settings_from_env()
+    InternalSecurity(
+        app, audience=_s03["S03_AUDIENCE"], issuer=_s03["KEYCLOAK_ISSUER_URL"],
+        jwks_url=_s03["KEYCLOAK_JWKS_URL"], policy_file=_s03["S03_POLICY_FILE"],
+        user_clients=frozenset(_s03["S03_USER_CLIENTS"].split(",")),
+        ca_file=_s03["S03_CA_FILE"] or None, owner_check=s03_owner_check,
+    ).install()

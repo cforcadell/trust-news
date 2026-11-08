@@ -1,0 +1,13 @@
+[
+  {"method":"POST","path":"/publishNew","action":"orders:create","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"},
+  {"method":"POST","path":"/publishWithAssertions","action":"orders:create","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"},
+  {"method":"GET","path":"/orders/{order_id}","action":"orders:read","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"},
+  {"method":"GET","path":"/news/{order_id}/events","action":"events:read","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"},
+  {"method":"GET","path":"/news","action":"orders:list","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"},
+  {"method":"GET","path":"/validators/cache","action":"validators:list","callers":["assermetry-gateway","assermetry-admin"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"GET","path":"/validators/cache/{validator_hash}","action":"validators:read","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"system"},
+  {"method":"GET","path":"/validators/cache/{validator_hash}/validations","action":"validators:validations:read","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"},
+  {"method":"POST","path":"/find-order-by-text","action":"orders:search","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"},
+  {"method":"POST","path":"/extract_text_from_url","action":"news:import","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"system"},
+  {"method":"GET","path":"/checkOrderConsistency/{order_id}","action":"orders:consistency:read","callers":["assermetry-gateway"],"user_required":true,"roles":[],"scope":"own"}
+]

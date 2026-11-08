@@ -213,7 +213,67 @@ apply_tls_secret kube-system trustnews-origin-tls \
 
 `MONGO_APP_USER` and `MONGO_APP_PWD` must match the user created by MongoDB's bootstrap. After lifting MongoDB the [`k8s-common.md`](k8s-common.md#7-mongodb-bootstrap)'s idepotent procedure is executed.
 
-### 3.3 Pull secret
+### 3.3 Credenciales de clientes de servicio S03
+
+Al preparar la activación S03 en preproducción o producción, reconciliar a mano
+el realm `TrustNews` contra el Keycloak del entorno. El reconciliador conserva
+las identidades ya existentes y escribe un `.env` por client en un directorio
+privado fuera del repositorio; nunca muestra los valores. El endpoint debe ser
+un port-forward al Keycloak del entorno y las credenciales administrativas se
+introducen por el entorno de la sesión, no como argumentos del proceso:
+
+```bash
+umask 077
+mkdir -p "$HOME/trust-news-secrets/s03-clients"
+(
+  read -r -p 'Keycloak admin user: ' KC_ADMIN_USER
+  read -r -s -p 'Keycloak admin password: ' KC_ADMIN_PASSWORD
+  printf '\n'
+  export KC_ADMIN_USER KC_ADMIN_PASSWORD
+  export KC_ADMIN_URL='http://127.0.0.1:18080/auth'
+  python3 scripts/security/reconcile_s03_keycloak.py \
+    --output-dir "$HOME/trust-news-secrets/s03-clients"
+)
+```
+
+Con el port-forward activo, crear/actualizar un Secret por client a partir de
+los ficheros generados. Esta operación no imprime el contenido de los Secrets:
+
+```bash
+set -o pipefail
+while IFS=$'\t' read -r namespace client secret; do
+  kubectl create secret generic "$secret" \
+    --namespace "$namespace" \
+    --from-env-file="$HOME/trust-news-secrets/s03-clients/${client}.env" \
+    --dry-run=client -o yaml | kubectl apply -f -
+done < <(python3 - <<'PY'
+import json
+with open('docs/security/s03-local-services.json', encoding='utf-8') as source:
+    services = json.load(source)
+clients = {}
+for service in services:
+    client = service.get('client')
+    namespace = service.get('namespace')
+    if client and namespace:
+        secret = service.get('secret_name', f's03-client-{client}')
+        clients[(namespace, client, secret)] = True
+for namespace, client, secret in sorted(clients):
+    print(f'{namespace}\t{client}\t{secret}')
+PY
+)
+
+bash scripts/security/check_s03_configured_secrets.sh
+```
+
+El preflight comprueba, a partir del inventario de servicios, que cada Secret
+está presente, que `S03_CLIENT_ID` coincide y que `S03_CLIENT_SECRET` no está
+vacío ni contiene un placeholder. No verifica la autenticación remota ni
+habilita S03: los overlays de despliegue deben consumir esos Secrets cuando se
+programe la activación en preproducción. Mantener los `.env` privados hasta
+completar esa operación y retirarlos después de acuerdo con el procedimiento
+operativo del host.
+
+### 3.4 Pull secret
 
 ```bash
 for ns in apis infra frontend blockchain; do

@@ -8,7 +8,8 @@ import uuid
 from typing import Any, List, Optional
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Request
+from common.security.engine import USER_TOKEN_HEADER, configure_route_guard, require_internal_route
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 from common.utils.logging_utils import (
@@ -151,7 +152,10 @@ RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))
 # ============================================================
 # FastAPI
 # ============================================================
-app = FastAPI(title="Generate Assertions Worker (Typed)")
+app = FastAPI(title="Generate Assertions Worker (Typed)",
+              docs_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/docs",
+              redoc_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/redoc",
+              openapi_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/openapi.json")
 
 # ============================================================
 # Admin config
@@ -585,22 +589,22 @@ async def consume_and_process():
 # ============================================================
 
 
-async def fetch_client_quotas(client_id: str) -> dict:
-    return await fetch_admin_client_quotas(ADMIN_URL, client_id)
+async def fetch_client_quotas(client_id: str, user_token: str | None = None) -> dict:
+    return await fetch_admin_client_quotas(ADMIN_URL, client_id, user_token=user_token)
 
-async def update_client_consumed(client_id: str, field: str, new_value: int):
-    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value)
+async def update_client_consumed(client_id: str, field: str, new_value: int, user_token: str | None = None):
+    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value, user_token=user_token)
 
 # ============================================================
 # Endpoint HTTP 
 # ============================================================
-@app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"])
+@app.get("/admin/config", response_model=AdminConfigResponse, tags=["Admin"], dependencies=[Depends(require_internal_route)])
 def get_admin_config():
     """Consulta la configuracion runtime del generador de aserciones."""
     return normalize_admin_config_response()
 
 
-@app.put("/admin/config", tags=["Admin"])
+@app.put("/admin/config", tags=["Admin"], dependencies=[Depends(require_internal_route)])
 async def update_admin_config(config: AdminConfigUpdate):
     """Hot-update non-secret LLM selection; credentials remain deployment-only."""
     global AI_PROVIDER, TEMPERATURE, LLM_CONFIG_VERSION
@@ -646,9 +650,10 @@ async def update_admin_config(config: AdminConfigUpdate):
     }
 
 
-@app.post("/extraer")
+@app.post("/extraer", dependencies=[Depends(require_internal_route)])
 async def extraer_texto(
     body: TextoEntrada,
+    request: Request,
     client_id: str = Query(..., description="ID del cliente para cuotas") 
 ):
     endpoint_started = time.monotonic()
@@ -656,7 +661,7 @@ async def extraer_texto(
     # 1️⃣ Control de Cuotas PRE-Extracción
     # ================================================================
     try:
-        quotas = await fetch_client_quotas(client_id)
+        quotas = await fetch_client_quotas(client_id, request.headers.get(USER_TOKEN_HEADER) if os.getenv("S03_ENABLED", "false").lower() == "true" else None)
         cons_news = quotas.get("consumed", {}).get("news_generation", 0)
         lim_news = quotas.get("limits", {}).get("news_generation", 0)
 
@@ -686,7 +691,8 @@ async def extraer_texto(
 
     try:
         quota_update_started = time.monotonic()
-        await update_client_consumed(client_id, "news_generation", cons_news + 1)
+        await update_client_consumed(client_id, "news_generation", cons_news + 1,
+                                     request.headers.get(USER_TOKEN_HEADER) if os.getenv("S03_ENABLED", "false").lower() == "true" else None)
         logger.info(f"💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id} (Endpoint: /extraer)")
     except Exception as e:
         logger.error(f"❌ Error incrementando cuota en /extraer para {client_id}: {e}")
@@ -737,6 +743,10 @@ async def shutdown_event():
 # ============================================================
 # Entrypoint (útil si arrancas este worker directamente)
 # ============================================================
+if os.getenv("S03_ENABLED", "false").lower() == "true":
+    configure_route_guard(app, os.getenv("S03_POLICY_FILE", "/app/generate-asertions/s03-policy.json"))
+
+
 if __name__ == "__main__":
     import uvicorn
     logger.info("Iniciando worker (uvicorn) - FastAPI + Kafka consumer")

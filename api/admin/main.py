@@ -22,6 +22,7 @@ from common.models.async_models import ValidatorType, default_validator_type_wei
 from common.models.quota_models import ClientCreate, ClientResponse, ClientStatus, ClientUpdate, QuotaDetail
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.utils.mongo import build_mongo_uri_from_env
+from common.security.engine import InternalSecurity, USER_TOKEN_HEADER, audience_for_url, internal_headers, protected_url, settings_from_env
 
 log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
 configure_single_line_json_logging(log_level)
@@ -159,7 +160,9 @@ NEWS_HANDLER_URL = os.getenv("NEWS_HANDLER_URL", "http://news-handler.apis.svc.c
 # =========================================================
 # App & Globales
 # =========================================================
-app = FastAPI(title="Gateway - Quota Manager")
+S03_ENABLED = os.getenv("S03_ENABLED", "false").lower() == "true"
+app = FastAPI(title="Gateway - Quota Manager", docs_url=None if S03_ENABLED else "/docs",
+              redoc_url=None if S03_ENABLED else "/redoc", openapi_url=None if S03_ENABLED else "/openapi.json")
 mongo_client = None
 db = None
 orders_collection = None
@@ -899,8 +902,10 @@ def normalized_llm_config(payload: dict[str, Any]) -> dict[str, Any]:
 
 async def service_config(url: str) -> dict[str, Any]:
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{url.rstrip('/')}/admin/config")
+        url = protected_url(url) if S03_ENABLED else url
+        headers = await internal_headers(audience_for_url(url)) if S03_ENABLED else {}
+        async with httpx.AsyncClient(timeout=10.0, verify=os.getenv("S03_CA_FILE") or True) as client:
+            response = await client.get(f"{url.rstrip('/')}/admin/config", headers=headers)
         response.raise_for_status()
         data = response.json()
     except Exception as exc:
@@ -908,15 +913,17 @@ async def service_config(url: str) -> dict[str, Any]:
     return normalized_llm_config(data)
 
 
-async def apply_service_config(url: str, desired: dict[str, Any]) -> dict[str, Any]:
+async def apply_service_config(url: str, desired: dict[str, Any], user_token: str | None = None) -> dict[str, Any]:
     safe_payload = {
         key: desired[key]
         for key in ("provider", "model", "temperature", "config_version")
         if key in desired and desired[key] is not None
     }
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.put(f"{url.rstrip('/')}/admin/config", json=safe_payload)
+        url = protected_url(url) if S03_ENABLED else url
+        headers = await internal_headers(audience_for_url(url), user_token) if S03_ENABLED else {}
+        async with httpx.AsyncClient(timeout=30.0, verify=os.getenv("S03_CA_FILE") or True) as client:
+            response = await client.put(f"{url.rstrip('/')}/admin/config", json=safe_payload, headers=headers)
         response.raise_for_status()
         data = response.json()
     except Exception as exc:
@@ -974,8 +981,9 @@ async def discover_validators() -> list[dict[str, Any]]:
     registered validator configuration and is subsequently checked server-side.
     """
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(f"{NEWS_HANDLER_URL.rstrip('/')}/validators/cache", params={"recover_ipfs": "true"})
+        headers = await internal_headers("assermetry-news-handler")
+        async with httpx.AsyncClient(timeout=20.0, verify=os.getenv("S03_CA_FILE") or True) as client:
+            response = await client.get(f"{NEWS_HANDLER_URL.rstrip('/')}/validators/cache", params={"recover_ipfs": "true"}, headers=headers)
         response.raise_for_status()
         rows = response.json().get("validators") or []
     except Exception as exc:
@@ -1033,6 +1041,7 @@ async def persist_and_apply_llm_config(
     target_url: str,
     payload: LLMRuntimeUpdate,
     updated_by: str,
+    user_token: str | None = None,
     validator_type: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     current = await service_config(target_url)
@@ -1058,7 +1067,8 @@ async def persist_and_apply_llm_config(
         upsert=True,
     )
     try:
-        actual = await apply_service_config(target_url, desired)
+        actual = (await apply_service_config(target_url, desired, user_token)
+                  if S03_ENABLED else await apply_service_config(target_url, desired))
         if not config_matches(desired, actual):
             raise RuntimeError("desired_actual_mismatch")
     except Exception as exc:
@@ -1116,10 +1126,11 @@ async def update_llm_component(component: str, payload: LLMRuntimeUpdate, reques
         raise HTTPException(status_code=404, detail="Componente LLM desconocido")
     if not payload.model_dump(exclude_none=True):
         raise HTTPException(status_code=400, detail="Indica al menos un campo LLM a actualizar")
-    updated_by = request.headers.get("x-assermetry-admin-user", "gateway-admin")
+    updated_by = request.state.s03_call.user_sub if S03_ENABLED else request.headers.get("x-assermetry-admin-user", "gateway-admin")
     return await persist_and_apply_llm_config(
         config_id=llm_config_id(component), component=component, target_url=target,
         payload=payload, updated_by=updated_by,
+        user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None,
     )
 
 
@@ -1151,10 +1162,11 @@ async def update_llm_validator(validator_id: str, payload: LLMRuntimeUpdate, req
     validator = await require_discovered_validator(validator_id)
     if not payload.model_dump(exclude_none=True):
         raise HTTPException(status_code=400, detail="Indica al menos un campo LLM a actualizar")
-    updated_by = request.headers.get("x-assermetry-admin-user", "gateway-admin")
+    updated_by = request.state.s03_call.user_sub if S03_ENABLED else request.headers.get("x-assermetry-admin-user", "gateway-admin")
     result = await persist_and_apply_llm_config(
         config_id=validator_config_id(validator["validator_id"]), component=f"validator:{validator['validator_id']}",
         target_url=validator["service_url"], payload=payload, updated_by=updated_by,
+        user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None,
         validator_type=validator["validator_type"],
     )
     return {**result, "validator_id": validator["validator_id"], "validator_type": validator["validator_type"],
@@ -1316,6 +1328,50 @@ async def get_client_quotas(client_id: str):
     return client_doc
 
 
+class InternalQuotaConsumptionUpdate(BaseModel):
+    field: str
+    value: int = Field(ge=0)
+
+
+async def require_quota_resource(client_id: str, request: Request, order_id: str | None) -> None:
+    if not S03_ENABLED:
+        return
+    call = request.state.s03_call
+    if call.user_sub and call.user_issuer:
+        member = await db["s03_memberships"].find_one({
+            "issuer": call.user_issuer, "subject": call.user_sub, "active": True,
+            "legacy_client_ids": client_id,
+        }, {"_id": 1})
+        if member:
+            return
+    if order_id:
+        order = await orders_collection.find_one({"order_id": order_id, "client_id": client_id}, {"_id": 1})
+        if order:
+            return
+    raise HTTPException(status_code=403, detail="Quota resource denied")
+
+
+@app.get("/internal/quotas/{client_id}")
+async def get_internal_quotas(client_id: str, request: Request, order_id: str | None = None):
+    await require_quota_resource(client_id, request, order_id)
+    document = await quotas_collection.find_one({"client_id": client_id}, {"_id": 0, "client_id": 1, "limits": 1, "consumed": 1, "status": 1})
+    if not document:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return document
+
+
+@app.patch("/internal/quotas/{client_id}/consumed")
+async def update_internal_consumption(client_id: str, payload: InternalQuotaConsumptionUpdate, request: Request,
+                                      order_id: str | None = None):
+    await require_quota_resource(client_id, request, order_id)
+    if payload.field not in QuotaDetail.model_fields:
+        raise HTTPException(status_code=422, detail="Tipo de cuota desconocido")
+    result = await quotas_collection.update_one({"client_id": client_id}, {"$set": {f"consumed.{payload.field}": payload.value}})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return {"status": "success"}
+
+
 @app.patch("/clients/{client_id}", response_model=dict)
 async def update_client(client_id: str, update_data: ClientUpdate):
     update_dict = update_data.model_dump(exclude_unset=True)
@@ -1405,3 +1461,13 @@ async def shutdown_event():
     if mongo_client:
         mongo_client.close()
     logger.info("🛑 Gateway Quota Manager shut down.")
+
+
+if S03_ENABLED:
+    _s03 = settings_from_env()
+    InternalSecurity(
+        app, audience=_s03["S03_AUDIENCE"], issuer=_s03["KEYCLOAK_ISSUER_URL"],
+        jwks_url=_s03["KEYCLOAK_JWKS_URL"], policy_file=_s03["S03_POLICY_FILE"],
+        user_clients=frozenset(_s03["S03_USER_CLIENTS"].split(",")),
+        ca_file=_s03["S03_CA_FILE"] or None,
+    ).install()

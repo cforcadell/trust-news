@@ -209,6 +209,7 @@ profiles:
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
           - k8s/apis/validate-asertions/overlays/local/worker-3
+          - k8s/apis/validate-asertions/overlays/local/s03-credentials
           - k8s/apis/evidence-search/overlays/local
           - k8s/apis/source-router/overlays/local
           - k8s/apis/news-handler/overlays/local

@@ -26,6 +26,12 @@ generatorOptions:
   disableNameSuffixHash: true
 
 patches:
+  - path: patch-s03-client-secret.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: validate-worker
   - target:
       kind: Deployment
       name: validate-worker

@@ -112,6 +112,26 @@ async def test_streaming_fetch_preserves_small_text_document(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_downloaded_gzip_body_is_not_decoded_twice(monkeypatch):
+    from app import document_fetcher
+
+    body = ("Texto oficial descargado. " * 12).encode("utf-8")
+
+    async def already_decoded(url, policy, headers=None):
+        return SimpleNamespace(
+            url=url, status=200,
+            headers={"content-type": "text/plain; charset=utf-8",
+                     "content-encoding": "gzip", "content-length": "23"},
+            body=body, attempted_urls=(url,), redirects=(),
+        )
+
+    monkeypatch.setattr(document_fetcher, "public_fetch", already_decoded)
+    result = await document_fetcher.fetch_main_text("https://example.test/report")
+    assert result.status == "ok"
+    assert result.text.startswith("Texto oficial descargado.")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("encoding,compress", [("gzip", gzip.compress), ("deflate", zlib.compress)])
 async def test_streaming_fetch_decodes_compressed_document_after_redirect(monkeypatch, encoding, compress):
     from app import document_fetcher
@@ -211,15 +231,45 @@ def no_real_fetch_retry_delay(monkeypatch):
     monkeypatch.setattr(document_fetcher, "FETCH_RETRY_BASE_SECONDS", 0)
     monkeypatch.setattr(document_fetcher, "FETCH_RETRY_JITTER_RATIO", 0)
 
-    async def public_test_destination(_url):
-        return None
-
-    monkeypatch.setattr(document_fetcher, "_validate_fetch_url", public_test_destination)
-
-    async def run_extractor_inline(function, *args):
-        return function(*args)
+    async def run_extractor_inline(function, *args, **kwargs):
+        if function is document_fetcher.socket.getaddrinfo:
+            return [(None, None, None, None, ("93.184.216.34", args[1]))]
+        return function(*args, **kwargs)
 
     monkeypatch.setattr(document_fetcher.asyncio, "to_thread", run_extractor_inline)
+
+    # Legacy extraction tests supply httpx doubles. Keep that seam local to
+    # these tests; the real transport and policy have dedicated tests.
+    async def mocked_public_fetch(url, policy, headers=None):
+        async with document_fetcher.httpx.AsyncClient(
+            follow_redirects=False, timeout=policy.timeout_seconds, headers=headers,
+            trust_env=False,
+        ) as client:
+            attempted = [url]
+            attempts = []
+            try:
+                response, error = await document_fetcher._get_following_validated_redirects(
+                    client, url, attempted, attempts,
+                )
+            except document_fetcher.httpx.TimeoutException:
+                raise document_fetcher.PublicFetchError("TIME_BUDGET") from None
+            except document_fetcher.httpx.ConnectError as exc:
+                code = ("TLS_HOSTNAME_MISMATCH" if "hostname mismatch" in str(exc).lower()
+                        else "NETWORK_ERROR")
+                raise document_fetcher.PublicFetchError(code) from None
+            if error:
+                latest = attempts[-1] if attempts else {}
+                raise document_fetcher.PublicFetchError(
+                    error, status=latest.get("http_status"),
+                    received=latest.get("response_bytes", 0),
+                )
+            return SimpleNamespace(
+                url=str(getattr(response, "url", url)), status=response.status_code,
+                headers=response.headers, body=response.content,
+                attempted_urls=attempted, redirects=attempts,
+            )
+
+    monkeypatch.setattr(document_fetcher, "public_fetch", mocked_public_fetch)
 
 
 @pytest.mark.asyncio
@@ -256,7 +306,7 @@ async def test_redirect_rejects_private_target_before_request(monkeypatch):
         headers = {"location": "http://127.0.0.1/admin"}
 
     class Client:
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             requested.append(url)
             return Response()
 
@@ -283,7 +333,7 @@ async def test_redirect_follows_relative_public_location_and_records_hops(monkey
     monkeypatch.setattr(document_fetcher, "_validate_fetch_url", public_destination)
 
     class Client:
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             if url.endswith("/start"):
                 return SimpleNamespace(status_code=302, headers={"location": "documents/latest"})
             return SimpleNamespace(status_code=200, headers={}, url=url)
@@ -309,7 +359,7 @@ async def test_redirect_rejects_https_downgrade_and_limits_hops(monkeypatch):
     monkeypatch.setattr(document_fetcher, "_validate_fetch_url", public_destination)
 
     class DowngradeClient:
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             return SimpleNamespace(status_code=302, headers={"location": "http://public.example/plain"})
 
     _, error = await document_fetcher._get_following_validated_redirects(
@@ -320,7 +370,7 @@ async def test_redirect_rejects_https_downgrade_and_limits_hops(monkeypatch):
     class LoopingClient:
         hops = 0
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             self.hops += 1
             return SimpleNamespace(status_code=302, headers={"location": f"/hop-{self.hops}"})
 
@@ -427,7 +477,7 @@ async def test_html_article_body_is_extracted_from_same_response_without_retry(m
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             calls.append(url)
             return Response()
 
@@ -484,7 +534,7 @@ async def test_http_202_empty_body_without_retry_after_is_not_retried(monkeypatc
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             calls.append(url)
             return Response()
 
@@ -539,7 +589,7 @@ async def test_retry_after_pending_can_recover_without_exceeding_policy(monkeypa
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             calls.append(url)
             return responses.pop(0)
 
@@ -591,7 +641,7 @@ async def test_rate_limited_response_retries_and_recovers(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             calls.append(url)
             return responses.pop(0)
 
@@ -632,7 +682,7 @@ async def test_access_denied_is_not_retried_on_the_same_url(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             calls.append(url)
             return Response()
 
@@ -665,7 +715,7 @@ async def test_retry_is_skipped_when_its_delay_would_exceed_budget(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             calls.append(url)
             return Response()
 
@@ -857,7 +907,7 @@ async def test_pdf_content_is_extracted_and_non_pdf_behavior_is_unchanged(monkey
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             return Response()
 
     monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
@@ -886,7 +936,7 @@ async def test_document_format_uses_payload_signature_before_content_type(monkey
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             return Response()
 
     monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
@@ -916,12 +966,14 @@ async def test_pdf_extraction_is_offloaded_from_event_loop(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             return Response()
 
     offloaded = []
 
-    async def to_thread(function, *args):
+    async def to_thread(function, *args, **kwargs):
+        if function is document_fetcher.socket.getaddrinfo:
+            return [(None, None, None, None, ("93.184.216.34", args[1]))]
         offloaded.append((function, args))
         return "Texto PDF recuperado"
 
@@ -952,7 +1004,7 @@ async def test_plain_text_payload_is_extractable(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             return Response()
 
     monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
@@ -980,7 +1032,7 @@ async def test_fetch_failure_exposes_stable_stage_code_and_retryability(monkeypa
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             return Response()
 
     monkeypatch.setattr(document_fetcher.httpx, "AsyncClient", lambda **kwargs: Client())
@@ -1014,7 +1066,7 @@ async def test_tls_hostname_mismatch_retries_only_the_verified_www_variant(monke
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             if url == original:
                 raise document_fetcher.httpx.ConnectError(
                     "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch"
@@ -1047,7 +1099,7 @@ async def test_connect_errors_do_not_try_hostname_variants(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             calls.append(url)
             raise document_fetcher.httpx.ConnectError("network unreachable")
 

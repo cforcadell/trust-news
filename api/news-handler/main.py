@@ -6,11 +6,8 @@ import asyncio
 import logging
 import hashlib
 import re
-import ipaddress
-import socket
-from urllib.parse import urljoin, urlparse
-import requests
 import httpx
+from common.utils.public_fetch import FetchError as PublicFetchError, FetchPolicy, fetch_sync as public_fetch_sync
 import time # Añadir import de time
 import lxml.html
 
@@ -2279,36 +2276,6 @@ async def find_order_by_text(request: PublishRequest):
 
 
 
-def _is_public_ip(ip: str) -> bool:
-    try:
-        parsed = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    return parsed.is_global and not (parsed.is_multicast or parsed.is_reserved)
-
-
-def _validate_import_url(raw_url: str) -> str:
-    url = str(raw_url).strip()
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=400, detail="Solo se permiten URLs http o https.")
-    if not parsed.hostname:
-        raise HTTPException(status_code=400, detail="La URL debe incluir un host válido.")
-    if parsed.username or parsed.password:
-        raise HTTPException(status_code=400, detail="No se permiten credenciales embebidas en la URL.")
-
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        resolved = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
-    except socket.gaierror:
-        raise HTTPException(status_code=400, detail="No se pudo resolver el host de la URL.")
-
-    resolved_ips = {item[4][0] for item in resolved}
-    if not resolved_ips or any(not _is_public_ip(ip) for ip in resolved_ips):
-        raise HTTPException(status_code=400, detail="La URL apunta a una red no permitida.")
-    return url
-
-
 def _is_supported_import_content_type(content_type: str) -> bool:
     media_type = (content_type or "").split(";", 1)[0].strip().lower()
     return media_type in {
@@ -2321,89 +2288,38 @@ def _is_supported_import_content_type(content_type: str) -> bool:
     }
 
 
-def _read_limited_response_body(resp: requests.Response) -> str:
-    content_length = resp.headers.get("Content-Length")
-    if content_length:
-        try:
-            if int(content_length) > IMPORT_URL_MAX_BYTES:
-                raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.")
-        except ValueError:
-            pass
-
-    chunks = []
-    total = 0
-    for chunk in resp.iter_content(chunk_size=65536):
-        if not chunk:
-            continue
-        total += len(chunk)
-        if total > IMPORT_URL_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.")
-        chunks.append(chunk)
-
-    body = b"".join(chunks)
-    encoding = resp.encoding or resp.apparent_encoding or "utf-8"
-    return body.decode(encoding, errors="replace")
-
-
 def fetch_public_url_text(raw_url: str) -> Tuple[str, str]:
     headers = {"User-Agent": IMPORT_URL_USER_AGENT, "Accept": "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1"}
-    current_url = _validate_import_url(raw_url)
-
-    with requests.Session() as session:
-        session.trust_env = False
-        for redirect_count in range(IMPORT_URL_MAX_REDIRECTS + 1):
-            last_timeout = None
-            for attempt in range(IMPORT_URL_RETRIES + 1):
-                try:
-                    resp = session.get(
-                        current_url,
-                        timeout=IMPORT_URL_TIMEOUT_SECONDS,
-                        headers=headers,
-                        allow_redirects=False,
-                        stream=True,
-                    )
-                    break
-                except requests.exceptions.Timeout as exc:
-                    last_timeout = exc
-                    if attempt >= IMPORT_URL_RETRIES:
-                        raise
-                    time.sleep(min(0.5 * (attempt + 1), 2.0))
-                    logger.warning(
-                        f"Timeout importing URL; retrying | url={current_url} "
-                        f"attempt={attempt + 1}/{IMPORT_URL_RETRIES + 1} "
-                        f"timeout_seconds={IMPORT_URL_TIMEOUT_SECONDS}"
-                    )
-            else:
-                raise last_timeout
-
-            if resp.is_redirect or resp.is_permanent_redirect:
-                location = resp.headers.get("Location")
-                resp.close()
-                if not location:
-                    raise HTTPException(status_code=502, detail="Redirección sin cabecera Location.")
-                if redirect_count >= IMPORT_URL_MAX_REDIRECTS:
-                    raise HTTPException(status_code=400, detail="Demasiadas redirecciones al acceder a la URL.")
-                current_url = _validate_import_url(urljoin(current_url, location))
-                continue
-
-            if resp.status_code != 200:
-                status_code = resp.status_code if 400 <= resp.status_code < 600 else 502
-                resp.close()
-                raise HTTPException(status_code=status_code, detail="No se pudo acceder a la URL.")
-
-            content_type = resp.headers.get("Content-Type", "")
-            if not _is_supported_import_content_type(content_type):
-                resp.close()
-                raise HTTPException(status_code=415, detail="La URL no devuelve contenido HTML/texto soportado.")
-
-            final_url = _validate_import_url(resp.url or current_url)
-            try:
-                html = _read_limited_response_body(resp)
-            finally:
-                resp.close()
-            return final_url, html
-
-    raise HTTPException(status_code=400, detail="No se pudo completar la descarga de la URL.")
+    try:
+        response = public_fetch_sync(raw_url, FetchPolicy(
+            ports=(80, 443), max_redirects=IMPORT_URL_MAX_REDIRECTS,
+            max_attempts=IMPORT_URL_RETRIES + 1,
+            timeout_seconds=IMPORT_URL_TIMEOUT_SECONDS,
+            connect_timeout_seconds=min(10.0, IMPORT_URL_TIMEOUT_SECONDS),
+            max_bytes=IMPORT_URL_MAX_BYTES,
+            retry_delay_seconds=0.5,
+        ), headers)
+    except PublicFetchError as exc:
+        if exc.code == "TOO_LARGE":
+            raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.") from None
+        if exc.code == "TIME_BUDGET":
+            raise HTTPException(status_code=504, detail="Tiempo de espera agotado al acceder a la URL.") from None
+        if exc.code in {"INVALID_URL", "UNSAFE_TARGET", "UNSAFE_PORT", "REDIRECT_LOOP",
+                        "REDIRECT_LIMIT_EXCEEDED", "REDIRECT_HTTPS_DOWNGRADE"}:
+            raise HTTPException(status_code=400, detail="La URL apunta a un destino no permitido.") from None
+        raise HTTPException(status_code=502, detail="No se pudo acceder a la URL.") from None
+    if response.status != 200:
+        raise HTTPException(status_code=response.status if 400 <= response.status < 600 else 502,
+                            detail="No se pudo acceder a la URL.")
+    content_type = response.headers.get("Content-Type", "")
+    if not _is_supported_import_content_type(content_type):
+        raise HTTPException(status_code=415, detail="La URL no devuelve contenido HTML/texto soportado.")
+    charset = response.headers.get("Content-Type", "").partition("charset=")[2].split(";")[0].strip() or "utf-8"
+    try:
+        html = response.body.decode(charset, errors="replace")
+    except LookupError:
+        html = response.body.decode("utf-8", errors="replace")
+    return response.url, html
 
 
 @app.post(
@@ -2458,14 +2374,6 @@ def extract_text_from_url(request: ExtractTextRequest):
     except HTTPException:
         raise
 
-    except requests.exceptions.Timeout:
-        logger.error(f"Timeout al acceder a URL: {url}")
-        raise HTTPException(status_code=504, detail="Tiempo de espera agotado al acceder a la URL.")
-    
-    except requests.RequestException as e:
-        logger.error(f"Error de conexión accediendo a URL {url}: {e}")
-        raise HTTPException(status_code=502, detail="Error de conexión accediendo a la URL.")
-    
     except ValueError as e:
         logger.warning(f"Error de extracción para {url}: {e}")
         raise HTTPException(status_code=422, detail=str(e))

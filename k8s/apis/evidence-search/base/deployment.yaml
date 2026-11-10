@@ -26,6 +26,10 @@ spec:
             name: search-secret
         - secretRef:
             name: mongodb-app-secret
+        - configMapRef:
+            name: s03-runtime
+        - secretRef:
+            name: s03-client-assermetry-evidence-search
         readinessProbe:
           httpGet:
             path: /health

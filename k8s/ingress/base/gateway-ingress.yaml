@@ -18,4 +18,4 @@ spec:
               service:
                 name: gateway
                 port:
-                  number: 8500
+                  number: 9443

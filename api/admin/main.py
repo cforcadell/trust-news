@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any
 # Importación de Modelos de Mensajes
 # (Asegúrate de que la ruta 'common.async_models' es correcta en tu entorno)
 # =========================================================
-from common.utils.kafka_contracts import ACTION_TO_QUOTA_MODEL, BILLABLE_SERVICES, DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_RESPONSES
+from common.utils.kafka_contracts import ACTION_TO_QUOTA_MODEL, BILLABLE_SERVICES, DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs
 from common.models.async_models import ValidatorType, default_validator_type_weights
 from common.models.quota_models import ClientCreate, ClientResponse, ClientStatus, ClientUpdate, QuotaDetail
 from common.utils.logging_utils import configure_single_line_json_logging
@@ -838,7 +838,8 @@ async def consume_responses_for_quotas():
         TOPIC_RESPONSES,
         bootstrap_servers=KAFKA_BROKER,
         group_id="gateway-quota-billing-group", 
-        auto_offset_reset="earliest"
+        auto_offset_reset="earliest",
+        **kafka_security_kwargs(),
     )
     await consumer.start()
     logger.info(f"✅ Quota Manager subscribed to topic: {TOPIC_RESPONSES}")

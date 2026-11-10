@@ -35,17 +35,27 @@ spec:
         - configMapRef:
             name: news-chain-config
         env:
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: "SSL"
+        - name: KAFKA_CA_FILE
+          value: /etc/kafka-tls/ca.crt
         - name: PRIVATE_KEY
           valueFrom:
             secretKeyRef:
               name: news-chain-secrets
               key: PRIVATE_KEY
         volumeMounts:
+        - name: kafka-tls
+          mountPath: /etc/kafka-tls
+          readOnly: true
         # Montamos el volumen en la carpeta para que el archivo JSON aparezca dentro
         - name: abi-volume
           mountPath: /app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
           subPath: TrustNews.json
       volumes:
+      - name: kafka-tls
+        secret:
+          secretName: s07a-kafka-ca
       - name: abi-volume
         configMap:
           name: news-chain-contract

@@ -8,13 +8,8 @@ resources:
   - ../../deployment.yaml
 
 patches:
-  - path: patch-s03-gateway-service.yaml
-  - path: patch-s03-client-secret.yaml
-    target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: gateway
+  - path: ../../../../s03/runtime/patches/apis-gateway-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-gateway-service.json
 generatorOptions:
   disableNameSuffixHash: true
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...

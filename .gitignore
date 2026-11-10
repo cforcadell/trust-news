@@ -49,6 +49,11 @@ skaffold
 docs/fake_news/password_unlock.txt
 docs/github/github.txt
 *.env
+/k8s/infra/kafka/overlays/local/broker.p12
+/k8s/infra/kafka/overlays/local/ca.crt
+/k8s/apis/kafka-tls/overlays/local/ca.crt
+/k8s/s03/tls/overlays/local/infra/pki
+/k8s/s03/tls/overlays/local/apis/pki
 hardhat.config.js
 
 smart-contracts/hardhat.config.js

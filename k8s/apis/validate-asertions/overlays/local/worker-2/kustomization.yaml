@@ -26,12 +26,6 @@ generatorOptions:
   disableNameSuffixHash: true
 
 patches:
-  - path: patch-s03-client-secret.yaml
-    target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: validate-worker
   - target:
       kind: Deployment
       name: validate-worker
@@ -43,3 +37,5 @@ patches:
         path: /spec/selector/matchLabels/instance
         value: "2"
   - path: patch-config-ai.yaml
+  - path: ../../../../../s03/runtime/patches/apis-validate-service-2-deployment.json
+  - path: ../../../../../s03/runtime/patches/apis-validate-service-2-service.json

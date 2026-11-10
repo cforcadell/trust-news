@@ -170,6 +170,14 @@ The second execution verifies the power and should not create duplicate categori
 
 ## 5. Infraestructura local
 
+Antes de ejecutar `infra-basic` o `infra` en un kind nuevo, preparar la PKI
+S03 fuera del repositorio. El script crea los enlaces ignorados que necesitan
+los `secretGenerator` locales de Skaffold:
+
+```bash
+python3 scripts/security/s03_local_pki.py --output-dir /tmp/s03-kind-pki
+```
+
 ### 5.1 Basic profile
 
 `infra-basic` includes Kafka, IPFS, MongoDB, Mongo Express and Keycloak. It includes Kafdrop, Fluent Bit, Loki and Grafana.
@@ -233,7 +241,7 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik
 kubectl get ingress -A
 ```
 
-When S03 is active and its local client files do not exist yet, first bring up
+If its local client files do not exist yet, first bring up
 Keycloak (`./skaffold dev -p infra`) and reconcile its service clients. This
 writes one ignored `s03-client.env` into each API overlay; Kustomize uses those
 files to generate the `s03-client-*` Secrets during the API deployment. Run the
@@ -249,30 +257,13 @@ Then deploy APIs and frontends:
 ./skaffold dev -p apis-frontend
 ```
 
-If the local S03 setup is active, reapply its TLS Secrets and runtime patches
-after each Skaffold deployment. The local client files remain in each API's
-ignored overlay, are mode `0600`, and are not printed or committed. The local
-Kustomize overlays persistently route Traefik to Gateway over HTTPS on port
-9443. Each API overlay persistently declares its client Secret reference, so
-Skaffold keeps `S03_CLIENT_ID` and `S03_CLIENT_SECRET` mounted. TLS sidecars and
-the remaining runtime settings are applied by the S03 activator:
-
-```bash
-python3 scripts/security/s03_local_pki.py \
-  --output-dir /tmp/s03-kind-pki \
-  --apply-kind
-python3 scripts/security/activate_s03_kind.py --apply-kind --phase infra
-kubectl rollout status deployment/keycloak -n infra
-python3 scripts/security/activate_s03_kind.py --apply-kind --phase apis
-python3 scripts/security/activate_s03_kind.py --apply-kind --phase edge
-```
-
-The Keycloak reconciliation requires Keycloak to be running and its admin
-Secret to be configured in Kind. The generated client files stay under the API
-overlays; the CA and service certificates remain in `/tmp/s03-kind-pki` and
-are reused during ordinary redeploys. The activator checks that the current
-Kubernetes context is `kind-*` and does not target preproduction. See
-[S03 local deployment details](../security/s03-design.md).
+Los perfiles Skaffold ya incluyen sidecars, TLS, Secrets y rutas S03 en sus
+manifiestos. Las credenciales locales `s03-client.env` siguen ignoradas por
+Git y son reutilizadas en los siguientes despliegues. No se ejecuta un
+activador después de Skaffold. Keycloak debe estar listo antes de reconciliar
+los clients; la CA y los certificados se conservan en `/tmp/s03-kind-pki`.
+El orden completo y el contrato de Secrets están en
+[S03 con Skaffold](../security/s03-skaffold.md).
 
 Open the full entry:
 

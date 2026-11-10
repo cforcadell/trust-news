@@ -8,6 +8,7 @@ spec:
     app: news-handler
   ports:
     - protocol: TCP
+      name: http
       port: 8072
       targetPort: 8072
   type: ClusterIP

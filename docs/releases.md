@@ -8,6 +8,8 @@ Este documento recoge las versiones desplegadas, sus límites conocidos y los si
 
 - P0: autenticar host SSH y API K3s en todos los jobs privilegiados, adelantando ISSUE-003/004 desde el objetivo anterior v0.0.16; verificar exposición y contener cualquier secreto activo expuesto.
 - P1: motores reutilizables de descarga segura frente a SSRF/rebinding, identidad/autorización interna, segmentación declarativa, admisión y consumo idempotentes por organización y estado del cliente, Kafka autenticado y JWT/JWKS robustos.
+- S04 (segmentación declarativa) está diferida a una versión posterior por decidir; continúa pendiente y bloquea el GO de v0.0.13b salvo revisión formal de alcance.
+- S05 (reserva, consumo y liberación idempotentes de cuotas), S06 (estado/vigencia en admisión) y S07b (identidad/ACL y política de eventos Kafka) están diferidas a versiones posteriores por decidir; continúan pendientes y bloquean el GO de v0.0.13b salvo revisión formal de alcance. S07a implementa el cifrado TLS de Kafka; su aceptación por entorno se registra aparte.
 - Recuperación cifrada externa y restauración aislada antes de migrar MongoDB 4.4 a una versión soportada; pruebas negativas, regresión y aceptación por el borde sobre el candidato exacto.
 - Prioridad adicional del análisis propio: LIGHT puede admitir trabajo con cuotas cero y cliente suspendido; `publishWithAssertions` solicita escrituras de consumo `+1` y `-1` respecto al mismo valor inicial. La reproducción fue local y aislada, sin acreditar explotación productiva.
 - Se mantiene LIGHT/SMART, Blockchain OFF y mTLS general/administrativo. P2 conserva endurecimiento general de pods, suministro, cabeceras/TLS restante y el bloqueo de activación Geth sin controles.

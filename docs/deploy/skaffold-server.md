@@ -213,7 +213,16 @@ apply_tls_secret kube-system trustnews-origin-tls \
 
 `MONGO_APP_USER` and `MONGO_APP_PWD` must match the user created by MongoDB's bootstrap. After lifting MongoDB the [`k8s-common.md`](k8s-common.md#7-mongodb-bootstrap)'s idepotent procedure is executed.
 
-### 3.3 Credenciales de clientes de servicio S03
+### 3.3 Identidad TLS y credenciales S03
+
+Los perfiles `infra-prod` y `apis-frontend-prod` incluyen S03 en sus
+manifiestos. **Antes del siguiente despliegue de esos perfiles**, provisionar
+manualmente la CA interna y los Secrets `s03-tls-*` del entorno, con los
+certificados SAN indicados en [S03 con Skaffold](../security/s03-skaffold.md).
+`infra-prod` requiere `s03-tls-keycloak`; `apis-frontend-prod` requiere
+`s03-internal-ca` en `apis`, los certificados de las nueve APIs y los clients
+de servicio. La CI ejecuta el preflight S03 de la fase correspondiente antes
+del deploy. No usar certificados ni `.env` de kind en Hetzner.
 
 Al preparar la activación S03 en preproducción o producción, reconciliar a mano
 el realm `TrustNews` contra el Keycloak del entorno. El reconciliador conserva
@@ -267,9 +276,11 @@ bash scripts/security/check_s03_configured_secrets.sh
 
 El preflight comprueba, a partir del inventario de servicios, que cada Secret
 está presente, que `S03_CLIENT_ID` coincide y que `S03_CLIENT_SECRET` no está
-vacío ni contiene un placeholder. No verifica la autenticación remota ni
-habilita S03: los overlays de despliegue deben consumir esos Secrets cuando se
-programe la activación en preproducción. Mantener los `.env` privados hasta
+vacío ni contiene un placeholder. También comprueba las dos CA, las claves
+TLS, vigencia, SAN, correspondencia clave/certificado y cadena de cada
+servicio. Los overlays ya consumen esos Secrets y habilitan S03. El preflight
+no sustituye la prueba de autenticación remota; completarla según el runbook
+S03. Mantener los `.env` privados hasta
 completar esa operación y retirarlos después de acuerdo con el procedimiento
 operativo del host.
 
@@ -486,15 +497,17 @@ No `infra-basic` in production.
 Orden:
 
 1. Aplicar `setup`.
-2. Create Secrets and pull secrets.
+2. Crear Secrets habituales, pull secrets y los Secrets CA/TLS de S03.
 3. Instalar `traefik-prod`.
-4. Unfold `infra-prod` and run MongoDB bootstrap.
-5. Desplegar `apis-frontend-prod` con `BLOCKCHAIN_ENABLED=OFF` para LIGHT. La CI
+4. Desplegar `infra-prod` y ejecutar el bootstrap MongoDB.
+5. Con Keycloak disponible, reconciliar clients S03, crear sus Secrets
+   manualmente y pasar `check_s03_configured_secrets.sh`.
+6. Desplegar `apis-frontend-prod` con `BLOCKCHAIN_ENABLED=OFF` para LIGHT. La CI
    mantiene Geth y `news-chain` a cero réplicas y conserva Kafka.
-6. Para habilitar blockchain, ejecutar el pipeline con
+7. Para habilitar blockchain, ejecutar el pipeline con
    `PROFILE=apis-frontend-prod` y `BLOCKCHAIN_ENABLED=ON`. La CI aplica
    `blockchain-prod`, inicia Geth y `news-chain`, y después habilita las APIs.
-7. Si se habilitó blockchain, comprobar contrato y categorías; ejecutar la
+8. Si se habilitó blockchain, comprobar contrato y categorías; ejecutar la
    verificación completa del modo elegido.
 
 Pipelines manuales:

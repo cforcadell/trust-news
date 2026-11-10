@@ -4,6 +4,8 @@ This document contains only versions after the current version. The status of th
 
 Actualización de seguridad del 03-11-2026: **v0.0.13b precede y bloquea la apertura de v0.0.14**. El [plan de ejecución](version.md) adelanta los controles P0/P1 antes aplazados a preparación productiva. Las versiones siguientes conservan sus objetivos; ningún cambio se considera implantado por aparecer en este roadmap.
 
+Decisiones del 09-11-2026: S04 (segmentación de red), S05 (admisión/contabilidad idempotente de cuotas), S06 (estado/vigencia en admisión) y S07b (identidad y autorización Kafka, ACL, política de eventos) se difieren a versiones posteriores, todavía por decidir. Siguen pendientes y bloquean la aceptación de v0.0.13b y, por tanto, v0.0.14, hasta que se implementen o se revise formalmente el alcance de aceptación. S07a cubre solo el transporte Kafka cifrado y se implementa con el mismo contrato runtime en kind y Hetzner.
+
 ## Summary
 
 | Version | Objective | Main exit criterion |

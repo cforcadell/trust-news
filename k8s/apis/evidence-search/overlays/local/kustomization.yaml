@@ -4,13 +4,8 @@ resources:
   - ../../base
 
 patches:
-  - path: patch-s03-client-secret.yaml
-    target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: evidence-search
-
+  - path: ../../../../s03/runtime/patches/apis-evidence-search-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-evidence-search-service.json
 generatorOptions:
   disableNameSuffixHash: true
 

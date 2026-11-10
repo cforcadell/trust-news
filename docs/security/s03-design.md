@@ -95,7 +95,7 @@ El estado activo/suspendido, vigencia y baja de membresías o clientes se conect
 
 ## Implementación y evidencia local, 08-11-2026
 
-El motor común de políticas y tokens está en `api/common/security/engine.py`; Admin y News Handler comprueban también pertenencia y propietario. Keycloak sigue siendo el único emisor. `reconcile_s03_keycloak.py` crea identidades y audiencias; con `--local-overlays` guarda un `s03-client.env` por identidad dentro del overlay local de su API, con permisos `0600` y excluido por `*.env` en Git. Los `secretGenerator` de cada Kustomization convierten esos archivos en Secrets durante Skaffold y sus patches persistentes montan cada Secret en el Deployment correspondiente. Para preproducción el reconciliador conserva `--output-dir`, que exige un directorio privado externo al repositorio y nunca imprime secretos; el operador aplica esos archivos manualmente como Kubernetes Secrets. `s03_local_pki.py` crea los Secrets TLS fuera de Git y `activate_s03_kind.py` configura TLS y políticas en el contexto `kind-*`. El Gateway usa overlays locales persistentes para el Service TLS y el backend HTTPS de Traefik. No se ha integrado la activación S03 como overlay de preproducción.
+El motor común de políticas y tokens está en `api/common/security/engine.py`; Admin y News Handler comprueban también pertenencia y propietario. Keycloak sigue siendo el único emisor. `reconcile_s03_keycloak.py` crea identidades y audiencias; con `--local-overlays` guarda un `s03-client.env` por identidad dentro del overlay local de su API, con permisos `0600` y excluido por `*.env` en Git. Los `secretGenerator` de cada Kustomization convierten esos archivos en Secrets durante Skaffold. Para preproducción el reconciliador conserva `--output-dir`, que exige un directorio privado externo al repositorio y nunca imprime secretos; el operador aplica esos archivos manualmente como Kubernetes Secrets. En esta aceptación del 08-11, `s03_local_pki.py` creó los Secrets TLS y `activate_s03_kind.py` configuró TLS y políticas en el contexto `kind-*`. Esta secuencia imperativa se sustituyó después por los manifiestos declarativos descritos en [S03 con Skaffold](s03-skaffold.md).
 
 En kind se activaron Keycloak y nueve Deployments API con TLS en puerto 9443; todos los rollouts quedaron listos. Traefik llega a Gateway por HTTPS con CA interna y nombre verificado. Smoke real: Ingress `/backend/capabilities` 200; News Handler con token de servicio 200 y sin token 401; Admin sin token de usuario 401; Evidence Search y Validator sin token 401; llamador o audiencia incorrectos 401. La suite focalizada terminó con 72 pruebas correctas; `compileall` y `git diff --check` limpios. La migración local asoció cuatro identidades verificadas y dejó dos claves históricas sin asociación, invisibles por defecto, hasta su revisión.
 
@@ -105,14 +105,14 @@ Con esa sesión, antes de crear datos el listado devolvió 200 y la cuenta no te
 
 La aceptación local de S03 queda cerrada con lectura propia de una orden nueva y denegación del registro histórico sin dueño verificable. La ejecución E2E guardó su informe en `/tmp/s03-regression-alpha-order-20261108-retry/report.json`. La activación y aceptación de preproducción, más la revisión manual futura del dueño de la orden legacy, quedan pendientes y no bloquean el cierre local. La CA y los certificados locales están en `/tmp/s03-kind-pki`; las credenciales se guardan en los overlays locales ignorados de cada API.
 
-Para reactivar el perfil local tras Skaffold, con esos materiales conservados, ejecutar en este orden:
+Desde la integración declarativa posterior, preparar los materiales y desplegar en este orden:
 
 ```bash
-python3 scripts/security/s03_local_pki.py --output-dir /tmp/s03-kind-pki --apply-kind
-python3 scripts/security/activate_s03_kind.py --apply-kind --phase infra
+python3 scripts/security/s03_local_pki.py --output-dir /tmp/s03-kind-pki
+./skaffold run -p infra-basic
 kubectl rollout status deployment/keycloak -n infra
-python3 scripts/security/activate_s03_kind.py --apply-kind --phase apis
-python3 scripts/security/activate_s03_kind.py --apply-kind --phase edge
+python3 scripts/security/reconcile_s03_keycloak.py --kind-local --local-overlays
+./skaffold run -p apis-frontend
 ```
 
 ## Qué ganamos y qué cuesta

@@ -105,9 +105,11 @@ profiles:
           - image: keycloak
             context: keycloak
             docker: {dockerfile: Dockerfile}
+          - image: gateway
+            context: api
+            docker: {dockerfile: gateway/Dockerfile}
     manifests:
       rawYaml:
-        - k8s/infra/kafka/*.yaml
         #- k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         #- k8s/infra/fluent-bit/*.yaml
@@ -116,13 +118,15 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/infra/mongodb/overlays/local
-          - k8s/infra/mongo-express/overlays/local
+        #  - k8s/infra/mongo-express/overlays/local
+          - k8s/s03/tls/overlays/local/infra
           - k8s/infra/keycloak/overlays/local
+          - k8s/infra/kafka/overlays/local-basic
 
     portForward:
       #- {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
       #- {resourceType: service, resourceName: kafdrop, namespace: infra, port: 9000, localPort: 9000, address: "0.0.0.0"}
-      - {resourceType: service, resourceName: mongo-express, namespace: infra, port: 8081, localPort: 8081, address: "0.0.0.0"}
+      # - {resourceType: service, resourceName: mongo-express, namespace: infra, port: 8081, localPort: 8081, address: "0.0.0.0"}
   # ---------------------------------------------------------
   # PERFIL: INFRA
   # ---------------------------------------------------------
@@ -132,10 +136,12 @@ profiles:
           - image: keycloak
             context: keycloak
             docker: {dockerfile: Dockerfile}
+          - image: gateway
+            context: api
+            docker: {dockerfile: gateway/Dockerfile}
     manifests:
       rawYaml:
-        - k8s/infra/kafka/*.yaml
-        - k8s/infra/kafdrop/*.yaml
+      - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
       kustomize:
@@ -143,8 +149,10 @@ profiles:
         paths:
           - k8s/infra/mongodb/overlays/local
           - k8s/infra/mongo-express/overlays/local
+          - k8s/s03/tls/overlays/local/infra
           - k8s/infra/keycloak/overlays/local
           - k8s/infra/frontend-logs/overlays/local
+          - k8s/infra/kafka/overlays/local
 
     portForward:
       - {resourceType: service, resourceName: grafana, namespace: infra, port: 3000, localPort: 3000, address: "0.0.0.0"}
@@ -205,11 +213,14 @@ profiles:
         paths:
 
           - k8s/apis/mongodb-app/overlays/local
+          - k8s/s03/tls/overlays/local/apis
+          - k8s/s03/runtime/overlays/local
           - k8s/apis/generate-asertions/overlays/local
           - k8s/apis/validate-asertions/overlays/local/worker-1
           - k8s/apis/validate-asertions/overlays/local/worker-2
           - k8s/apis/validate-asertions/overlays/local/worker-3
           - k8s/apis/validate-asertions/overlays/local/s03-credentials
+          - k8s/apis/kafka-tls/overlays/local
           - k8s/apis/evidence-search/overlays/local
           - k8s/apis/source-router/overlays/local
           - k8s/apis/news-handler/overlays/local
@@ -261,10 +272,11 @@ profiles:
           - image: keycloak
             context: keycloak
             docker: {dockerfile: Dockerfile}
+          - image: gateway
+            context: api
+            docker: {dockerfile: gateway/Dockerfile}
     manifests:
       rawYaml:
-        - k8s/infra/kafka/*.yaml
-        - k8s/infra/kafdrop/*.yaml
         - k8s/infra/ipfs/*.yaml
         - k8s/infra/fluent-bit/*.yaml
       kustomize:
@@ -274,6 +286,7 @@ profiles:
           - k8s/infra/mongo-express/overlays/prod
           - k8s/infra/keycloak/overlays/prod-domain
           - k8s/infra/frontend-logs/overlays/prod
+          - k8s/infra/kafka/overlays/prod
 
   # ---------------------------------------------------------
   # PERFIL: APIS + FRONTEND PROD
@@ -328,6 +341,7 @@ profiles:
         buildArgs: ["--load-restrictor=LoadRestrictionsNone"]
         paths:
           - k8s/apis/mongodb-app/overlays/prod
+          - k8s/s03/runtime/overlays/prod
           - k8s/apis/generate-asertions/overlays/prod 
           - k8s/apis/validate-asertions/overlays/prod/worker-1 
           - k8s/apis/validate-asertions/overlays/prod/worker-2

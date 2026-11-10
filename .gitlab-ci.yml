@@ -192,6 +192,15 @@ deploy:
 
   script:
     - |
+      case "$PROFILE" in
+        infra-prod)
+          S03_PREFLIGHT_PHASE=infra bash scripts/security/check_s03_configured_secrets.sh
+          ;;
+        apis-frontend-prod)
+          S03_PREFLIGHT_PHASE=apis bash scripts/security/check_s03_configured_secrets.sh
+          ;;
+      esac
+    - |
       if [ "$PROFILE" = "apis-frontend-prod" ]; then
         bash scripts/ci/rollout-revisions.sh capture \
           --targets "$ROLLBACK_TARGETS" --snapshot rollout-before.tsv

@@ -462,7 +462,7 @@ test "$errors" -eq 0
 
 Los requisitos cubren el nuevo LLM OpenRouter y la búsqueda Exa del Source Router, el cambio de Generate Assertions a OpenRouter, Evidence Search, MongoDB y los tres validadores incluidos en el perfil. `EXA_API_KEY` y `API_KEY_PROVIDER` son alternativas; tener una no obliga a duplicarla. Si falla el preflight, no lanzar `deploy`: crear o actualizar el Secret mediante el procedimiento privado del paso 2 y repetir el bloque completo. Esta comprobación evita claves ausentes, vacías o de ejemplo; la validez remota, el modelo habilitado, la cuota y el presupuesto se confirman en las cuentas de OpenRouter y Exa sin copiar credenciales al repositorio ni a los logs.
 
-Cuando se prepare S03, este preflight base no sustituye la comprobación de credenciales Keycloak. Después de reconciliar los clients y crear sus Secrets desde los `.env` protegidos, ejecutar también `bash scripts/security/check_s03_configured_secrets.sh`; detener el despliegue si cualquiera de los dos preflights falla.
+Los perfiles Skaffold incluyen S03. Antes de `infra-prod` deben estar creados los Secrets CA/TLS según [S03 con Skaffold](../security/s03-skaffold.md). Después de iniciar Keycloak, reconciliar los clients y crear sus Secrets desde los `.env` protegidos; antes de `apis-frontend-prod`, ejecutar también `bash scripts/security/check_s03_configured_secrets.sh`. Este preflight valida clientes, CA y certificados de servicio; detener el despliegue si falla cualquiera de los preflights.
 
 Si se ha aprobado que Source Router comparta las mismas credenciales ya validadas de Generate Assertions y Evidence Search, **[HETZNER]** se puede crear `source-router-enc` copiando los datos codificados entre Secrets, sin decodificarlos, imprimirlos ni guardarlos en disco:
 

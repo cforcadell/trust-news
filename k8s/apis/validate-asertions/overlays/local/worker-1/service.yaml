@@ -9,5 +9,6 @@ spec:
     instance: "1" # <- Esta es la clave para que apunte solo a este worker
   ports:
     - protocol: TCP
+      name: http
       port: 8070           
-      targetPort: 8070   
+      targetPort: 8070

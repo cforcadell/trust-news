@@ -17,4 +17,6 @@ configMapGenerator:
 
 patches:
   - path: patch-resources.yaml
+  - path: ../../../../s03/runtime/patches/apis-gateway-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-gateway-service.json
 namespace: apis

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a reusable local CA and per-Service TLS Secrets for kind.
+"""Create reusable local S03 certificate files for kind Kustomize overlays.
 
 Private keys remain outside the repository. Existing keys are reused; the
 script never silently replaces a trust anchor or server identity.
@@ -14,13 +14,11 @@ from pathlib import Path
 import subprocess
 
 
+ROOT = Path(__file__).resolve().parents[2]
+
+
 def run(*args):
     subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def apply_secret(*kubectl_args):
-    yaml = subprocess.check_output(["kubectl", "create", *kubectl_args, "--dry-run=client", "-o", "yaml"])
-    subprocess.run(["kubectl", "apply", "-f", "-"], input=yaml, check=True, stdout=subprocess.DEVNULL)
 
 
 def create_ca(folder):
@@ -34,7 +32,7 @@ def create_ca(folder):
     return cert, key
 
 
-def create_service_cert(folder, ca_cert, ca_key, namespace, service):
+def create_service_cert(folder, ca_cert, ca_key, namespace, service, extra_dns=()):
     name = f"{namespace}-{service}"
     key, cert, csr, ext = (folder / f"{name}.{suffix}" for suffix in ("key", "crt", "csr", "ext"))
     if cert.exists() != key.exists():
@@ -44,9 +42,10 @@ def create_service_cert(folder, ca_cert, ca_key, namespace, service):
         run("openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={dns}",
             "-keyout", str(key), "-out", str(csr))
         os.chmod(key, 0o600)
+        names = (dns, f"{service}.{namespace}.svc", *extra_dns)
         ext.write_text("basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\n"
                        "extendedKeyUsage=serverAuth\n"
-                       f"subjectAltName=DNS:{dns},DNS:{service}.{namespace}.svc\n", encoding="utf-8")
+                       f"subjectAltName={','.join('DNS:' + item for item in names)}\n", encoding="utf-8")
         run("openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca_cert), "-CAkey", str(ca_key),
             "-CAcreateserial", "-days", "90", "-out", str(cert), "-extfile", str(ext))
         csr.unlink()
@@ -58,12 +57,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="docs/security/s03-local-services.json")
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--apply-kind", action="store_true")
     args = parser.parse_args()
-    if args.apply_kind:
-        context = subprocess.check_output(["kubectl", "config", "current-context"], text=True).strip()
-        if not context.startswith("kind-"):
-            raise SystemExit(f"Refusing to apply local S03 material outside a kind context: {context}")
     folder = Path(args.output_dir).resolve()
     if folder.is_relative_to(Path.cwd().resolve()):
         raise SystemExit("PKI output must be outside the repository")
@@ -74,16 +68,16 @@ def main():
     ca_cert, ca_key = create_ca(folder)
     for namespace, service in {(row["namespace"], row["service"]) for row in services}:
         create_service_cert(folder, ca_cert, ca_key, namespace, service)
-    if args.apply_kind:
-        for namespace in {row["namespace"] for row in services}:
-            apply_secret("secret", "generic", "s03-internal-ca", "-n", namespace, f"--from-file=ca.crt={ca_cert}")
-        for row in services:
-            namespace, service = row["namespace"], row["service"]
-            name = f"{namespace}-{service}"
-            apply_secret("secret", "tls", f"s03-tls-{service}", "-n", namespace,
-                         f"--cert={folder / (name + '.crt')}", f"--key={folder / (name + '.key')}")
-            print(f"s03_local_secret={namespace}/{service}")
-    print(f"s03_local_pki=PASS services={len(services)} applied={args.apply_kind}")
+    for namespace in ("infra", "apis"):
+        link = ROOT / "k8s/s03/tls/overlays/local" / namespace / "pki"
+        if link.is_symlink():
+            if link.resolve() != folder:
+                raise RuntimeError(f"Existing PKI link points elsewhere: {link}")
+        elif link.exists():
+            raise RuntimeError(f"PKI overlay path is not a symlink: {link}")
+        else:
+            link.symlink_to(folder, target_is_directory=True)
+    print(f"s03_local_pki=PASS services={len(services)} overlay=prepared")
 
 
 if __name__ == "__main__":

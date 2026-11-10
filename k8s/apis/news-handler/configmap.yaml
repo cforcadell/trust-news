@@ -8,7 +8,7 @@ data:
   # --- Kafka ---
   KAFKA_BROKER: "kafka.infra.svc.cluster.local:9092"
   KAFKA_MAX_MESSAGE_BYTES: "4194304"
-  KAFKA_SECURITY_PROTOCOL: "PLAINTEXT"
+  KAFKA_SECURITY_PROTOCOL: "SSL"
   KAFKA_MECHANISM: "PLAIN"
   
   # --- Tópicos ---

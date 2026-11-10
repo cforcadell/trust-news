@@ -26,6 +26,10 @@ spec:
               done
       containers:
       - name: generate-asertions
+        volumeMounts:
+        - name: kafka-tls
+          mountPath: /etc/kafka-tls
+          readOnly: true
         image: generate-asertions
         imagePullPolicy: IfNotPresent
         ports:
@@ -35,8 +39,20 @@ spec:
             name: generate-asertions-config
         - secretRef:               
             name: api-keys         
+        - configMapRef:
+            name: s03-runtime
+        - secretRef:
+            name: s03-client-assermetry-generate
         env:
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: "SSL"
+        - name: KAFKA_CA_FILE
+          value: /etc/kafka-tls/ca.crt
         - name: IPFS_API_ADD
           value: "http://ipfs-fastapi.apis.svc.cluster.local:8060/api/v0/add"
         - name: IPFS_API_CAT
           value: "http://ipfs-fastapi.apis.svc.cluster.local:8060/api/v0/cat"
+      volumes:
+      - name: kafka-tls
+        secret:
+          secretName: s07a-kafka-ca

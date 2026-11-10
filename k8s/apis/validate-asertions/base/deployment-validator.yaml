@@ -52,6 +52,10 @@ spec:
         - configMapRef:
             name: blockchain-mode
             optional: true
+        - configMapRef:
+            name: s03-runtime
+        - secretRef:
+            name: s03-client-assermetry-validator
         env:
         - name: PRIVATE_KEY
           valueFrom: { secretKeyRef: { name: validator-secret, key: PRIVATE_KEY } }
@@ -61,12 +65,22 @@ spec:
           valueFrom: { secretKeyRef: { name: validator-secret, key: API_KEY } }
         - name: VALIDATOR_CATEGORIES
           value: "[1,2,3,4,5,6,7,8,9,10]"
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: "SSL"
+        - name: KAFKA_CA_FILE
+          value: /etc/kafka-tls/ca.crt
         volumeMounts:
+        - name: kafka-tls
+          mountPath: /etc/kafka-tls
+          readOnly: true
         - name: abi-volume
           mountPath: /app/smart-contracts/artifacts/contracts/TrustNews.sol/TrustNews.json
           subPath: TrustNews.json
 
       volumes:
+      - name: kafka-tls
+        secret:
+          secretName: s07a-kafka-ca
       - name: abi-volume
         configMap:
           name: validator-contract

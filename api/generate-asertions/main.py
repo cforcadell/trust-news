@@ -50,7 +50,7 @@ from common.routing_taxonomy import (
     TemporalType,
 )
 from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
-from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs
 from common.utils.llm_json import parse_model_list
 from common.llm import LLMConfigurationError, LLMRequest, acomplete_structured_with_repair
 from common.utils.llm_runtime import fetch_llm_runtime_override
@@ -555,9 +555,10 @@ async def consume_and_process():
         INPUT_TOPIC,
         bootstrap_servers=BROKER_URL,
         group_id="generate-assertions-group",
-        auto_offset_reset="earliest"
+        auto_offset_reset="earliest",
+        **kafka_security_kwargs(),
     )
-    producer = AIOKafkaProducer(bootstrap_servers=BROKER_URL)
+    producer = AIOKafkaProducer(bootstrap_servers=BROKER_URL, **kafka_security_kwargs())
 
     # Intentos de arranque (retries)
     for attempt in range(1, MAX_RETRIES + 1):

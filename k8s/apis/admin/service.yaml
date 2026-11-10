@@ -9,6 +9,7 @@ spec:
     app: admin
   ports:
   - protocol: TCP
+    name: http
     port: 8400        # Puerto expuesto del servicio
     targetPort: 8400  # Puerto al que apunta en el contenedor
   type: ClusterIP     # Solo visible dentro del clúster

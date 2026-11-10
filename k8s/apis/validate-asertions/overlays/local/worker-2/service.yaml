@@ -9,5 +9,6 @@ spec:
     instance: "2" # <- Esta es la clave para que apunte solo a este worker
   ports:
     - protocol: TCP
+      name: http
       port: 8070           # El puerto del servicio en el clúster
       targetPort: 8070   # El mismo puerto que añadiste en tu deployment base

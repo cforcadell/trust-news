@@ -9,13 +9,8 @@ resources:
   - ../../deployment.yaml
 
 patches:
-  - path: patch-s03-client-secret.yaml
-    target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: admin-deployment
-
+  - path: ../../../../s03/runtime/patches/apis-admin-service-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-admin-service-service.json
 generatorOptions:
   disableNameSuffixHash: true
 

@@ -22,9 +22,15 @@ spec:
               containerPort: 9000
           env:
             - name: KAFKA_BROKERCONNECT
-              value: "kafka:9092"
+              value: "kafka.infra.svc.cluster.local:9092"
+            - name: KAFKA_PROPERTIES_FILE
+              value: /etc/kafka-tls/kafdrop.properties
             - name: JVM_OPTS
               value: "-Xms64m -Xmx256m"
+          volumeMounts:
+            - name: kafka-tls
+              mountPath: /etc/kafka-tls
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: 9000
@@ -42,3 +48,12 @@ spec:
             requests:
               memory: "128Mi"
               cpu: "100m"
+      volumes:
+        - name: kafka-tls
+          secret:
+            secretName: s07a-kafka-broker
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: kafdrop.properties
+                path: kafdrop.properties

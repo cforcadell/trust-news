@@ -14,13 +14,21 @@ spec:
       labels:
         app: kafka
     spec:
-      # ¡Adiós initContainers! Kafka lo hará solo.
       containers:
         - name: kafka
           image: confluentinc/cp-kafka:7.6.1
           ports:
             - containerPort: 9092
             - containerPort: 9093 # Puerto para el controlador
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            periodSeconds: 5
+          startupProbe:
+            tcpSocket:
+              port: 9092
+            periodSeconds: 5
+            failureThreshold: 180
           env:
             # --- El secreto para que Confluent formatee KRaft automáticamente ---
             - name: CLUSTER_ID
@@ -38,11 +46,27 @@ spec:
             
             # --- Listeners ---
             - name: KAFKA_LISTENERS
-              value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+              value: "SSL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
             - name: KAFKA_ADVERTISED_LISTENERS
-              value: "PLAINTEXT://kafka.infra.svc.cluster.local:9092"
+              value: "SSL://kafka.infra.svc.cluster.local:9092"
             - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
-              value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+              value: "SSL:SSL,CONTROLLER:SSL"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "SSL"
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: "PKCS12"
+            - name: KAFKA_SSL_KEYSTORE_FILENAME
+              value: broker.p12
+            - name: KAFKA_SSL_KEYSTORE_CREDENTIALS
+              value: KEYSTORE_PASSWORD
+            - name: KAFKA_SSL_KEY_CREDENTIALS
+              value: KEYSTORE_PASSWORD
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: "PEM"
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: "/etc/kafka/secrets/ca.crt"
+            - name: KAFKA_SSL_CLIENT_AUTH
+              value: "none"
             
             # --- Opciones generales y de Almacenamiento ---
             - name: KAFKA_LOG_DIRS
@@ -61,6 +85,13 @@ spec:
           volumeMounts:
             - name: kafka-data
               mountPath: /var/lib/kafka/data
+            - name: kafka-tls
+              mountPath: /etc/kafka/secrets
+              readOnly: true
+      volumes:
+        - name: kafka-tls
+          secret:
+            secretName: s07a-kafka-broker
   volumeClaimTemplates:
     - metadata:
         name: kafka-data

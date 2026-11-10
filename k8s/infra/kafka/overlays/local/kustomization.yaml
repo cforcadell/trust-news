@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: infra
+resources:
+  - ../../service.yaml
+  - ../../statefulset.yaml
+  - ../../../kafdrop/service.yaml
+  - ../../../kafdrop/deployment.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+secretGenerator:
+  - name: s07a-kafka-broker
+    envs:
+      - kafka-tls.env
+    files:
+      - broker.p12
+      - ca.crt
+      - kafdrop.properties=../../kafdrop.properties

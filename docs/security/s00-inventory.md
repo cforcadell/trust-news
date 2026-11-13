@@ -24,6 +24,16 @@ más `docs/deploy/candidate-v0.0.13b-k3s.md` sin seguimiento. El SHA no incluye
 esos cambios. Es una fotografía del árbol local, no evidencia de GitLab ni de
 despliegue.
 
+**Actualización 2026-11-13:** antes de los cambios de esta sesión, el checkout
+estaba limpio en `1573ec7c6c0519d3b5874424fe295b046401f9ab`. La key local se
+regeneró; su retirada del índice está preparada y la ruta se excluye con
+`.gitignore`. `privkey.pem` solo alimenta
+el overlay local para `localhost`; no se usa en Hetzner. El objeto anterior
+permanece en la historia Git local y no se verificó el remoto en vivo. No se
+requiere rotar el certificado TLS de Hetzner por este material. El snapshot de
+la VM Hetzner es una acción futura del operador; no se ha aportado evidencia de
+su ejecución ni de una restauración probada.
+
 ## Alcance y procedencia
 
 | Entorno | Función real | Fuente disponible | Estado de comprobación |

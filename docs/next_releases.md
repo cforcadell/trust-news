@@ -2,37 +2,41 @@
 
 This document contains only versions after the current version. The status of the current version is in [`v0.0.13.md`](releases/v0.0.13.md) and the release history in [`releases.md`](releases.md).
 
-Actualización de seguridad del 03-11-2026: **v0.0.13b precede y bloquea la apertura de v0.0.14**. El [plan de ejecución](version.md) adelanta los controles P0/P1 antes aplazados a preparación productiva. Las versiones siguientes conservan sus objetivos; ningún cambio se considera implantado por aparecer en este roadmap.
+Actualización de alcance del 10-11-2026: **v0.0.13b habilita solo demos guiadas, con mTLS y hasta dos organizaciones; v0.0.13c cierra los P1 antes del acceso autónomo de v0.0.14**. El [plan](version.md) fija las puertas por entorno. Ningún cambio se considera implantado por aparecer en este roadmap.
 
-Decisiones del 09-11-2026: S04 (segmentación de red), S05 (admisión/contabilidad idempotente de cuotas), S06 (estado/vigencia en admisión) y S07b (identidad y autorización Kafka, ACL, política de eventos) se difieren a versiones posteriores, todavía por decidir. Siguen pendientes y bloquean la aceptación de v0.0.13b y, por tanto, v0.0.14, hasta que se implementen o se revise formalmente el alcance de aceptación. S07a cubre solo el transporte Kafka cifrado y se implementa con el mismo contrato runtime en kind y Hetzner.
+Decisiones del 09-11-2026, reasignadas el 10-11-2026: S04 (segmentación), S05 (cuotas idempotentes), S06 (estado/vigencia) y S07b (identidad, ACL y eventos Kafka) pasan a v0.0.13c. Siguen pendientes y bloquean el acceso autónomo. S07a cubre el transporte Kafka cifrado y superó en kind los E2E técnico y funcional; su aceptación en Hetzner sigue pendiente.
 
 ## Summary
 
 | Version | Objective | Main exit criterion |
 | --- | --- | --- |
-| v0.0.13b | Cierre de seguridad previo a beta | Puertas P0/P1 del plan verificadas sobre el candidato exacto |
-| v0.0.14 | Beta closed by invitation | Two external evaluations and one candidate for partner design |
+| v0.0.13b | Demos controladas en preproducción | Puertas de demo en Hetzner; mTLS, gasto supervisado y hasta dos organizaciones |
+| v0.0.13c | Seguridad para acceso autónomo limitado | P1 diferidos, recuperación y aceptación integral en Hetzner |
+| v0.0.14 | Beta closed by invitation | Hasta dos clientes autónomos, dos evaluaciones y un candidato para piloto |
 | v0.0.15 | Pilot with design partners | A pilot with evidence of value and explicit decision of continuity |
 | v0.0.16 | Production preparation | Hardening and recovery demonstrated; risks resolved or accepted |
 | v0.9.0 | Release Candidate | Full regression and formal decision GO/NO-GO |
 | v1.0.0 | Controlled production | Repeatable case, contractual commitment and accepted transaction |
 
-## v0.0.13b — Cierre de seguridad previo a la beta
+## v0.0.13b — Plataforma de demos controladas
 
-**Planificada, sin remediaciones ejecutadas; S00 iniciado con inventario parcial.** Contrasta al mismo nivel la auditoría aportada y la revisión Copilot mediante [análisis propio del código y docs](security/security_review_codex.md). El [enfoque, paquetes ordenados, dependencias, estimaciones y puertas](version.md) son la referencia de ejecución.
+**En ejecución; NO-GO para abrir a clientes.** S00/S01 cerrados para preproducción con límites, S02/S03 aceptados localmente y S07a solo con E2E técnico kind. El [estado y las puertas](version.md) son la referencia de ejecución.
 
-- Primero identidad de CI (ISSUE-003/004), verificación de exposición e inventario de secretos activos; después SSRF, autorización/segmentación interna, cuotas/estado de cliente, Kafka, JWT/JWKS y canales de identidad protegidos.
-- Restauración aislada/cifrado externo antes de migración soportada de MongoDB y aceptación integrada del perfil LIGHT/SMART.
-- Mantener Blockchain OFF y mTLS general/administrativo. El hardening general P2 continúa después; ON queda bloqueado hasta endurecer Geth.
-- No abrir beta mientras una puerta P0/P1 esté pendiente. La aceptación funcional/factual de v0.0.13 conserva sus requisitos independientes.
+- Integrar y aceptar S02/S03/S07a en Hetzner; probar S11-D/S12-D sobre candidato exacto con dos organizaciones, coste, baja, borde y rollback.
+- Mantener Blockchain OFF y mTLS general/administrativo. Los invitados no inician trabajos con gasto hasta S05; sin separación verificable solo hay demos internas.
+- Copias/restauración y migración MongoDB pertenecen a v0.0.13c; en demos solo datos desechables. La aceptación funcional/factual de v0.0.13 sigue independiente.
+
+## v0.0.13c — Seguridad para acceso autónomo limitado
+
+**Planificada.** Cierra S04, S05, S06, S07b, S08→S09, S10 y S11/S12 completos con evidencias Hetzner sobre candidato exacto. S08 restaura antes de S09; S03 ya exige verificación criptográfica y S10 endurece JWKS. [Alcance y puertas](releases.md). Su GO prepara la puerta propia de v0.0.14; no abre acceso autónomo ni retira mTLS.
 
 ## v0.0.14 - Beta closed by invitation
 
-**Prerequisito:** cerrar v0.0.13b según [version.md](version.md), además de la aceptación funcional requerida. El corte de mTLS no se ejecuta como parte de la auditoría ni de la preparación del plan.
+**Prerequisito:** cerrar v0.0.13c y la aceptación funcional requerida. El corte de mTLS exige ventana y rollback propios.
 
 ### Objective
 
-Allow a maximum of ten external organizations to evaluate the platform for a defined period, with pseudonim identities and manually provided OIDC access. The controlled removal of the mTLS general temporary rule belongs to this version and is its first operating step, before opening external evaluations.
+Allow a maximum of two external organizations to evaluate the platform for a defined period, with pseudonim identities and manually provided OIDC access. The controlled removal of the mTLS general temporary rule belongs to this version and is its first operating step, before opening autonomous access.
 
 ### Step 1: Remove temporary mTLS and keep the route gate
 
@@ -79,10 +83,10 @@ the secret of `TrustNewsApi` is not shared.
 
 ### Limit and data
 
-- Ten external organizations active simultaneously are allowed. Tenants
+- Two external organizations active simultaneously are allowed. Tenants
 synthetics and internal identities do not consume that limit.
 - No self-registration. Highs, roles and quotas are approved manually.
-- High number eleven is locked and moved on to a waiting list.
+- A third organization is blocked and moved to a waiting list.
 - No credentials, personal, regulated or confidential data are entered
 no need, authorisation and treatment agreed.
 - Each evaluation defines final date, retention and cleaning.
@@ -103,7 +107,7 @@ protected by its permanent mTLS rule.
 Cloudflare and they don't reach Hetzner.
 - A revoked disposable administrative certificate is rejected and the
 certificate of endorsement retains administrative access.
-- The high number eleven is derived from the waiting list.
+- A third organization is blocked and moved to a waiting list.
 - Two external evaluations completed and one design candidate identified
 partner with problem, metric and possible pilot.
 
@@ -124,7 +128,7 @@ in the components concerned.
 - Laterance measurement, cost per validation, perceived quality, repetition and
 support load.
 
-This hardening is limited to the components affected by the pilot. Pipeline identity and the P1 segmentation controls are prerequisites closed in `v0.0.13b`; the pilot verifies they remain effective. General supply-chain hardening remains at `v0.0.16`. Geth must pass its security activation gate before any ON use, including a pilot.
+This hardening is limited to the components affected by the pilot. Pipeline identity belongs to `v0.0.13b`; P1 segmentation and autonomous admission belong to `v0.0.13c`. The pilot verifies they remain effective. General supply-chain hardening remains at `v0.0.16`. Geth must pass its security activation gate before any ON use, including a pilot.
 
 Disposable data can accept risk of loss. Data to be stored requires minimal backup before entering; irreplaceable data are not supported until a standalone restoration is demonstrated.
 
@@ -140,7 +144,7 @@ At least one pilot ends up with evidence of value and an explicit decision to co
 
 Converting the validated platform with customers into a service that can be operated. It is a stabilization version and does not incorporate commercial functionalities except those necessary to close a production risk.
 
-Los controles P0/P1 de [v0.0.13b](version.md) son prerrequisitos, no trabajo aplazado hasta esta versión. Los apartados siguientes verifican su continuidad y completan el endurecimiento P2 y la preparación productiva. Si un control ya cerrado regresa, se bloquea la promoción.
+Los controles P0 de [v0.0.13b](version.md) y P1 de [v0.0.13c](releases.md) son prerrequisitos. Los apartados siguientes verifican su continuidad y completan P2 y la preparación productiva. Si un control ya cerrado regresa, se bloquea la promoción.
 
 ### Identity Hardening
 

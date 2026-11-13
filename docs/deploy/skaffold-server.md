@@ -8,6 +8,15 @@ Runbook operating the Hetzner environment. This document contains only:
 
 The status of the current version is in [`v0.0.13.md`](../releases/v0.0.13.md), the roadmap in [`next_releases.md`](../next_releases.md), the evidence of closed versions in [`releases.md`](../releases.md) and the incidences in [`issues.md`](../issues.md). The procedures shared with local are in [`k8s-common.md`](k8s-common.md).
 
+Hetzner/K3s es actualmente **preproducción**. Los nombres `-prod` son identificadores técnicos de perfiles y overlays; no acreditan producción. Esta guía sirve también para otro K3s después de adaptar dominio, issuer, Ingress, certificados y comprobaciones de CI al destino.
+
+## Guía rápida de K3s
+
+1. **Clúster limpio:** comprobar contexto, almacenamiento, registro, DNS y borde; aplicar `./skaffold deploy -p setup` y preparar los Secrets y certificados de [§3](#3-secrets-productivos). Desplegar inicialmente `infra-prod` con el `build.json` del mismo SHA, esperar a Keycloak, restaurar o crear realm/clientes base y completar MongoDB y clientes de servicio S03. Seguir la [secuencia detallada](#62-controlled-installation-or-reconstruction).
+2. Lanzar después los pipelines protegidos `traefik-prod`, `infra-prod` y `apis-frontend-prod`, por separado, con `BLOCKCHAIN_ENABLED=OFF`. La CI despliega con Skaffold y reconcilia el cliente web de Keycloak; no repetir ese ajuste tras un job correcto.
+3. **Clúster existente:** conservar estado, CA y Secrets; revisar contexto, backups, PVC, SHA/digests y modo. Para cambios solo de aplicación, lanzar `apis-frontend-prod`; para cambios de infraestructura, `infra-prod` y luego APIs. Rotar credenciales y certificados con el procedimiento S03/S07a cuando corresponda.
+4. Comprobar pods Ready, configuración efectiva, TLS, JWKS y rutas autorizadas/denegadas desde el borde. La aceptación kind no acredita Hetzner ni abre por sí sola las demos externas.
+
 Do not record here chronologies of tests, attempts of pipeline, identifiers, IP addresses, fingerprints, tokens, certificates or personal data.
 
 ---
@@ -124,6 +133,22 @@ PROFILE=apis-frontend-prod
 The `postTFM` branch must be protected when the deployment variables are `Protected`. The scope of the variables must match the environment of the job.
 
 The deployment job opens a local `127.0.0.1:6443 -> Hetzner:127.0.0.1:6443` tunnel and forces the Kubeconfig endpoint to `https://127.0.0.1:6443`. This tunnel is for the K3s API and does not change the application's public issuer.
+
+Para operación interactiva desde un equipo externo, verificar la clave pública del host SSH por un canal independiente y usar `known_hosts` estricto. En el Hetzner actual el puerto SSH es `2222`; en otro K3s usar el configurado allí. Los ejemplos usan variables de la sesión (sin registrar sus valores):
+
+```bash
+export K3S_HOST=<host-o-ip>
+export K3S_USER=<usuario>
+export K3S_KEY=<ruta-clave-ssh>
+export K3S_SSH_PORT=2222
+ssh -i "$K3S_KEY" -p "$K3S_SSH_PORT" "$K3S_USER@$K3S_HOST" 'kubectl get nodes; kubectl get pods -A'
+```
+
+Con kubeconfig local preparado para el certificado del servidor, mantener abierto el túnel de la API y usar `https://127.0.0.1:6443` como endpoint del contexto. No publicar `6443/tcp`:
+
+```bash
+ssh -N -i "$K3S_KEY" -p "$K3S_SSH_PORT" -L 6443:127.0.0.1:6443 "$K3S_USER@$K3S_HOST"
+```
 
 ---
 
@@ -398,6 +423,17 @@ The discovery should continue to publish:
 https://assermetry.com/auth/realms/TrustNews
 ```
 
+Para diagnosticar un servicio interno sin publicarlo, abrir un túnel temporal desde el equipo del operador. Sustituir namespace, servicio y puertos según el caso; el HTTP directo omite Traefik y Cloudflare:
+
+```bash
+ssh -i "$K3S_KEY" -p "$K3S_SSH_PORT" \
+  -L <puerto-local>:127.0.0.1:<puerto-remoto> \
+  "$K3S_USER@$K3S_HOST" \
+  -t 'kubectl port-forward --address 127.0.0.1 -n <namespace> svc/<servicio> <puerto-remoto>:<puerto-servicio>'
+```
+
+Ejemplos de puertos internos: Admin API `apis/admin-service:8400`, Gateway `apis/gateway:8500`, Evidence Search `apis/evidence-search:8074`, Source Router `apis/source-router:8075`, Grafana `infra/grafana:3000` y Mongo Express `infra/mongo-express:8081`. Al cerrar, detener el `port-forward` y comprobar que no quedan túneles activos. Para validar OIDC o TLS de extremo a extremo, usar el dominio y la CA del origen o el borde real.
+
 ---
 
 ## 5. Cloudflare and firewall
@@ -490,25 +526,62 @@ Action: `Block`. Comparison remains capital sensitive. Keep URL Normalization, F
 | `news-chain-prod` | Integración blockchain, desplegada por el script de modo ON |
 | `apis-frontend-prod` | APIs, Gateway, Frontend and Domain Log-ins |
 
-No `infra-basic` in production.
+`infra-basic` es solo para kind; el K3s actual de preproducción usa `infra-prod`.
 
 ### 6.2 Controlled installation or reconstruction
 
-Orden:
+En un K3s limpio, la CI actual no completa por sí sola el primer arranque:
+`traefik-prod` comprueba el ConfigMap de Keycloak antes de `infra-prod`, y el
+job `infra-prod` reconcilia el cliente web antes de que Skaffold haya creado
+el realm y los clientes base. La preparación inicial es **manual**, una sola
+vez; los despliegues posteriores siguen el pipeline protegido.
 
-1. Aplicar `setup`.
-2. Crear Secrets habituales, pull secrets y los Secrets CA/TLS de S03.
-3. Instalar `traefik-prod`.
-4. Desplegar `infra-prod` y ejecutar el bootstrap MongoDB.
-5. Con Keycloak disponible, reconciliar clients S03, crear sus Secrets
-   manualmente y pasar `check_s03_configured_secrets.sh`.
-6. Desplegar `apis-frontend-prod` con `BLOCKCHAIN_ENABLED=OFF` para LIGHT. La CI
-   mantiene Geth y `news-chain` a cero réplicas y conserva Kafka.
-7. Para habilitar blockchain, ejecutar el pipeline con
+1. Confirmar contexto K3s, PVC/almacenamiento, acceso al registro, DNS,
+   certificado de origen y reglas del borde. Ejecutar `./skaffold deploy -p
+   setup`. Preparar pull secrets, Secrets habituales, CA/TLS S03 y Kafka S07a
+   según [§3](#3-secrets-productivos) y [S07a](../security/s07a-kafka-tls.md).
+   Los overlays de K3s consumen Secrets existentes; Skaffold no los genera.
+   Antes del despliegue inicial de infraestructura, ejecutar
+   `S03_PREFLIGHT_PHASE=infra bash scripts/security/check_s03_configured_secrets.sh`.
+2. Construir en la CI el perfil `infra-prod` para el SHA elegido y descargar
+   su artefacto `build.json` (caduca al día). En un checkout del **mismo SHA**
+   con acceso K3s preparado, ejecutar una sola vez:
+
+   ```bash
+   kubectl config current-context
+   ./skaffold deploy --build-artifacts=build.json -p infra-prod
+   kubectl rollout status statefulset/keycloak-db -n infra
+   kubectl rollout status deployment/keycloak -n infra
+   kubectl rollout status statefulset/mongodb -n infra
+   ```
+
+   Este comando aplica el mismo perfil y las imágenes publicadas por CI; no
+   ejecuta el postdespliegue del job `infra-prod`. No usar `skaffold run` con
+   imágenes locales para un K3s remoto.
+3. Restaurar el estado previsto de Keycloak o configurar el realm `TrustNews`
+   y sus clientes base `TrustNewsWeb`/`TrustNewsApi` según
+   [Keycloak común](k8s-common.md#8-keycloak-and-assessed-contributions).
+   Skaffold no crea ese estado. Ejecutar el [bootstrap MongoDB](k8s-common.md#7-mongodb-bootstrap)
+   y la [reconciliación web](#65-keycloak-idepotent-alignment) una vez.
+4. Reconciliar clientes de servicio S03, crear sus Secrets desde los `.env`
+   privados y pasar `scripts/security/check_s03_configured_secrets.sh` como
+   indica [§3.3](#33-identidad-tls-y-credenciales-s03). Cerrar los accesos
+   temporales usados para Keycloak.
+5. Lanzar y esperar los pipelines protegidos `traefik-prod`, `infra-prod` y
+   `apis-frontend-prod` en ese orden, con `BLOCKCHAIN_ENABLED=OFF`. La CI
+   ejecuta preflight, despliegue Skaffold y reconciliación web. La CI mantiene
+   Geth y `news-chain` a cero réplicas y conserva Kafka.
+6. Para habilitar blockchain, ejecutar el pipeline con
    `PROFILE=apis-frontend-prod` y `BLOCKCHAIN_ENABLED=ON`. La CI aplica
    `blockchain-prod`, inicia Geth y `news-chain`, y después habilita las APIs.
-8. Si se habilitó blockchain, comprobar contrato y categorías; ejecutar la
+7. Si se habilitó blockchain, comprobar contrato y categorías; ejecutar la
    verificación completa del modo elegido.
+
+En un **K3s existente**, no repetir los pasos de provisión si CA, certificados,
+realm, clientes y Secrets siguen válidos. Revisar respaldo, PVC, contexto,
+SHA/digests y modo antes de la [actualización normal](#64-normal-update).
+Si el entorno aún usa Kafka PLAINTEXT, el cambio a TLS exige una ventana
+coordinada y rollback preparado; no tratarlo como un redespliegue rutinario.
 
 Pipelines manuales:
 
@@ -611,6 +684,8 @@ kubectl get tlsstore default -n kube-system
 
 Inner services should not appear with Ingress, NodePort or LoadBalancer. The only web edge is Traefik.
 
+La aceptación S03/S07a exige además comprobar los Secrets por nombre y claves sin mostrar valores, pods Ready, JWKS por HTTPS con CA y hostname verificados, Traefik→Gateway por HTTPS y resultados esperados de rutas autenticadas y denegadas. Seguir la [matriz S03](../security/s03-skaffold.md#comprobaciones-y-rotación) y registrar evidencia separada de kind y K3s. Una configuración declarada o un rollout correcto no sustituyen estas pruebas.
+
 ### 7.2 Dominio
 
 Before testing the lock status is checked. If enabled, the general `403` is the expected result.
@@ -654,6 +729,17 @@ tests/operations/verify-loki-persistence.sh --execute
 ```
 
 For Grafana, a port-forward carried by SSH is used; the Service is not published. Check errors and rejections in Loki/Grafana without exporting tokens, headers, bodies, IPs or Cloudflare identifiers.
+
+### 7.4 Viewer de evaluación
+
+Preferir ejecutar el viewer de solo lectura en el checkout local con artefactos descargados, ligado a loopback:
+
+```bash
+PYTHONPATH=tests:api .venv/bin/python -m evaluation.viewer.server \
+  --artifacts-root tests/data/evaluation/artifacts --host 127.0.0.1 --port 8765
+```
+
+Si los artefactos solo están en el servidor K3s, ejecutar allí el mismo comando y abrir desde el equipo del operador un túnel `ssh -N -i "$K3S_KEY" -p "$K3S_SSH_PORT" -L 18765:127.0.0.1:8765 "$K3S_USER@$K3S_HOST"`; acceder a `http://127.0.0.1:18765/`. Detener el viewer y el túnel al terminar. Los E2E contra K3s pueden consumir cuotas y proveedores; seguir [el contrato de pruebas](../../tests/frontend/e2e/README.md) en una ventana autorizada.
 
 ---
 

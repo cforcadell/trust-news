@@ -47,6 +47,12 @@ const keycloak = new Keycloak({
     realm: 'TrustNews',
     clientId: 'TrustNewsWeb'
 });
+keycloak.onAuthLogout = () => document.documentElement.classList.remove('app-ready');
+
+window.addEventListener('pagehide', () => document.documentElement.classList.remove('app-ready'));
+window.addEventListener('pageshow', event => {
+    if (event.persisted) window.location.reload();
+});
 
 function t(key, params = {}) {
     return window.I18N?.t(key, params) || key;
@@ -3506,16 +3512,16 @@ document.addEventListener('DOMContentLoaded', () => {
         onLoad: 'login-required', // Obliga a loguearse al cargar la web
         checkLoginIframe: false   // Recomendado para evitar problemas de cookies en localhost
     }).then(authenticated => {
-        if (authenticated) {
-            console.log("Autenticado con éxito.");
-            checkAdminStatus();
-            // Una vez autenticado, cargamos los listeners y la vista
-            document.body.classList.add('authenticated');
-            initializeApp();
-        }
+        if (!authenticated) return keycloak.login();
+        console.log("Autenticado con éxito.");
+        checkAdminStatus();
+        // Una vez autenticado, cargamos los listeners y la vista
+        document.body.classList.add('authenticated');
+        initializeApp();
+        document.documentElement.classList.add('app-ready');
     }).catch(err => {
         console.error("Error al inicializar Keycloak:", err);
-        alertMessage(t("messages.identityError"), "error");
+        document.getElementById('auth-gate').textContent = t("messages.identityError");
     });
 
 });
@@ -4712,9 +4718,12 @@ initializeApp = function initializeAppUXIntegrated() {
     const logoutBtn = document.getElementById("btn-logout");
     if (logoutBtn && !logoutBtn.dataset.bound) {
         logoutBtn.dataset.bound = "true";
-        logoutBtn.addEventListener("click", () => keycloak.logout({
-            redirectUri: new URL(FRONTEND_BASE_PATH, window.location.origin).href
-        }));
+        logoutBtn.addEventListener("click", () => {
+            document.documentElement.classList.remove('app-ready');
+            keycloak.logout({
+                redirectUri: new URL(FRONTEND_BASE_PATH, window.location.origin).href
+            });
+        });
     }
 
     const badge = document.getElementById("sessionBadge");

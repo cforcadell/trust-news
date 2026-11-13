@@ -4,6 +4,15 @@ Runbook of the local environment with Kind and non-productive profiles of Skaffo
 
 The shared procedures are in [`k8s-common.md`](k8s-common.md), the status of the current version in [`v0.0.13.md`](../releases/v0.0.13.md) and the roadmap in [`next_releases.md`](../next_releases.md).
 
+## Guía rápida de la VM local
+
+1. En la VM, comprobar `kubectl config current-context` (`kind-trust-news`). Solo si falta el clúster, crearlo con `kind create cluster --name trust-news --config kind-config.yaml`. Aplicar `./skaffold deploy -p setup`.
+2. Conservar la CA y los archivos privados existentes. En la primera instalación, preparar S03/S07a como en [infraestructura](#5-infraestructura-local). Ejecutar `./skaffold dev -p infra-basic` **o** `./skaffold dev -p infra`; esperar a Keycloak y MongoDB. Completar MongoDB y los clientes base y de servicio de Keycloak antes de las APIs.
+3. Ejecutar `./skaffold deploy -p traefik` y `./skaffold dev -p apis-frontend`. Mantener `BLOCKCHAIN_ENABLED=OFF` para LIGHT. Skaffold aplica los manifiestos S03/S07a con los insumos preparados.
+4. Abrir Traefik en loopback de la VM, tunelizar `7443` por SSH desde el host y alinear el cliente web OIDC antes del primer login. Comprobar `https://localhost:7443/gui/` y las rutas autenticadas. La aceptación local del camino declarativo S03 quedó cerrada el 13-11-2026 según confirmación del operador; esta evidencia no acredita Hetzner/K3s.
+
+En un **clúster existente**, revisar contexto, PVC, CA y archivos locales; no recrear kind ni regenerar material criptográfico en un redespliegue normal. Las campañas [E2E](#92-matriz-funcional) son opcionales y no acreditan K3s.
+
 ---
 
 ## 1. Current local photo
@@ -41,7 +50,7 @@ Grafana or Kafdrop.
 
 ### 1.1 Access from VM host
 
-The local environment runs within a VM and the port-forwards that must be opened from the host listen deliberately in `0.0.0.0`. This exception is only local: the VM adapter must be `host-only` or an equivalent private network, and the guest firewall must accept those ports only from the host address. Do not use a bridge interface or a unreliable shared network with those active listeners.
+The local environment runs within a VM. Skaffold's direct API port-forwards can listen on `0.0.0.0`; the VM adapter must be `host-only` or an equivalent private network, and the guest firewall must accept those ports only from the host address. The Traefik port-forward below listens on `127.0.0.1` and is reached through SSH. Do not use a bridge interface or an untrusted shared network with those listeners.
 
 The full tour of Traefik must retain `localhost`: the Ingress and the IODC issuer depend on that hostname. From the host the hypervisor port is redirected to the VM or a tunnel opens, for example:
 
@@ -59,30 +68,33 @@ Orden:
 
 1. Create or check the Kind cluster.
 2. Crear namespaces.
-3. Choose `infra-basic` or `infra`.
-4. Run MongoDB bootstrap.
-5. Desplegar `traefik`.
-6. Desplegar `apis-frontend` en LIGHT.
-7. Configure Keycloak, quotas and functional data.
+3. Preparar la PKI local S03 y el material TLS Kafka S07a antes de Skaffold.
+4. Choose `infra-basic` or `infra`.
+5. Run MongoDB bootstrap; con Keycloak listo, comprobar el realm y los clientes
+   base y reconciliar clientes de servicio S03 si aún no existen los
+   `s03-client.env` locales.
+6. Desplegar `traefik` y `apis-frontend` en LIGHT.
+7. Alinear el cliente web/issuer local y configurar cuotas y datos funcionales.
 8. Activar blockchain solo si se va a probar un flujo auditable; desplegar o
    verificar el contrato entonces.
 9. Run the local validation matrix.
+
+En redespliegues con CA y credenciales conservadas, los perfiles aplican S03/S07a sin activador posterior.
 
 ---
 
 ## 3. Cluster and namespaces
 
-Create the cluster:
+Solo si falta el clúster, crearlo:
 
 ```bash
 kind create cluster --name trust-news --config kind-config.yaml
 ```
 
-Crear namespaces:
+Crear o comprobar namespaces con el perfil idempotente:
 
 ```bash
-cd ./scripts/k8s
-./create-namespaces.sh
+./skaffold deploy -p setup
 kubectl get ns blockchain infra apis frontend
 ```
 
@@ -176,11 +188,15 @@ los `secretGenerator` locales de Skaffold:
 
 ```bash
 python3 scripts/security/s03_local_pki.py --output-dir /tmp/s03-kind-pki
+python3 scripts/security/s07a_local_kafka_tls.py --pki-dir /tmp/s03-kind-pki
+python3 scripts/security/render_s03_runtime.py --check
 ```
+
+Conservar `/tmp/s03-kind-pki` y los archivos ignorados entre redespliegues. Si faltan, seguir [S03](../security/s03-skaffold.md) y [S07a](../security/s07a-kafka-tls.md) antes de continuar; no regenerar una CA o un PKCS12 por separado.
 
 ### 5.1 Basic profile
 
-`infra-basic` includes Kafka, IPFS, MongoDB, Mongo Express and Keycloak. It includes Kafdrop, Fluent Bit, Loki and Grafana.
+`infra-basic` includes Kafka, IPFS, MongoDB, Mongo Express and Keycloak; Kafdrop, Fluent Bit, Loki and Grafana belong to `infra`.
 
 ```bash
 ./skaffold dev -p infra-basic
@@ -215,11 +231,28 @@ kubectl port-forward --address 0.0.0.0 \
   -n infra svc/mongo-express 8081:8081
 ```
 
-The listener is accessible from the host according to the private network model described in [1.1](#11-acceso-desde-el-host-de-la-vm).
+The listener is accessible from the host according to the private network model described in [1.1](#11-access-from-vm-host).
 
 With either of the two profiles, then run the common bootstrap:
 
 - [`k8s-common.md - MongoDB bootstrap`](k8s-common.md#7-mongodb-bootstrap).
+
+En la primera instalación, esperar a los servicios y completar el bootstrap:
+
+```bash
+kubectl rollout status deployment/keycloak -n infra
+kubectl rollout status statefulset/mongodb -n infra
+scripts/k8s/init-mongodb-server.sh
+scripts/k8s/realign-source-routing-mongodb.sh --check
+```
+
+Skaffold no crea el realm `TrustNews` ni los clientes base `TrustNewsWeb` y `TrustNewsApi`. Restaurarlos o seguir la [configuración de Keycloak](k8s-common.md#8-keycloak-and-assessed-contributions) antes de reconciliar los clientes S03. Para el reconciliador local, abrir temporalmente en otra terminal de la VM:
+
+```bash
+kubectl port-forward --address 127.0.0.1 -n infra svc/keycloak 18080:8080
+```
+
+Cerrar ese puerto al terminar la reconciliación.
 
 ---
 
@@ -242,7 +275,7 @@ kubectl get ingress -A
 ```
 
 If its local client files do not exist yet, first bring up
-Keycloak (`./skaffold dev -p infra`) and reconcile its service clients. This
+Keycloak with `infra-basic` or `infra` and reconcile its service clients. This
 writes one ignored `s03-client.env` into each API overlay; Kustomize uses those
 files to generate the `s03-client-*` Secrets during the API deployment. Run the
 reconciliation from the repository root:
@@ -257,6 +290,12 @@ Then deploy APIs and frontends:
 ./skaffold dev -p apis-frontend
 ```
 
+Para el arranque LIGHT, después de aplicar las APIs:
+
+```bash
+BLOCKCHAIN_ENABLED=OFF bash scripts/k8s/set-blockchain-mode.sh
+```
+
 Los perfiles Skaffold ya incluyen sidecars, TLS, Secrets y rutas S03 en sus
 manifiestos. Las credenciales locales `s03-client.env` siguen ignoradas por
 Git y son reutilizadas en los siguientes despliegues. No se ejecuta un
@@ -268,11 +307,11 @@ El orden completo y el contrato de Secrets están en
 Open the full entry:
 
 ```bash
-kubectl port-forward --address 0.0.0.0 \
+kubectl port-forward --address 127.0.0.1 \
   -n kube-system svc/traefik 7443:443
 ```
 
-The listener is accessible from the host according to the private network model described in [1.1](#11-acceso-desde-el-host-de-la-vm).
+Desde el host, usar el túnel SSH de [1.1](#11-access-from-vm-host). Para otros puertos de diagnóstico, añadir `-L <puerto>:127.0.0.1:<puerto>` solo durante la operación.
 
 Rutas principales:
 
@@ -340,7 +379,7 @@ The frontend does not finish TLS or proxify `/backend` or `/auth`. Traefik publi
 
 ## 8. Endpoints locales
 
-The table uses `localhost` as a canonical reference. For frontend and Keycloak it is preserved by redirection or tunnel. A direct HTTP port-forward displayed by Skaffold can use the private IP of the VM. Services that Skaffold links only to loopback requires an explicit tunnel or port-forward with the same network criterion of [1.1](#11-acceso-desde-el-host-de-la-vm).
+The table uses `localhost` as a canonical reference. For frontend and Keycloak it is preserved by redirection or tunnel. A direct HTTP port-forward displayed by Skaffold can use the private IP of the VM. Services that Skaffold links only to loopback require an explicit tunnel or port-forward with the same network criterion of [1.1](#11-access-from-vm-host).
 
 | Service | URL | Perfil |
 | --- | --- | --- |
@@ -367,6 +406,23 @@ The table uses `localhost` as a canonical reference. For frontend and Keycloak i
 Local validates application and manifests without playing out the external controls of Cloudflare.
 
 ### 9.1 Render
+
+El Ingress local usa el certificado de `web_classic/certs`. Si se regenera, el
+nombre DNS debe coincidir con `localhost`; el generador reutiliza la clave
+existente y emite un certificado con SAN. Aplicar después el overlay local para
+actualizar `trustnews-origin-tls` en kind:
+
+```bash
+bash web_classic/certs/create_certs.sh localhost
+openssl verify -CAfile web_classic/certs/fullchain.pem \
+  -verify_hostname localhost web_classic/certs/fullchain.pem
+kubectl kustomize --load-restrictor=LoadRestrictionsNone \
+  k8s/ingress/overlays/local | kubectl apply -f -
+```
+
+En el navegador del host, confiar explícitamente en este certificado local
+autofirmado antes de usar la GUI; en comandos `curl`, pasar `--cacert` como en
+las comprobaciones siguientes. No usar este certificado ni su clave en K3s.
 
 ```bash
 kubectl kustomize --load-restrictor=LoadRestrictionsNone \
@@ -419,6 +475,34 @@ Expected results of technical checks:
 | mTLS Cloudflare | No aplica |
 
 When they change Gateway, Traefik or his manifests repeat this matrix before deploying in Hetzner.
+
+### 9.3 E2E y viewer opcionales
+
+Estas campañas pueden consumir cuotas y proveedores; fijar identidad de prueba y presupuesto antes de ejecutarlas. Con el túnel `7443` activo, el smoke LIGHT usa `ASSERMETRY_USERNAME` y `ASSERMETRY_PASSWORD` cargados solo en la sesión:
+
+```bash
+ASSERMETRY_CASE_FILE=tests/data/frontend-e2e/resources/cases/light.json \
+  node tests/frontend/e2e/ui-smoke-test.js
+```
+
+Para una campaña de evaluación publicada, cargar `ASSERMETRY_KEYCLOAK_CLIENT_ID` y `ASSERMETRY_KEYCLOAK_CLIENT_SECRET` solo en la sesión; el proceso puede llamar proveedores externos. Ejecutar con el túnel `7443` activo:
+
+```bash
+PYTHONPATH=tests:api .venv/bin/python -m evaluation.pipeline \
+  --dataset tests/data/benchmark/resources/cases/official-gold-v0 \
+  --mode full --publish --repetitions 1 \
+  --output "tests/data/evaluation/artifacts/e2e-$(date +%Y%m%d-%H%M%S)"
+unset ASSERMETRY_KEYCLOAK_CLIENT_SECRET
+```
+
+Solo `phase=campaign.complete` acredita el fin de la campaña; revisar `execution_failures` si aparece `COMPLETED_WITH_ERRORS`. La regresión completa se documenta en [E2E frontend](../../tests/frontend/e2e/README.md). No forma parte del arranque rutinario. Para leer los artefactos ya generados, iniciar en la VM:
+
+```bash
+PYTHONPATH=tests:api .venv/bin/python -m evaluation.viewer.server \
+  --artifacts-root tests/data/evaluation/artifacts --host 127.0.0.1 --port 8765
+```
+
+Desde el host se accede con `ssh -L 8765:127.0.0.1:8765 <usuario-vm>@<ip-privada-vm>` y `http://127.0.0.1:8765/`. Al terminar, detener viewer, túneles y procesos `skaffold dev` con `Ctrl+C`; el clúster y sus volúmenes permanecen.
 
 ---
 

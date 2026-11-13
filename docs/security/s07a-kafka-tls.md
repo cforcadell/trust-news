@@ -61,4 +61,8 @@ El motor crea un topic de nombre único, comprueba producción/consumo TLS y rec
 - `s07a-kafka-broker` y `s07a-kafka-ca` generados por Kustomize desde overlays locales; Kafka y todos los Deployments cliente quedaron Ready en la revisión TLS. Kafdrop mostró `fake_news_responses`.
 - E2E Kafka desde el contenedor News Handler: producir y consumir el mismo mensaje con CA y hostname verificados, PASS. El cliente `PLAINTEXT` fue rechazado, PASS. El topic temporal `s07a_tls_e2e_edf09009de4b` se eliminó.
 - El listener KRaft 9093 respondió TLSv1.3 `TLS_AES_256_GCM_SHA384`; verificación de CA y hostname del pod, OK.
-- Suite focalizada: 55 pruebas correctas; renders locales y prod de clientes y broker correctos. El flujo funcional autenticado LIGHT/SMART queda pendiente de credenciales de prueba y comprobación de cuota/propiedad. Hetzner/K3s no se desplegó ni se aceptó; el kubeconfig local solo contiene `kind-trust-news`.
+- Suite focalizada: 55 pruebas correctas; renders locales y prod de clientes y broker correctos. El flujo funcional autenticado LIGHT/SMART quedaba pendiente tras esta ejecución. Hetzner/K3s no se desplegó ni se aceptó; el kubeconfig local solo contiene `kind-trust-news`.
+
+### Confirmación posterior
+
+- 11-11-2026: el usuario confirma que los E2E funcionales autenticados LIGHT/SMART de S07a se superaron en kind. Hetzner/K3s continúa pendiente; esta confirmación local no constituye aceptación de preproducción.

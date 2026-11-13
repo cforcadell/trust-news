@@ -105,6 +105,8 @@ Con esa sesión, antes de crear datos el listado devolvió 200 y la cuenta no te
 
 La aceptación local de S03 queda cerrada con lectura propia de una orden nueva y denegación del registro histórico sin dueño verificable. La ejecución E2E guardó su informe en `/tmp/s03-regression-alpha-order-20261108-retry/report.json`. La activación y aceptación de preproducción, más la revisión manual futura del dueño de la orden legacy, quedan pendientes y no bloquean el cierre local. La CA y los certificados locales están en `/tmp/s03-kind-pki`; las credenciales se guardan en los overlays locales ignorados de cada API.
 
+**Actualización 2026-11-13 — camino declarativo:** el operador confirma que todas las pruebas locales en kind están OK y se cierra también la aceptación del camino Skaffold declarativo. En la comprobación actual, `S03_PREFLIGHT_PHASE=apis bash scripts/security/check_s03_configured_secrets.sh` terminó correctamente para nueve servicios, sin mostrar valores; la inspección de runtime confirmó las variables no sensibles de S03, SMART y Blockchain OFF donde aplican. La aceptación e integración en Hetzner/K3s siguen pendientes; la confirmación local no las sustituye.
+
 Desde la integración declarativa posterior, preparar los materiales y desplegar en este orden:
 
 ```bash

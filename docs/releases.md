@@ -2,22 +2,27 @@
 
 Este documento recoge las versiones desplegadas, sus límites conocidos y los siguientes hitos planificados. Una entrada planificada no acredita implementación ni despliegue. El roadmap completo está en [next_releases.md](next_releases.md).
 
-## v0.0.13b — Cierre de seguridad previo a la beta
+## v0.0.13b — Plataforma de demos controladas
 
-**Estado: planificada; S00 iniciado el 04-11-2026 con inventario local parcial. Remediaciones pendientes.** Se ejecuta después de v0.0.13 y antes de v0.0.14. La VM con kind es desarrollo local, Hetzner es preproducción y producción aún no existe; los perfiles `-prod` son nombres técnicos heredados. [Enfoque, ejecución y planning](version.md) · [Inventario S00](security/s00-inventory.md) · [Auditoría contrastada Codex](security/security_review_codex.md) · [Auditoría aportada](security/security_review_aportada.md) · [Revisión Copilot](security/security_review_copilot.md).
+**Estado: en ejecución; NO-GO para abrir a clientes.** S00/S01 cerrados para preproducción con límites; S02/S03 aceptados localmente en kind, incluido el camino declarativo S03 confirmado por el operador; S07a tiene E2E técnico y funcional kind. Hetzner/K3s es preproducción, producción no existe y los perfiles `-prod` son nombres heredados. [Objetivo, estado y puertas](version.md) · [Inventario S00](security/s00-inventory.md) · [Auditoría contrastada](security/security_review_codex.md).
 
-- P0: autenticar host SSH y API K3s en todos los jobs privilegiados, adelantando ISSUE-003/004 desde el objetivo anterior v0.0.16; verificar exposición y contener cualquier secreto activo expuesto.
-- P1: motores reutilizables de descarga segura frente a SSRF/rebinding, identidad/autorización interna, segmentación declarativa, admisión y consumo idempotentes por organización y estado del cliente, Kafka autenticado y JWT/JWKS robustos.
-- S04 (segmentación declarativa) está diferida a una versión posterior por decidir; continúa pendiente y bloquea el GO de v0.0.13b salvo revisión formal de alcance.
-- S05 (reserva, consumo y liberación idempotentes de cuotas), S06 (estado/vigencia en admisión) y S07b (identidad/ACL y política de eventos Kafka) están diferidas a versiones posteriores por decidir; continúan pendientes y bloquean el GO de v0.0.13b salvo revisión formal de alcance. S07a implementa el cifrado TLS de Kafka; su aceptación por entorno se registra aparte.
-- Recuperación cifrada externa y restauración aislada antes de migrar MongoDB 4.4 a una versión soportada; pruebas negativas, regresión y aceptación por el borde sobre el candidato exacto.
-- Prioridad adicional del análisis propio: LIGHT puede admitir trabajo con cuotas cero y cliente suspendido; `publishWithAssertions` solicita escrituras de consumo `+1` y `-1` respecto al mismo valor inicial. La reproducción fue local y aislada, sin acreditar explotación productiva.
-- Se mantiene LIGHT/SMART, Blockchain OFF y mTLS general/administrativo. P2 conserva endurecimiento general de pods, suministro, cabeceras/TLS restante y el bloqueo de activación Geth sin controles.
-- Cierre: todas las puertas P0/P1 de `version.md` superadas con evidencias; P2 con responsable y revisión. Estimación P0/P1: 178–314 h técnicas. La seguridad no sustituye la aceptación funcional/factual pendiente de v0.0.13.
+- Demos guiadas LIGHT/SMART, Blockchain OFF, mTLS general/administrativo y máximo dos organizaciones invitadas con identidad separada, datos desechables y vigencia limitada.
+- S02/S03/S07a requieren integración y aceptación en Hetzner; S11-D y S12-D prueban borde, aislamiento, coste, baja y rollback sobre el mismo candidato. S01 exige revalidar preflight y aceptar sus riesgos residuales para la ventana.
+- Hasta S05 no se permite a invitados iniciar trabajos con gasto; cada ejecución autorizada es supervisada por el operador. Si ese límite no puede imponerse, solo hay demos internas.
+- El cierre habilita exclusivamente las demos descritas en [version.md](version.md#puertas-de-apertura-de-demos). No cierra v0.0.13, no retira mTLS, no acredita beta autónoma ni producción.
+
+## v0.0.13c — Seguridad para acceso autónomo limitado
+
+**Estado: planificada; sin aceptación de los paquetes diferidos.** Hito intermedio entre demos v0.0.13b y beta cerrada v0.0.14. Conserva motores compartidos y completa las barreras que las demos guiadas compensan operativamente:
+
+- S04: segmentación declarativa default-deny con enforcement probado; S05: cuotas con reserva/consumo/liberación idempotentes y concurrencia; S06: estado/vigencia y revocación de organizaciones, usuarios y clientes; S07b: identidad, ACL y política de eventos Kafka.
+- S08: copia cifrada externa y restauración aislada MongoDB/Keycloak, **antes** de S09: migración reproducible de MongoDB 4.4 a versión soportada con retorno ensayado. S10 completa caché, rotación y fallo acotado de JWKS sobre el verificador S03.
+- S11/S12 completos: contrato de borde, aislamiento, gasto, bajas, mensajería, recuperación y regresión LIGHT/SMART sobre SHA/digests exactos. Los hallazgos P0 requieren contención inmediata; no esperan esta versión.
+- **GO:** todos los P1 anteriores implementados y aceptados en Hetzner, con recuperación, operación y riesgos residuales documentados. Este GO acredita preparación para la puerta propia de v0.0.14; no abre acceso autónomo. La estimación histórica 178–314 h correspondía al alcance integral anterior y debe reestimarse para el trabajo restante.
 
 ## v0.0.14 — Beta cerrada por invitación
 
-**Estado: planificada y condicionada al cierre de v0.0.13b.** Retirada controlada del mTLS general conservando el gate de rutas y mTLS administrativo, prueba de revocación e invitaciones a organizaciones externas. [Alcance y aceptación](next_releases.md#v0014---beta-closed-by-invitation). Esta entrada no autoriza abrir el acceso ni indica que se hayan aplicado cambios al borde.
+**Estado: planificada y condicionada a v0.0.13c y aceptación funcional aplicable.** Acceso autónomo de hasta dos clientes, retirada controlada del mTLS general con gate de rutas y mTLS administrativo conservados, revocación probada y aceptación propia. [Alcance y aceptación](next_releases.md#v0014---beta-closed-by-invitation). Esta entrada no autoriza abrir el acceso ni indica cambios aplicados al borde.
 
 ## v0.0.13 — Estabilización funcional
 

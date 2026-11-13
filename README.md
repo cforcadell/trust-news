@@ -707,11 +707,9 @@ Skaffold profiles currently defined in `skaffold.yaml`:
 
 Primary deployment documentation:
 
-- [Local quick start](docs/quick_start_local.md)
-- [Hetzner quick start](docs/quick_start_hetzner.md)
 - [Common Kubernetes procedures](docs/deploy/k8s-common.md)
-- [Local Skaffold deployment](docs/deploy/skaffold-local.md)
-- [Server/Hetzner deployment](docs/deploy/skaffold-server.md)
+- [Local Skaffold deployment and quick guide](docs/deploy/skaffold-local.md)
+- [K3s/Hetzner deployment and quick guide](docs/deploy/skaffold-server.md)
 - [GitLab, GitHub and release workflow](docs/deploy/gitlab-github-release-workflow.md)
 
 The previous Kubernetes notes are archived and non-operational; see
@@ -721,59 +719,8 @@ The previous Kubernetes notes are archived and non-operational; see
 
 ## Local Quick Start
 
-Prerequisites:
-
-- Docker
-- Kubernetes local cluster
-- Kind
-- Skaffold v4
-- kubectl
-- Node.js/npm for smart-contract scripts
-- Python 3.10+
-
-Clone:
-
-```bash
-git clone https://github.com/cforcadell/trust-news.git
-cd trust-news
-```
-
-Create local `.env` files from their examples before running Skaffold. Real
-secrets must never be committed.
-
-Typical local flow:
-
-Run each Skaffold `dev` command in its own terminal; apply the mode switch
-after the API manifests exist.
-
-```bash
-cd ./scripts/k8s
-./create-namespaces.sh
-
-cd ../..
-./skaffold dev -p infra
-./skaffold dev -p apis-frontend
-# En otra terminal, tras aplicar los manifiestos de APIs:
-BLOCKCHAIN_ENABLED=OFF bash scripts/k8s/set-blockchain-mode.sh
-```
-
-Main local URLs:
-
-| Service | URL |
-|---|---|
-| Frontend | `https://localhost:7443/gui/` |
-| Keycloak Admin | `https://localhost:7443/auth/admin/master/console/` |
-| Admin API | `http://localhost:8400/docs` |
-| Gateway | `https://localhost:7443/backend/docs` |
-| Evidence Search | `http://localhost:8074/docs` |
-| News Handler | `http://localhost:8072/docs` |
-| News Chain | `http://localhost:8073/docs` |
-| Mongo Express | `http://localhost:8081` |
-| Kafdrop | `http://localhost:9000` |
-| Grafana | `http://localhost:3000` |
-
-See [skaffold-local.md](docs/deploy/skaffold-local.md) for the full local
-runbook.
+Use the [local Skaffold guide](docs/deploy/skaffold-local.md#guía-rápida-de-la-vm-local)
+for the current kind setup, first installation, VM access and optional checks.
 
 ---
 

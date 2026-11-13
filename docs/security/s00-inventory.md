@@ -2,6 +2,28 @@
 
 **Estado:** inventario S00 completado el 07-11-2026, con hallazgos y límites documentados; S01/G0 cerrados después para preproducción. Lectura de repositorio, kind y K3s de preproducción, con evidencias de GitLab, Hetzner y Cloudflare aportadas por el operador; sin cambios de clúster. El cierre del inventario no acredita copias de seguridad, rotación de secretos, RBAC mínimo ni confianza independiente de host key/CA.
 
+## Revisión del checkout local para candidato (2026-11-13)
+
+En la revisión previa a preparar v0.0.13b, `git ls-files -s` confirmó que el
+repositorio sigue versionando `web_classic/certs/privkey.pem` con modo Git
+`100644`; la referencia local `origin/postTFM` contiene el mismo blob y el
+último commit observado para la ruta es `78638d9` (2026-01-24). No se consultó
+el remoto en vivo, por lo que su estado y visibilidad actuales no están
+confirmados. En el checkout local el archivo tiene modo `0600`. No se leyó ni
+se registró su contenido. El `fullchain.pem` actual es un certificado autofirmado con CN y SAN
+`localhost`; el overlay local genera el Secret TLS usando ambos archivos. El
+overlay `prod` no declara ese SecretGenerator y `web_classic/Dockerfile` solo
+copia `./app` a la imagen. Esto mantiene el uso declarado en el camino local,
+pero no demuestra que la clave nunca haya salido del repositorio. Tratarla como
+expuesta al menos a los lectores del historial local disponible; retirar del
+seguimiento y rotar antes de distribuir otro candidato. Nunca usarla como
+certificado TLS de Hetzner.
+
+La misma revisión encontró 19 rutas versionadas modificadas o eliminadas,
+más `docs/deploy/candidate-v0.0.13b-k3s.md` sin seguimiento. El SHA no incluye
+esos cambios. Es una fotografía del árbol local, no evidencia de GitLab ni de
+despliegue.
+
 ## Alcance y procedencia
 
 | Entorno | Función real | Fuente disponible | Estado de comprobación |
@@ -209,7 +231,7 @@ Si `sshd` no usa esa ruta o no existe, tomar la ruta pública correspondiente a 
 
 ### 2. Preparar la VM
 
-Desde la raíz del checkout, definir **localmente**, sin pegar sus valores en Git ni en el chat, `HETZNER_HOST`, `HETZNER_USER` y `HETZNER_KEY` como en [quick start](../quick_start_hetzner.md#3-acceso-ssh-y-kubernetes). Comprobar que la clave privada ya existe; si `test` falla, detenerse. Crear un fichero nuevo de confianza para esta operación y pegar la línea pública obtenida de la consola cuando `read` la solicite:
+Desde la raíz del checkout, definir **localmente**, sin pegar sus valores en Git ni en el chat, `HETZNER_HOST`, `HETZNER_USER` y `HETZNER_KEY` para esta operación; el patrón de acceso está en la [guía K3s](../deploy/skaffold-server.md#2-accesses-and-variables). Comprobar que la clave privada ya existe; si `test` falla, detenerse. Crear un fichero nuevo de confianza para esta operación y pegar la línea pública obtenida de la consola cuando `read` la solicite:
 
 ```bash
 test -r "$HETZNER_KEY" && echo 'Clave privada accesible'

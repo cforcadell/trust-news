@@ -14,7 +14,7 @@ protegido y el clúster K3s. No autoriza despliegue ni apertura de demos.
 | Perfiles del clúster existente | `infra-prod` y después `apis-frontend-prod` si se incorpora S03/S07a; `traefik-prod` solo ante cambio de chart/configuración Traefik | Ejecutar cada perfil en una ventana serial, con pipeline y artefacto propios del mismo SHA. `setup` corresponde a clúster limpio. No ejecutar `blockchain-prod` ni `news-chain-prod` para LIGHT/SMART OFF. |
 | Render estático | Los cinco overlays de `infra-prod`, los trece de `apis-frontend-prod` y el de `blockchain-prod` renderizan; `s03-runtime` usa issuer público `https://assermetry.com/auth/realms/TrustNews`, JWKS interno HTTPS y CA montada; Evidence Search declara `SMART`; Geth declara cero réplicas | Repetir el render en el SHA publicado y comparar con la configuración que realmente reciban los pods. Los Secrets S03/S07a se provisionan fuera del repositorio en K3s. |
 | Blockchain | `.gitlab-ci.yml` tiene `BLOCKCHAIN_ENABLED=OFF` por defecto; el modo se aplica con `set-blockchain-mode.sh` tras el perfil API | Seleccionar `OFF` explícitamente y comprobar `apis/blockchain-mode=false`, valor efectivo dentro de Gateway/News Handler/validadores, cero pendientes BLOCKCHAIN antes del corte, y cero réplicas de Geth y `news-chain` después. |
-| Preflight CI | `PIPELINE_ACTION=preflight` solo admite `infra-prod` y `apis-frontend-prod`. Comprueba acceso Kubernetes y certificado servido por Traefik con CA y hostname; para API captura revisiones. No construye ni despliega. | Ejecutarlo en el SHA protegido final y conservar ID, hora, perfil y resultado. En `deploy`, el job vuelve a comprobar S03 por fase. Comprobar aparte presencia de Secrets S07a por nombres/claves y cadena/SAN, sin mostrar valores. |
+| Preflight CI | `PIPELINE_ACTION=preflight` solo admite `infra-prod` y `apis-frontend-prod`. Comprueba acceso Kubernetes, certificado servido por Traefik con CA y hostname, Secrets con `scripts/check_configured_secrets.sh` y, para API, captura revisiones. No construye ni despliega. | Ejecutarlo en el SHA protegido final y conservar ID, hora, perfil y resultado. El motor comprueba S03, S07a (incluida cadena y SAN) y los Secrets de aplicación, sin mostrar valores; `deploy` repite la fase antes de mutar recursos. |
 | Lock y concurrencia | La guía documenta un Maintenance lock de Cloudflare; su estado actual no está comprobado. La CI no define `resource_group`. | El operador verifica y registra el estado del lock antes de la ventana, mantiene el acceso externo cerrado durante el cambio y evita pipelines concurrentes. Registrar responsable y criterio para abrir/cerrar la ventana. |
 | Observación | La guía prevé Loki/Grafana, estado Ready, rutas, errores y coste | Fijar periodo de observación, responsable y umbrales antes de desplegar. Conservar solo métricas y resultados redactados, sin tokens, cuerpos, IP ni identificadores de Cloudflare. |
 | Rollback | `rollout-revisions.sh` captura las revisiones de diez Deployments API y `frontend-web`; el job `rollback` intenta restaurarlas si falla `apis-frontend-prod`. Antes del rollout, la CI ejecuta `realign-source-routing-mongodb.sh --apply`, que puede modificar MongoDB. | Conservar snapshot y artefacto del pipeline anterior, imagen/digest, manifiestos, Secrets anteriores validados y respaldo de datos. El job no revierte ConfigMaps, Ingress, Kafka, Keycloak, MongoDB ni PVC; preparar recuperación por componente y datos antes de la ventana. No considerar probado en K3s el rollback automático por un fallo real. |
@@ -42,9 +42,10 @@ servicios. Esto no fija un candidato ni acredita Hetzner/K3s.
    hora UTC y responsable. Cualquier cambio posterior exige otro candidato.
 2. En GitLab, seleccionar `PIPELINE_ACTION=preflight`, primero con
    `PROFILE=infra-prod` y luego con `PROFILE=apis-frontend-prod`, ambos en el
-   mismo SHA. Registrar los dos resultados. Comprobar respaldo recuperable,
-   Secrets S03/S07a por nombres y claves, certificados y estado del lock. Un
-   preflight correcto no prueba que el despliegue posterior funcione.
+   mismo SHA. El preflight ejecuta `scripts/check_configured_secrets.sh` en
+   cada fase antes de `deploy`; registrar ambos resultados. Comprobar respaldo
+   recuperable y estado del lock. Un preflight correcto no prueba que el
+   despliegue posterior funcione.
 3. Cuando la ventana esté autorizada, mantener el lock activo y ejecutar el
    pipeline protegido de `infra-prod` con `BLOCKCHAIN_ENABLED=OFF`. Conservar
    su `build.json`; comprobar Keycloak, Kafka TLS, JWKS y pods Ready. Después

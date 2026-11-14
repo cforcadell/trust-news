@@ -16,7 +16,7 @@ variables:
   PIPELINE_ACTION:
     value: "deploy"
     options: ["deploy", "preflight"]
-    description: "deploy construye y permite despliegue manual; preflight solo comprueba acceso y TLS de origen"
+    description: "deploy construye y permite despliegue manual; preflight verifica acceso, TLS de origen y Secrets requeridos"
   PROFILE:
     value: "apis-frontend-prod"
     options:
@@ -132,6 +132,7 @@ check_phase6_origin_tls:
 
   before_script:
     - !reference [.kube_access, before_script]
+    - apk add --no-cache python3
 
   script:
     - echo "Comprobando TLSStore y certificado público servido antes de desplegar"
@@ -151,6 +152,15 @@ check_phase6_origin_tls:
         --server-name "$ORIGIN_TLS_SERVER_NAME" \
         --ca-file "$origin_ca_file" \
         --ca-fingerprint "$ORIGIN_TLS_CA_FINGERPRINT"
+    - |
+      case "$PROFILE" in
+        infra-prod)
+          bash scripts/check_configured_secrets.sh --phase infra
+          ;;
+        apis-frontend-prod)
+          bash scripts/check_configured_secrets.sh --phase apis
+          ;;
+      esac
     - |
       if [ "$PIPELINE_ACTION" = "preflight" ] && [ "$PROFILE" = "apis-frontend-prod" ]; then
         bash scripts/ci/rollout-revisions.sh capture \
@@ -194,10 +204,10 @@ deploy:
     - |
       case "$PROFILE" in
         infra-prod)
-          S03_PREFLIGHT_PHASE=infra bash scripts/security/check_s03_configured_secrets.sh
+          bash scripts/check_configured_secrets.sh --phase infra
           ;;
         apis-frontend-prod)
-          S03_PREFLIGHT_PHASE=apis bash scripts/security/check_s03_configured_secrets.sh
+          bash scripts/check_configured_secrets.sh --phase apis
           ;;
       esac
     - |

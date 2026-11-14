@@ -44,6 +44,8 @@ skaffold run -p apis-frontend-prod
 
 Ejecutar los comandos solo después de comprobar el contexto K3s y los SAN. El código y las rutas montadas son idénticos a kind. El paso de `PLAINTEXT` a TLS requiere un corte coordinado del broker y los clientes; conservar una copia protegida de los Secrets y el manifiesto anterior para rollback operativo.
 
+Antes de desplegar `infra-prod`, ejecutar desde el checkout del SHA candidato `bash scripts/check_configured_secrets.sh --phase infra`; esta fase valida el Secret del broker, su CA y el certificado PKCS12. Después de reconciliar S03 y antes de `apis-frontend-prod`, ejecutar `bash scripts/check_configured_secrets.sh --phase apis`; esta fase comprueba además `apis/s07a-kafka-ca` y que su CA coincide con la del broker. Ambas fases validan vigencia de la CA y del certificado, password, SAN, `serverAuth` y cadena del certificado. GitLab repite la fase correspondiente en preflight y justo antes del despliegue.
+
 ## Aceptación por entorno
 
 En cada entorno, comprobar que Kafka y los clientes están Ready, que un productor/consumidor TLS produce y lee el mismo mensaje con CA y hostname verificados, que una conexión `PLAINTEXT` al puerto 9092 falla, que Kafdrop accede al broker y que el E2E autenticado LIGHT/SMART funciona sin errores Kafka. Registrar identificadores de orden y efecto en cuota, sin incluir secretos. El éxito en kind no acredita Hetzner.

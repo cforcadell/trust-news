@@ -38,6 +38,26 @@ secret_value_equals() {
 errors=0
 checked=0
 declare -A seen=()
+secret_is_readable() {
+  local namespace="$1" secret="$2" error
+  if error="$(kubectl get secret "$secret" -n "$namespace" -o name 2>&1 >/dev/null)"; then
+    return 0
+  fi
+  case "$error" in
+    *NotFound*|*"not found"*)
+      echo "ERROR: falta Secret $namespace/$secret" >&2
+      ;;
+    *Forbidden*|*forbidden*|*"cannot get resource"*)
+      echo "ERROR: el contexto activo no tiene permiso para leer Secrets en $namespace ($namespace/$secret)" >&2
+      ;;
+    *)
+      echo "ERROR: no se pudo consultar $namespace/$secret; revisa conexión y permisos de kubectl" >&2
+      ;;
+  esac
+  errors=$((errors + 1))
+  return 1
+}
+
 while IFS=$'\t' read -r namespace client_id secret; do
   [ "$phase" != infra ] || continue
   [ -n "$namespace" ] && [ -n "$client_id" ] && [ -n "$secret" ] || continue
@@ -46,9 +66,7 @@ while IFS=$'\t' read -r namespace client_id secret; do
   seen[$identity]=1
   checked=$((checked + 1))
 
-  if ! kubectl get secret "$secret" -n "$namespace" >/dev/null 2>&1; then
-    echo "ERROR: falta Secret $identity" >&2
-    errors=$((errors + 1))
+  if ! secret_is_readable "$namespace" "$secret"; then
     continue
   fi
   if ! secret_value_equals "$namespace" "$secret" S03_CLIENT_ID "$client_id"; then

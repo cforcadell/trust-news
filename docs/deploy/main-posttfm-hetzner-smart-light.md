@@ -4,6 +4,8 @@
 
 **Modo previsto de Evidence Search: SMART.** El commit `20b8bb2` y el ConfigMap actual seleccionan SMART; el overlay productivo hereda ese valor. Las campañas locales [SMART](../../tests/data/evaluation/artifacts/e2e-20261031-181209/report.md) y [DIRECT](../../tests/data/evaluation/artifacts/e2e-20261101-101658/report.md) son diagnósticas; DIRECT obtuvo 12/22 unidades e2e estrictas y tres fallos de ejecución frente a 19/22 y cero fallos técnicos en SMART. Cambió también la configuración observada de generación. Ninguna campaña acredita por sí sola aceptación en Hetzner. Un cambio futuro a DIRECT requiere otra revisión versionada y validación.
 
+**Actualización de preflight, 2026-11-14:** el checkout local compara la referencia `gitlab/main` (`02907aefa44cbd185a3517d8018fbf224b2c336d`, 2026-11-03) con `postTFM` (`4eedd59ee0a4976b01c810ac6cf037a0f4ea6ad1`, 2026-11-13). Desde la base común hay 14 commits exclusivos por rama. Estas referencias locales no prueban el estado actual del remoto; repetir `git fetch` y la comparación en el SHA candidato. Para el cambio de configuración, `postTFM` añade S03, Kafka TLS S07a y Source Router/OpenRouter/Exa; validar todos sus Secrets con el motor descrito más abajo antes de desplegar.
+
 Los comandos de esta guía son instrucciones para el operador, no una constancia de ejecución. El repositorio editable está en la VM con Kind; Hetzner no recibe un archivo por el mero hecho de modificarlo allí. Los scripts de copia/restauración y la transición versionada a Blockchain `OFF` solo existen en Hetzner después de una sincronización explícita o de la copia realizada por la CI desde un commit publicado.
 
 ## Resultado ejecutivo
@@ -17,7 +19,7 @@ Los comandos de esta guía son instrucciones para el operador, no una constancia
 
 ## Alcance real del diff
 
-Comparación de contenido `git diff origin/main postTFM`: **328 archivos cambiados**, unas 38 658 líneas añadidas y 48 090 retiradas. Es un salto funcional y de configuración, no una mera conmutación de dos flags. Para revisar lo que aporta *solo* la rama desde la base común, usar `git diff origin/main...postTFM`; para saber qué recibirá `main` al fusionar, revisar también `git diff origin/main postTFM` y los 3 commits exclusivos de `main`.
+Comparación local de la base común `gitlab/main...postTFM`: **159 archivos cambiados, 6 956 líneas añadidas y 1 161 retiradas**; las ramas tienen 14 commits exclusivos por lado. Esta fotografía usa refs locales y puede quedar obsoleta. Antes de fijar un SHA, refrescar las ramas con `git fetch` y revisar `git diff gitlab/main...postTFM`, además de resolver los commits exclusivos de cada rama.
 
 | Área | Cambios relevantes para el despliegue y la aceptación |
 | --- | --- |
@@ -399,70 +401,18 @@ git push gitlab postTFM
 
 #### Preflight de Secrets en Hetzner
 
-**[HETZNER]** Antes de iniciar el pipeline, comprobar contra K3s que todos los Secrets consumidos por `apis-frontend-prod` existen y que contienen valores no vacíos ni placeholders. El motor siguiente admite varias claves alternativas para un mismo requisito, no imprime sus valores y termina con error si falta algún requisito:
+El repositorio versiona un único motor para este control: [check_configured_secrets.sh](../../scripts/check_configured_secrets.sh). **GitLab lo ejecuta automáticamente en el job de preflight antes de `deploy`** usando el túnel Kubernetes del job y el checkout de ese SHA. También se repite al inicio del job `deploy`; un resultado fallido detiene el pipeline antes de modificar recursos.
+
+Si se requiere una comprobación manual, ejecutar desde un checkout de `postTFM` en el SHA candidato, con `kubectl` apuntando al K3s de Hetzner y desde la raíz del repositorio. Nunca copiar el script aislado: usa el inventario S03 y su verificador común.
 
 ```bash
-set +x
-
-secret_value_is_usable() {
-  local namespace="$1" secret="$2" key="$3" encoded value compact
-  encoded="$(kubectl get secret "$secret" -n "$namespace" -o "jsonpath={.data.${key}}" 2>/dev/null || true)"
-  [ -n "$encoded" ] || return 1
-  value="$(printf '%s' "$encoded" | base64 --decode 2>/dev/null || true)"
-  compact="${value//[$'\t\r\n ']/}"
-  value=
-  case "${compact,,}" in
-    ""|replace-me|replace_me|changeme|change-me|example|example-*|your-*|todo|xxx|xxxxxxxx)
-      return 1
-      ;;
-  esac
-}
-
-require_secret_any() {
-  local namespace="$1" secret="$2"
-  shift 2
-  if ! kubectl get secret "$secret" -n "$namespace" >/dev/null 2>&1; then
-    echo "ERROR: falta Secret $namespace/$secret" >&2
-    return 1
-  fi
-  local key
-  for key in "$@"; do
-    if secret_value_is_usable "$namespace" "$secret" "$key"; then
-      echo "OK: $namespace/$secret contiene una clave válida para $*"
-      return 0
-    fi
-  done
-  echo "ERROR: $namespace/$secret requiere al menos una clave válida entre: $*" >&2
-  return 1
-}
-
-errors=0
-require_secret_any apis source-router-enc OPENROUTER_API_KEY || errors=$((errors + 1))
-require_secret_any apis source-router-enc EXA_API_KEY API_KEY_PROVIDER || errors=$((errors + 1))
-require_secret_any apis api-keys OPENROUTER_API_KEY || errors=$((errors + 1))
-require_secret_any apis search-secret EXA_API_KEY API_KEY_PROVIDER || errors=$((errors + 1))
-
-for key in MONGO_APP_USER MONGO_APP_PWD MONGO_APP_HOST MONGO_APP_PORT MONGO_APP_DATABASE MONGO_APP_AUTHSOURCE; do
-  require_secret_any apis mongodb-app-secret "$key" || errors=$((errors + 1))
-done
-
-for worker in 1 2 3; do
-  for key in PRIVATE_KEY ACCOUNT_ADDRESS API_KEY; do
-    require_secret_any apis "validator-secret-$worker" "$key" || errors=$((errors + 1))
-  done
-done
-
-if [ "$errors" -ne 0 ]; then
-  echo "Preflight de Secrets FALLIDO: $errors requisito(s) ausente(s) o no válido(s)." >&2
-else
-  echo "Preflight de Secrets OK: no se han mostrado valores."
-fi
-test "$errors" -eq 0
+PROFILE=infra-prod bash scripts/check_configured_secrets.sh --phase infra
+PROFILE=apis-frontend-prod bash scripts/check_configured_secrets.sh --phase apis
 ```
 
-Los requisitos cubren el nuevo LLM OpenRouter y la búsqueda Exa del Source Router, el cambio de Generate Assertions a OpenRouter, Evidence Search, MongoDB y los tres validadores incluidos en el perfil. `EXA_API_KEY` y `API_KEY_PROVIDER` son alternativas; tener una no obliga a duplicarla. Si falla el preflight, no lanzar `deploy`: crear o actualizar el Secret mediante el procedimiento privado del paso 2 y repetir el bloque completo. Esta comprobación evita claves ausentes, vacías o de ejemplo; la validez remota, el modelo habilitado, la cuota y el presupuesto se confirman en las cuentas de OpenRouter y Exa sin copiar credenciales al repositorio ni a los logs.
+Ejecutar cada fase inmediatamente antes del perfil correspondiente: `infra` antes de `infra-prod`; después de reconciliar Keycloak y crear los client Secrets, `apis` antes de `apis-frontend-prod`. La fase `infra` valida CA y TLS de Keycloak y el Secret S07a del broker; no exige todavía `apis/s07a-kafka-ca`, que se crea al aplicar el overlay de APIs. La fase `apis` valida los clients, CA y certificados de servicio S03; ambos Secrets S07a y la igualdad de sus CA; y las claves API, MongoDB y validadores consumidos por el perfil. El motor comprueba presencia, valores no vacíos y placeholders; para Kafka valida además vigencia, SAN, uso `serverAuth`, PKCS12, password y cadena contra la CA del broker. No imprime valores. `EXA_API_KEY` y `API_KEY_PROVIDER` son alternativas según el consumidor. El preflight no comprueba que el proveedor acepte la clave ni su cuota/presupuesto.
 
-Los perfiles Skaffold incluyen S03. Antes de `infra-prod` deben estar creados los Secrets CA/TLS según [S03 con Skaffold](../security/s03-skaffold.md). Después de iniciar Keycloak, reconciliar los clients y crear sus Secrets desde los `.env` protegidos; antes de `apis-frontend-prod`, ejecutar también `bash scripts/security/check_s03_configured_secrets.sh`. Este preflight valida clientes, CA y certificados de servicio; detener el despliegue si falla cualquiera de los preflights.
+Si cualquiera de las fases falla, no ejecutar `deploy`: provisionar o corregir los Secrets con los procedimientos privados de [§3 de secretos productivos](skaffold-server.md#3-secrets-productivos), repetir el preflight correspondiente y exigir `Preflight de Secrets OK`.
 
 Si se ha aprobado que Source Router comparta las mismas credenciales ya validadas de Generate Assertions y Evidence Search, **[HETZNER]** se puede crear `source-router-enc` copiando los datos codificados entre Secrets, sin decodificarlos, imprimirlos ni guardarlos en disco:
 
@@ -499,7 +449,7 @@ test "$copy_status" -eq 0
 
 Si Source Router debe tener credenciales, cuota o trazabilidad propias, no reutilizar las anteriores: crear `source-router-enc` desde el fichero privado descrito en el paso 2. En ambos casos, repetir después **todo** el preflight y exigir el único resultado final `Preflight de Secrets OK`. No ejecutar el pipeline con un fallo aunque el shell interactivo haya vuelto al prompt.
 
-**Resultado recibido del operador:** el preflight completo terminó con `Preflight de Secrets OK: no se han mostrado valores.` Pasaron las claves requeridas de `source-router-enc` (OpenRouter y Exa/API_KEY_PROVIDER), `api-keys`, `search-secret`, `mongodb-app-secret` y los tres Secrets de validadores. Esto acredita que los Secrets existen y contienen valores no vacíos ni placeholders según el motor; no prueba que las credenciales sean aceptadas por los proveedores ni que haya cuota disponible. Se cierra el bloqueo anterior por ausencia de `source-router-enc`.
+**Resultado comunicado previamente por el operador:** pasó el preflight anterior para `source-router-enc` (OpenRouter y Exa/API_KEY_PROVIDER), `api-keys`, `search-secret`, `mongodb-app-secret` y los tres Secrets de validadores. Ese resultado no incluye las comprobaciones S03/S07a que ahora ejecuta el motor integrado; repetir las fases `infra` y `apis` en el SHA candidato. La validación anterior de claves tampoco prueba aceptación del proveedor, cuota o presupuesto. El bloqueo previo por ausencia de `source-router-enc` se había resuelto en esa ejecución.
 
 #### Comprobar el SHA y ejecutar el pipeline de GitLab
 

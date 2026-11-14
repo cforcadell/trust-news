@@ -55,9 +55,23 @@ PY
 )
 ```
 
-Comprobar antes de `infra-prod` con `S03_PREFLIGHT_PHASE=infra bash scripts/security/check_s03_configured_secrets.sh`. Después desplegar `infra-prod` para iniciar Keycloak por HTTPS interno. Reconciliar los clients del realm con el procedimiento de [skaffold-server.md](../deploy/skaffold-server.md#33-identidad-tls-y-credenciales-s03), crear manualmente sus Secrets `s03-client-*` desde los `.env` privados y ejecutar `S03_PREFLIGHT_PHASE=apis bash scripts/security/check_s03_configured_secrets.sh`. El preflight valida clientes, CA, vigencia, SAN, clave y cadena TLS sin mostrar valores. Entonces desplegar `apis-frontend-prod`. La CI ejecuta automáticamente la fase apropiada antes de mutar recursos. Los overlays de Hetzner consumen los Secrets existentes; no generan credenciales ni certificados locales. La activación real y la aceptación de Hetzner siguen pendientes.
+Antes de `infra-prod`, ejecutar `bash scripts/check_configured_secrets.sh --phase infra`. Después desplegar `infra-prod` para iniciar Keycloak por HTTPS interno. Reconciliar los clients del realm con el procedimiento de [skaffold-server.md](../deploy/skaffold-server.md#33-identidad-tls-y-credenciales-s03), crear manualmente sus Secrets `s03-client-*` desde los `.env` privados y ejecutar `bash scripts/check_configured_secrets.sh --phase apis` antes de `apis-frontend-prod`. El motor delega en el verificador S03 existente y agrupa la comprobación de clientes, CA, vigencia, SAN, clave y cadena TLS con Kafka S07a y los Secrets de aplicación, sin mostrar valores. La CI ejecuta automáticamente la fase apropiada en preflight y la repite justo antes del despliegue. Los overlays de Hetzner consumen los Secrets existentes; no generan credenciales ni certificados locales. La activación real y la aceptación de Hetzner siguen pendientes.
 
 ## Comprobaciones y rotación
+
+### Preflight común para kind y Hetzner/K3s
+
+`scripts/check_configured_secrets.sh` valida los objetos Secret del clúster indicado por el contexto activo de `kubectl`; no depende de que se hayan creado con los `secretGenerator` de los overlays locales o a mano en K3s. Ambos caminos deben mantener los nombres y claves del contrato de Secrets de este documento y de [S07a](s07a-kafka-tls.md). La fase `infra` comprueba el Secret Kafka del broker; `apis` comprueba también la copia de la CA creada por el overlay de APIs y que ambas CA coinciden. La identidad activa necesita permiso `get` sobre los Secrets inspeccionados. El motor muestra el contexto que consulta y diferencia Secret ausente, permiso insuficiente y error de conexión, para no confundir esos estados.
+
+Para validar kind, comprobar primero que el contexto es el esperado y ejecutar ambas fases cuando infraestructura y APIs ya estén desplegadas:
+
+```bash
+kubectl config current-context
+bash scripts/check_configured_secrets.sh --phase infra
+bash scripts/check_configured_secrets.sh --phase apis
+```
+
+La misma secuencia sirve desde un checkout con acceso al Hetzner K3s. En GitLab, la CI prepara su túnel y kubeconfig efímero, y pasa la fase apropiada antes del despliegue. Si el E2E pasa pero el preflight informa de secretos ausentes, comparar el contexto impreso con el entorno probado antes de cambiar Secrets.
 
 Antes de desplegar, comprobar `render_s03_runtime.py --check`, la presencia y claves de todos los Secrets y que el issuer público corresponda al entorno. Después comprobar que Keycloak y las APIs están Ready, que JWKS responde por HTTPS con CA y hostname verificados, que Traefik alcanza Gateway por HTTPS y que las rutas autenticadas y denegadas conservan sus códigos esperados. Registrar por separado kind y Hetzner.
 

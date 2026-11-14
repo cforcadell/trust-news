@@ -205,12 +205,18 @@ No borrar primero un Secret para actualizarlo.
 | `apis` | `mongodb-secret` | `mongodb.env` |
 | `apis` | `search-secret` | `search.env` |
 | `apis` | `mongodb-app-secret` | `mongodb-app.env` |
+| `apis` | `source-router-enc` | `source-router.env` |
 | `infra` | `mongodb-secret` | `mongodb.env` |
 | `infra` | `keycloak-admin-secret` | `keycloak.env` |
 | `infra` | `keycloak-db-secret` | `keycloak-db.env` |
 | `infra` | `mongo-express-secret` | `mongo-express.env` |
 | `blockchain` | `ethereum-secrets` | `ethereum.env` |
 | `kube-system` | `trustnews-origin-tls` | `tls-origin.env` |
+| `infra` | `s03-internal-ca`, `s03-tls-keycloak` | CA y certificado TLS S03 de Keycloak |
+| `apis` | `s03-internal-ca`, `s03-tls-{admin-service,evidence-search,gateway,generate-asertions,news-handler,source-router,validate-service-1,validate-service-2,validate-service-3}` | misma CA S03 y un certificado TLS por servicio |
+| `apis` | `s03-client-*` | un `.env` privado por client de servicio S03 |
+| `infra` | `s07a-kafka-broker` | `broker.p12`, `ca.crt`, `KEYSTORE_PASSWORD`, `kafdrop.properties` |
+| `apis` | `s07a-kafka-ca` | la misma `ca.crt` pública de Kafka |
 
 Implementation:
 
@@ -225,6 +231,7 @@ apply_secret apis gate-config gateway.env
 apply_secret apis mongodb-secret mongodb.env
 apply_secret apis search-secret search.env
 apply_secret apis mongodb-app-secret mongodb-app.env
+apply_secret apis source-router-enc source-router.env
 
 apply_secret infra mongodb-secret mongodb.env
 apply_secret infra keycloak-admin-secret keycloak.env
@@ -238,6 +245,17 @@ apply_tls_secret kube-system trustnews-origin-tls \
 
 `MONGO_APP_USER` and `MONGO_APP_PWD` must match the user created by MongoDB's bootstrap. After lifting MongoDB the [`k8s-common.md`](k8s-common.md#7-mongodb-bootstrap)'s idepotent procedure is executed.
 
+Los Secrets S03/S07a se aprovisionan por los procedimientos de [S03](../security/s03-skaffold.md) y [S07a](../security/s07a-kafka-tls.md); los nombres y claves son requisitos del manifiesto, no generadores de credenciales en Git. El `source-router.env` contiene `OPENROUTER_API_KEY` y una credencial Exa bajo `EXA_API_KEY` o `API_KEY_PROVIDER`. Reutilizar las credenciales de otros consumidores solo si la política de cuota y trazabilidad del entorno lo permite.
+
+Antes de cada despliegue de Hetzner, comprobar los Secrets desde el preflight de GitLab (mismo SHA y túnel a K3s). Para validación manual desde el checkout del SHA candidato:
+
+```bash
+PROFILE=infra-prod bash scripts/check_configured_secrets.sh --phase infra
+PROFILE=apis-frontend-prod bash scripts/check_configured_secrets.sh --phase apis
+```
+
+La fase elegida se ejecuta antes de su despliegue correspondiente. No continuar si el script falla. `infra` valida el Secret del broker; `apis` valida también el Secret de CA de APIs y su igualdad con la CA del broker. El motor incluye las comprobaciones S03 existentes y verifica Secrets de aplicación sin mostrar valores; para su contrato y alcance, ver [preflight de Secrets](main-posttfm-hetzner-smart-light.md#preflight-de-secrets-en-hetzner).
+
 ### 3.3 Identidad TLS y credenciales S03
 
 Los perfiles `infra-prod` y `apis-frontend-prod` incluyen S03 en sus
@@ -247,7 +265,9 @@ certificados SAN indicados en [S03 con Skaffold](../security/s03-skaffold.md).
 `infra-prod` requiere `s03-tls-keycloak`; `apis-frontend-prod` requiere
 `s03-internal-ca` en `apis`, los certificados de las nueve APIs y los clients
 de servicio. La CI ejecuta el preflight S03 de la fase correspondiente antes
-del deploy. No usar certificados ni `.env` de kind en Hetzner.
+del deploy. El job ejecuta `scripts/check_configured_secrets.sh --phase infra`
+o `--phase apis`, que agrupa el preflight S03 con S07a y los Secrets de
+aplicación requeridos por el perfil. No usar certificados ni `.env` de kind en Hetzner.
 
 Al preparar la activación S03 en preproducción o producción, reconciliar a mano
 el realm `TrustNews` contra el Keycloak del entorno. El reconciliador conserva
@@ -296,7 +316,7 @@ for namespace, client, secret in sorted(clients):
 PY
 )
 
-bash scripts/security/check_s03_configured_secrets.sh
+bash scripts/check_configured_secrets.sh --phase apis
 ```
 
 El preflight comprueba, a partir del inventario de servicios, que cada Secret
@@ -541,8 +561,10 @@ vez; los despliegues posteriores siguen el pipeline protegido.
    setup`. Preparar pull secrets, Secrets habituales, CA/TLS S03 y Kafka S07a
    según [§3](#3-secrets-productivos) y [S07a](../security/s07a-kafka-tls.md).
    Los overlays de K3s consumen Secrets existentes; Skaffold no los genera.
-   Antes del despliegue inicial de infraestructura, ejecutar
-   `S03_PREFLIGHT_PHASE=infra bash scripts/security/check_s03_configured_secrets.sh`.
+   Antes del despliegue inicial de infraestructura, ejecutar el preflight
+   integrado `bash scripts/check_configured_secrets.sh --phase infra` desde
+   el checkout con acceso al K3s de destino. Incluye S03, Kafka S07a y los
+   Secrets requeridos por el perfil.
 2. Construir en la CI el perfil `infra-prod` para el SHA elegido y descargar
    su artefacto `build.json` (caduca al día). En un checkout del **mismo SHA**
    con acceso K3s preparado, ejecutar una sola vez:
@@ -564,8 +586,8 @@ vez; los despliegues posteriores siguen el pipeline protegido.
    Skaffold no crea ese estado. Ejecutar el [bootstrap MongoDB](k8s-common.md#7-mongodb-bootstrap)
    y la [reconciliación web](#65-keycloak-idepotent-alignment) una vez.
 4. Reconciliar clientes de servicio S03, crear sus Secrets desde los `.env`
-   privados y pasar `scripts/security/check_s03_configured_secrets.sh` como
-   indica [§3.3](#33-identidad-tls-y-credenciales-s03). Cerrar los accesos
+   privados y pasar `bash scripts/check_configured_secrets.sh --phase apis`
+   antes del despliegue del perfil API, como indica [§3.3](#33-identidad-tls-y-credenciales-s03). Cerrar los accesos
    temporales usados para Keycloak.
 5. Lanzar y esperar los pipelines protegidos `traefik-prod`, `infra-prod` y
    `apis-frontend-prod` en ese orden, con `BLOCKCHAIN_ENABLED=OFF`. La CI

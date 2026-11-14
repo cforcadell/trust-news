@@ -93,6 +93,24 @@ reconciliador S03 existente y su configuración no secreta, necesarios para
 la fase `apis`. Estos cambios requieren un nuevo SHA publicado, sus
 preflights y un despliegue controlado; no están activos en K3s.
 
+El operador publicó después, por su cuenta, el SHA
+`d743b545fbfccf86e99b815c67de7459b1281848` con esos cinco archivos;
+el checkout local está limpio. El log de preflight `infra-prod` de este SHA
+se corta justo después de `Preflight de Secrets OK`, sin estado final del job.
+El preflight `apis-frontend-prod` del mismo SHA falla antes de desplegar por
+los siete Secrets S03 de clientes y `apis/s07a-kafka-ca` ausentes. La fase API
+sigue pendiente de reconciliación de clientes tras completar `infra-prod`.
+
+El operador aportó el log posterior del job `deploy infra-prod` en
+`d743b545`: Skaffold estabilizó todos los recursos, incluido Kafdrop con su
+espera nueva. La verificación CI falló al ejecutar
+`reconcile-keycloak-web-prod.sh`: `kubectl exec` seleccionó por defecto
+`s03-tls-proxy` y allí no existe `kcadm`. El job no alcanzó la
+reconciliación web, la comprobación del issuer ni los demás checks de
+infraestructura. Se preparó localmente la selección explícita del contenedor
+`keycloak` en el motor existente. No está publicada ni ejecutada; requiere
+otro SHA y la repetición de sus gates.
+
 ## Fotografía local, 2026-11-11
 
 | Campo | Resultado comprobado | Para fijar el candidato |

@@ -86,6 +86,33 @@ apply_ca_secret() {
   echo "OK: actualizado $namespace/s03-internal-ca"
 }
 
+apply_mixed_secret() {
+  local namespace="$1" name="$2" env_file="$3"
+  shift 3
+  python3 - \
+    <(kubectl create secret generic "$name" --namespace "$namespace" \
+        "$@" --dry-run=client -o json) \
+    <(kubectl create secret generic "$name" --namespace "$namespace" \
+        --from-env-file="$env_file" --dry-run=client -o json) <<'PY' | kubectl apply -f - >/dev/null || return
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    manifest = json.load(source)
+with open(sys.argv[2], encoding="utf-8") as source:
+    env_manifest = json.load(source)
+
+file_data = manifest["data"]
+env_data = env_manifest["data"]
+duplicates = file_data.keys() & env_data.keys()
+if duplicates:
+    raise SystemExit("ERROR: claves duplicadas en Secret: " + ", ".join(sorted(duplicates)))
+file_data.update(env_data)
+json.dump(manifest, sys.stdout)
+PY
+  echo "OK: actualizado $namespace/$name"
+}
+
 need_infra() { [[ "$phase" == infra || "$phase" == all ]]; }
 need_apis() { [[ "$phase" == apis || "$phase" == all ]]; }
 need_blockchain() { [[ "$phase" == blockchain || "$phase" == all ]]; }
@@ -168,14 +195,10 @@ if need_infra; then
   apply_ca_secret infra
   apply_tls_secret infra s03-tls-keycloak \
     "$s03_pki_dir/tls-keycloak.crt" "$s03_pki_dir/tls-keycloak.key"
-  kubectl create secret generic s07a-kafka-broker \
-    --namespace infra \
+  apply_mixed_secret infra s07a-kafka-broker "$s03_pki_dir/kafka-tls.env" \
     --from-file=broker.p12="$s03_pki_dir/broker.p12" \
     --from-file=ca.crt="$s03_pki_dir/ca.crt" \
-    --from-file=kafdrop.properties="$repo_root/k8s/infra/kafka/kafdrop.properties" \
-    --from-env-file="$s03_pki_dir/kafka-tls.env" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  echo 'OK: actualizado infra/s07a-kafka-broker'
+    --from-file=kafdrop.properties="$repo_root/k8s/infra/kafka/kafdrop.properties"
 fi
 
 if need_apis; then

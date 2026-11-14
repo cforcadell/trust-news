@@ -133,7 +133,7 @@ Las credenciales de clientes S03 no se generan en este paso. Se reconcilian con 
 
 ## 2. Crear/actualizar Secrets de `infra`
 
-El directorio privado por defecto para los ficheros del script es `$HOME/trust-news/secrets`. Debe contener los mismos `.env` ya usados por el script del servidor, y `pkis/` debe contener `ca.crt`, `tls-keycloak.crt`, `tls-keycloak.key`, `broker.p12` y `kafka-tls.env`. El nombre anterior `infra-keycloak.*` no se busca. Para aplicar el bloque de infraestructura:
+El directorio privado por defecto para los ficheros del script es `$HOME/trust-news/secrets`. Debe contener los mismos `.env` ya usados por el script del servidor, y `pkis/` debe contener `ca.crt`, `tls-keycloak.crt`, `tls-keycloak.key`, `broker.p12` y `kafka-tls.env`. El nombre anterior `infra-keycloak.*` no se busca. Para el Secret de Kafka, el motor combina los manifiestos generados por `kubectl` para los archivos y el `.env`, porque `kubectl create secret generic` no admite `--from-file` y `--from-env-file` juntos. Si una ejecución se interrumpe después de aplicar algunos Secrets, corregir la causa y repetir la fase; `kubectl apply` vuelve a reconciliar los mismos nombres. Para aplicar el bloque de infraestructura:
 
 ```bash
 bash scripts/create-secrets.sh --phase infra

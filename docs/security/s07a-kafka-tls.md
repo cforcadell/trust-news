@@ -29,17 +29,14 @@ Los perfiles Skaffold incluyen ahora la configuración de ejecución S03 complet
 
 ### Hetzner/K3s
 
-El operador emite el certificado Kafka desde su CA privada. Debe incluir SAN `kafka.infra.svc.cluster.local` y `kafka-0.kafka.infra.svc.cluster.local`, uso `serverAuth` y vigencia comprobada. Con un PKCS12 `broker.p12`, la CA `ca.crt` y un archivo privado `kafka-tls.env` con `KEYSTORE_PASSWORD=<contraseña del PKCS12>`, provisiona manualmente en el contexto K3s:
+El operador emite el certificado Kafka desde su CA privada. Debe incluir SAN `kafka.infra.svc.cluster.local` y `kafka-0.kafka.infra.svc.cluster.local`, uso `serverAuth` y vigencia comprobada. Con un PKCS12 `broker.p12`, la CA `ca.crt` y un archivo privado `kafka-tls.env` con `KEYSTORE_PASSWORD=<contraseña del PKCS12>`, sigue el motor de [Secrets de Hetzner](../deploy/secrets-hetzner.md) desde el host con contexto K3s. `kubectl create secret generic` no permite combinar `--from-file` y `--from-env-file` en una invocación; el motor compone ambos orígenes antes de aplicar el Secret.
 
 ```bash
-kubectl -n infra create secret generic s07a-kafka-broker \
-  --from-file=broker.p12 --from-file=ca.crt \
-  --from-file=kafdrop.properties=k8s/infra/kafka/kafdrop.properties \
-  --from-env-file=kafka-tls.env --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n apis create secret generic s07a-kafka-ca \
-  --from-file=ca.crt --dry-run=client -o yaml | kubectl apply -f -
-skaffold run -p infra-prod
-skaffold run -p apis-frontend-prod
+bash scripts/create-secrets.sh --phase infra
+bash scripts/check_configured_secrets.sh --phase infra
+# Después de infra-prod y de reconciliar los clients S03 de Keycloak:
+bash scripts/create-secrets.sh --phase apis
+bash scripts/check_configured_secrets.sh --phase apis
 ```
 
 Ejecutar los comandos solo después de comprobar el contexto K3s y los SAN. El código y las rutas montadas son idénticos a kind. El paso de `PLAINTEXT` a TLS requiere un corte coordinado del broker y los clientes; conservar una copia protegida de los Secrets y el manifiesto anterior para rollback operativo.

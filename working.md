@@ -14,6 +14,13 @@
 
 ## Próximo paso
 
+La provisión de Secrets `infra` en Hetzner quedó parcial el 14-11-2026: el
+operador confirmó seis Secrets aplicados y el fallo de `s07a-kafka-broker` por
+una combinación de opciones que `kubectl` rechaza. La corrección está en el
+script local, todavía sin sincronizar al host. Sincronizar ese archivo,
+repetir `--phase infra` y ejecutar su preflight antes de considerar la fase
+completa. Esto no acredita despliegue ni aceptación de K3s.
+
 La [ficha de preparación del candidato K3s](docs/deploy/candidate-v0.0.13b-k3s.md)
 describe perfiles, renders, controles de CI y límites de rollback. En la revisión
 local inicial del 13-11-2026, `postTFM` estaba limpio en
@@ -26,6 +33,7 @@ La aceptación local de S03 declarativo está cerrada. S07a también superó sus
 
 ## HISTORY
 
+- 2026-11-14 — El operador preparó en Hetzner una CA interna nueva y comunicó que emitió los certificados S03/Kafka; la salida aportada confirmó `CA:TRUE`, el PKCS12 abrió con su contraseña y los archivos privados de Kafka quedaron en `0600`. Los cuatro `.env` de `infra` coincidían con los Secrets existentes antes de aplicar la fase. `create-secrets.sh --phase infra` actualizó esos cuatro Secrets, creó `s03-internal-ca` y `s03-tls-keycloak`, y falló al crear `s07a-kafka-broker`: `kubectl` rechazó mezclar `--from-file` y `--from-env-file`. El Secret Kafka y el preflight `infra` siguen pendientes de verificación. Se corrigió localmente el motor para combinar ambos manifiestos y se ajustó la guía; la corrección aún no se ha sincronizado al host ni publicado. Sin despliegue, commit ni push.
 - 2026-11-13 — El operador confirma que todas las pruebas locales están OK y cierra la aceptación del camino declarativo S03 en kind. Comprobación de solo lectura: preflight S03 correcto para nueve servicios, S03 habilitado en las APIs inventariadas, SMART en Evidence Search y Blockchain OFF donde aplica. Hetzner/K3s sigue pendiente; sin despliegue, commit ni push.
 - 2026-11-13 — Revisión local predespliegue: 19 rutas versionadas modificadas/eliminadas y la ficha candidata sin seguimiento. `privkey.pem` local estaba versionado; también aparecía en la referencia local `origin/postTFM` (último commit de la ruta observado: `78638d9`, 24-01-2026). El certificado asociado es solo para `localhost`; el overlay prod no genera ese Secret y la imagen frontend copia solo `app`. El snapshot local no verificó el remoto en vivo. No había backups recuperables documentados en Hetzner. Sin pipeline, despliegue, commit ni push.
 - 2026-11-13 — Se regeneró el par TLS local de `localhost` con `web_classic/certs/create_certs.sh`; `web_classic/certs/privkey.pem` se añadió a `.gitignore` y se retiró del índice sin borrar el archivo local. La clave no se usa en Hetzner y no requiere rotación del certificado de origen. El blob anterior permanece en el historial local; no se reescribió historia ni se verificó GitLab en vivo. El operador prevé tomar un snapshot de la VM Hetzner antes de aplicar cambios; no se registra como realizado ni restauración probada. Sin despliegue, commit ni push.

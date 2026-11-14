@@ -31,7 +31,7 @@ Comparación local de la base común `gitlab/main...postTFM`: **159 archivos cam
 | Infraestructura | Perfil productivo incorpora Source Router, recursos/probes y dos réplicas de Evidence Search; pipeline añade preflight de TLS, realineación MongoDB antes del rollout, cambio de modo Blockchain y comprobaciones de `/gui`. Persisten riesgos de autenticación SSH/K3s del CI. |
 | Pruebas/artefactos | Nuevas suites API, frontend, E2E, evaluación, viewer y comparador DIRECT/SMART. La presencia de un test o un artefacto no acredita que el commit actual haya pasado contra Hetzner. |
 
-Archivos de referencia: [Skaffold](../../skaffold.yaml), [CI](../../.gitlab-ci.yml), [modo Blockchain](../../scripts/k8s/set-blockchain-mode.sh), [sincronización de scripts operativos](../../scripts/ci/sync-remote-files.sh), [motor de adquisición](../../api/evidence-search/app/acquisition.py), [ConfigMap Evidence Search](../../k8s/apis/evidence-search/base/configmap.yaml), [runbook de servidor](skaffold-server.md).
+Archivos de referencia: [Skaffold](../../skaffold.yaml), [CI](../../.gitlab-ci.yml), [modo Blockchain](../../scripts/k8s/set-blockchain-mode.sh), [inventario de scripts operativos](../../scripts/ci/sync-operations-scripts.sh), [motor de sincronización](../../scripts/ci/sync-remote-files.sh), [motor de adquisición](../../api/evidence-search/app/acquisition.py), [ConfigMap Evidence Search](../../k8s/apis/evidence-search/base/configmap.yaml), [runbook de servidor](skaffold-server.md).
 
 ## Lectura de los manifiestos productivos
 
@@ -159,22 +159,18 @@ El backup que protege frente a la pérdida del servidor se crea desde **VM-KIND*
 
 #### Sincronizar los scripts con Hetzner
 
-**[VM-KIND]** Sincronizar primero las tres herramientas versionadas con el directorio operativo de Hetzner. El motor instala archivos regulares mediante un staging remoto, los publica con modo `0750` y compara su SHA-256 con el checkout. Esto reemplaza las copias creadas manualmente y falla si el contenido remoto no coincide:
+**[VM-KIND]** Sincronizar primero las herramientas versionadas con el directorio operativo de Hetzner. El motor instala archivos regulares mediante un staging remoto, los publica con los permisos de cada grupo y compara su SHA-256 con el checkout. El inventario exacto, los ficheros de soporte y el perfil independiente de CI `sync-scripts`/`scripts-hetzner` están en [secrets-hetzner.md](secrets-hetzner.md#0-instalar-las-herramientas-del-repositorio-en-hetzner). La sincronización no borra archivos privados ni antiguas copias; revisar cualquier script heredado antes de volver a usarlo.
 
 `HETZNER_HOST`, `HETZNER_USER` y `HETZNER_KEY` deben estar definidos en VM-KIND; `HETZNER_KEY` es la ruta a la clave privada. La confianza SSH guardada en otro equipo no se comparte con esta VM: antes de sincronizar, comprobar que `~/.ssh/known_hosts` de VM-KIND contiene la clave del puerto 2222 previamente verificada. El motor usa `StrictHostKeyChecking=yes` y aborta si no existe o cambia.
 
 ```bash
 cd /home/adminu/blockchain/tfm
-scripts/ci/sync-remote-files.sh \
+bash scripts/ci/sync-operations-scripts.sh \
   --host "$HETZNER_HOST" \
   --user "$HETZNER_USER" \
   --port 2222 \
   --identity "$HETZNER_KEY" \
-  --target-dir /home/sysadmin/trust-news/scripts/k8s \
-  --mode 0750 \
-  -- scripts/k8s/backup-mongodb.sh \
-     scripts/k8s/restore-mongodb.sh \
-     scripts/k8s/set-blockchain-mode.sh
+  --target-root /home/sysadmin/trust-news
 
 ssh -i "$HETZNER_KEY" -p 2222 "$HETZNER_USER@$HETZNER_HOST" \
   'test -x /home/sysadmin/trust-news/scripts/k8s/backup-mongodb.sh &&
@@ -182,7 +178,7 @@ ssh -i "$HETZNER_KEY" -p 2222 "$HETZNER_USER@$HETZNER_HOST" \
    test -x /home/sysadmin/trust-news/scripts/k8s/set-blockchain-mode.sh'
 ```
 
-El job `deploy` repite esta sincronización desde su checkout efímero antes de modificar MongoDB o Kubernetes usando `OPERATIONS_SCRIPTS_DIR=/home/sysadmin/trust-news/scripts/k8s`. La sincronización manual anterior sigue siendo necesaria para disponer de `set-blockchain-mode.sh` en Hetzner antes del pipeline. Instalar `backup-mongodb.sh` en el CX33 no convierte en externa una copia creada allí: el backup de este procedimiento se ejecuta desde VM-KIND y se conserva fuera del servidor.
+El job `deploy` de `apis-frontend-prod` repite esta sincronización desde su checkout efímero antes de modificar MongoDB o Kubernetes usando `OPERATIONS_ROOT=/home/sysadmin/trust-news`. El perfil independiente permite instalar los scripts antes de preparar los Secrets, sin esperar al deploy. Instalar `backup-mongodb.sh` en el CX33 no convierte en externa una copia creada allí: el backup de este procedimiento se ejecuta desde VM-KIND y se conserva fuera del servidor.
 
 **[VM-KIND con contexto de producción]** Crear y validar el backup fuera de Hetzner:
 
@@ -502,7 +498,7 @@ PROFILE=apis-frontend-prod
 BLOCKCHAIN_ENABLED=OFF
 ```
 
-Ejecutar/esperar `build` y comprobar que su `build.json` pertenece al SHA elegido; el job `deploy` exige ese archivo aunque `needs: build` sea opcional. Esperar a que pase el preflight TLS. **Antes de lanzar `deploy`, confirmar el punto 3 completo: backup MongoDB, apagado y snapshot disponible, actualización del host y verificaciones de seguridad/K3s**. Al comenzar, el checkout de GITLAB-RUNNER instala y verifica las versiones del SHA de `backup-mongodb.sh`, `restore-mongodb.sh` y `set-blockchain-mode.sh` en `OPERATIONS_SCRIPTS_DIR` de Hetzner. Después realinea MongoDB, comprueba las órdenes pendientes y prepara `blockchain-mode=false` sin reiniciar los pods antiguos. Luego Skaffold aplica las imágenes y el motor ejecuta la desactivación completa con el código nuevo: reinicia sus consumidores y escala Geth/`news-chain` a cero. Finalmente se comprueban rollouts, `/gui` y la reconciliación Keycloak. No sustituir este proceso por parches `kubectl apply` o `helm upgrade` manuales.
+Ejecutar/esperar `build` y comprobar que su `build.json` pertenece al SHA elegido; el job `deploy` exige ese archivo aunque `needs: build` sea opcional. Esperar a que pase el preflight TLS. **Antes de lanzar `deploy`, confirmar el punto 3 completo: backup MongoDB, apagado y snapshot disponible, actualización del host y verificaciones de seguridad/K3s**. Al comenzar, el checkout de GITLAB-RUNNER instala y verifica las versiones del SHA de los scripts operativos y sus ficheros de soporte en `OPERATIONS_ROOT` de Hetzner. Después realinea MongoDB, comprueba las órdenes pendientes y prepara `blockchain-mode=false` sin reiniciar los pods antiguos. Luego Skaffold aplica las imágenes y el motor ejecuta la desactivación completa con el código nuevo: reinicia sus consumidores y escala Geth/`news-chain` a cero. Finalmente se comprueban rollouts, `/gui` y la reconciliación Keycloak. No sustituir este proceso por parches `kubectl apply` o `helm upgrade` manuales.
 
 Si el salto incluye la migración inicial de Traefik a `/gui` y aún no está aplicada en el destino, seguir la secuencia controlada del runbook con lock habilitado: pipeline separado `PROFILE=traefik-prod`, validación, y **después** el de `apis-frontend-prod`. Si Traefik `/gui` ya existe y no cambió, no redeployar `traefik-prod` innecesariamente. Para una instalación nueva, ejecutar antes los perfiles de infraestructura según el runbook, cada uno en pipeline separado.
 

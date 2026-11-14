@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: sync-remote-files.sh --host HOST --user USER --identity FILE
                             --known-hosts FILE --target-dir DIRECTORY [--port PORT]
-                            [--mode OCTAL] -- FILE [FILE ...]
+                            [--mode OCTAL] [--directory-only | -- FILE [FILE ...]]
 
 Installs regular files on a remote host through SSH and verifies their
 SHA-256 hashes. Source basenames must be unique. The target directory must be
@@ -20,6 +20,7 @@ known_hosts=
 target_dir=
 port=22
 mode=0750
+directory_only=false
 
 while (($#)); do
   case "$1" in
@@ -40,6 +41,10 @@ while (($#)); do
       shift
       break
       ;;
+    --directory-only)
+      directory_only=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -52,10 +57,15 @@ while (($#)); do
 done
 
 sources=("$@")
-[[ -n $host && -n $user && -f $identity && -f $known_hosts && -n $target_dir && ${#sources[@]} -gt 0 ]] || {
+[[ -n $host && -n $user && -f $identity && -f $known_hosts && -n $target_dir ]] || {
   usage >&2
   exit 2
 }
+if [[ $directory_only == true ]]; then
+  [[ ${#sources[@]} -eq 0 ]] || { usage >&2; exit 2; }
+else
+  [[ ${#sources[@]} -gt 0 ]] || { usage >&2; exit 2; }
+fi
 [[ $host =~ ^[A-Za-z0-9._:-]+$ && $user =~ ^[A-Za-z0-9._-]+$ ]] || {
   echo "Invalid SSH host or user" >&2
   exit 2
@@ -116,6 +126,11 @@ remote="$user@$host"
 scp_remote=$remote
 if [[ $host == *:* ]]; then
   scp_remote="$user@[$host]"
+fi
+if [[ $directory_only == true ]]; then
+  ssh "${ssh_options[@]}" "$remote" "install -d -m '$mode' -- '$target_dir'"
+  echo "Directory ready: $target_dir"
+  exit 0
 fi
 remote_stage=$(ssh "${ssh_options[@]}" "$remote" 'mktemp -d /tmp/remote-file-sync.XXXXXXXX')
 [[ $remote_stage =~ ^/tmp/remote-file-sync\.[A-Za-z0-9]+$ ]] || {

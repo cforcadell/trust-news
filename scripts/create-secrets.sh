@@ -40,11 +40,19 @@ esac
 
 command -v kubectl >/dev/null || { echo 'ERROR: kubectl no está disponible' >&2; exit 2; }
 command -v python3 >/dev/null || { echo 'ERROR: python3 no está disponible' >&2; exit 2; }
+context="$(kubectl config current-context 2>/dev/null || true)"
+[[ -n $context ]] || { echo 'ERROR: kubectl no tiene un contexto activo' >&2; exit 2; }
+case "$context" in
+  kind|kind-*)
+    echo "ERROR: create-secrets.sh es para K3s; contexto kind detectado: $context" >&2
+    exit 2 ;;
+esac
+echo "Contexto Kubernetes para creación de Secrets: $context; fase=$phase"
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 secrets_dir="${SECRETS_DIR:-$HOME/trust-news/secrets}"
-s03_pki_dir="${S03_PKI_DIR:-$HOME/trust-news-secrets/s03-pki}"
+s03_pki_dir="${S03_PKI_DIR:-$secrets_dir/pkis}"
 s03_clients_dir="${S03_CLIENTS_DIR:-$HOME/trust-news-secrets/s03-clients}"
 origin_cert="${ORIGIN_TLS_CERT:-$HOME/trustnews-origin-ca/assermetry-origin.pem}"
 origin_key="${ORIGIN_TLS_KEY:-$HOME/trustnews-origin-ca/assermetry-origin.key}"
@@ -89,8 +97,8 @@ if need_infra; then
     require_file "$secrets_dir/$file"
   done
   require_file "$s03_pki_dir/ca.crt"
-  require_file "$s03_pki_dir/infra-keycloak.crt"
-  require_file "$s03_pki_dir/infra-keycloak.key"
+  require_file "$s03_pki_dir/tls-keycloak.crt"
+  require_file "$s03_pki_dir/tls-keycloak.key"
   require_file "$s03_pki_dir/broker.p12"
   require_file "$s03_pki_dir/kafka-tls.env"
   require_file "$repo_root/k8s/infra/kafka/kafdrop.properties"
@@ -159,7 +167,7 @@ if need_infra; then
 
   apply_ca_secret infra
   apply_tls_secret infra s03-tls-keycloak \
-    "$s03_pki_dir/infra-keycloak.crt" "$s03_pki_dir/infra-keycloak.key"
+    "$s03_pki_dir/tls-keycloak.crt" "$s03_pki_dir/tls-keycloak.key"
   kubectl create secret generic s07a-kafka-broker \
     --namespace infra \
     --from-file=broker.p12="$s03_pki_dir/broker.p12" \

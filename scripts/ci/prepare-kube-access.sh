@@ -4,6 +4,13 @@ set -euo pipefail
 # Prepares an authenticated SSH tunnel and a TLS-verifying kubeconfig.
 # All DEPLOY_ACCESS_* inputs are supplied by the calling environment so the
 # same engine can serve distinct environments without embedded identities.
+ssh_only=false
+if [[ ${1:-} == --ssh-only && $# == 1 ]]; then
+  ssh_only=true
+elif (($#)); then
+  echo 'Usage: prepare-kube-access.sh [--ssh-only]' >&2
+  exit 2
+fi
 
 required=(
   DEPLOY_ACCESS_SSH_HOST
@@ -11,12 +18,16 @@ required=(
   DEPLOY_ACCESS_SSH_USER
   DEPLOY_ACCESS_SSH_PRIVATE_KEY_B64
   DEPLOY_ACCESS_SSH_KNOWN_HOSTS_B64
+)
+if [[ $ssh_only == false ]]; then
+required+=(
   DEPLOY_ACCESS_KUBECONFIG_B64
   DEPLOY_ACCESS_KUBE_CA_B64
   DEPLOY_ACCESS_KUBE_CONTEXT
   DEPLOY_ACCESS_KUBE_CLUSTER
   DEPLOY_ACCESS_KUBE_TLS_SERVER_NAME
 )
+fi
 
 for name in "${required[@]}"; do
   [[ -n ${!name:-} ]] || { echo "ERROR: $name is required" >&2; exit 2; }
@@ -31,12 +42,12 @@ done
 [[ ${DEPLOY_ACCESS_SSH_PORT} =~ ^[0-9]+$ && ${DEPLOY_ACCESS_SSH_PORT} -ge 1 && ${DEPLOY_ACCESS_SSH_PORT} -le 65535 ]] || {
   echo "ERROR: DEPLOY_ACCESS_SSH_PORT is invalid" >&2; exit 2;
 }
-[[ ${DEPLOY_ACCESS_KUBE_CONTEXT} =~ ^[A-Za-z0-9._-]+$ && ${DEPLOY_ACCESS_KUBE_CLUSTER} =~ ^[A-Za-z0-9._-]+$ ]] || {
+if [[ $ssh_only == false ]] && ! [[ ${DEPLOY_ACCESS_KUBE_CONTEXT} =~ ^[A-Za-z0-9._-]+$ && ${DEPLOY_ACCESS_KUBE_CLUSTER} =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "ERROR: Kubernetes context or cluster name is invalid" >&2; exit 2;
-}
-[[ ${DEPLOY_ACCESS_KUBE_TLS_SERVER_NAME} =~ ^[A-Za-z0-9._:-]+$ ]] || {
+fi
+if [[ $ssh_only == false ]] && ! [[ ${DEPLOY_ACCESS_KUBE_TLS_SERVER_NAME} =~ ^[A-Za-z0-9._:-]+$ ]]; then
   echo "ERROR: DEPLOY_ACCESS_KUBE_TLS_SERVER_NAME is invalid" >&2; exit 2;
-}
+fi
 
 local_host=${DEPLOY_ACCESS_LOCAL_HOST:-127.0.0.1}
 local_port=${DEPLOY_ACCESS_LOCAL_PORT:-6443}
@@ -69,9 +80,7 @@ kubeconfig="$access_dir/kubeconfig"
 ca_file="$access_dir/kube-ca.crt"
 decode "$DEPLOY_ACCESS_SSH_PRIVATE_KEY_B64" "$identity" DEPLOY_ACCESS_SSH_PRIVATE_KEY_B64
 decode "$DEPLOY_ACCESS_SSH_KNOWN_HOSTS_B64" "$known_hosts" DEPLOY_ACCESS_SSH_KNOWN_HOSTS_B64
-decode "$DEPLOY_ACCESS_KUBECONFIG_B64" "$kubeconfig" DEPLOY_ACCESS_KUBECONFIG_B64
-decode "$DEPLOY_ACCESS_KUBE_CA_B64" "$ca_file" DEPLOY_ACCESS_KUBE_CA_B64
-chmod 600 "$identity" "$known_hosts" "$kubeconfig" "$ca_file"
+chmod 600 "$identity" "$known_hosts"
 
 ssh-keygen -y -f "$identity" >/dev/null 2>&1 || {
   echo "ERROR: SSH private key is invalid" >&2; exit 2;
@@ -79,6 +88,14 @@ ssh-keygen -y -f "$identity" >/dev/null 2>&1 || {
 ssh-keygen -F "[${DEPLOY_ACCESS_SSH_HOST}]:${DEPLOY_ACCESS_SSH_PORT}" -f "$known_hosts" >/dev/null || {
   echo "ERROR: known_hosts has no verified entry for the configured SSH host and port" >&2; exit 2;
 }
+if [[ $ssh_only == true ]]; then
+  echo 'deploy_access=ssh-ready'
+  exit 0
+fi
+
+decode "$DEPLOY_ACCESS_KUBECONFIG_B64" "$kubeconfig" DEPLOY_ACCESS_KUBECONFIG_B64
+decode "$DEPLOY_ACCESS_KUBE_CA_B64" "$ca_file" DEPLOY_ACCESS_KUBE_CA_B64
+chmod 600 "$kubeconfig" "$ca_file"
 openssl x509 -in "$ca_file" -noout >/dev/null 2>&1 || {
   echo "ERROR: Kubernetes CA is invalid" >&2; exit 2;
 }

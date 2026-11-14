@@ -17,6 +17,8 @@ Hetzner/K3s es actualmente **preproducción**. Los nombres `-prod` son identific
 3. **Clúster existente:** conservar estado, CA y Secrets; revisar contexto, backups, PVC, SHA/digests y modo. Para cambios solo de aplicación, lanzar `apis-frontend-prod`; para cambios de infraestructura, `infra-prod` y luego APIs. Rotar credenciales y certificados con el procedimiento S03/S07a cuando corresponda.
 4. Comprobar pods Ready, configuración efectiva, TLS, JWKS y rutas autorizadas/denegadas desde el borde. La aceptación kind no acredita Hetzner ni abre por sí sola las demos externas.
 
+Para instalar únicamente los scripts operativos y ficheros de soporte versionados en el host, lanzar el pipeline web con `PIPELINE_ACTION=sync-scripts` y `PROFILE=scripts-hetzner`; es un perfil de CI, no de Skaffold. El inventario, las rutas privadas y el uso de `secrets/pkis/` se detallan en [secrets-hetzner.md](secrets-hetzner.md#0-instalar-las-herramientas-del-repositorio-en-hetzner).
+
 Do not record here chronologies of tests, attempts of pipeline, identifiers, IP addresses, fingerprints, tokens, certificates or personal data.
 
 ---

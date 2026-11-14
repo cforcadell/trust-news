@@ -20,30 +20,58 @@ Kind también genera `infra/keycloak-tls-secret` con su certificado local. Hetzn
 
 `gate-config`, `news-handler-secrets` y `mongodb-secret` de `apis` se mantienen en el script por compatibilidad con los ficheros operativos existentes. La comprobación de Secrets de aplicación del preflight actual requiere `source-router-enc`, `api-keys`, `search-secret`, `mongodb-app-secret` y `validator-secret-{1,2,3}`; no elimines los demás sin revisar primero los manifiestos y el uso de ese entorno.
 
+## 0. Instalar las herramientas del repositorio en Hetzner
+
+El perfil operativo de GitLab `PIPELINE_ACTION=sync-scripts`, `PROFILE=scripts-hetzner` copia desde **el SHA del pipeline** al host `~/trust-news` del usuario SSH. El job es manual; no requiere que K3s esté arrancado, no ejecuta Skaffold ni crea Secrets. Reutiliza `scripts/ci/sync-remote-files.sh`, que exige clave de host conocida, instala cada archivo con reemplazo atómico y comprueba SHA-256. El despliegue normal `apis-frontend-prod` ejecuta el mismo inventario antes del rollout.
+
+| Ruta en Hetzner | Archivos versionados instalados | Uso |
+| --- | --- | --- |
+| `scripts/` | `check_configured_secrets.sh`, `create-secrets.sh`, `print-secrets-parameters.sh` | Comprobar Secrets en kind o K3s; crear Secrets solo en K3s; listar nombres de parámetros sin valores |
+| `scripts/security/` | `check_s03_configured_secrets.sh` | Motor S03 llamado por el comprobador general |
+| `scripts/k8s/` | `backup-mongodb.sh`, `restore-mongodb.sh`, `set-blockchain-mode.sh`, `start-k3s-cluster.sh`, `stop-k3s-cluster.sh`, `scale_env.sh` | Operación de K3s; backup/restore también se ejecutan desde un operador con acceso a Kubernetes, preferiblemente fuera del servidor para conservar el respaldo fuera del nodo |
+| `docs/security/` | `s03-local-services.json` | Inventario S03 leído por `create-secrets.sh` y ambos comprobadores; el nombre histórico no implica que sus servicios sean solo locales |
+| `k8s/infra/kafka/` | `kafdrop.properties` | Configuración sin credenciales incluida en `infra/s07a-kafka-broker` |
+| `secrets/` y `secrets/pkis/` | Ningún archivo | Directorios privados `0700` creados si faltan; `pkis/` aloja CA, certificados, claves y PKCS12 del **host** |
+
+El perfil no sincroniza `.env`, `.pem`, `.p12`, `.crt`, `.key`, backups, `secrets/old/` ni `scripts/old/`; tampoco borra archivos previos. Los `.env` siguen en `~/trust-news/secrets/`, salvo los clientes S03, cuyo directorio por defecto continúa siendo `~/trust-news-secrets/s03-clients/` y se puede cambiar con `S03_CLIENTS_DIR`. Los archivos de PKI interna S03/Kafka deben colocarse **manualmente** en `~/trust-news/secrets/pkis/` con acceso restringido. En particular, trasladar allí `tls-keycloak.crt` y `tls-keycloak.key` antes de `--phase infra`. Por decisión del operador, el certificado y la clave **Cloudflare Origin** permanecen en `$HOME/trustnews-origin-ca/`; `--phase edge` conserva esa ruta independiente.
+
+Desde una copia local del repo también se puede instalar exactamente el mismo inventario, sin abrir un pipeline:
+
+```bash
+bash scripts/ci/sync-operations-scripts.sh \
+  --host "$HETZNER_HOST" --user "$HETZNER_USER" --port 2222 \
+  --identity "$HETZNER_KEY" --known-hosts "$HOME/.ssh/known_hosts" \
+  --target-root /home/sysadmin/trust-news
+```
+
+En Hetzner, ejecutar desde `~/trust-news`; ambos comprobadores y el creador buscan `docs/security/s03-local-services.json` a partir de la ruta instalada. `scripts/check_configured_secrets.sh --phase infra|apis` también sirve en kind desde el repo, siempre después de que los Secrets existan. `create-secrets.sh` consume archivos privados del host y apunta al contexto Kubernetes activo: comprobar `kubectl config current-context` antes de invocarlo. Arranque, parada y escalado se reservan para K3s; copiar los scripts no los ejecuta.
+
 ## 1. Preparar una PKI interna nueva
 
 Hazlo una sola vez para el entorno. Si ya existe una CA S03/Kafka usada por servicios, **reutilízala**: no ejecutes la creación de CA ni sustituyas solo algunos certificados. Una rotación debe planificarse como cambio coordinado y conservar material para rollback.
 
-El ejemplo genera la CA y certificados de servicio fuera del checkout. Cada certificado lleva SAN de servicio Kubernetes, EKU `serverAuth` y validez de 90 días. Kafka comparte esta CA, como en kind, e incluye también el DNS del pod KRaft.
+El ejemplo genera la CA y certificados de servicio en el directorio privado `~/trust-news/secrets/pkis/`, fuera del repositorio. Cada certificado lleva SAN de servicio Kubernetes, EKU `serverAuth` y validez de 90 días. Kafka comparte esta CA, como en kind, e incluye también el DNS del pod KRaft. El par de Keycloak se llama `tls-keycloak.crt` y `tls-keycloak.key`; si se traslada un par ya existente, **no ejecutar el bloque de generación de una PKI nueva**. Primero recuperar su CA y comprobar que el certificado valida contra ella y tiene el SAN `keycloak.infra.svc.cluster.local`.
 
-Desde la raíz del checkout, con `openssl` y `python3` instalados:
+Desde `~/trust-news` después de sincronizar los ficheros de soporte, con `openssl` y `python3` instalados:
 
 ```bash
 set -euo pipefail
 umask 077
-export S03_PKI_DIR="$HOME/trust-news-secrets/s03-pki"
+export S03_PKI_DIR="$HOME/trust-news/secrets/pkis"
 install -d -m 700 "$S03_PKI_DIR"
 
-# Esta parte solo es para una PKI nueva. Falla si ya existe cualquiera de los dos ficheros.
+# Esta parte solo es para una PKI nueva. No mezclar con material existente.
 test ! -e "$S03_PKI_DIR/ca.crt" && test ! -e "$S03_PKI_DIR/ca.key"
+test ! -e "$S03_PKI_DIR/tls-keycloak.crt" && test ! -e "$S03_PKI_DIR/tls-keycloak.key"
+test ! -e "$S03_PKI_DIR/broker.p12" && test ! -e "$S03_PKI_DIR/kafka-tls.env"
 openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 1825 \
   -subj '/CN=TrustNews Hetzner Internal CA' \
   -keyout "$S03_PKI_DIR/ca.key" -out "$S03_PKI_DIR/ca.crt"
 chmod 600 "$S03_PKI_DIR/ca.key"
 
 issue_server_cert() {
-  local namespace="$1" service="$2" extra_dns="${3:-}"
-  local stem="$S03_PKI_DIR/$namespace-$service"
+  local namespace="$1" service="$2" extra_dns="${3:-}" filename="${4:-$1-$2}"
+  local stem="$S03_PKI_DIR/$filename"
   local dns="$service.$namespace.svc.cluster.local"
   local sans="DNS:$dns,DNS:$service.$namespace.svc"
   local csr="$stem.csr" ext="$stem.ext"
@@ -65,7 +93,7 @@ EOF
   rm -f "$csr" "$ext"
 }
 
-issue_server_cert infra keycloak
+issue_server_cert infra keycloak '' tls-keycloak
 while IFS=$'\t' read -r namespace service; do
   [[ "$namespace" == apis ]] && issue_server_cert "$namespace" "$service"
 done < <(python3 - docs/security/s03-local-services.json <<'PY'
@@ -105,7 +133,7 @@ Las credenciales de clientes S03 no se generan en este paso. Se reconcilian con 
 
 ## 2. Crear/actualizar Secrets de `infra`
 
-El directorio privado por defecto para los ficheros del script es `$HOME/trust-news/secrets`. Debe contener los mismos `.env` ya usados por el script del servidor. Para aplicar el bloque de infraestructura:
+El directorio privado por defecto para los ficheros del script es `$HOME/trust-news/secrets`. Debe contener los mismos `.env` ya usados por el script del servidor, y `pkis/` debe contener `ca.crt`, `tls-keycloak.crt`, `tls-keycloak.key`, `broker.p12` y `kafka-tls.env`. El nombre anterior `infra-keycloak.*` no se busca. Para aplicar el bloque de infraestructura:
 
 ```bash
 bash scripts/create-secrets.sh --phase infra
@@ -159,7 +187,7 @@ El script usa estos valores por defecto y permite sobrescribirlos por entorno:
 | Variable | Valor por defecto |
 | --- | --- |
 | `SECRETS_DIR` | `$HOME/trust-news/secrets` |
-| `S03_PKI_DIR` | `$HOME/trust-news-secrets/s03-pki` |
+| `S03_PKI_DIR` | `$SECRETS_DIR/pkis` (o `$HOME/trust-news/secrets/pkis` sin `SECRETS_DIR`) |
 | `S03_CLIENTS_DIR` | `$HOME/trust-news-secrets/s03-clients` |
 | `ORIGIN_TLS_CERT` | `$HOME/trustnews-origin-ca/assermetry-origin.pem` |
 | `ORIGIN_TLS_KEY` | `$HOME/trustnews-origin-ca/assermetry-origin.key` |

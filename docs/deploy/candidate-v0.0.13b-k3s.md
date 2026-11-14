@@ -4,6 +4,20 @@
 estático del repositorio de la evidencia que solo puede producir un pipeline
 protegido y el clúster K3s. No autoriza despliegue ni apertura de demos.
 
+Actualización 2026-11-14: antes de esta actualización documental, el checkout local estaba limpio en
+`554a2382397275649774eb8cf659b9d1145504b9`. El operador comunica que
+sincronizó el script corregido a Hetzner; la salida que aportó muestra
+`create-secrets.sh --phase infra` completo y el preflight de Secrets `infra`
+correcto en K3s (S03 Keycloak y Kafka TLS). Esto acredita esa fase de Secrets
+en la sesión del host. El preflight CI `infra-prod` del mismo SHA arrancó en
+GitLab y falló antes del despliegue: el comprobador Kafka usaba
+`base64 --decode`, opción no admitida por BusyBox en el contenedor Alpine del
+job. El Secret era legible, pero sus claves se informaron erróneamente como
+ausentes y la CA como inválida. La corrección local cambia a `base64 -d`;
+requiere publicación y nuevo preflight CI. Siguen pendientes respaldo
+recuperable, despliegue y aceptación funcional. No se ha confirmado un
+snapshot completo ni una restauración.
+
 ## Fotografía local, 2026-11-11
 
 | Campo | Resultado comprobado | Para fijar el candidato |

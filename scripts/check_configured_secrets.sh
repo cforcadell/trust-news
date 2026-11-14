@@ -65,7 +65,7 @@ secret_value_is_usable() {
   key="${key//./\\.}"
   encoded="$(kubectl get secret "$secret" -n "$namespace" -o "jsonpath={.data.${key}}" 2>/dev/null || true)"
   [[ -n "$encoded" ]] || return 1
-  value="$(printf '%s' "$encoded" | base64 --decode 2>/dev/null || true)"
+  value="$(printf '%s' "$encoded" | base64 -d 2>/dev/null || true)"
   compact="${value//[$'\t\r\n ']/}"
   value=
   case "${compact,,}" in
@@ -79,7 +79,7 @@ secret_key_is_present() {
   local namespace="$1" secret="$2" key="$3" encoded
   key="${key//./\\.}"
   encoded="$(kubectl get secret "$secret" -n "$namespace" -o "jsonpath={.data.${key}}" 2>/dev/null || true)"
-  [[ -n "$encoded" ]] && printf '%s' "$encoded" | base64 --decode >/dev/null 2>&1
+  [[ -n "$encoded" ]] && printf '%s' "$encoded" | base64 -d >/dev/null 2>&1
 }
 
 require_secret_exists() {
@@ -162,14 +162,14 @@ check_s07a_secrets() {
     if [[ -z "$apis_ca" ]]; then
       return 0
     fi
-    if ! cmp -s <(printf '%s' "$infra_ca" | base64 --decode 2>/dev/null) \
-        <(printf '%s' "$apis_ca" | base64 --decode 2>/dev/null); then
+    if ! cmp -s <(printf '%s' "$infra_ca" | base64 -d 2>/dev/null) \
+        <(printf '%s' "$apis_ca" | base64 -d 2>/dev/null); then
       echo 'ERROR: las CA de s07a-kafka-broker y s07a-kafka-ca difieren' >&2
       errors=$((errors + 1))
       return 0
     fi
   fi
-  if ! printf '%s' "$infra_ca" | base64 --decode 2>/dev/null | \
+  if ! printf '%s' "$infra_ca" | base64 -d 2>/dev/null | \
       openssl x509 -noout -checkend 86400 >/dev/null 2>&1; then
     echo 'ERROR: la CA Kafka es inválida o caduca en menos de 24 horas' >&2
     errors=$((errors + 1))
@@ -179,7 +179,7 @@ check_s07a_secrets() {
   broker_p12="$(kubectl get secret s07a-kafka-broker -n infra -o jsonpath='{.data.broker\.p12}' 2>/dev/null || true)"
   encoded_password="$(kubectl get secret s07a-kafka-broker -n infra -o jsonpath='{.data.KEYSTORE_PASSWORD}' 2>/dev/null || true)"
   [[ -n "$broker_p12" && -n "$encoded_password" ]] || return 0
-  password="$(printf '%s' "$encoded_password" | base64 --decode 2>/dev/null || true)"
+  password="$(printf '%s' "$encoded_password" | base64 -d 2>/dev/null || true)"
   local compact_password="${password//[$'\t\r\n ']/}"
   case "${compact_password,,}" in
     ''|replace-me|replace_me|changeme|change-me|example|example-*|your-*|todo|xxx|xxxxxxxx)
@@ -189,7 +189,7 @@ check_s07a_secrets() {
       ;;
   esac
   if ! certificate="$(printf '%s\n' "$password" | openssl pkcs12 \
-      -in <(printf '%s' "$broker_p12" | base64 --decode) \
+      -in <(printf '%s' "$broker_p12" | base64 -d) \
       -passin stdin -clcerts -nokeys 2>/dev/null)"; then
     echo 'ERROR: broker.p12 no se puede abrir con KEYSTORE_PASSWORD' >&2
     errors=$((errors + 1))
@@ -214,7 +214,7 @@ check_s07a_secrets() {
     kafka_errors=$((kafka_errors + 1))
   fi
   if ! openssl verify \
-      -CAfile <(printf '%s' "$infra_ca" | base64 --decode) \
+      -CAfile <(printf '%s' "$infra_ca" | base64 -d) \
       -verify_hostname kafka.infra.svc.cluster.local -purpose sslserver \
       <(printf '%s' "$certificate") >/dev/null 2>&1; then
     echo 'ERROR: el certificado Kafka no valida contra su CA y hostname de servicio' >&2

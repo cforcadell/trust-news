@@ -14,25 +14,33 @@
 
 ## Próximo paso
 
-La provisión de Secrets `infra` en Hetzner quedó parcial el 14-11-2026: el
-operador confirmó seis Secrets aplicados y el fallo de `s07a-kafka-broker` por
-una combinación de opciones que `kubectl` rechaza. La corrección está en el
-script local, todavía sin sincronizar al host. Sincronizar ese archivo,
-repetir `--phase infra` y ejecutar su preflight antes de considerar la fase
-completa. Esto no acredita despliegue ni aceptación de K3s.
+El operador confirmó que sincronizó la corrección al host y repitió
+`create-secrets.sh --phase infra` en Hetzner el 14-11-2026. Su salida muestra
+los siete Secrets aplicados y `check_configured_secrets.sh --phase infra` OK:
+S03 para Keycloak y Kafka con CA, PKCS12, vigencia, SAN y cadena verificados,
+sin valores mostrados. El preflight CI `infra-prod` del SHA `554a238` arrancó
+en GitLab, verificó acceso y TLS servido, y falló antes del despliegue por un
+fallo de compatibilidad del comprobador Kafka con BusyBox: usa
+`base64 --decode`, que Alpine no admite. La corrección local usa `base64 -d` y
+debe publicarse y pasar un nuevo preflight CI. Todavía no hay despliegue
+`infra-prod` ni aceptación funcional allí. Sigue pendiente confirmar respaldo
+recuperable y rollback antes del despliegue.
 
 La [ficha de preparación del candidato K3s](docs/deploy/candidate-v0.0.13b-k3s.md)
 describe perfiles, renders, controles de CI y límites de rollback. En la revisión
 local inicial del 13-11-2026, `postTFM` estaba limpio en
 `1573ec7c6c0519d3b5874424fe295b046401f9ab`, igual a la referencia local
-`origin/postTFM`. Los cambios de esta sesión están ahora sin commit y la retirada
-de la key está preparada en el índice. Esto no verifica GitLab en vivo ni
-acredita un candidato o despliegue en Hetzner.
+`origin/postTFM`. Antes de esta actualización documental, el checkout local
+estaba limpio en `554a2382397275649774eb8cf659b9d1145504b9`; el operador comunica que
+sincronizó el script a Hetzner. No se verificó GitLab en vivo desde esta
+sesión ni se acreditó un candidato o despliegue en Hetzner.
 
-La aceptación local de S03 declarativo está cerrada. S07a también superó sus E2E técnico y funcional LIGHT/SMART en kind. La revisión inicial de solo lectura del 13-11 detectó 19 rutas locales modificadas/eliminadas en ese momento. La key de `web_classic/certs/privkey.pem` es solo para `localhost`, no se usa en Hetzner; se regeneró localmente y la retirada del índice está preparada, con la ruta ignorada. La historia local conserva el blob previo, y no se verificó el remoto en vivo. El operador realizará un snapshot de la VM Hetzner antes de aplicar cambios; hasta entonces no hay evidencia de snapshot ni de restauración probada. Después, revisar el diff del SHA candidato, ejecutar los dos preflights sobre el mismo SHA, preparar la ventana y el rollback, e integrar S02/S03/S07a en Hetzner/K3s verificando Secrets y configuración efectiva en cada pod. Preparar S11-D/S12-D para el mismo SHA/digests, dos organizaciones, presupuesto, baja y rollback. No abrir invitaciones ni cambiar el borde hasta una decisión GO registrada para demos. No existe entorno productivo.
+La aceptación local de S03 declarativo está cerrada. S07a también superó sus E2E técnico y funcional LIGHT/SMART en kind. La revisión inicial de solo lectura del 13-11 detectó 19 rutas locales modificadas/eliminadas en ese momento. La key de `web_classic/certs/privkey.pem` es solo para `localhost`, no se usa en Hetzner; se regeneró localmente y su ruta dejó de estar versionada. La historia local conserva el blob previo, y no se verificó el remoto en vivo. El snapshot de la VM Hetzner anunciado por el operador no está confirmado aquí ni sustituye una restauración probada. Después, revisar el diff del SHA candidato, ejecutar los preflights correspondientes al mismo SHA, preparar la ventana y el rollback, e integrar S02/S03/S07a en Hetzner/K3s verificando Secrets y configuración efectiva en cada pod. Preparar S11-D/S12-D para el mismo SHA/digests, dos organizaciones, presupuesto, baja y rollback. No abrir invitaciones ni cambiar el borde hasta una decisión GO registrada para demos. No existe entorno productivo.
 
 ## HISTORY
 
+- 2026-11-14 — El log GitLab aportado muestra checkout `554a2382` para `postTFM`, acceso K3s y TLS servido verificados, S03 `infra` OK y fallo del preflight Kafka antes de desplegar. El Secret era legible, pero el motor decodificaba con `base64 --decode`, incompatible con BusyBox del job Alpine; la reproducción local dio salida 1 con esa opción y 0 con `-d`. Se corrigió localmente el motor para usar `-d` en todas las lecturas Kafka. Pendientes publicación autorizada y repetición del preflight CI; sin despliegue ni aceptación funcional.
+- 2026-11-14 — Tras sincronizar el script corregido según el operador, `create-secrets.sh --phase infra` terminó en Hetzner: los cuatro Secrets de aplicación existentes y los tres nuevos (`s03-internal-ca`, `s03-tls-keycloak`, `s07a-kafka-broker`) se aplicaron. La salida aportada de `check_configured_secrets.sh --phase infra` confirmó S03 para Keycloak y Kafka con CA, PKCS12, vigencia, SAN y cadena; no mostró valores. Antes de esta actualización documental, el checkout local estaba limpio en `554a238`; no se ha observado despliegue `infra-prod`, prueba funcional ni respaldo recuperable. La sincronización al host es confirmación del operador, sin ID de pipeline registrado aquí.
 - 2026-11-14 — El operador preparó en Hetzner una CA interna nueva y comunicó que emitió los certificados S03/Kafka; la salida aportada confirmó `CA:TRUE`, el PKCS12 abrió con su contraseña y los archivos privados de Kafka quedaron en `0600`. Los cuatro `.env` de `infra` coincidían con los Secrets existentes antes de aplicar la fase. `create-secrets.sh --phase infra` actualizó esos cuatro Secrets, creó `s03-internal-ca` y `s03-tls-keycloak`, y falló al crear `s07a-kafka-broker`: `kubectl` rechazó mezclar `--from-file` y `--from-env-file`. El Secret Kafka y el preflight `infra` siguen pendientes de verificación. Se corrigió localmente el motor para combinar ambos manifiestos y se ajustó la guía; la corrección aún no se ha sincronizado al host ni publicado. Sin despliegue, commit ni push.
 - 2026-11-13 — El operador confirma que todas las pruebas locales están OK y cierra la aceptación del camino declarativo S03 en kind. Comprobación de solo lectura: preflight S03 correcto para nueve servicios, S03 habilitado en las APIs inventariadas, SMART en Evidence Search y Blockchain OFF donde aplica. Hetzner/K3s sigue pendiente; sin despliegue, commit ni push.
 - 2026-11-13 — Revisión local predespliegue: 19 rutas versionadas modificadas/eliminadas y la ficha candidata sin seguimiento. `privkey.pem` local estaba versionado; también aparecía en la referencia local `origin/postTFM` (último commit de la ruta observado: `78638d9`, 24-01-2026). El certificado asociado es solo para `localhost`; el overlay prod no genera ese Secret y la imagen frontend copia solo `app`. El snapshot local no verificó el remoto en vivo. No había backups recuperables documentados en Hetzner. Sin pipeline, despliegue, commit ni push.

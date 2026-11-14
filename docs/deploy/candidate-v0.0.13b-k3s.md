@@ -46,8 +46,52 @@ El operador mostró una copia MongoDB del 14-11-2026 con manifiesto y checksum
 en el propio servidor; sigue sin acreditarse almacenamiento externo ni
 restauración. Se prepararon localmente motores parametrizados de copia y
 restauración PostgreSQL con el mismo contrato de artefacto que MongoDB, y se
-añadieron al inventario de sincronización a Hetzner. No se han publicado ni
-ejecutado en K3s; no acreditan aún el respaldo de Keycloak.
+añadieron al inventario de sincronización a Hetzner. El log aportado del job
+`sync-scripts` sobre `35c2a995` confirma su instalación con SHA-256 y termina
+en `Job succeeded`. El operador ejecutó después el backup PostgreSQL de
+`keycloak` en la VM: `keycloak-20261114T183013Z.archive.gz`. El restore sin
+`--apply` verificó el archivo y el destino `infra/keycloak-db-0` sin modificar
+datos. El operador confirma los respaldos MongoDB y PostgreSQL fuera de
+Hetzner y pide continuar con esa confirmación operativa. No se ha ensayado una
+restauración aislada. El nuevo preflight CI `infra-prod` sobre `35c2a995`
+pasó: acceso K3s, TLS servido, S03 y Kafka, con `Job succeeded`. El prefijo
+coincide con el HEAD local completo `35c2a9955503b2605e1ba5b527c6e1505c3ec5ec`.
+El preflight `apis-frontend-prod` del mismo SHA falló antes de desplegar:
+faltan los siete Secrets de clientes S03 y `apis/s07a-kafka-ca`; las
+credenciales de aplicación comprobadas pasaron. El orden de
+`secrets-hetzner.md` exige primero desplegar `infra-prod`, reconciliar clients
+con Keycloak y aprovisionar `--phase apis`; el preflight API se pidió antes de
+esa fase. Antes de desplegar infraestructura siguen pendientes la confirmación
+actual del snapshot y del maintenance lock.
+
+El operador aportó después el log del job `deploy` de `infra-prod` en
+`35c2a995`: descargó el artefacto `build.json`, pasó el preflight de Secrets
+e inició `skaffold deploy`; varios recursos de `infra` quedaron configurados.
+El job terminó fallando al estabilizar Kafdrop porque no pudo resolver
+`kafka.infra.svc.cluster.local`. Mongo Express mostró también un fallo de
+resolución de `mongodb` antes de aparecer Ready, y Loki quedó pendiente por
+CPU insuficiente. El log no acredita el estado final de CoreDNS, Kafka,
+Keycloak ni los demás pods. Es un despliegue parcial; se requiere diagnóstico
+vivo antes de otro deploy o de pasar a `apis-frontend-prod`.
+
+La lectura viva posterior aportada por el operador muestra nodo y CoreDNS
+Ready, endpoint de CoreDNS presente, todos los Deployments y StatefulSets de
+`infra` Ready y endpoints de Kafka, MongoDB y Keycloak DB presentes. Kafdrop
+reinició dos veces y quedó Ready. Esto indica convergencia posterior al
+fallo, pero el job no llegó a su verificación final ni a la reconciliación
+web de Keycloak. Antes de reintentar el mismo job con `build.json`, confirmar
+snapshot y maintenance lock; no pasar aún a `apis-frontend-prod`.
+
+El operador confirmó después snapshot y maintenance lock activos. El retry
+del job `infra-prod` en el mismo SHA descargó `build.json`, pero volvió a
+fallar cuando Kafdrop no pudo resolver el Service headless de Kafka mientras
+el broker aún se creaba. Esto es compatible con una carrera de arranque. Se
+preparó localmente una espera de Kafka en el
+Deployment Kafdrop, coherente con las esperas ya declaradas para los otros
+servicios dependientes. También se añadió al inventario de sincronización el
+reconciliador S03 existente y su configuración no secreta, necesarios para
+la fase `apis`. Estos cambios requieren un nuevo SHA publicado, sus
+preflights y un despliegue controlado; no están activos en K3s.
 
 ## Fotografía local, 2026-11-11
 

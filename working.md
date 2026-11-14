@@ -45,7 +45,44 @@ confirmado. El operador mostró un archivo MongoDB del 14-11-2026 con
 servidor; todavía no acredita una copia externa. Se prepararon localmente los
 motores parametrizados `backup-postgresql.sh` y `restore-postgresql.sh`, con
 el mismo contrato de artefacto que MongoDB y sincronización en el inventario
-de scripts operativos. No se han publicado ni ejecutado en Hetzner.
+de scripts operativos. El job `sync-scripts` de GitLab hizo checkout de
+`35c2a995` y terminó correctamente; su salida confirma la instalación con
+SHA-256 de los motores PostgreSQL, los módulos compartidos y los motores
+MongoDB. El operador ejecutó después `backup-postgresql.sh` para la base
+`keycloak` y `restore-postgresql.sh` sin `--apply`: el archivo
+`keycloak-20261114T183013Z.archive.gz` se creó en la VM y pasó la verificación
+de integridad, formato y destino `infra/keycloak-db-0`. El operador confirma
+que las copias MongoDB y PostgreSQL ya están confirmadas fuera de la VM.
+La restauración real en un entorno aislado sigue sin ensayarse. El preflight
+CI `infra-prod` del SHA `35c2a9955503b2605e1ba5b527c6e1505c3ec5ec`
+pasó: acceso K3s, TLS servido, Secrets S03 y Kafka. El preflight
+`apis-frontend-prod` del mismo SHA falló antes de desplegar: faltan siete
+Secrets de clientes S03 y `apis/s07a-kafka-ca`; las credenciales de aplicación
+comprobadas están presentes. Según `docs/deploy/secrets-hetzner.md`, los
+clients S03 se reconcilian tras desplegar `infra-prod` y luego se aprovisiona
+la fase `apis`. El operador lanzó después el despliegue `infra-prod` del SHA
+`35c2a995`: Skaffold aplicó recursos de `infra`, pero el job falló al esperar
+Kafdrop, que no pudo resolver `kafka.infra.svc.cluster.local`. Mongo Express
+también mostró un fallo transitorio de resolución de `mongodb`; Loki quedó
+pendiente por CPU insuficiente en el nodo. En la lectura posterior aportada
+por el operador, el nodo, CoreDNS y su endpoint están Ready; todos los
+Deployments y StatefulSets de `infra` figuran Ready, incluidos Kafdrop,
+Kafka, Keycloak, Loki y MongoDB; los endpoints de Kafka, MongoDB y
+Keycloak DB apuntan a sus pods. Kafdrop reinició dos veces y acabó Ready.
+El job no alcanzó su verificación final, incluida la reconciliación web de
+Keycloak. Sigue siendo un deploy parcial a nivel de CI; confirmar snapshot y
+maintenance lock antes de reintentar el mismo job con su artefacto.
+El preflight `infra-prod` anterior correspondía a `41dc2989`.
+El operador confirmó snapshot disponible y maintenance lock activo. El retry
+de `infra-prod` sobre `35c2a995` volvió a fallar en el mismo arranque:
+Kafdrop no pudo resolver el Service headless de Kafka mientras el broker aún
+se creaba, salió con código 1 y Skaffold abortó. Esto es compatible con una
+carrera de arranque. El manifiesto Kafdrop carecía
+de la espera de dependencia que ya usan Mongo Express, Keycloak y varios
+servicios API. Se añadió localmente un init container que espera el puerto
+Kafka, y el inventario de sincronización incorpora el reconciliador S03 y
+su configuración no secreta para la fase siguiente. Estos cambios no están
+publicados ni desplegados; el SHA `35c2a995` sigue fallando en esta carrera.
 
 La [ficha de preparación del candidato K3s](docs/deploy/candidate-v0.0.13b-k3s.md)
 describe perfiles, renders, controles de CI y límites de rollback. En la revisión
@@ -60,6 +97,15 @@ La aceptación local de S03 declarativo está cerrada. S07a también superó sus
 
 ## HISTORY
 
+- 2026-11-14 — El operador confirmó snapshot y maintenance lock activos; el retry de `infra-prod` en `35c2a995` descargó el mismo `build.json`, pasó Secrets y volvió a fallar cuando Kafdrop no pudo resolver el Service headless de Kafka mientras el broker aún se creaba. Es compatible con una carrera de arranque. Se preparó localmente una espera declarativa `wait-for-kafka` para Kafdrop, siguiendo los init containers existentes, y se incluyeron el reconciliador S03 y su configuración no secreta en el inventario de scripts de Hetzner. Sin commit, push ni redeploy; nuevo SHA y nuevos preflights necesarios al publicar.
+- 2026-11-14 — Inventario vivo posterior al fallo de `infra-prod`: nodo Ready, CoreDNS 1/1 con endpoint, los cinco Deployments y cuatro StatefulSets de `infra` Ready; pods de Kafka, MongoDB, Keycloak, Kafdrop y Loki Running/Ready; endpoints de Kafka, MongoDB y Keycloak DB presentes. Kafdrop acumuló dos reinicios. El estado converge, pero el job no alcanzó la verificación final; aún no equivale a deploy CI correcto.
+- 2026-11-14 — El job de despliegue `infra-prod` hizo checkout de `35c2a995`, descargó `build.json`, pasó preflight de Secrets y aplicó recursos con Skaffold. Falló porque Kafdrop no resolvió el DNS interno de Kafka; Mongo Express también informó un fallo de DNS y Loki quedó pendiente por CPU insuficiente. No alcanzó la verificación final ni hay evidencia de rollback de infra. Estado parcial pendiente de inventario vivo; no repetir deploy ni iniciar APIs aún.
+- 2026-11-14 — El preflight CI `apis-frontend-prod` hizo checkout de `35c2a995`, verificó acceso K3s y TLS servido, y falló en Secrets: siete `apis/s03-client-*` y `apis/s07a-kafka-ca` ausentes. El resto de credenciales de aplicación verificadas pasó. No se construyó ni desplegó. La guía de aprovisionamiento ordena desplegar `infra-prod`, reconciliar clientes con Keycloak y crear los Secrets `apis` antes de repetir este preflight; pedirlo antes de esa fase fue prematuro.
+- 2026-11-14 — Log aportado del preflight CI `infra-prod`: checkout `35c2a995` de `postTFM`, acceso K3s `ready`, TLS servido verificado, fase `infra` S03/Kafka OK y `Job succeeded`. El prefijo coincide con el HEAD local completo `35c2a9955503b2605e1ba5b527c6e1505c3ec5ec`. No construyó ni desplegó; siguiente preflight `apis-frontend-prod` en el mismo SHA.
+- 2026-11-14 — El operador pide continuar tomando como confirmados los backups MongoDB y Keycloak/PostgreSQL fuera de Hetzner. Se acepta esa confirmación operativa; no se ha realizado una restauración aislada. El siguiente paso es repetir `infra-prod` y `apis-frontend-prod` en preflight sobre el SHA `35c2a995` antes de cualquier despliegue; el snapshot y el maintenance lock siguen sin confirmación actual.
+- 2026-11-14 — El operador confirma que copió fuera de la VM los respaldos MongoDB y Keycloak/PostgreSQL. No se han visto los checksums ejecutados en el destino externo ni un ensayo de restauración aislado; el siguiente control es comprobar ambos archivos allí con sus `.sha256`.
+- 2026-11-14 — El operador creó en la VM el backup PostgreSQL `keycloak-20261114T183013Z.archive.gz` de `keycloak`; el restore sin `--apply` confirmó archivo, checksum y destino `infra/keycloak-db-0`, sin cambiar datos. Pendientes copia externa verificada y ensayo de restauración aislado.
+- 2026-11-14 — El operador aportó el log de `sync-scripts` en GitLab: checkout `35c2a995` de `postTFM`, instalación verificada por SHA-256 de los scripts de backup/restore PostgreSQL y MongoDB y sus módulos, `Job succeeded`. El prefijo coincide con el HEAD local `35c2a9955503b2605e1ba5b527c6e1505c3ec5ec`; el job no ejecutó backup ni restore ni desplegó servicios. Sigue pendiente generar y conservar fuera de la VM el respaldo PostgreSQL.
 - 2026-11-14 — El operador pidió backup/restore PostgreSQL análogos a MongoDB, instalados por el inventario de scripts de Hetzner. Mostró un archivo MongoDB local con manifiesto y checksum en `~/trust-news/scripts/k8s/backup/`; ubicación externa y restauración pendientes. Se añadieron localmente motores PostgreSQL parametrizados y módulos compartidos de artefacto, se reconciliaron los dos scripts MongoDB existentes y se actualizó el inventario de sincronización. Sin publicación, ejecución remota ni despliegue.
 - 2026-11-14 — `findmnt -T /var/lib/rancher/k3s/storage` en Hetzner devolvió raíz `/` sobre `/dev/sda1` ext4. Los PV inventariados apuntan bajo esa ruta; un snapshot del disco del servidor debería cubrirla si no hay montajes anidados, sujeto a confirmar el snapshot y la coherencia del corte. Sigue sin acreditarse la copia externa MongoDB ni el respaldo de Keycloak/PostgreSQL. Sin despliegue.
 - 2026-11-14 — Los nueve PV locales apuntan a `/var/lib/rancher/k3s/storage/...`, según salida del operador. El operador indica que dispone de una copia de MongoDB, todavía sin evidencia de ubicación externa, fecha, checksum ni restauración. Pendiente `findmnt` del directorio de PV, copia de Keycloak/PostgreSQL y snapshot confirmado. Sin despliegue.

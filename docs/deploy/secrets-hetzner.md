@@ -28,7 +28,7 @@ El perfil operativo de GitLab `PIPELINE_ACTION=sync-scripts`, `PROFILE=scripts-h
 | --- | --- | --- |
 | `scripts/` | `check_configured_secrets.sh`, `create-secrets.sh`, `print-secrets-parameters.sh` | Comprobar Secrets en kind o K3s; crear Secrets solo en K3s; listar nombres de parámetros sin valores |
 | `scripts/security/` | `check_s03_configured_secrets.sh` | Motor S03 llamado por el comprobador general |
-| `scripts/k8s/` | `backup-mongodb.sh`, `restore-mongodb.sh`, `set-blockchain-mode.sh`, `start-k3s-cluster.sh`, `stop-k3s-cluster.sh`, `scale_env.sh` | Operación de K3s; backup/restore también se ejecutan desde un operador con acceso a Kubernetes, preferiblemente fuera del servidor para conservar el respaldo fuera del nodo |
+| `scripts/k8s/` | `backup-mongodb.sh`, `restore-mongodb.sh`, `backup-postgresql.sh`, `restore-postgresql.sh`, sus módulos comunes `backup-artifact.sh` y `postgresql-archive.sh`, `set-blockchain-mode.sh`, `start-k3s-cluster.sh`, `stop-k3s-cluster.sh`, `scale_env.sh` | Operación de K3s; backup/restore también se ejecutan desde un operador con acceso a Kubernetes, preferiblemente fuera del servidor para conservar el respaldo fuera del nodo |
 | `docs/security/` | `s03-local-services.json` | Inventario S03 leído por `create-secrets.sh` y ambos comprobadores; el nombre histórico no implica que sus servicios sean solo locales |
 | `k8s/infra/kafka/` | `kafdrop.properties` | Configuración sin credenciales incluida en `infra/s07a-kafka-broker` |
 | `secrets/` y `secrets/pkis/` | Ningún archivo | Directorios privados `0700` creados si faltan; `pkis/` aloja CA, certificados, claves y PKCS12 del **host** |
@@ -193,3 +193,36 @@ El script usa estos valores por defecto y permite sobrescribirlos por entorno:
 | `ORIGIN_TLS_KEY` | `$HOME/trustnews-origin-ca/assermetry-origin.key` |
 
 Para ejecutar desde otra sesión o checkout, exportar la ruta correspondiente antes de llamar al script. No activar `set -x` en sesiones con variables, contraseñas o rutas sensibles.
+
+## 6. Respaldo de Keycloak/PostgreSQL
+
+El mismo inventario de sincronización instala `backup-postgresql.sh`,
+`restore-postgresql.sh` y sus módulos compartidos junto a los scripts de
+MongoDB. Los motores PostgreSQL aceptan `--namespace`, `--selector`, `--pod` y
+`--container`; por defecto seleccionan el único pod `app=keycloak-db` de
+`infra`, contenedor `postgres`. Leen `POSTGRES_DB`, `POSTGRES_USER` y
+`POSTGRES_PASSWORD` dentro del pod, sin imprimir sus valores. La copia se crea
+en la máquina que ejecuta el script, no dentro del PVC.
+
+```bash
+umask 077
+install -d -m 700 "$HOME/keycloak-db-backups"
+backup_file="$HOME/keycloak-db-backups/keycloak-$(date -u +%Y%m%dT%H%M%SZ).archive.gz"
+bash scripts/k8s/backup-postgresql.sh --output "$backup_file"
+bash scripts/k8s/restore-postgresql.sh --input "$backup_file"
+```
+
+El primer script produce `FILE`, `FILE.manifest` y `FILE.sha256`, igual que el
+motor MongoDB. El segundo, sin `--apply`, comprueba checksum, gzip, formato de
+archivo PostgreSQL, nombre de base y destino; no cambia datos. Conservar los
+tres archivos juntos fuera de la VM Hetzner, con acceso restringido. Una copia
+creada en el propio servidor sigue siendo local hasta trasladarla y verificar
+su integridad en el destino externo. Estos controles no sustituyen una
+restauración ensayada en un entorno aislado.
+
+La restauración real requiere detener clientes/escrituras, mantener el lock de
+mantenimiento y una decisión explícita de recuperación. Solo entonces, con
+el destino correcto y respaldo protegido, usar
+`restore-postgresql.sh --input "$backup_file" --apply --replace-database`:
+el motor elimina y recrea la base del archivo y pierde las escrituras
+posteriores. Nunca ensayar ese modo sobre el PVC activo.

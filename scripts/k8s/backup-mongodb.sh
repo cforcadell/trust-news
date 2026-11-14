@@ -33,6 +33,8 @@ command -v kubectl >/dev/null
 command -v gzip >/dev/null
 command -v sha256sum >/dev/null
 umask 077
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/backup-artifact.sh"
 
 if [[ -z $pod ]]; then
   pod=$(kubectl get pods -n "$namespace" -l app=mongodb -o jsonpath='{.items[0].metadata.name}')
@@ -45,24 +47,13 @@ database=$(kubectl exec -n "$namespace" "$pod" -- sh -c 'printf %s "${MONGO_APP_
   echo 'Refusing to back up a MongoDB system database as the application database' >&2; exit 1;
 }
 
-for file in "$output" "$output.manifest" "$output.sha256"; do
-  [[ ! -e $file ]] || { echo "Refusing to overwrite $file" >&2; exit 1; }
-done
-directory=$(dirname -- "$output")
-[[ -d $directory ]] || { echo "Directory does not exist: $directory" >&2; exit 1; }
-temporary=$(mktemp "$directory/.mongodb-backup.XXXXXXXX")
-trap 'rm -f -- "$temporary"' EXIT
+backup_artifact_prepare_output "$output"
+trap 'rm -f -- "$backup_artifact_temporary"' EXIT
 
 kubectl exec -n "$namespace" "$pod" -- sh -c \
   'exec mongodump --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --db "$MONGO_APP_DATABASE" --archive' \
-  | gzip -c >"$temporary"
-[[ -s $temporary ]] || { echo 'Empty MongoDB archive' >&2; exit 1; }
-gzip -t "$temporary"
-checksum=$(sha256sum "$temporary" | cut -d ' ' -f 1)
-
-printf 'database=%s\nnamespace=%s\npod=%s\ncreated_utc=%s\nsha256=%s\n' \
-  "$database" "$namespace" "$pod" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$checksum" >"$output.manifest"
-printf '%s  %s\n' "$checksum" "$(basename -- "$output")" >"$output.sha256"
-mv -T -- "$temporary" "$output"
+  | gzip -c >"$backup_artifact_temporary"
+backup_artifact_finish_output "$output" mongodb "$database" "$namespace" "$pod"
 trap - EXIT
+checksum=$(sed -n 's/^sha256=//p' "$output.manifest")
 echo "MongoDB backup created: $output (database=$database, sha256=$checksum)"

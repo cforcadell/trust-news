@@ -21,10 +21,31 @@ S03 para Keycloak y Kafka con CA, PKCS12, vigencia, SAN y cadena verificados,
 sin valores mostrados. El preflight CI `infra-prod` del SHA `554a238` arrancó
 en GitLab, verificó acceso y TLS servido, y falló antes del despliegue por un
 fallo de compatibilidad del comprobador Kafka con BusyBox: usa
-`base64 --decode`, que Alpine no admite. La corrección local usa `base64 -d` y
-debe publicarse y pasar un nuevo preflight CI. Todavía no hay despliegue
+`base64 --decode`, que Alpine no admite. El checkout local limpio está ahora en
+`41dc2989325db70b1c545a7726d100883911a127` y contiene la corrección a
+`base64 -d`. El operador aportó el log completo de un nuevo preflight CI
+`infra-prod` correcto: GitLab hizo checkout de `41dc2989`, verificó acceso K3s
+y TLS servido, comprobó S03 y Kafka, y terminó con `Job succeeded`. El prefijo
+de SHA coincide con el HEAD local completo; el log no muestra ID del job ni
+los valores seleccionados para las variables del pipeline. Todavía no hay despliegue
 `infra-prod` ni aceptación funcional allí. Sigue pendiente confirmar respaldo
-recuperable y rollback antes del despliegue.
+recuperable y rollback antes del despliegue. Un inventario de solo lectura
+aportado por el operador muestra contexto K3s `default` y nueve PVC `Bound`:
+MongoDB, Keycloak/PostgreSQL, Kafka, IPFS, Grafana y Loki en `infra`, y tres
+PVC de Geth en `blockchain`. El operador confirmó después que los nueve PVC
+usan `local-path` con provisioner `rancher.io/local-path`. Falta comprobar el
+sistema de archivos real de las rutas PV: el operador mostró que todas apuntan
+a `/var/lib/rancher/k3s/storage/...`. `findmnt -T` en el host sitúa ese
+directorio en `/dev/sda1` (`/`, ext4). El operador
+indica que tiene una copia de MongoDB;
+siguen sin confirmar su ubicación fuera de la VM, fecha, integridad y prueba
+de restauración. No hay copia de Keycloak/PostgreSQL acreditada ni snapshot
+confirmado. El operador mostró un archivo MongoDB del 14-11-2026 con
+`.manifest` y `.sha256` bajo `~/trust-news/scripts/k8s/backup/` en el propio
+servidor; todavía no acredita una copia externa. Se prepararon localmente los
+motores parametrizados `backup-postgresql.sh` y `restore-postgresql.sh`, con
+el mismo contrato de artefacto que MongoDB y sincronización en el inventario
+de scripts operativos. No se han publicado ni ejecutado en Hetzner.
 
 La [ficha de preparación del candidato K3s](docs/deploy/candidate-v0.0.13b-k3s.md)
 describe perfiles, renders, controles de CI y límites de rollback. En la revisión
@@ -39,6 +60,12 @@ La aceptación local de S03 declarativo está cerrada. S07a también superó sus
 
 ## HISTORY
 
+- 2026-11-14 — El operador pidió backup/restore PostgreSQL análogos a MongoDB, instalados por el inventario de scripts de Hetzner. Mostró un archivo MongoDB local con manifiesto y checksum en `~/trust-news/scripts/k8s/backup/`; ubicación externa y restauración pendientes. Se añadieron localmente motores PostgreSQL parametrizados y módulos compartidos de artefacto, se reconciliaron los dos scripts MongoDB existentes y se actualizó el inventario de sincronización. Sin publicación, ejecución remota ni despliegue.
+- 2026-11-14 — `findmnt -T /var/lib/rancher/k3s/storage` en Hetzner devolvió raíz `/` sobre `/dev/sda1` ext4. Los PV inventariados apuntan bajo esa ruta; un snapshot del disco del servidor debería cubrirla si no hay montajes anidados, sujeto a confirmar el snapshot y la coherencia del corte. Sigue sin acreditarse la copia externa MongoDB ni el respaldo de Keycloak/PostgreSQL. Sin despliegue.
+- 2026-11-14 — Los nueve PV locales apuntan a `/var/lib/rancher/k3s/storage/...`, según salida del operador. El operador indica que dispone de una copia de MongoDB, todavía sin evidencia de ubicación externa, fecha, checksum ni restauración. Pendiente `findmnt` del directorio de PV, copia de Keycloak/PostgreSQL y snapshot confirmado. Sin despliegue.
+- 2026-11-14 — Los nueve PVC inventariados usan StorageClass `local-path`, provisioner `rancher.io/local-path`, según la salida K3s aportada. Aún no se conoce el sistema de archivos de las rutas PV ni si el snapshot previsto las incluye; tampoco se confirmó una copia fuera de la VM. Sin despliegue.
+- 2026-11-14 — Inventario K3s aportado por el operador: contexto `default`, nueve PVC `Bound`; en `infra`, MongoDB, Keycloak/PostgreSQL, Kafka, IPFS, Grafana y Loki; en `blockchain`, tres PVC de Geth. No se verificó storage class, backup externo, consistencia ni restauración. Sin despliegue.
+- 2026-11-14 — El operador aportó el log completo del preflight GitLab `infra-prod`: checkout `41dc2989` de `postTFM`, acceso K3s y TLS servido correctos, S03 y Kafka OK, incluida CA, PKCS12, vigencia, SAN y cadena; `Job succeeded`. El prefijo coincide con el HEAD local `41dc2989325db70b1c545a7726d100883911a127`; el log no incluye ID del job ni valores de variables seleccionadas. No se hizo commit ni push en esta sesión. Sin despliegue ni aceptación funcional.
 - 2026-11-14 — El log GitLab aportado muestra checkout `554a2382` para `postTFM`, acceso K3s y TLS servido verificados, S03 `infra` OK y fallo del preflight Kafka antes de desplegar. El Secret era legible, pero el motor decodificaba con `base64 --decode`, incompatible con BusyBox del job Alpine; la reproducción local dio salida 1 con esa opción y 0 con `-d`. Se corrigió localmente el motor para usar `-d` en todas las lecturas Kafka. Pendientes publicación autorizada y repetición del preflight CI; sin despliegue ni aceptación funcional.
 - 2026-11-14 — Tras sincronizar el script corregido según el operador, `create-secrets.sh --phase infra` terminó en Hetzner: los cuatro Secrets de aplicación existentes y los tres nuevos (`s03-internal-ca`, `s03-tls-keycloak`, `s07a-kafka-broker`) se aplicaron. La salida aportada de `check_configured_secrets.sh --phase infra` confirmó S03 para Keycloak y Kafka con CA, PKCS12, vigencia, SAN y cadena; no mostró valores. Antes de esta actualización documental, el checkout local estaba limpio en `554a238`; no se ha observado despliegue `infra-prod`, prueba funcional ni respaldo recuperable. La sincronización al host es confirmación del operador, sin ID de pipeline registrado aquí.
 - 2026-11-14 — El operador preparó en Hetzner una CA interna nueva y comunicó que emitió los certificados S03/Kafka; la salida aportada confirmó `CA:TRUE`, el PKCS12 abrió con su contraseña y los archivos privados de Kafka quedaron en `0600`. Los cuatro `.env` de `infra` coincidían con los Secrets existentes antes de aplicar la fase. `create-secrets.sh --phase infra` actualizó esos cuatro Secrets, creó `s03-internal-ca` y `s03-tls-keycloak`, y falló al crear `s07a-kafka-broker`: `kubectl` rechazó mezclar `--from-file` y `--from-env-file`. El Secret Kafka y el preflight `infra` siguen pendientes de verificación. Se corrigió localmente el motor para combinar ambos manifiestos y se ajustó la guía; la corrección aún no se ha sincronizado al host ni publicado. Sin despliegue, commit ni push.

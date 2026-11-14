@@ -14,9 +14,40 @@ GitLab y falló antes del despliegue: el comprobador Kafka usaba
 `base64 --decode`, opción no admitida por BusyBox en el contenedor Alpine del
 job. El Secret era legible, pero sus claves se informaron erróneamente como
 ausentes y la CA como inválida. La corrección local cambia a `base64 -d`;
-requiere publicación y nuevo preflight CI. Siguen pendientes respaldo
-recuperable, despliegue y aceptación funcional. No se ha confirmado un
-snapshot completo ni una restauración.
+figura ahora en el checkout local limpio `41dc2989325db70b1c545a7726d100883911a127`.
+El operador aportó después el log completo de preflight CI `infra-prod`:
+checkout `41dc2989` de `postTFM`, acceso K3s y TLS servido verificados, S03
+y Kafka OK, y `Job succeeded`. El prefijo coincide con el HEAD local completo
+indicado arriba; el log no muestra ID del job ni valores de variables
+seleccionadas. Siguen pendientes respaldo recuperable, despliegue y aceptación
+funcional. No se ha confirmado un snapshot completo ni una restauración.
+
+Inventario PVC aportado por el operador el 2026-11-14: contexto K3s `default`,
+nueve PVC `Bound`. `infra` contiene MongoDB, Keycloak/PostgreSQL, Kafka,
+IPFS, Grafana y Loki; `blockchain` conserva tres PVC de Geth. Este inventario
+no confirmó la clase de almacenamiento, el contenido de las copias ni una
+restauración probada.
+
+Lectura posterior del operador: los nueve PVC usan StorageClass `local-path`
+con provisioner `rancher.io/local-path`. Falta comprobar las rutas PV y su
+sistema de archivos en el nodo antes de afirmar que un snapshot del servidor
+las cubriría. No se confirmó ninguna copia externa ni restauración.
+
+Las nueve rutas PV aportadas después están bajo `/var/lib/rancher/k3s/storage`;
+falta identificar el montaje que contiene ese directorio. El operador afirma
+tener una copia MongoDB, sin ubicación externa, fecha, integridad ni
+restauración verificadas. Tampoco se ha acreditado una copia de
+Keycloak/PostgreSQL. `findmnt -T /var/lib/rancher/k3s/storage` devolvió
+`/dev/sda1` como sistema de archivos raíz (`ext4`). Los PV apuntan bajo ese
+directorio; falta descartar montajes anidados y confirmar un snapshot
+disponible y la consistencia de los datos de ese corte.
+
+El operador mostró una copia MongoDB del 14-11-2026 con manifiesto y checksum
+en el propio servidor; sigue sin acreditarse almacenamiento externo ni
+restauración. Se prepararon localmente motores parametrizados de copia y
+restauración PostgreSQL con el mismo contrato de artefacto que MongoDB, y se
+añadieron al inventario de sincronización a Hetzner. No se han publicado ni
+ejecutado en K3s; no acreditan aún el respaldo de Keycloak.
 
 ## Fotografía local, 2026-11-11
 

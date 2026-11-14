@@ -64,8 +64,12 @@ sync_group scripts 0750 \
   scripts/print-secrets-parameters.sh
 sync_group scripts/security 0750 scripts/security/check_s03_configured_secrets.sh
 sync_group scripts/k8s 0750 \
+  scripts/k8s/backup-artifact.sh \
   scripts/k8s/backup-mongodb.sh \
+  scripts/k8s/backup-postgresql.sh \
+  scripts/k8s/postgresql-archive.sh \
   scripts/k8s/restore-mongodb.sh \
+  scripts/k8s/restore-postgresql.sh \
   scripts/k8s/set-blockchain-mode.sh \
   scripts/k8s/start-k3s-cluster.sh \
   scripts/k8s/stop-k3s-cluster.sh \

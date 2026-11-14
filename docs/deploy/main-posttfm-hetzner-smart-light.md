@@ -175,6 +175,10 @@ bash scripts/ci/sync-operations-scripts.sh \
 ssh -i "$HETZNER_KEY" -p 2222 "$HETZNER_USER@$HETZNER_HOST" \
   'test -x /home/sysadmin/trust-news/scripts/k8s/backup-mongodb.sh &&
    test -x /home/sysadmin/trust-news/scripts/k8s/restore-mongodb.sh &&
+   test -x /home/sysadmin/trust-news/scripts/k8s/backup-postgresql.sh &&
+   test -x /home/sysadmin/trust-news/scripts/k8s/restore-postgresql.sh &&
+   test -r /home/sysadmin/trust-news/scripts/k8s/backup-artifact.sh &&
+   test -r /home/sysadmin/trust-news/scripts/k8s/postgresql-archive.sh &&
    test -x /home/sysadmin/trust-news/scripts/k8s/set-blockchain-mode.sh'
 ```
 
@@ -190,6 +194,13 @@ scripts/k8s/restore-mongodb.sh --namespace infra --input "$backup_file"
 ```
 
 El último comando **solo valida** gzip, SHA-256, nombre de base y destino; no cambia datos. Conservar juntos `*.archive.gz`, `*.manifest` y `*.sha256`, registrar ruta, hash, hora UTC, SHA de Git y almacenamiento externo. Comprobar que el backup terminó antes de apagar el servidor. Una prueba de restauración aislada es la verificación más fuerte; el chequeo de integridad no demuestra que toda la aplicación pueda arrancar. Verificar la clase de almacenamiento del PVC MongoDB: los snapshots del servidor no incluyen Cloud Volumes adjuntos.
+
+Keycloak usa otra base PostgreSQL. El inventario de sincronización también
+instala `backup-postgresql.sh` y `restore-postgresql.sh`, que conservan el
+mismo trío de artefactos y tienen comprobación sin mutación. Ejecutarlos desde
+un operador con contexto K3s y almacenamiento protegido fuera del servidor,
+siguiendo [secrets-hetzner.md §6](secrets-hetzner.md#6-respaldo-de-keycloakpostgresql).
+El respaldo MongoDB no cubre Keycloak.
 
 Para restaurar desde **VM-KIND con contexto de producción**, mantener el lock, detener las escrituras y escoger un MongoDB de destino con la misma `MONGO_APP_DATABASE`. Probar primero en un entorno aislado y revisar el nombre de base/objetivo mostrado por el comando sin `--apply`. La operación real **borra la base de aplicación completa**, restaura las colecciones e índices del archivo y recrea el usuario de aplicación con los Secrets del pod de destino. Pierde todas las escrituras posteriores al backup; no fusiona datos. No ejecutarla sobre una aplicación de versión incompatible ni sin decisión explícita de recuperación:
 

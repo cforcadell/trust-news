@@ -38,18 +38,14 @@ done
 command -v kubectl >/dev/null
 command -v gzip >/dev/null
 command -v sha256sum >/dev/null
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/backup-artifact.sh"
 
-database=$(sed -n 's/^database=//p' "$input.manifest")
-expected=$(sed -n 's/^sha256=//p' "$input.manifest")
-[[ -n $database && $database != *$'\n'* && $expected =~ ^[0-9a-f]{64}$ ]] || {
-  echo 'Invalid backup manifest' >&2; exit 1;
-}
+backup_artifact_verify_input "$input" mongodb
+database=$backup_artifact_database
 [[ $database != admin && $database != config && $database != local ]] || {
   echo 'Refusing to replace a MongoDB system database' >&2; exit 1;
 }
-actual=$(sha256sum "$input" | cut -d ' ' -f 1)
-[[ $actual == "$expected" ]] || { echo 'Backup checksum mismatch' >&2; exit 1; }
-gzip -t "$input"
 
 if [[ -z $pod ]]; then
   pod=$(kubectl get pods -n "$namespace" -l app=mongodb -o jsonpath='{.items[0].metadata.name}')

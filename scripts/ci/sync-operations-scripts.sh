@@ -67,6 +67,7 @@ sync_group scripts 0750 \
 sync_group scripts/security 0750 \
   scripts/security/check_s03_configured_secrets.sh \
   scripts/security/migrate_s03_owners.py \
+  scripts/security/provision_s03_gui_user.py \
   scripts/security/reconcile_s03_keycloak.py
 sync_group scripts/k8s 0750 \
   scripts/k8s/backup-artifact.sh \

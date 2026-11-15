@@ -16,8 +16,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import httpx
-
 
 def exact_one(rows, name, field="clientId"):
     matches = [row for row in rows if row.get(field) == name]
@@ -117,6 +115,8 @@ def reconcile(config, client, token, credential_paths):
 
 
 def main():
+    import httpx
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="docs/security/s03-keycloak-clients.json")
     destination = parser.add_mutually_exclusive_group(required=True)

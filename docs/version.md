@@ -4,13 +4,16 @@
 
 **Entornos:** kind en VM es desarrollo local; Hetzner/K3s es preproducción; producción no existe. Los perfiles y overlays `-prod` conservan un nombre histórico. Código, render y pruebas kind no acreditan el comportamiento efectivo en Hetzner.
 
-**Incidencia S03 en Hetzner/K3s (2026-11-15):** el login funciona, pero el
-listado de órdenes devuelve `403 Resource denied`. MongoDB tiene cero
-membresías S03 activas; la clave legacy `user_<sub>` de órdenes y cuotas
-coincide con la identidad Keycloak probada. El maintenance lock está activo.
-La aceptación S03 sigue pendiente. El motor reutilizable de migración está
-preparado localmente, sin publicar ni ejecutar contra K3s; el acceso al listado
-no se considera corregido hasta aplicar el plan revisado y verificarlo.
+**Incidencia S03 en Hetzner/K3s (2026-11-15):** el operador confirmó que la
+clave legacy `user_<sub>` de órdenes y cuotas coincide con su identidad
+Keycloak. El operador comunicó el hash del plan de migración y la salida
+`APPLIED memberships=1 aliases=1`; el recuento posterior fue de una membresía
+S03 activa. Tras desactivar temporalmente el maintenance lock, el operador
+entró en la GUI y verificó listado y detalle de una orden propia. La prueba de
+aislamiento entre dos cuentas en Hetzner sigue pendiente porque no hay una
+segunda cuenta de prueba. No se ha confirmado todavía la reactivación del lock
+tras esa ventana. Por tanto, esta evidencia resuelve el 403 observado para el
+propietario, pero no cierra la aceptación S03 ni autoriza la apertura a clientes.
 
 ## Objetivo y límites de uso
 
@@ -32,7 +35,7 @@ efectiva del mismo SHA en K3s.
 | S00 · inventario | Completado con hallazgos abiertos. [Inventario](security/s00-inventory.md). | Revalidar borde, flujos, secretos y responsables. No hay copias externas ni rotación definida. |
 | S01 · confianza CI | Cerrado para preproducción: deploy `#3039935585`, preflight acceso/TLS/revisiones `#3040405655`; restauración de Deployment temporal probada en kind. | Revalidar preflight del candidato. TOFU de host key/CA y kubeconfig cluster-admin compartido son riesgos aceptados; rollback automático ante fallo real no ensayado en K3s y sin cobertura de datos/ConfigMaps. Preparar lock y rollback. |
 | S02 · descarga pública | Motor común implementado y aceptado en kind, con E2E LIGHT/SMART y DIRECT comunicados por el operador. | Desplegar en Hetzner y probar descargas válidas, bloqueo SSRF/rebinding, TLS, límites y regresión desde el borde. |
-| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, login y TLS pasan; listado bloqueado por cero membresías activas. | Publicar y revisar el inventario del motor de migración; aplicar solo asociaciones verificadas y aceptar listado/aislamiento en Hetzner. Mantener inaccesibles propietarios legacy ambiguos. |
+| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, la migración comunicó una membresía activa; el operador verificó login, listado y detalle propios. | Confirmar el estado operativo del maintenance lock y probar aislamiento con una segunda cuenta descartable antes de aceptar S03 en Hetzner. Mantener inaccesibles propietarios legacy ambiguos. |
 | S07a · Kafka TLS | En kind: E2E técnico de producción/consumo TLS, rechazo PLAINTEXT y E2E funcional autenticado LIGHT/SMART superados. | Integrar y aceptar TLS/CA y LIGHT/SMART en Hetzner. No atribuirle identidad ni ACL Kafka. |
 | S11-D · borde de demos | Pendiente. | Verificar mTLS general/administrativo, gate de rutas, origen, login/refresh/logout, roles, Admin y revocación de invitación. Reutilizar la matriz S11. |
 | S12-D · aceptación de demos | Pendiente. | Campaña acotada del SHA/digests/render/configuración efectivos: dos organizaciones, negativos, LIGHT/SMART, costes, límites, fallos y baja; GO/NO-GO firmado. Reutilizar runner y matriz S12. |
@@ -50,6 +53,18 @@ S11-D y S12-D son **cortes de aceptación** de S11 y S12, sin motores duplicados
 **GO de v0.0.13b:** cinco puertas superadas para Hetzner y la ventana concreta. El operador registra alcance, impacto, compensaciones, caducidad y criterio de suspensión de los riesgos residuales, incluidos S04, S05, S06, S07b, S08–S10 y los límites S01; un camino externo directo a servicios internos es NO-GO, no un riesgo aceptable para demos. **NO-GO:** falta cualquiera de las puertas. El GO habilita solo demos en estos límites y como máximo dos organizaciones; no retira mTLS, no abre beta ni promueve a producción.
 
 ## Trabajo posterior y roadmap
+
+**Alta de cuentas:** el [motor GUI](security/s03-gui-user-provisioning.md) está
+preparado localmente para crear usuarios del realm `TrustNews` que siempre usan
+`TrustNewsWeb`, junto con su membresía S03. Su ejecución en Hetzner aún no se
+ha validado y no se ha creado ninguna cuenta nueva. Las cuotas se gestionan
+por la API Admin existente. El alta OAuth para integraciones autónomas de API
+sigue como propuesta pendiente tras validar el aislamiento y el candidato
+actual en Hetzner/K3s: decidir entre un cliente confidencial propio por cuenta
+con *client credentials* o `TrustNewsApi` compartido con usuarios del realm.
+Requiere revisar identidad de propietario, cuotas, auditoría, rotación y baja,
+y adaptar el motor S03, que hoy rechaza cuentas de servicio como identidad
+propietaria. No hay script ni cambio de runtime para cuentas OAuth nuevas.
 
 Los P1 diferidos no se consideran aceptados por reducir el alcance. [v0.0.13c](releases.md) reúne los controles **antes del acceso autónomo de clientes y de v0.0.14**:
 

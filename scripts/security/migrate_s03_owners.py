@@ -49,6 +49,15 @@ def read_secret(context: str, name: str, namespace: str) -> dict[str, str]:
         raise RuntimeError(f"Secret {namespace}/{name} has invalid encoded data") from exc
 
 
+def mongo_uri(secret: dict[str, str], port: int) -> str:
+    database = secret["MONGO_APP_DATABASE"]
+    user = quote_plus(secret["MONGO_APP_USER"])
+    password = quote_plus(secret["MONGO_APP_PWD"])
+    auth_source = quote_plus(secret["MONGO_APP_AUTHSOURCE"])
+    return (f"mongodb://{user}:{password}@127.0.0.1:{port}/"
+            f"{quote_plus(database)}?authSource={auth_source}")
+
+
 def free_loopback_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -91,12 +100,7 @@ def keycloak_users(client, issuer: str, username: str, password: str) -> list[di
     import httpx
 
     try:
-        token_response = client.post("/realms/master/protocol/openid-connect/token", data={
-            "grant_type": "password", "client_id": "admin-cli",
-            "username": username, "password": password,
-        })
-        token_response.raise_for_status()
-        token = token_response.json()["access_token"]
+        token = keycloak_admin_token(client, username, password)
         realm = issuer.rstrip("/").rsplit("/", 1)[-1]
         client.headers["Authorization"] = f"Bearer {token}"
         users: list[dict] = []
@@ -116,6 +120,15 @@ def keycloak_users(client, issuer: str, username: str, password: str) -> list[di
         raise RuntimeError("Keycloak user inventory failed") from None
     finally:
         client.headers.pop("Authorization", None)
+
+
+def keycloak_admin_token(client, username: str, password: str) -> str:
+    response = client.post("/realms/master/protocol/openid-connect/token", data={
+        "grant_type": "password", "client_id": "admin-cli",
+        "username": username, "password": password,
+    })
+    response.raise_for_status()
+    return response.json()["access_token"]
 
 
 def build_plan(*, issuer: str, config: dict, order_counts: dict[str, int],
@@ -278,12 +291,8 @@ def main() -> int:
     with ExitStack() as stack:
         mongo_port = start_port_forward(stack, args.context, "infra", "mongodb", 27017)
         keycloak_port = start_port_forward(stack, args.context, "infra", "keycloak", 8080)
-        mongo_user = quote_plus(mongo_secret["MONGO_APP_USER"])
-        mongo_password = quote_plus(mongo_secret["MONGO_APP_PWD"])
-        auth_source = quote_plus(mongo_secret["MONGO_APP_AUTHSOURCE"])
         database_name = mongo_secret["MONGO_APP_DATABASE"]
-        uri = (f"mongodb://{mongo_user}:{mongo_password}@127.0.0.1:{mongo_port}/"
-               f"{quote_plus(database_name)}?authSource={auth_source}")
+        uri = mongo_uri(mongo_secret, mongo_port)
         try:
             mongo = MongoClient(uri, serverSelectionTimeoutMS=5000)
             database = mongo[database_name]

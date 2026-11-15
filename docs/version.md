@@ -4,6 +4,14 @@
 
 **Entornos:** kind en VM es desarrollo local; Hetzner/K3s es preproducción; producción no existe. Los perfiles y overlays `-prod` conservan un nombre histórico. Código, render y pruebas kind no acreditan el comportamiento efectivo en Hetzner.
 
+**Incidencia S03 en Hetzner/K3s (2026-11-15):** el login funciona, pero el
+listado de órdenes devuelve `403 Resource denied`. MongoDB tiene cero
+membresías S03 activas; la clave legacy `user_<sub>` de órdenes y cuotas
+coincide con la identidad Keycloak probada. El maintenance lock está activo.
+La aceptación S03 sigue pendiente. El motor reutilizable de migración está
+preparado localmente, sin publicar ni ejecutar contra K3s; el acceso al listado
+no se considera corregido hasta aplicar el plan revisado y verificarlo.
+
 ## Objetivo y límites de uso
 
 Ofrecer demostraciones guiadas de LIGHT/SMART con Blockchain OFF y, como máximo, acceso temporal a **dos organizaciones externas identificadas**. Cada una tendrá identidad y organización propias. Se mantienen el mTLS general y administrativo, el gate de rutas de Cloudflare y el origen restringido. Altas, certificados, roles, cuotas, caducidad y bajas se gestionan manualmente y quedan registrados; no hay autorregistro, API pública para clientes ni apertura anónima.
@@ -24,7 +32,7 @@ efectiva del mismo SHA en K3s.
 | S00 · inventario | Completado con hallazgos abiertos. [Inventario](security/s00-inventory.md). | Revalidar borde, flujos, secretos y responsables. No hay copias externas ni rotación definida. |
 | S01 · confianza CI | Cerrado para preproducción: deploy `#3039935585`, preflight acceso/TLS/revisiones `#3040405655`; restauración de Deployment temporal probada en kind. | Revalidar preflight del candidato. TOFU de host key/CA y kubeconfig cluster-admin compartido son riesgos aceptados; rollback automático ante fallo real no ensayado en K3s y sin cobertura de datos/ConfigMaps. Preparar lock y rollback. |
 | S02 · descarga pública | Motor común implementado y aceptado en kind, con E2E LIGHT/SMART y DIRECT comunicados por el operador. | Desplegar en Hetzner y probar descargas válidas, bloqueo SSRF/rebinding, TLS, límites y regresión desde el borde. |
-| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo; el operador confirma todas las pruebas locales OK. Preflight actual: nueve servicios; variables no sensibles de runtime comprobadas. | Integrar y aceptar en Hetzner; comprobar Secrets efectivos sin valores, TLS, JWT/claims y aislamiento con dos organizaciones. Mantener inaccesibles propietarios legacy ambiguos. |
+| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, login y TLS pasan; listado bloqueado por cero membresías activas. | Publicar y revisar el inventario del motor de migración; aplicar solo asociaciones verificadas y aceptar listado/aislamiento en Hetzner. Mantener inaccesibles propietarios legacy ambiguos. |
 | S07a · Kafka TLS | En kind: E2E técnico de producción/consumo TLS, rechazo PLAINTEXT y E2E funcional autenticado LIGHT/SMART superados. | Integrar y aceptar TLS/CA y LIGHT/SMART en Hetzner. No atribuirle identidad ni ACL Kafka. |
 | S11-D · borde de demos | Pendiente. | Verificar mTLS general/administrativo, gate de rutas, origen, login/refresh/logout, roles, Admin y revocación de invitación. Reutilizar la matriz S11. |
 | S12-D · aceptación de demos | Pendiente. | Campaña acotada del SHA/digests/render/configuración efectivos: dos organizaciones, negativos, LIGHT/SMART, costes, límites, fallos y baja; GO/NO-GO firmado. Reutilizar runner y matriz S12. |

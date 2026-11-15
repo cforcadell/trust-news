@@ -55,16 +55,17 @@ S11-D y S12-D son **cortes de aceptación** de S11 y S12, sin motores duplicados
 ## Trabajo posterior y roadmap
 
 **Alta de cuentas:** el [motor GUI](security/s03-gui-user-provisioning.md) está
-preparado localmente para crear usuarios del realm `TrustNews` que siempre usan
-`TrustNewsWeb`, junto con su membresía S03. El primer intento en Hetzner creó
-`s03_test_02` deshabilitado y terminó con error antes de la membresía: Keycloak
-descartó el atributo personalizado no declarado por el perfil del realm. El
-operador confirmó que la cuenta sigue deshabilitada, sin roles privilegiados y
-con `UPDATE_PASSWORD`; no se ha habilitado ni validado el alta. Se corrigió
-localmente el motor para no depender de atributos personalizados y exigir una
-opción explícita para reanudar una cuenta huérfana deshabilitada; falta publicar
-y sincronizar esa corrección antes de continuar. Las cuotas se gestionan por la
-API Admin existente. El alta OAuth para integraciones autónomas de API
+crea usuarios del realm `TrustNews` que siempre usan `TrustNewsWeb`, junto con
+su membresía S03 y una cuota parametrizada en el plan confirmado. En Hetzner,
+`s03_test_02` se reanudó y habilitó correctamente; pudo listar órdenes, pero al
+generar aserciones recibió `403 Client quotas not found`. El inventario confirmó
+que no existía cuota para esa cuenta. Se está adaptando localmente el motor para
+crear cuotas nuevas con límites explícitos de generación y validación, y para
+añadir solo la cuota a una cuenta habilitada con membresía válida. Esta ruta no
+modifica contraseña, roles ni membresía; bloquea cuotas existentes con límites
+distintos. La corrección anterior para cuentas huérfanas fue sincronizada y
+usada en Hetzner; la nueva gestión de cuotas aún requiere publicación y
+sincronización. El alta OAuth para integraciones autónomas de API
 sigue como propuesta pendiente tras validar el aislamiento y el candidato
 actual en Hetzner/K3s: decidir entre un cliente confidencial propio por cuenta
 con *client credentials* o `TrustNewsApi` compartido con usuarios del realm.

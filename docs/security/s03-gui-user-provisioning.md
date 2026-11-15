@@ -7,7 +7,10 @@ ni modifica clientes Keycloak. No concede roles administrativos.
 
 El motor crea el usuario deshabilitado, le asigna una contraseña temporal con
 `UPDATE_PASSWORD`, crea su membresía S03 con la clave `user_<sub>` y solo
-entonces habilita el usuario. El `org_id` usa la misma fórmula determinista que
+entonces habilita el usuario. En el dry-run se deben indicar límites explícitos
+para `news_generation` y `blockchain_validation`; ambos forman parte del hash
+revisado. Crea una cuota activa con consumo inicial cero y no cambia cuotas
+existentes. El `org_id` usa la misma fórmula determinista que
 el migrador de propietarios (`UUIDv5` del emisor y sujeto). Antes de escribir,
 rechaza nombres existentes ajenos al motor, membresías inactivas o conflictivas
 y configuración S03/Web incompleta. Si se interrumpe con una membresía S03
@@ -45,12 +48,15 @@ cd ~/trust-news
 kubectl config current-context
 "$HOME/trust-news-ops-venv/bin/python" -c 'import httpx, pymongo; print("dependencias OK")'
 "$HOME/trust-news-ops-venv/bin/python" -m scripts.security.provision_s03_gui_user \
-  --context default --username usuario_de_prueba
+  --context default --username usuario_de_prueba \
+  --news-generation-limit 10 --blockchain-validation-limit 10
 ```
 
 El modo inicial solo consulta Keycloak, ConfigMaps y MongoDB. Comprobar que el
-plan indica `client=TrustNewsWeb`, `state=NEW`, `s03_gui_provision=DRY_RUN` y
-un `plan_sha256`. Para un realm que exige verificación de correo, añadir
+plan indica `client=TrustNewsWeb`, `state=NEW`, `s03_gui_provision=DRY_RUN`, los
+dos límites elegidos y un `plan_sha256`. Sustituir los valores de ejemplo por
+topes aprobados para la cuenta; no reutilizar automáticamente los límites de
+otro cliente. Para un realm que exige verificación de correo, añadir
 `--email <correo>` en ambos comandos. Si el estado es `BLOCKED`, no aplicar.
 
 Para reanudar un usuario deshabilitado sin membresía tras un intento fallido
@@ -64,21 +70,28 @@ Con el plan exacto revisado:
 ```bash
 "$HOME/trust-news-ops-venv/bin/python" -m scripts.security.provision_s03_gui_user \
   --context default --username usuario_de_prueba \
+  --news-generation-limit 10 --blockchain-validation-limit 10 \
   --apply --confirm-context default --confirm-plan '<SHA256 revisado>'
 ```
 
 El motor vuelve a leer el destino y rechaza un plan que haya cambiado. La
 salida correcta termina con `s03_gui_provision=APPLIED`,
-`client=TrustNewsWeb`, `membership=active` y `quota=not_managed`. Si falla a mitad,
-consultar el estado del usuario en Keycloak. Solo reanudar una cuenta sin
-membresía cuando la procedencia del intento fallido esté confirmada y el nuevo
-plan `RESUME_UNMARKED_DISABLED` haya sido revisado.
+`client=TrustNewsWeb`, `membership=active` y `quota=active`, mostrando los topes
+aplicados. Si falla a mitad, consultar el estado del usuario en Keycloak. Solo
+reanudar una cuenta sin membresía cuando la procedencia del intento fallido
+esté confirmada y el nuevo plan `RESUME_UNMARKED_DISABLED` haya sido revisado.
+
+Para una cuenta ya habilitada con una membresía S03 válida pero sin cuota, el
+plan puede indicar `state=ADD_QUOTA_ONLY`. Revisar los límites y el hash; el
+apply de ese plan crea únicamente la cuota y no cambia la cuenta, contraseña,
+roles ni membresía. Si la cuota ya existe con límites distintos o está inactiva,
+el plan queda bloqueado; este motor no ajusta cuotas existentes.
 
 Entregar la contraseña temporal al titular por un canal privado y retirarla del
 host cuando haya cambiado la contraseña. La clave `quota_client_id` del archivo
-privado sirve para crear una cuota mediante la API Admin existente; el script
-no inserta ni modifica `clients_quotas`. Sin cuota, el usuario puede iniciar
-sesión y consultar su lista vacía, pero no debe iniciar trabajos con gasto.
+privado identifica la cuota para futuras operaciones de administración. Aunque
+el alta establezca límites, S05 sigue pendiente: usar solo topes aprobados y
+mantener supervisión de gasto en las pruebas.
 Para la prueba S03 pendiente, iniciar sesión con la nueva cuenta, comprobar
 que no ve las órdenes del primer usuario y que el detalle de una orden ajena
 se deniega. Registrar los resultados sin tokens ni secretos y devolver el

@@ -3,7 +3,7 @@
 
 Run from the repository root with ``python -m scripts.security.provision_s03_gui_user``.
 The default is read-only. Apply requires the exact context and reviewed plan
-hash. No Keycloak client or quota document is created by this tool.
+hash. No Keycloak client is created or modified.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import stat
 import sys
 import uuid
 from contextlib import ExitStack
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -42,10 +43,28 @@ def parse_args() -> argparse.Namespace:
         "--resume-unmarked-disabled", action="store_true",
         help="Explicitly resume this disabled user after confirming it was created by a failed run",
     )
+    parser.add_argument(
+        "--news-generation-limit", type=non_negative_int,
+        help="Maximum news-generation calls for this account (required)",
+    )
+    parser.add_argument(
+        "--blockchain-validation-limit", type=non_negative_int,
+        help="Maximum blockchain validations for this account (required)",
+    )
     parser.add_argument("--apply", action="store_true", help="Apply a reviewed plan")
     parser.add_argument("--confirm-context", help="Repeat the exact Kubernetes context")
     parser.add_argument("--confirm-plan", help="SHA-256 printed by the dry run")
     return parser.parse_args()
+
+
+def non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
+    return parsed
 
 
 def issuer_and_realm(context: str) -> tuple[str, str]:
@@ -93,12 +112,14 @@ def web_client_ready(client, root: str, required_scopes: set[str]) -> bool:
 
 def build_plan(*, context: str, issuer: str, username: str, email: str | None,
                user: dict | None, memberships: list[dict], web_ready: bool,
-               resume_unmarked_disabled: bool = False) -> dict:
+               resume_unmarked_disabled: bool = False,
+               quota_limits: dict[str, int] | None = None,
+               quota_document: dict | None = None) -> dict:
     state = "NEW"
     if user is not None:
         attributes = user.get("attributes") or {}
         marker = attributes.get(PROVISIONER_ATTRIBUTE)
-        if (user.get("enabled") is not False or user.get("username") != username):
+        if user.get("username") != username:
             state = "BLOCKED_EXISTING_USER"
         elif (user.get("email") or None) != email:
             state = "BLOCKED_EMAIL_MISMATCH"
@@ -119,26 +140,45 @@ def build_plan(*, context: str, issuer: str, username: str, email: str | None,
                     break
             if state not in {"BLOCKED_MEMBERSHIP", "BLOCKED_EMAIL_MISMATCH",
                              "BLOCKED_EXISTING_USER"}:
-                if memberships or marker == [PROVISIONER_VALUE]:
+                if user.get("enabled") is True:
+                    if len(memberships) != 1:
+                        state = "BLOCKED_MEMBERSHIP"
+                    elif quota_document is None:
+                        state = "ADD_QUOTA_ONLY"
+                    else:
+                        state = "ALREADY_CONFIGURED"
+                elif user.get("enabled") is not False:
+                    state = "BLOCKED_EXISTING_USER"
+                elif memberships or marker == [PROVISIONER_VALUE]:
                     state = "RESUME_DISABLED"
                 elif (resume_unmarked_disabled
                       and "UPDATE_PASSWORD" in (user.get("requiredActions") or [])):
                     state = "RESUME_UNMARKED_DISABLED"
                 else:
                     state = "BLOCKED_UNMARKED_DISABLED"
+    quota_matches = None
+    if quota_document is not None and quota_limits is not None:
+        quota_matches = (
+            quota_document.get("status") == "Active"
+            and quota_document.get("limits") == quota_limits
+        )
+        if not quota_matches:
+            state = "BLOCKED_QUOTA_MISMATCH"
     if not web_ready:
         state = "BLOCKED_WEB_CLIENT"
     plan = {
-        "schema_version": 2, "context": context, "issuer": issuer,
+        "schema_version": 3, "context": context, "issuer": issuer,
         "username": username, "email": email, "client": GUI_CLIENT, "state": state,
         "subject": user.get("id") if user else None,
         "membership_count": len(memberships),
         "resume_unmarked_disabled": resume_unmarked_disabled,
+        "quota_limits": quota_limits,
+        "quota_matches": quota_matches,
     }
     payload = json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
     plan["plan_sha256"] = hashlib.sha256(payload).hexdigest()
     plan["can_apply"] = state in {
-        "NEW", "RESUME_DISABLED", "RESUME_UNMARKED_DISABLED",
+        "NEW", "RESUME_DISABLED", "RESUME_UNMARKED_DISABLED", "ADD_QUOTA_ONLY",
     }
     return plan
 
@@ -147,6 +187,10 @@ def print_plan(plan: dict) -> None:
     print(f"s03_gui_plan context={plan['context']} issuer={plan['issuer']} "
           f"client={GUI_CLIENT} username={plan['username']} state={plan['state']} "
           f"email_present={plan['email'] is not None}")
+    limits = plan.get("quota_limits")
+    if limits is not None:
+        print("quota_limits news_generation=" + str(limits["news_generation"])
+              + " blockchain_validation=" + str(limits["blockchain_validation"]))
     print(f"plan_sha256={plan['plan_sha256']}")
     print("s03_gui_provision=DRY_RUN" if plan["can_apply"] else "s03_gui_provision=BLOCKED")
 
@@ -193,9 +237,42 @@ def membership_rows(collection, issuer: str, subject: str) -> list[dict]:
          "active": 1, "legacy_client_ids": 1}))
 
 
+def quota_matches(quota_document: dict | None, limits: dict[str, int]) -> bool:
+    return (quota_document is not None
+            and quota_document.get("status") == "Active"
+            and quota_document.get("limits") == limits)
+
+
+def ensure_quota(collection, client_id: str, username: str,
+                 limits: dict[str, int]) -> None:
+    from pymongo.errors import DuplicateKeyError
+
+    collection.create_index("client_id", unique=True)
+    document = {
+        "client_id": client_id,
+        "name": f"GUI user {username}",
+        "limits": limits,
+        "consumed": {"news_generation": 0, "blockchain_validation": 0},
+        "status": "Active",
+        "active_date": datetime.now(timezone.utc),
+        "deactivate_date": None,
+    }
+    try:
+        collection.update_one(
+            {"client_id": client_id}, {"$setOnInsert": document}, upsert=True,
+        )
+    except DuplicateKeyError:
+        # A concurrent retry may insert the unique client key first.
+        pass
+    observed = collection.find_one({"client_id": client_id}, {"_id": 0})
+    if not quota_matches(observed, limits):
+        raise RuntimeError("Existing quota differs from the reviewed limits or is inactive")
+
+
 def provision(client, root: str, username: str, email: str | None, user: dict | None,
               issuer: str, collection, credentials_path: Path,
-              resume_unmarked_disabled: bool = False) -> None:
+              resume_unmarked_disabled: bool = False, quota_collection=None,
+              quota_limits: dict[str, int] | None = None) -> None:
     created_by_this_run = user is None
     if created_by_this_run:
         payload = {"username": username, "enabled": False,
@@ -216,10 +293,13 @@ def provision(client, root: str, username: str, email: str | None, user: dict | 
     # only because this invocation created them while keeping them disabled.
     if not created_by_this_run:
         rows = membership_rows(collection, issuer, subject)
+        quota_document = (quota_collection.find_one({"client_id": alias}, {"_id": 0})
+                          if quota_collection is not None else None)
         check = build_plan(
             context="apply", issuer=issuer, username=username, email=email,
             user=user, memberships=rows, web_ready=True,
             resume_unmarked_disabled=resume_unmarked_disabled,
+            quota_limits=quota_limits, quota_document=quota_document,
         )
         if not check["can_apply"]:
             raise RuntimeError("Existing disabled user cannot be resumed safely")
@@ -228,6 +308,8 @@ def provision(client, root: str, username: str, email: str | None, user: dict | 
     keycloak_request(client, "PUT", f"{root}/users/{subject}/reset-password",
                      json={"type": "password", "temporary": True, "value": password})
     write_credentials(credentials_path, username, password, alias)
+    if quota_collection is not None and quota_limits is not None:
+        ensure_quota(quota_collection, alias, username, quota_limits)
     collection.create_index([("issuer", 1), ("subject", 1), ("org_id", 1)], unique=True)
     collection.create_index("legacy_client_ids")
     collection.update_one(
@@ -242,7 +324,10 @@ def provision(client, root: str, username: str, email: str | None, user: dict | 
     if verified.get("enabled") is not True:
         raise RuntimeError("Realm user did not become enabled")
     print(f"s03_gui_provision=APPLIED client={GUI_CLIENT} username={username} "
-          f"membership=active quota=not_managed credentials_file={credentials_path}")
+          f"membership=active quota=active "
+          f"news_generation_limit={quota_limits['news_generation'] if quota_limits else 'unset'} "
+          f"blockchain_validation_limit={quota_limits['blockchain_validation'] if quota_limits else 'unset'} "
+          f"credentials_file={credentials_path}")
 
 
 def main() -> int:
@@ -251,6 +336,8 @@ def main() -> int:
         raise SystemExit("Username must be 3-64 lowercase letters, digits, dots, underscores or hyphens; service-account- is reserved")
     if args.email is not None and (not args.email or "@" not in args.email or any(c.isspace() for c in args.email)):
         raise SystemExit("Email is invalid")
+    if args.news_generation_limit is None or args.blockchain_validation_limit is None:
+        raise SystemExit("Both --news-generation-limit and --blockchain-validation-limit are required")
     validate_apply_request(apply=args.apply, context=args.context,
                            confirm_context=args.confirm_context, confirm_plan=args.confirm_plan)
 
@@ -279,6 +366,7 @@ def main() -> int:
             database = mongo[mongo_secret["MONGO_APP_DATABASE"]]
             database.command("ping")
             collection = database["s03_memberships"]
+            quota_collection = database["clients_quotas"]
             base = f"http://127.0.0.1:{keycloak_port}/auth"
             with httpx.Client(base_url=base, timeout=15) as client:
                 token = keycloak_admin_token(client, keycloak_secret["ADMIN_USER"],
@@ -293,15 +381,37 @@ def main() -> int:
                 web_ready = web_client_ready(client, root, required_scopes)
                 user = keycloak_user(client, root, args.username)
                 rows = membership_rows(collection, issuer, user["id"]) if user else []
+                limits = {
+                    "news_generation": args.news_generation_limit,
+                    "blockchain_validation": args.blockchain_validation_limit,
+                }
+                quota_document = (
+                    quota_collection.find_one({"client_id": f"user_{user['id']}"}, {"_id": 0})
+                    if user else None
+                )
                 plan = build_plan(context=args.context, issuer=issuer,
                                   username=args.username, email=args.email,
                                   user=user, memberships=rows, web_ready=web_ready,
-                                  resume_unmarked_disabled=args.resume_unmarked_disabled)
+                                  resume_unmarked_disabled=args.resume_unmarked_disabled,
+                                  quota_limits=limits, quota_document=quota_document)
                 print_plan(plan)
                 if not args.apply:
                     return 0 if plan["can_apply"] else 3
                 if not plan["can_apply"] or plan["plan_sha256"] != args.confirm_plan:
                     raise SystemExit("Live plan is blocked or differs from the reviewed hash")
+                limits = {
+                    "news_generation": args.news_generation_limit,
+                    "blockchain_validation": args.blockchain_validation_limit,
+                }
+                quota_collection = database["clients_quotas"]
+                if plan["state"] == "ADD_QUOTA_ONLY":
+                    alias = f"user_{user['id']}"
+                    ensure_quota(quota_collection, alias, args.username, limits)
+                    print(f"s03_gui_provision=APPLIED client={GUI_CLIENT} username={args.username} "
+                          f"mode=quota_only quota=active "
+                          f"news_generation_limit={limits['news_generation']} "
+                          f"blockchain_validation_limit={limits['blockchain_validation']}")
+                    return 0
                 credentials_path = private_credentials_path(
                     repo_root, args.username,
                     resume=plan["state"] in {
@@ -310,7 +420,8 @@ def main() -> int:
                 )
                 provision(client, root, args.username, args.email, user,
                           issuer, collection, credentials_path,
-                          resume_unmarked_disabled=args.resume_unmarked_disabled)
+                          resume_unmarked_disabled=args.resume_unmarked_disabled,
+                          quota_collection=quota_collection, quota_limits=limits)
                 return 0
 
 
@@ -319,6 +430,6 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as exc:
         print(f"s03_gui_provision=ERROR error_type={type(exc).__name__}; "
-              "details suppressed; inspect the disabled realm user before retry",
+              "details suppressed; inspect the target account and quota before retry",
               file=sys.stderr)
         raise SystemExit(1) from None

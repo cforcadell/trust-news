@@ -1,3 +1,5 @@
+> **HISTÓRICO — no ejecutar.** Blockchain permanece OFF para v0.0.13b; consultar [version.md](../../version.md) y [procedimientos comunes](../../deploy/k8s-common.md).
+
 # Smart Contract Tests
 
 This project contains scripts to compile, deploy, and test the **Assermetry** smart contracts.  

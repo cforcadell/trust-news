@@ -6,7 +6,7 @@ Runbook operating the Hetzner environment. This document contains only:
 - repeatable deployment, verification and recovery procedures;
 - the next steps that have not yet been implemented.
 
-The status of the current version is in [`v0.0.13.md`](../releases/v0.0.13.md), the roadmap in [`next_releases.md`](../next_releases.md), the evidence of closed versions in [`releases.md`](../releases.md) and the incidences in [`issues.md`](../issues.md). The procedures shared with local are in [`k8s-common.md`](k8s-common.md).
+El estado y las puertas de la versión actual están en [`version.md`](../version.md), el roadmap en [`next_releases.md`](../next_releases.md), la historia de versiones en [`releases.md`](../releases.md) y las incidencias en [`issues.md`](../issues.md). Los procedimientos comunes están en [`k8s-common.md`](k8s-common.md).
 
 Hetzner/K3s es actualmente **preproducción**. Los nombres `-prod` son identificadores técnicos de perfiles y overlays; no acreditan producción. Esta guía sirve también para otro K3s después de adaptar dominio, issuer, Ingress, certificados y comprobaciones de CI al destino.
 
@@ -64,7 +64,7 @@ The five custom rules are occupied and retain this order:
 | 4 | `Permanent block - non-public resources` | Activa |
 | 5 | `Permanent block - unexpected backend methods` | Activa |
 
-The lock exists and, as long as there are no redirects in an earlier phase, it can block the entire hostname. Its status is not assumed: the operator deliberately enables or disables it according to the working window. Its current observed state is disabled. Before changing it, the desired state is confirmed and, at the end, is left registered in the operational evidence, not in this runbook.
+The lock exists and, as long as there are no redirects in an earlier phase, it can block the entire hostname. The operator verifies its state before each working window and records the result in operational evidence. See [`version.md`](../version.md) and [`working.md`](../../working.md) for the last reported observation.
 
 The Free Managed Rulet is enabled. The only rule of rate limiting, `Expensive backend operations per IP`, protects the costly operations of the Gateway with the operating threshold of 5 requests for 10 seconds and 10 seconds mitigation. Login, refresh and Polling are not part of that rule.
 
@@ -256,7 +256,7 @@ PROFILE=infra-prod bash scripts/check_configured_secrets.sh --phase infra
 PROFILE=apis-frontend-prod bash scripts/check_configured_secrets.sh --phase apis
 ```
 
-La fase elegida se ejecuta antes de su despliegue correspondiente. No continuar si el script falla. `infra` valida el Secret del broker; `apis` valida también el Secret de CA de APIs y su igualdad con la CA del broker. El motor incluye las comprobaciones S03 existentes y verifica Secrets de aplicación sin mostrar valores; para su contrato y alcance, ver [preflight de Secrets](main-posttfm-hetzner-smart-light.md#preflight-de-secrets-en-hetzner).
+La fase elegida se ejecuta antes de su despliegue correspondiente. No continuar si el script falla. `infra` valida el Secret del broker; `apis` valida también el Secret de CA de APIs y su igualdad con la CA del broker. El motor incluye las comprobaciones S03 existentes y verifica Secrets de aplicación sin mostrar valores; para la secuencia, ver [Secrets de Hetzner](secrets-hetzner.md).
 
 ### 3.3 Identidad TLS y credenciales S03
 
@@ -753,6 +753,12 @@ Si los artefactos solo están en el servidor K3s, ejecutar allí el mismo comand
 
 Rollback Application:
 
+Antes de ejecutar un rollback, revisar los recursos y revisiones concretas del
+despliegue y el plan de recuperación de la ventana. `rollout undo` solo restaura
+la plantilla de cada Deployment; no restaura datos, Secrets, Services ni
+ConfigMaps. Los comandos siguientes son ejemplos por recurso y no demuestran
+que la revisión anterior sea el destino correcto.
+
 ```bash
 kubectl rollout undo deployment/gateway -n apis
 kubectl rollout undo deployment/news-handler -n apis
@@ -771,47 +777,12 @@ kubectl get pvc -n infra
 kubectl get pvc -n blockchain
 ```
 
-Active PVC destructive restorations are prohibited. La copia protegida y la restauración aislada de MongoDB/Keycloak se adelantan a **v0.0.13b**, antes de migrar datos y abrir beta, según [version.md](../version.md). La cobertura productiva ampliada y la verificación continuada permanecen en `v0.0.16`; esta reasignación no acredita que las pruebas ya estén ejecutadas.
+Active PVC destructive restorations are prohibited. Según [version.md](../version.md), S08 se prepara desde ahora y una copia y restauración demostrada son necesarias antes de conservar datos; su cierre y la migración MongoDB se planifican en v0.0.13c. Las demos solo admiten datos desechables mientras esa puerta no esté superada.
 
 ---
 
-## 9. Next steps
+## 9. Siguientes pasos
 
-### 9.1 Closing of v0.0.12
-
-- Run `infra-prod`, get `keycloak_web_alignment=PASS` on the
-reconciliation of `TrustNewsWeb` and revalidate the IODC issuer.
-- Confirm the coexistence of the lock, the temporary mTLS and the mTLS
-  administrativo.
-- Validate from another network with temporary certificate frontend, OIDC and
-  LIGHT; include blockchain only with `BLOCKCHAIN_ENABLED=ON`.
-- Check Gateway with and without JWT.
-- Verify the attribution and access of administrative routes.
-- Prove that the lock blocks the entire hostname and leaves it in the operating state
-  decidido.
-- Register the stable baseline.
-
-### 9.2 v0.0.13
-
-- Run the reproducible regression of GUI and API with synthetic data.
-- Keep the mTLS rule on general temporary throughout the version.
-- Validate `aud` and `azp` or `client_id` before admitting external evaluators.
-- Solve `ISSUE-001` and pass your non-refresher competition tests
-LIGHT validator cache manual.
-- Run demos from lock controlled windows.
-
-### 9.3 v0.0.14
-
-- Enable the lock during the change window.
-- Unfold and validate `/gui` before modifying the Cloudflare border.
-- Create the exact `/` and `/gui` redirects to `/gui/` with `302`.
-- Replace `Temporary mTLS gate - assermetry.com` with `default deny`
-paths; do not open a window without the lock.
-- Maintain the mTLS association and the permanent administrative rule.
-- Revocation of a disposable administrative certificate and proof of rejection without
-affect the administrative endorsement certificate.
-- Validate uncertified user OIDC, administration with certificate,
-WAF, rate limit, logs and rollback.
-- Open beta only after you pass those checks.
-
-Subsequent steps are maintained exclusively in [`next_releases.md`](../next_releases.md) until your version becomes ongoing.
+Las puertas y pendientes vigentes están en [version.md](../version.md); la
+secuencia operativa y la evidencia más reciente, en [working.md](../../working.md).
+Los criterios de versiones futuras se mantienen en [next_releases.md](../next_releases.md).

@@ -14,8 +14,10 @@ habilitó `s03_test_02` y se le asignó una cuota explícita; el operador confir
 que esta cuenta ya completa el E2E B. En la GUI, las búsquedas directas de una
 orden ajena desde cada cuenta devolvieron HTTP 403 `Resource denied` en ambas
 direcciones. El operador confirmó que reactivó el maintenance lock y que una
-ventana privada queda bloqueada. Para pruebas S11-D lo desactivó temporalmente;
-el estado actual requiere reactivarlo al cerrar esa ventana. Esta evidencia
+ventana privada queda bloqueada. Para pruebas S11-D lo desactivó temporalmente
+y después se solicitó reactivarlo; el operador mostró el bloqueo de
+Cloudflare. La captura confirma el bloqueo observado, no identifica por sí sola
+la regla que lo produjo. Esta evidencia
 confirma la denegación de las dos consultas probadas y no cierra la aceptación
 integral S03 ni autoriza la apertura a clientes.
 
@@ -39,7 +41,7 @@ efectiva del mismo SHA en K3s.
 | S00 · inventario | Completado con hallazgos abiertos. [Inventario](security/s00-inventory.md). | Revalidar borde, flujos, secretos y responsables. No hay copias externas ni rotación definida. |
 | S01 · confianza CI | Cerrado para preproducción: deploy `#3039935585`, preflight acceso/TLS/revisiones `#3040405655`; restauración de Deployment temporal probada en kind. | Revalidar preflight del candidato. TOFU de host key/CA y kubeconfig cluster-admin compartido son riesgos aceptados; rollback automático ante fallo real no ensayado en K3s y sin cobertura de datos/ConfigMaps. Preparar lock y rollback. |
 | S02 · descarga pública | Motor común implementado y aceptado en kind, con E2E LIGHT/SMART y DIRECT comunicados por el operador. | Desplegar en Hetzner y probar descargas válidas, bloqueo SSRF/rebinding, TLS, límites y regresión desde el borde. |
-| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, el operador verificó login, listado/detalle propios y E2E B de `s03_test_02`; dos búsquedas directas cruzadas devolvieron 403 `Resource denied`. | Completar las pruebas restantes de borde antes de aceptar S03 en Hetzner. El maintenance lock está temporalmente desactivado durante la ventana de pruebas y debe reactivarse al cerrarla. Mantener inaccesibles propietarios legacy ambiguos. |
+| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, el operador verificó login, listado/detalle propios y E2E B de `s03_test_02`; dos búsquedas directas cruzadas devolvieron 403 `Resource denied`. | Completar las pruebas restantes de borde antes de aceptar S03 en Hetzner. Mantener inaccesibles propietarios legacy ambiguos y registrar el estado del maintenance lock en cada ventana. |
 | S07a · Kafka TLS | En kind: E2E técnico de producción/consumo TLS, rechazo PLAINTEXT y E2E funcional autenticado LIGHT/SMART superados. | Integrar y aceptar TLS/CA y LIGHT/SMART en Hetzner. No atribuirle identidad ni ACL Kafka. |
 | S11-D · borde de demos | Pendiente. | Verificar mTLS general/administrativo, gate de rutas, origen, login/refresh/logout, roles, Admin y revocación de invitación. Reutilizar la matriz S11. |
 | S12-D · aceptación de demos | Pendiente. | Campaña acotada del SHA/digests/render/configuración efectivos: dos organizaciones, negativos, LIGHT/SMART, costes, límites, fallos y baja; GO/NO-GO firmado. Reutilizar runner y matriz S12. |
@@ -69,9 +71,9 @@ funciona. El modo `ADD_QUOTA_ONLY` solo crea la cuota de una cuenta habilitada
 con membresía válida; no cambia contraseña, roles ni membresía y bloquea cuotas
 existentes incompatibles. Las búsquedas directas de órdenes ajenas entre ambas
 cuentas devolvieron 403 en las dos direcciones; el maintenance lock se reactivó
-y bloqueó la GUI en ventana privada, y se desactivó de nuevo temporalmente para
-las pruebas S11-D descritas en el estado actual. Debe reactivarse al cerrar esa
-ventana. La aceptación integral de S03 sigue pendiente. El alta OAuth para
+y bloqueó la GUI en ventana privada; después se desactivó temporalmente para
+las pruebas S11-D; después se solicitó reactivarlo y la GUI mostró un nuevo
+bloqueo de Cloudflare. La aceptación integral de S03 sigue pendiente. El alta OAuth para
 integraciones autónomas de API
 sigue como propuesta pendiente tras validar el aislamiento y el candidato
 actual en Hetzner/K3s: decidir entre un cliente confidencial propio por cuenta

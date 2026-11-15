@@ -1,6 +1,6 @@
 # Análisis de seguridad: despliegue LIGHT en Hetzner
 
-Fecha de revisión: 2026-11-02. Revisión de código: `ad40321369bfd901022df19995369d719c65ba3a`, con modificaciones locales previas en [la guía de despliegue](../deploy/main-posttfm-hetzner-smart-light.md). La guía es evidencia de la configuración **prevista**, no de su aplicación en el servidor. No se ha accedido a Hetzner, Cloudflare, GitLab ni al clúster; no se han ejecutado pruebas de penetración, escaneos de dependencias ni restauraciones. El documento no certifica el estado de producción ni la ausencia de otras vulnerabilidades.
+Fecha de revisión: 2026-11-02. Revisión de código: `ad40321369bfd901022df19995369d719c65ba3a`, con modificaciones locales previas en [la guía de despliegue](../deprecated/deploy/main-posttfm-hetzner-smart-light.md). La guía es evidencia de la configuración **prevista**, no de su aplicación en el servidor. No se ha accedido a Hetzner, Cloudflare, GitLab ni al clúster; no se han ejecutado pruebas de penetración, escaneos de dependencias ni restauraciones. El documento no certifica el estado de producción ni la ausencia de otras vulnerabilidades.
 
 ## Alcance y método
 
@@ -38,7 +38,7 @@ El flujo previsto es: usuario → Cloudflare → Traefik → frontend, Gateway y
 
 ### 4. Exposición del origen y de la administración — S, I, E; prioridad alta, pendiente de verificación
 
-**Evidencia:** los [Ingress](../../k8s/ingress/base/kustomization.yaml) publican rutas para GUI, Gateway y Keycloak sobre `websecure`; [Traefik](../../k8s/traefik/values-prod.yaml) restringe qué IP pueden aportar cabeceras reenviadas. La [guía](../deploy/main-posttfm-hetzner-smart-light.md) exige revisar firewall de Hetzner, acceso SSH, lock y mTLS de Cloudflare. La lista de proxies confiables no equivale por sí sola a una regla de firewall ni prueba mTLS.
+**Evidencia:** los [Ingress](../../k8s/ingress/base/kustomization.yaml) publican rutas para GUI, Gateway y Keycloak sobre `websecure`; [Traefik](../../k8s/traefik/values-prod.yaml) restringe qué IP pueden aportar cabeceras reenviadas. La [guía](../deprecated/deploy/main-posttfm-hetzner-smart-light.md) exige revisar firewall de Hetzner, acceso SSH, lock y mTLS de Cloudflare. La lista de proxies confiables no equivale por sí sola a una regla de firewall ni prueba mTLS.
 
 **Escenario:** si el origen o la administración son accesibles por rutas no previstas, un tercero podría evitar controles del borde o intentar comprometer acceso administrativo. No se han verificado reglas, puertos, identidades de cliente ni acceso externo.
 
@@ -62,7 +62,7 @@ El flujo previsto es: usuario → Cloudflare → Traefik → frontend, Gateway y
 
 ### 7. Contenido externo y proveedores de IA — T, I, D; prioridad media
 
-**Evidencia:** la [guía](../deploy/main-posttfm-hetzner-smart-light.md) describe búsquedas y uso de proveedores externos de LLM, y el procesamiento de documentos recuperados. En SMART puede usarse texto devuelto por el proveedor de búsqueda.
+**Evidencia:** la [guía](../deprecated/deploy/main-posttfm-hetzner-smart-light.md) describe búsquedas y uso de proveedores externos de LLM, y el procesamiento de documentos recuperados. En SMART puede usarse texto devuelto por el proveedor de búsqueda.
 
 **Escenario:** contenido o resultados manipulados podrían influir en la clasificación, evidencia o respuesta del modelo; los datos enviados a terceros quedan sujetos a sus configuraciones y políticas. Cuotas agotadas, latencia o fallos del proveedor pueden afectar disponibilidad y coste. No se ha demostrado una inyección de instrucciones ni una filtración.
 
@@ -86,7 +86,7 @@ El flujo previsto es: usuario → Cloudflare → Traefik → frontend, Gateway y
 
 ## Análisis del borde exterior según la documentación
 
-Esta sección amplía la revisión anterior: la documentación **sí registra pruebas históricas del perímetro**, no solo una intención. La [evidencia de cierre de v0.0.12](../releases/v0.0.12.md#phase-7---closure-of-the-perimeter-and-administrative-access) sitúa una línea base en el 21-08-2026, asociada al commit `8bdaa6f`. El [runbook de Hetzner](../deploy/skaffold-server.md#1-current-photo) describe una fotografía operativa y la [guía de v0.0.13](../deploy/main-posttfm-hetzner-smart-light.md) recoge observaciones posteriores. Ninguna prueba histórica acredita que las mismas reglas sigan activas hoy ni valida por sí sola la revisión v0.0.13, que permanece en Deploying. No se ha consultado el estado en vivo.
+Esta sección amplía la revisión anterior: la documentación **sí registra pruebas históricas del perímetro**, no solo una intención. La [evidencia de cierre de v0.0.12](../releases/v0.0.12.md#phase-7---closure-of-the-perimeter-and-administrative-access) sitúa una línea base en el 21-08-2026, asociada al commit `8bdaa6f`. El [runbook de Hetzner](../deploy/skaffold-server.md#1-current-photo) describe una fotografía operativa y la [guía de v0.0.13](../deprecated/deploy/main-posttfm-hetzner-smart-light.md) recoge observaciones posteriores. Ninguna prueba histórica acredita que las mismas reglas sigan activas hoy ni valida por sí sola la revisión v0.0.13, que permanece en Deploying. No se ha consultado el estado en vivo.
 
 | Límite de confianza | Evidencia documental | Amenaza y valoración |
 | --- | --- | --- |

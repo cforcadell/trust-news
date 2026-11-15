@@ -26,7 +26,7 @@ Este documento recoge las versiones desplegadas, sus límites conocidos y los si
 
 ## v0.0.13 — Estabilización funcional
 
-**Estado: desplegada en Hetzner (preproducción); validación funcional y aceptación pendientes.** El operador comunicó el despliegue y comprobaciones correctas de pods, rollouts, SMART y Blockchain OFF. El despliegue no acredita por sí solo aceptación ni una etiqueta de release. [Detalle y anexos](releases/v0.0.13.md) · [Incidencias](issues.md) · [Guía de despliegue](deploy/main-posttfm-hetzner-smart-light.md).
+**Estado: desplegada en Hetzner (preproducción); validación funcional y aceptación pendientes.** El operador comunicó el despliegue y comprobaciones correctas de pods, rollouts, SMART y Blockchain OFF. El despliegue no acredita por sí solo aceptación ni una etiqueta de release. [Detalle y anexos](releases/v0.0.13.md) · [Incidencias](issues.md) · [Guía histórica de despliegue](deprecated/deploy/main-posttfm-hetzner-smart-light.md) · [Runbook actual](deploy/skaffold-server.md).
 
 - Flujo LIGHT y contrato v2 de afirmaciones integrados con generación, validación, Kafka y persistencia; ruta BLOCKCHAIN por CID, IPFS y registro con estados de error y reintento.
 - Consensus-v2 con votos, pesos, abstenciones, errores y motivos explícitos; citas RAG canónicas desde contextos entregados y elegibles.

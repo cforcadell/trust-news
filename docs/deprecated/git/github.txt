@@ -1,3 +1,5 @@
+HISTÓRICO: no ejecutar; consultar docs/version.md y los runbooks actuales.
+
 PAra subir los cambios de develope a main manteniendo develop como rama de desarrollo.
 
 Dsesde GitHub hacer Pull Request de develop a main

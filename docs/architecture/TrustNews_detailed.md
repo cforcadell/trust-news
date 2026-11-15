@@ -875,7 +875,7 @@ For detailed commands, see:
 * `docs/deploy/skaffold-local.md` for the current local Kubernetes/Skaffold workflow.
 * `docs/deploy/skaffold-server.md` for the current server Kubernetes/Skaffold workflow.
 * `docs/docker/installation_blockchain.md` for private Geth PoA setup notes.
-* `docs/blockchain/scripts_blockchain.md` for smart contract deploy/test scripts.
+* [Historical smart contract commands](../deprecated/blockchain/scripts_blockchain.md); Blockchain activation remains gated by [version.md](../version.md).
 
 ---
 

@@ -4,6 +4,11 @@
 **Ámbito:** cambios locales de Evidence Search, adaptadores de búsqueda, cadena de citas, viewers y evaluación desarrollados en este hilo.
 **Estado:** implementación y pruebas locales completadas; activación de SMART y validación integral en despliegue pendientes.
 
+**Nota de vigencia:** este informe conserva la fotografía del 28-10-2026. La
+configuración posterior selecciona SMART para la versión actual; su estado de
+aceptación por entorno se mantiene en [version.md](../version.md). No usar las
+afirmaciones temporales del informe para inferir la configuración efectiva.
+
 ## Resumen ejecutivo
 
 Evidence Search dispone ahora de un motor de obtención configurable que toma las URL descubiertas por un proveedor de búsqueda y puede conseguir el texto del documento por tres vías: texto completo incluido en la búsqueda, HTTP directo y extracción de una URL mediante el proveedor. La decisión se expresa mediante las políticas `DIRECT`, `PROVIDER` y `SMART`. El ConfigMap conserva `DIRECT` como política activa y tiene desactivada la extracción adicional por proveedor.

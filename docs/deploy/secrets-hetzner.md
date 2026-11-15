@@ -27,7 +27,7 @@ El perfil operativo de GitLab `PIPELINE_ACTION=sync-scripts`, `PROFILE=scripts-h
 | Ruta en Hetzner | Archivos versionados instalados | Uso |
 | --- | --- | --- |
 | `scripts/` | `check_configured_secrets.sh`, `create-secrets.sh`, `print-secrets-parameters.sh` | Comprobar Secrets en kind o K3s; crear Secrets solo en K3s; listar nombres de parámetros sin valores |
-| `scripts/security/` | `check_s03_configured_secrets.sh`, `migrate_s03_owners.py`, `reconcile_s03_keycloak.py` | Comprobar S03, planificar/aplicar asociaciones verificadas de propietarios legacy y reconciliar clientes contra Keycloak |
+| `scripts/security/` | `check_s03_configured_secrets.sh`, `migrate_s03_owners.py`, `provision_s03_gui_user.py`, `reconcile_s03_keycloak.py` | Comprobar S03, migrar asociaciones de propietarios, aprovisionar usuarios GUI con cuotas y reconciliar clientes contra Keycloak |
 | `scripts/k8s/` | `backup-mongodb.sh`, `restore-mongodb.sh`, `backup-postgresql.sh`, `restore-postgresql.sh`, sus módulos comunes `backup-artifact.sh` y `postgresql-archive.sh`, `set-blockchain-mode.sh`, `start-k3s-cluster.sh`, `stop-k3s-cluster.sh`, `scale_env.sh` | Operación de K3s; backup/restore también se ejecutan desde un operador con acceso a Kubernetes, preferiblemente fuera del servidor para conservar el respaldo fuera del nodo |
 | `docs/security/` | `s03-local-services.json`, `s03-keycloak-clients.json`, `s03-owner-migration.json` | Inventario y configuración S03 no secreta; el nombre histórico del inventario no implica que sus servicios sean solo locales |
 | `k8s/infra/kafka/` | `kafdrop.properties` | Configuración sin credenciales incluida en `infra/s07a-kafka-broker` |

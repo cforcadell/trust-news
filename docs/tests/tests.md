@@ -2,6 +2,11 @@
 
 This document orders currently checks from those that travel through more layers of the system to the most local ones. A test above provides more integration coverage, but is usually slow, more variable and dependent on the environment. Local tests better isolate a cause and must be executed before regression is deployed.
 
+Para v0.0.13b, el alcance es LIGHT/SMART con Blockchain OFF; las pruebas
+locales no sustituyen las puertas de Hetzner de [version.md](../version.md).
+Las pruebas que crean órdenes o llaman a proveedores consumen cuota y deben
+ejecutarse dentro de una ventana y presupuesto autorizados.
+
 ## Organization
 
 All test sources, their resources and outputs live under `tests/`:
@@ -9,20 +14,18 @@ All test sources, their resources and outputs live under `tests/`:
 ```text
 tests/
 ├── api/                         # suite Python y requisitos
+├── security/                    # provisión GUI y migración de propietarios S03
+├── e2e/                         # transporte Kafka TLS
+├── evaluation/                  # motores y pruebas de evaluación
 ├── frontend/
 │   ├── unit/                    # node:test
-│   └── e2e/
-│       ├── resources/           # casos e identidades
-│       └── artifacts/           # informes y capturas de E2E
-├── llm-benchmark/
-│   ├── resources/               # caso y perfiles versionados
-│   └── artifacts/               # SQLite, planes e informes
+│   └── e2e/                     # runners de navegador y README
+├── llm-benchmark/               # runners de benchmark
 ├── contracts/
 │   ├── mocha/                   # pruebas cargadas por Hardhat
 │   └── manual/                  # comprobaciones ejecutables con hardhat run
 ├── operations/                  # sondas operativas de prueba
-├── resources/historical-stats/  # muestras históricas de métricas
-└── artifacts/                   # caché de pytest y salidas de métricas
+└── data/                        # resources y artifacts por herramienta
 ```
 
 Artifact directories are ignored in Git. Each executor uses its default subfolder; `ASSERMETRY_ARTIFACTS_DIR` allows explicitly replacing it for the E2E.
@@ -80,13 +83,18 @@ Validate only case definitions, without opening Chrome:
 node tests/frontend/e2e/run-regression.js --validate
 ```
 
-Run the E2E, once the credentials described in your README are configured:
+Para ejecutar únicamente LIGHT con Blockchain OFF, una vez configuradas las
+credenciales descritas en el README:
 
 ```bash
-node tests/frontend/e2e/run-regression.js
+ASSERMETRY_CASES=tests/data/frontend-e2e/resources/cases/light.json \
+  node tests/frontend/e2e/run-regression.js
 ```
 
-[`ui-smoke-test.js`](../../tests/frontend/e2e/ui-smoke-test.js) can also run a single case. Without `ASSERMETRY_CASE_FILE`, use all [`docs/fake_news/news.txt`](../fake_news/news.txt); that mode is exploratory and does not replace the regression versioned.
+Sin `ASSERMETRY_CASES`, el runner selecciona LIGHT y BLOCKCHAIN; este último
+requiere su propia puerta de activación y no forma parte de v0.0.13b.
+
+[`ui-smoke-test.js`](../../tests/frontend/e2e/ui-smoke-test.js) can also run a single case. Without `ASSERMETRY_CASE_FILE`, it reads `docs/fake_news/news.txt`, a local file that is not tracked in Git and may be absent from a fresh checkout. Prefer the versioned `light.json` case shown in the [E2E README](../../tests/frontend/e2e/README.md); the default exploratory smoke does not replace the versioned regression.
 
 ## 2. E2E backend flow
 
@@ -155,6 +163,22 @@ The canonical clean local regression (pinned disposable Python environment plus 
 ```bash
 tests/run-local-regression.sh
 ```
+
+El script instala `tests/api/requirements.txt`, ejecuta `tests/api` con seis
+integraciones externas excluidas y las pruebas unitarias de frontend; no ejecuta
+`tests/security` ni la campaña Kafka en K3s. Para los motores operativos S03:
+
+```bash
+python3 -m pytest -q tests/security/test_s03_gui_user_provisioning.py \
+  tests/security/test_s03_owner_migration.py
+```
+
+Las pruebas API de seguridad y transporte locales están en
+`tests/api/test_s03_security.py`, `tests/api/test_gateway_security.py`,
+`tests/api/test_public_fetch.py` y `tests/api/test_s07a_kafka_tls.py`. La
+prueba de transporte de extremo a extremo está en `tests/e2e/kafka_tls_transport.py`;
+seguir [S07a](../security/s07a-kafka-tls.md) y comprobar destino y requisitos
+antes de ejecutarla. Estos resultados deben identificarse por entorno y SHA.
 
 The rest of `tests/api` is distributed as follows:
 
@@ -225,7 +249,8 @@ For a normal modification:
 2. Run the local backend suite excluding external integrations.
 3. Run HTTP integrations of affected services.
 4. Validate E2E definitions with `run-regression.js --validate`.
-5. Run the GUI LIGHT + BLOCKCHAIN regression on deployment.
+5. En v0.0.13b, ejecutar LIGHT en la ventana y entorno autorizados; reservar
+   BLOCKCHAIN para cuando su puerta de seguridad permita habilitarlo.
 6. Use operating probes only when the corresponding infrastructure changes.
 
 A result should always indicate which level was executed. “Green Tests” without the suite and the environment does not distinguish local units from an E2E validation.

@@ -129,5 +129,5 @@ lock. Sin certificado cliente, cookies ni sesión, se probaron mediante GET
 Para `/gui/`, la respuesta incluyó `server: cloudflare` y
 `cf-ray=a5ae0000dd2a1ec4-MAD`, consistente con el gate del borde. Sin consultar
 los eventos de Cloudflare no se atribuye cada 403 a una regla concreta. No se
-probó el acceso positivo con certificado/sesión. El maintenance lock debe
-reactivarse al cerrar la ventana de pruebas.
+probó el acceso positivo con certificado/sesión. Después se solicitó reactivar el maintenance lock y el operador mostró la GUI
+bloqueada por Cloudflare; la captura no identifica la regla concreta que produjo el bloqueo.

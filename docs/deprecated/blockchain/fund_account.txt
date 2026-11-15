@@ -1,3 +1,5 @@
+HISTÓRICO: no ejecutar; consultar docs/version.md y los runbooks actuales.
+
 
 eth.sendTransaction({
   from: "0x1747D8AB4dBDc6B2aBe233d5688487A39Bc555B5",

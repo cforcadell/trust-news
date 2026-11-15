@@ -7,10 +7,10 @@
 
 The current sources are:
 
-- [`skaffold-local.md`](../skaffold-local.md) for Kind within the local VM;
-- [`skaffold-server.md`](../skaffold-server.md) for Hetzner;
-- [`k8s-common.md`](../k8s-common.md) for shared procedures;
-- [`gitlab-github-release-workflow.md`](../gitlab-github-release-workflow.md)
+- [`skaffold-local.md`](../../../deploy/skaffold-local.md) for Kind within the local VM;
+- [`skaffold-server.md`](../../../deploy/skaffold-server.md) for Hetzner;
+- [`k8s-common.md`](../../../deploy/k8s-common.md) for shared procedures;
+- [`gitlab-github-release-workflow.md`](../../../deploy/gitlab-github-release-workflow.md)
 for deployment, promotion and release.
 
 The active runbooks document `BLOCKCHAIN_ENABLED=OFF` as the normal LIGHT

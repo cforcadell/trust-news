@@ -1,3 +1,5 @@
+HISTÓRICO: no ejecutar; consultar docs/version.md y los runbooks actuales.
+
 sysadmin@trust-news-prod:~$ sudo gitlab-runner start
 Runtime platform                                    arch=amd64 os=linux pid=460175 revision=3b43bf9f version=18.10.1
 

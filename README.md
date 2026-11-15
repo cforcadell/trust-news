@@ -713,7 +713,7 @@ Primary deployment documentation:
 - [GitLab, GitHub and release workflow](docs/deploy/gitlab-github-release-workflow.md)
 
 The previous Kubernetes notes are archived and non-operational; see
-[the archive warning](docs/deploy/old/README.md).
+[the archive warning](docs/deprecated/deploy/old/README.md).
 
 ---
 

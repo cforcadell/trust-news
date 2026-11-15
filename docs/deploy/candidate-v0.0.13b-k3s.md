@@ -4,6 +4,14 @@
 estático del repositorio de la evidencia que solo puede producir un pipeline
 protegido y el clúster K3s. No autoriza despliegue ni apertura de demos.
 
+**Lectura de la bitácora:** los párrafos y tablas fechados conservan el estado
+conocido en cada momento y no son instrucciones actuales. Para la situación
+actual y las puertas pendientes, consultar [version.md](../version.md) y
+[working.md](../../working.md). El operador comunicó copias MongoDB y
+PostgreSQL fuera de Hetzner; la restauración aislada aún no está demostrada.
+Las comprobaciones posteriores del operador incluyen S03 y Kafka en K3s, sin
+que ello fije por sí solo el candidato exacto ni cierre su aceptación.
+
 Actualización 2026-11-14: antes de esta actualización documental, el checkout local estaba limpio en
 `554a2382397275649774eb8cf659b9d1145504b9`. El operador comunica que
 sincronizó el script corregido a Hetzner; la salida que aportó muestra
@@ -179,7 +187,7 @@ esa versión en K3s antes de considerarla operativa.
 | TLS local | `fullchain.pem` actual es autofirmado para `localhost` con SAN `DNS:localhost`. `overlays/local` genera `trustnews-origin-tls` desde ese certificado y `privkey.pem`; `overlays/prod` no contiene ese generador. `web_classic/Dockerfile` solo copia `./app` a la imagen. | El certificado/keypair pertenecen al camino local y no deben sustituir TLS/Secrets de K3s. |
 | Clave TLS local | `web_classic/certs/privkey.pem` se usa solo con `overlays/local` para `localhost`; no se usa en Hetzner. El 13-11-2026 se generó un par local nuevo y la ruta se retiró del índice y añadió a `.gitignore`. La key anterior sigue en la historia Git local (commit observado `78638d9`, 2026-01-24); no se consultó el remoto en vivo. | Mantener el par solo en el entorno local. No hace falta rotar TLS de Hetzner por esta key; el origen K3s usa su Secret independiente. La eliminación del índice no borra objetos históricos. |
 | Documentación | README y runbooks enlazan las guías nuevas; se eliminaron `docs/quick_start_local.md` y `docs/quick_start_hetzner.md`. | Confirmar que la migración conserva todos los procedimientos necesarios para la ventana. |
-| Recuperación | `working.md` registra que aún no existen copias de MongoDB ni Keycloak/PostgreSQL en preproducción; la CI puede aplicar `realign-source-routing-mongodb.sh --apply` antes del rollout API. | No abrir la ventana de despliegue hasta disponer de respaldo recuperable y del procedimiento de restauración de datos/configuración. |
+| Recuperación | Fotografía del 13-11: entonces no había copias acreditadas; posteriormente el operador comunicó copias externas de MongoDB y PostgreSQL. La CI puede aplicar `realign-source-routing-mongodb.sh --apply` antes del rollout API. | Verificar el respaldo y el procedimiento de recuperación para la ventana; la restauración aislada sigue sin demostrarse. |
 
 ## Secuencia de fijación y ventana, sin ejecución en esta ficha
 

@@ -20,7 +20,7 @@ Decisiones del 09-11-2026, reasignadas el 10-11-2026: S04 (segmentación), S05 (
 
 ## v0.0.13b — Plataforma de demos controladas
 
-**En ejecución; NO-GO para abrir a clientes.** S00/S01 cerrados para preproducción con límites, S02/S03 aceptados localmente y S07a solo con E2E técnico kind. El [estado y las puertas](version.md) son la referencia de ejecución.
+**En ejecución; NO-GO para abrir a clientes.** S00/S01 cerrados para preproducción con límites, S02/S03 aceptados localmente y S07a con E2E técnico y funcional LIGHT/SMART en kind. El [estado y las puertas](version.md) son la referencia de ejecución.
 
 - Integrar y aceptar S02/S03/S07a en Hetzner; probar S11-D/S12-D sobre candidato exacto con dos organizaciones, coste, baja, borde y rollback.
 - Mantener Blockchain OFF y mTLS general/administrativo. Los invitados no inician trabajos con gasto hasta S05; sin separación verificable solo hay demos internas.

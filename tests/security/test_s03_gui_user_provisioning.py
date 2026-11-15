@@ -31,11 +31,27 @@ def test_plan_is_stable_for_new_user_and_never_switches_client(capsys):
     assert "subject-a" not in output
 
 
-def test_existing_unmanaged_or_active_user_and_conflicting_membership_block():
+def test_unmarked_disabled_user_requires_explicit_safe_resume():
     base = dict(context="k3s", issuer=ISSUER, username="synthetic_user",
                 email=None, memberships=[], web_ready=True)
-    unmanaged = {**managed_user(), "attributes": {}}
-    assert gui.build_plan(**base, user=unmanaged)["state"] == "BLOCKED_EXISTING_USER"
+    unmarked_disabled = {
+        **managed_user(), "attributes": {}, "requiredActions": ["UPDATE_PASSWORD"],
+    }
+    blocked = gui.build_plan(**base, user=unmarked_disabled)
+    assert blocked["state"] == "BLOCKED_UNMARKED_DISABLED"
+    assert blocked["can_apply"] is False
+
+    resumable = gui.build_plan(
+        **base, user=unmarked_disabled, resume_unmarked_disabled=True,
+    )
+    assert resumable["state"] == "RESUME_UNMARKED_DISABLED"
+    assert resumable["can_apply"] is True
+
+    without_password_reset = {**unmarked_disabled, "requiredActions": []}
+    assert gui.build_plan(
+        **base, user=without_password_reset, resume_unmarked_disabled=True,
+    )["state"] == "BLOCKED_UNMARKED_DISABLED"
+
     assert gui.build_plan(**base, user=managed_user(enabled=True))["can_apply"] is False
     subject = managed_user()["id"]
     expected_org = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{ISSUER}|{subject}"))

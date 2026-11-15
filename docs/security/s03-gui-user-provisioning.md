@@ -18,9 +18,10 @@ válida, el usuario deshabilitado puede reanudarse y recibirá una nueva
 contraseña temporal. Si el proceso se corta antes de crear la membresía, solo
 se puede reanudar con `--resume-unmarked-disabled`, tras confirmar que ese
 usuario fue creado por el intento fallido. El plan exige además que siga
-deshabilitado y requiera `UPDATE_PASSWORD`. Un usuario ya habilitado no se
-modifica en una repetición. El motor no depende de atributos personalizados
-del perfil Keycloak.
+deshabilitado y requiera `UPDATE_PASSWORD`. Una cuenta habilitada no se vuelve a
+provisionar ni se le cambia la contraseña. Si tiene una membresía activa válida
+pero carece de cuota, se permite únicamente el modo `ADD_QUOTA_ONLY` descrito
+más abajo. El motor no depende de atributos personalizados del perfil Keycloak.
 
 La contraseña y la clave de cuotas se guardan en
 `secrets/clients/gui-<username>.json`, directorio privado `0700` y archivo
@@ -39,9 +40,10 @@ alta: el runtime S03 existente ya acepta usuarios de `TrustNewsWeb`.
 
 ## Ejecución
 
-Mantener el maintenance lock activo durante el alta y la prueba de aislamiento.
-Desde el host operativo, con `kubectl` hacia el destino y el entorno Python que
-tenga `httpx` y `pymongo`:
+Mantener el maintenance lock activo durante el alta. Desactivarlo solo durante
+la ventana autorizada de pruebas de navegador que lo necesiten y restaurar
+después el estado operativo acordado. Desde el host operativo, con `kubectl`
+hacia el destino y el entorno Python que tenga `httpx` y `pymongo`:
 
 ```bash
 cd ~/trust-news
@@ -82,17 +84,50 @@ reanudar una cuenta sin membresía cuando la procedencia del intento fallido
 esté confirmada y el nuevo plan `RESUME_UNMARKED_DISABLED` haya sido revisado.
 
 Para una cuenta ya habilitada con una membresía S03 válida pero sin cuota, el
-plan puede indicar `state=ADD_QUOTA_ONLY`. Revisar los límites y el hash; el
-apply de ese plan crea únicamente la cuota y no cambia la cuenta, contraseña,
+plan puede indicar `state=ADD_QUOTA_ONLY`. Revisar los dos límites y el hash;
+el apply de ese plan crea únicamente la cuota y no cambia la cuenta, contraseña,
 roles ni membresía. Si la cuota ya existe con límites distintos o está inactiva,
-el plan queda bloqueado; este motor no ajusta cuotas existentes.
+el plan queda bloqueado; este motor no ajusta cuotas existentes. Al aplicar,
+confirmar `mode=quota_only quota=active`; después se puede verificar en
+`clients_quotas` que `status=Active`, los límites coinciden y el consumo inicial
+es cero, sin imprimir el `client_id`.
 
 Entregar la contraseña temporal al titular por un canal privado y retirarla del
 host cuando haya cambiado la contraseña. La clave `quota_client_id` del archivo
 privado identifica la cuota para futuras operaciones de administración. Aunque
 el alta establezca límites, S05 sigue pendiente: usar solo topes aprobados y
 mantener supervisión de gasto en las pruebas.
-Para la prueba S03 pendiente, iniciar sesión con la nueva cuenta, comprobar
-que no ve las órdenes del primer usuario y que el detalle de una orden ajena
-se deniega. Registrar los resultados sin tokens ni secretos y devolver el
-maintenance lock al estado operativo acordado al terminar la ventana.
+Para la prueba S03, iniciar sesión con cada cuenta y buscar por ID una orden de
+la otra. Registrar el código y el cuerpo sin tokens ni secretos. Una respuesta
+`403 Resource denied` en las dos direcciones confirma la denegación de esas
+consultas cruzadas; no sustituye las demás pruebas de borde ni la aceptación
+integral. Devolver el maintenance lock al estado operativo acordado al terminar
+la ventana.
+
+## Registro Hetzner/K3s — 2026-11-15
+
+El operador reanudó y habilitó `s03_test_02` con `TrustNewsWeb`. Tras detectar
+que faltaba su cuota, el plan `ADD_QUOTA_ONLY` se aplicó sin tocar Keycloak ni la
+membresía. MongoDB confirmó `status=Active`, consumo inicial cero y estos
+límites: `news_generation=99999999999`,
+`blockchain_validation=9999999999999`. El operador confirma que el E2E B ya
+funciona con esta cuenta. La prueba cruzada de acceso entre las dos cuentas se
+completó: desde `cforcadellm` se
+buscó una orden de `s03_test_02`, y desde `s03_test_02` una orden de
+`cforcadellm`; ambas consultas devolvieron HTTP 403 con `Resource denied` en la
+GUI. Esto confirma el aislamiento de esas dos consultas directas. El operador
+confirmó la reactivación del maintenance lock y el bloqueo de la consola en una
+ventana privada. La aceptación integral de S03 en Hetzner continúa pendiente.
+
+## Pruebas de borde S11-D — 2026-11-15
+
+En una ventana posterior, el operador desactivó temporalmente el maintenance
+lock. Sin certificado cliente, cookies ni sesión, se probaron mediante GET
+`/gui/`, `/backend/orders/list`,
+`/auth/realms/TrustNews/.well-known/openid-configuration` y
+`/auth/admin/realms/master`; las cuatro rutas respondieron `403 text/html`.
+Para `/gui/`, la respuesta incluyó `server: cloudflare` y
+`cf-ray=a5ae0000dd2a1ec4-MAD`, consistente con el gate del borde. Sin consultar
+los eventos de Cloudflare no se atribuye cada 403 a una regla concreta. No se
+probó el acceso positivo con certificado/sesión. El maintenance lock debe
+reactivarse al cerrar la ventana de pruebas.

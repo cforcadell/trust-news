@@ -9,11 +9,15 @@ clave legacy `user_<sub>` de órdenes y cuotas coincide con su identidad
 Keycloak. El operador comunicó el hash del plan de migración y la salida
 `APPLIED memberships=1 aliases=1`; el recuento posterior fue de una membresía
 S03 activa. Tras desactivar temporalmente el maintenance lock, el operador
-entró en la GUI y verificó listado y detalle de una orden propia. La prueba de
-aislamiento entre dos cuentas en Hetzner sigue pendiente porque no hay una
-segunda cuenta de prueba. No se ha confirmado todavía la reactivación del lock
-tras esa ventana. Por tanto, esta evidencia resuelve el 403 observado para el
-propietario, pero no cierra la aceptación S03 ni autoriza la apertura a clientes.
+entró en la GUI y verificó listado y detalle de una orden propia. Después se
+habilitó `s03_test_02` y se le asignó una cuota explícita; el operador confirma
+que esta cuenta ya completa el E2E B. En la GUI, las búsquedas directas de una
+orden ajena desde cada cuenta devolvieron HTTP 403 `Resource denied` en ambas
+direcciones. El operador confirmó que reactivó el maintenance lock y que una
+ventana privada queda bloqueada. Para pruebas S11-D lo desactivó temporalmente;
+el estado actual requiere reactivarlo al cerrar esa ventana. Esta evidencia
+confirma la denegación de las dos consultas probadas y no cierra la aceptación
+integral S03 ni autoriza la apertura a clientes.
 
 ## Objetivo y límites de uso
 
@@ -35,7 +39,7 @@ efectiva del mismo SHA en K3s.
 | S00 · inventario | Completado con hallazgos abiertos. [Inventario](security/s00-inventory.md). | Revalidar borde, flujos, secretos y responsables. No hay copias externas ni rotación definida. |
 | S01 · confianza CI | Cerrado para preproducción: deploy `#3039935585`, preflight acceso/TLS/revisiones `#3040405655`; restauración de Deployment temporal probada en kind. | Revalidar preflight del candidato. TOFU de host key/CA y kubeconfig cluster-admin compartido son riesgos aceptados; rollback automático ante fallo real no ensayado en K3s y sin cobertura de datos/ConfigMaps. Preparar lock y rollback. |
 | S02 · descarga pública | Motor común implementado y aceptado en kind, con E2E LIGHT/SMART y DIRECT comunicados por el operador. | Desplegar en Hetzner y probar descargas válidas, bloqueo SSRF/rebinding, TLS, límites y regresión desde el borde. |
-| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, la migración comunicó una membresía activa; el operador verificó login, listado y detalle propios. | Confirmar el estado operativo del maintenance lock y probar aislamiento con una segunda cuenta descartable antes de aceptar S03 en Hetzner. Mantener inaccesibles propietarios legacy ambiguos. |
+| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, el operador verificó login, listado/detalle propios y E2E B de `s03_test_02`; dos búsquedas directas cruzadas devolvieron 403 `Resource denied`. | Completar las pruebas restantes de borde antes de aceptar S03 en Hetzner. El maintenance lock está temporalmente desactivado durante la ventana de pruebas y debe reactivarse al cerrarla. Mantener inaccesibles propietarios legacy ambiguos. |
 | S07a · Kafka TLS | En kind: E2E técnico de producción/consumo TLS, rechazo PLAINTEXT y E2E funcional autenticado LIGHT/SMART superados. | Integrar y aceptar TLS/CA y LIGHT/SMART en Hetzner. No atribuirle identidad ni ACL Kafka. |
 | S11-D · borde de demos | Pendiente. | Verificar mTLS general/administrativo, gate de rutas, origen, login/refresh/logout, roles, Admin y revocación de invitación. Reutilizar la matriz S11. |
 | S12-D · aceptación de demos | Pendiente. | Campaña acotada del SHA/digests/render/configuración efectivos: dos organizaciones, negativos, LIGHT/SMART, costes, límites, fallos y baja; GO/NO-GO firmado. Reutilizar runner y matriz S12. |
@@ -54,18 +58,21 @@ S11-D y S12-D son **cortes de aceptación** de S11 y S12, sin motores duplicados
 
 ## Trabajo posterior y roadmap
 
-**Alta de cuentas:** el [motor GUI](security/s03-gui-user-provisioning.md) está
-crea usuarios del realm `TrustNews` que siempre usan `TrustNewsWeb`, junto con
-su membresía S03 y una cuota parametrizada en el plan confirmado. En Hetzner,
-`s03_test_02` se reanudó y habilitó correctamente; pudo listar órdenes, pero al
-generar aserciones recibió `403 Client quotas not found`. El inventario confirmó
-que no existía cuota para esa cuenta. Se está adaptando localmente el motor para
-crear cuotas nuevas con límites explícitos de generación y validación, y para
-añadir solo la cuota a una cuenta habilitada con membresía válida. Esta ruta no
-modifica contraseña, roles ni membresía; bloquea cuotas existentes con límites
-distintos. La corrección anterior para cuentas huérfanas fue sincronizada y
-usada en Hetzner; la nueva gestión de cuotas aún requiere publicación y
-sincronización. El alta OAuth para integraciones autónomas de API
+**Alta de cuentas:** el [motor GUI](security/s03-gui-user-provisioning.md)
+provisiona usuarios del realm `TrustNews` siempre con `TrustNewsWeb`, membresía
+S03 y límites de cuota incluidos en el plan confirmado. Para `s03_test_02`, el
+operador aplicó `ADD_QUOTA_ONLY` después de que la generación devolviera
+`403 Client quotas not found`. MongoDB confirmó la cuota activa con consumo
+inicial cero y límites `news_generation=99999999999` y
+`blockchain_validation=9999999999999`; el operador confirma que el E2E B ya
+funciona. El modo `ADD_QUOTA_ONLY` solo crea la cuota de una cuenta habilitada
+con membresía válida; no cambia contraseña, roles ni membresía y bloquea cuotas
+existentes incompatibles. Las búsquedas directas de órdenes ajenas entre ambas
+cuentas devolvieron 403 en las dos direcciones; el maintenance lock se reactivó
+y bloqueó la GUI en ventana privada, y se desactivó de nuevo temporalmente para
+las pruebas S11-D descritas en el estado actual. Debe reactivarse al cerrar esa
+ventana. La aceptación integral de S03 sigue pendiente. El alta OAuth para
+integraciones autónomas de API
 sigue como propuesta pendiente tras validar el aislamiento y el candidato
 actual en Hetzner/K3s: decidir entre un cliente confidencial propio por cuenta
 con *client credentials* o `TrustNewsApi` compartido con usuarios del realm.

@@ -4,10 +4,10 @@ Este documento recoge las versiones desplegadas, sus límites conocidos y los si
 
 ## v0.0.13b — Plataforma de demos controladas
 
-**Estado: en ejecución; NO-GO para abrir a clientes.** S00/S01 cerrados para preproducción con límites; S02/S03 aceptados localmente en kind, incluido el camino declarativo S03 confirmado por el operador; S07a tiene E2E técnico y funcional kind. Hetzner/K3s es preproducción, producción no existe y los perfiles `-prod` son nombres heredados. [Objetivo, estado y puertas](version.md) · [Inventario S00](security/s00-inventory.md) · [Auditoría contrastada](security/security_review_codex.md).
+**Estado: desplegada en Hetzner/K3s, con salud OK según el operador; aceptación pendiente y NO-GO para abrir a clientes.** La captura del pipeline `#3070111046` muestra build, preflight y deploy correctos para `722c1d57`; faltan artefactos efectivos de K3s. El operador aclara que la aceptación S02/S03/S07a, S11-D y S12-D no está confirmada. S00/S01 cerrados para preproducción con límites; S02/S03 aceptados localmente en kind, incluido el camino declarativo S03 confirmado por el operador; S07a tiene E2E técnico y funcional kind. Hetzner/K3s es preproducción, producción no existe y los perfiles `-prod` son nombres heredados. [Objetivo, estado y puertas](version.md) · [Inventario S00](security/s00-inventory.md) · [Auditoría contrastada](security/security_review_codex.md).
 
 - Demos guiadas LIGHT/SMART, Blockchain OFF, mTLS general/administrativo y máximo dos organizaciones invitadas con identidad separada, datos desechables y vigencia limitada.
-- S02/S03/S07a requieren integración y aceptación en Hetzner; S11-D y S12-D prueban borde, aislamiento, coste, baja y rollback sobre el mismo candidato. S01 exige revalidar preflight y aceptar sus riesgos residuales para la ventana.
+- S02/S03/S07a requieren verificar su integración efectiva y completar la aceptación en Hetzner; S11-D y S12-D prueban borde, aislamiento, coste, baja y rollback sobre el mismo candidato. S01 exige vincular los preflights al SHA desplegado y aceptar sus riesgos residuales para la ventana.
 - Hasta S05 no se permite a invitados iniciar trabajos con gasto; cada ejecución autorizada es supervisada por el operador. Si ese límite no puede imponerse, solo hay demos internas.
 - El cierre habilita exclusivamente las demos descritas en [version.md](version.md#puertas-de-apertura-de-demos). No cierra v0.0.13, no retira mTLS, no acredita beta autónoma ni producción.
 

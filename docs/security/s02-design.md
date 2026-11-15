@@ -1,6 +1,6 @@
 # S02 — Diseño del motor de descarga pública
 
-**Estado:** implementación integrada y validación local en kind completadas; el operador confirma que los E2E autenticados LIGHT/SMART y DIRECT terminaron correctamente. La aceptación de preproducción queda pendiente y fuera de esta ejecución. **Ámbito:** SEC-02 y la prueba de seguridad SEC-19. El motor se comparte entre News Handler y Evidence Search; sus límites y formatos son configuración validada, no excepciones por URL o proveedor.
+**Estado:** implementación integrada y validación local en kind completadas; el operador confirma que los E2E autenticados LIGHT/SMART y DIRECT terminaron correctamente. El operador confirma después S02 verificado también en Hetzner/K3s (2026-11-15); no se adjuntó detalle de ejecución ni artefacto. La confirmación operativa se separa de la validación local descrita aquí. **Ámbito:** SEC-02 y la prueba de seguridad SEC-19. El motor se comparte entre News Handler y Evidence Search; sus límites y formatos son configuración validada, no excepciones por URL o proveedor.
 
 ## Punto de partida
 

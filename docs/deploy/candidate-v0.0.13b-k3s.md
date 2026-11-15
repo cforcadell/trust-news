@@ -1,6 +1,7 @@
 # Candidato v0.0.13b para Hetzner/K3s
 
-**Estado: preparación; candidato no fijado.** Esta ficha separa el resultado
+**Estado: desplegada en Hetzner/K3s, con salud OK según el operador; aceptación
+pendiente.** Esta ficha separa el resultado
 estático del repositorio de la evidencia que solo puede producir un pipeline
 protegido y el clúster K3s. No autoriza despliegue ni apertura de demos.
 
@@ -257,8 +258,153 @@ más de una; `kubectl exec deployment/...` selecciona solo un pod. Comparar los
 | Preflight CI | Dos jobs del mismo SHA, IDs/horas/resultado; TLS servido con CA y hostname verificados |
 | Lock, observación y rollback | Estado antes/durante/después, responsable, snapshot anterior, artefactos retenidos, umbrales y resultado de recuperación |
 
-**Bloqueo actual:** faltan el SHA publicado que incluya el diff elegido, sus
-imágenes/digests, la verificación viva de K3s y los dos preflights del candidato.
+**Bloqueo registrado el 13-11-2026:** faltan el SHA publicado que incluya el
+diff elegido, sus imágenes/digests, la verificación viva de K3s y los dos
+preflights del candidato.
 También están pendientes la revisión de la clave local versionada y un respaldo
 recuperable para los datos que la CI puede modificar. No se ha tocado Hetzner
 ni GitLab para elaborar esta ficha.
+
+## Auditoría local de cierre, 2026-11-15
+
+Esta entrada actualiza el estado de la ficha; las fotografías anteriores se
+conservan como historial. El checkout local está en `postTFM`,
+`b860ab991f10e8b66107e3fa9c59cd810e3c5fb3`. `origin/postTFM` coincide
+localmente, pero esa referencia no acredita el remoto actual. La referencia
+local `gitlab/postTFM` sigue en `62c5df6`; la consulta de solo lectura al
+remoto GitLab no terminó porque este entorno no resolvió `gitlab.com`. No hay
+etiqueta `v0.0.13b` local. El árbol conserva cambios documentales sin commit
+en `docs/version.md`, `working.md`, `docs/releases.md`,
+`docs/next_releases.md` y esta ficha para asignar el alta OAuth API a
+v0.0.13c y registrar la auditoría.
+
+En el código del HEAD están `name: http` en el puerto 8070 de los tres
+Services de validación de producción, el contexto TLS compartido para Kafka
+usado por News Handler y la consulta directa a MongoDB del gate de órdenes
+BLOCKCHAIN pendientes. El operador confirma que v0.0.13b está desplegada en
+Hetzner/K3s; falta vincular ese despliegue a un SHA y sus imágenes efectivas,
+por lo que esta revisión estática no acredita qué versión corre allí. La clave
+TLS local `web_classic/certs/privkey.pem` no está versionada y figura en
+`.gitignore`.
+El contexto Kubernetes activo en esta máquina es `kind-trust-news`; no se
+consultó K3s. Tampoco se ejecutaron pruebas ni pipelines en esta auditoría.
+
+La evidencia comunicada por el operador cubre parte de S03 y negativos
+anónimos de S11-D. Siguen sin vincularse al **SHA desplegado** los dos preflights
+CI, `build.json` y digests por perfil, imágenes/configuración efectivas y
+salud en K3s, aceptación integral S02/S03/S07a, positivos y negativos
+restantes de S11-D, campaña S12-D, respaldo recuperable y decisión GO/NO-GO
+de una ventana concreta. El estado de v0.0.13b permanece **NO-GO para
+clientes** hasta registrar esas pruebas. El siguiente paso verificable es
+identificar en GitLab el SHA y los pipelines que produjeron el despliegue
+existente y comparar sus artefactos con K3s. Solo si falta un preflight del
+SHA efectivo habrá que planificarlo; no se presupone un nuevo despliegue.
+
+### Evidencia posterior del pipeline de despliegue, 2026-11-15
+
+El operador aporta captura del pipeline GitLab `#3070111046`, rama `postTFM`,
+commit abreviado `722c1d57` (SHA local completo
+`722c1d570f8c85f36539bea356a2848a19d7cc5a`). El pipeline figura
+`Passed`; los jobs `build`, `check_phase6_origin_tls` y `deploy` aparecen
+correctos, mientras `rollback` quedó sin ejecutar. El operador confirma
+despliegue y salud OK en Hetzner; aclara que no ha confirmado la aceptación
+completa S02/S03/S07a, S11-D ni S12-D. La captura no muestra el perfil
+seleccionado ni `BLOCKCHAIN_ENABLED`; el operador aportó después el artefacto
+`build.json` del job `build`. Tampoco están documentados el pipeline de
+infraestructura, los `imageID` efectivos ni los resultados completos de
+S11-D/S12-D. Se registra como evidencia de CI y confirmación operativa, sin
+atribuirle las pruebas que no aparecen en ella.
+
+El `build.json` aportado contiene estas imágenes y digests:
+
+| Imagen | Tag | Digest SHA-256 |
+| --- | --- | --- |
+| `generate-asertions` | `722c1d5` | `f112ff69550317265f388746970a0d9a123617f0870529a038b575c70f9839c9` |
+| `validate-asertions` | `722c1d5` | `363fd41d01912dba821dafc2ec05c2a5175df75cd082599aedcb7ef157090870` |
+| `news-handler` | `722c1d5` | `d2793ca90184ac5410f4fb0e9a991a3fb149f0abdbd9550b0f8713d477f1631a` |
+| `news-chain` | `722c1d5` | `2cdaae18d877651e019c4466cce71698c5df1b7aba3a85b45796a4a4abe36631` |
+| `ipfs-api` | `722c1d5` | `fde4bf73cc83e4288094bb5b73136ed3201392426ed19497f658ae29725d5fd3` |
+| `evidence-search` | `722c1d5` | `99b42047e0036ce525cb2ad83a3bc7f28e6657952d549b4f166767d2074659c7` |
+| `source-router` | `722c1d5` | `a5ffb30e881531aaaf39d03d4a394e64be68423d4b99844c212f62942a98bce9` |
+| `gateway` | `722c1d5` | `c45bfc8ab38c0cff17d8550c91393cc017d99cf22deaf54932972e7bedce4e39` |
+| `admin` | `722c1d5` | `2570f3150b6e4edcee86c2621fc38886159d81e488a8541723efe414afae7761` |
+| `web-classic` | `722c1d5` | `7ac32f673e64c5d3f234219ec18d4698906bbbdd1c9af4a23fa60e55f57aa352` |
+
+La comparación local muestra que `722c1d57` es ancestro de
+`b860ab991f10e8b66107e3fa9c59cd810e3c5fb3`; los commits intermedios
+añaden scripts operativos, pruebas y documentación, sin modificar código API,
+manifiestos K8s ni `.gitlab-ci.yml`. Esto permite separar el runtime del
+pipeline de los cambios posteriores del motor S03, cuya sincronización y
+ejecución ya están registradas por el operador en `working.md`.
+
+El operador aportó `build.json` antes de su caducidad. El siguiente paso es
+confirmar el perfil/modo del pipeline. El pipeline correcto y la salud
+comunicada no sustituyen la aceptación funcional ni un GO para clientes.
+
+### Inventario de pods e imágenes comunicado por el operador, 2026-11-15
+
+Desde el host Hetzner, el operador informó contexto `default` y recogió
+manualmente pods de los namespaces `apis` y `frontend`, porque el motor de
+inventario no está instalado en `~/trust-news`. Todos los pods mostrados
+figuraban `Running` y sus contenedores `ready=true`. Los `imageID` comunicados
+coinciden con los diez digests de `build.json`: los nueve componentes API/web
+y el digest de `gateway` usado por los sidecars `s03-tls-proxy`. `news-chain`
+no aparece entre los pods, coherente con que no esté activo en este perfil.
+La salida no incluye el namespace `blockchain`, por lo que no determina por sí
+sola si hay workloads Geth u otros componentes allí. Es una comprobación
+operativa comunicada, no una consulta independiente. Aún falta documentar el
+perfil del pipeline y confirmar `BLOCKCHAIN_ENABLED` y los modos efectivos
+LIGHT/SMART en K3s; después se continúa con las pruebas de aceptación.
+
+### Configuración efectiva comunicada por el operador, 2026-11-15
+
+En el contexto Hetzner `default`, el operador informó `apis/blockchain-mode`
+con `BLOCKCHAIN_ENABLED=false`, `news-handler` con `BLOCKCHAIN_ENABLED=false`
+y `KAFKA_SECURITY_PROTOCOL=SSL`, y `evidence-search` con
+`EVIDENCE_EXTRACTION_MODE=SMART`. Los StatefulSets `geth-bootnode`,
+`geth-miner` y `geth-rpc-endpoint`, así como el Deployment `news-chain`,
+figuraban con cero réplicas. Esto confirma las lecturas indicadas, no la
+configuración de Gateway y validadores ni el modo de cada réplica de
+Evidence Search. El perfil seleccionado en el pipeline sigue sin evidencia.
+
+En una consulta posterior, Gateway y los tres workers de validación
+devolvieron `BLOCKCHAIN_ENABLED=false`; las dos réplicas de Evidence Search
+devolvieron `EVIDENCE_EXTRACTION_MODE=SMART`. Evidence Search mostró
+`BLOCKCHAIN_ENABLED=<absent>`, variable que no corresponde a su modo operativo.
+Con estas lecturas queda cubierto el estado efectivo de Blockchain OFF en
+Gateway, News Handler y validadores, más SMART en cada réplica de Evidence
+Search. La salida sigue siendo evidencia operativa aportada por el operador.
+
+### Prueba local del motor S02, 2026-11-15
+
+Se ejecutó `PYTHONPATH=api .venv/bin/pytest -q
+tests/api/test_public_fetch.py`: **9 passed**. La prueba cubre política de
+destinos, DNS mixto y cambios de respuesta, redirección a loopback, límites de
+cuerpo/tiempo y TLS con comprobación de hostname/SNI. La prueba TLS abre un
+servidor efímero en `127.0.0.1`; el primer intento bajo el aislamiento local
+no pudo enlazar el socket y pasó al repetirse con permiso para loopback. Es
+evidencia del motor en el checkout local, no ejecución en Hetzner/K3s ni
+aceptación de extremo a extremo de S02. El `kubectl` disponible en esta sesión
+usa `kind-trust-news`, por lo que no se consultó ni modificó el clúster remoto.
+
+### Confirmación operativa de S02 en Hetzner, 2026-11-15
+
+El operador indica que S02 también queda verificado en Hetzner/K3s. Se registra
+como confirmación del operador; no se aportó un resultado detallado o artefacto
+que permita asociar los casos ejecutados al SHA/digests. La suite local
+`tests/api/test_public_fetch.py` (9 passed) es evidencia separada y no se usa
+como sustituto de esa aceptación preproductiva. Próximo paquete: aceptación S03
+en Hetzner/K3s.
+
+### Prueba local de autorización S03, 2026-11-15
+
+A petición del operador se ejecutó `PYTHONPATH=api .venv/bin/pytest -q
+tests/api/test_s03_security.py`: **5 passed**. Se probaron las denegaciones
+401 sin identidad, sin identidad humana, con cliente de servicio incorrecto y
+con firma/issuer/audience/cliente/expiración JWT inválidos; el caso de recurso
+de otro propietario devolvió 403 y el acceso propio 200. La política de ruta
+usó verificadores e identidades simulados; la prueba de JWT usó una clave RSA
+efímera. Esto valida localmente el motor, no tokens de Keycloak ni las rutas
+desplegadas en Hetzner/K3s. El contexto de esta sesión sigue siendo
+`kind-trust-news`; por ello la aceptación S03 de preproducción permanece
+pendiente.

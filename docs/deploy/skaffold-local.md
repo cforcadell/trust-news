@@ -308,7 +308,7 @@ El orden completo y el contrato de Secrets están en
 Open the full entry:
 
 ```bash
-kubectl port-forward --address 127.0.0.1 \
+kubectl port-forward --address 0.0.0.0 \
   -n kube-system svc/traefik 7443:443
 ```
 

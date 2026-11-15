@@ -131,3 +131,31 @@ Para `/gui/`, la respuesta incluyó `server: cloudflare` y
 los eventos de Cloudflare no se atribuye cada 403 a una regla concreta. No se
 probó el acceso positivo con certificado/sesión. Después se solicitó reactivar el maintenance lock y el operador mostró la GUI
 bloqueada por Cloudflare; la captura no identifica la regla concreta que produjo el bloqueo.
+
+## Comprobación externa tras desactivar maintenance — 2026-11-15
+
+El operador confirma que deshabilitó `custom maintenance`. Desde una salida de
+red exterior al clúster, sin certificado cliente, cookies ni token, se hicieron
+solicitudes de solo lectura; la comprobación terminó a las 17:43 UTC. No se
+usaron credenciales ni se enviaron cuerpos. Resultados observados:
+
+| Comprobación | Resultado |
+| --- | --- |
+| TLS del dominio | Cadena y hostname verificados por el cliente; TLS 1.3; certificado observado con caducidad 2026-12-31. |
+| `GET /` por HTTP y HTTPS, `GET /gui` por HTTPS | `302` a `https://assermetry.com/gui/`. |
+| `GET /gui/`, `/backend/orders/list`, descubrimiento OIDC del realm y `/auth/admin/realms/master` por HTTPS | `403`, respuesta servida por Cloudflare. |
+| `GET /backend/openapi.json`, `/.git/config` y ruta inexistente por HTTPS | `403`, respuesta servida por Cloudflare. |
+| Siete variantes de path con doble barra, caracteres codificados o segmento `..` bajo Admin/Backend | `403`, respuesta servida por Cloudflare. |
+| `HEAD` y `OPTIONS` con Origin externo en `/backend/orders/list` | `403`; no se observó `Access-Control-Allow-Origin`. |
+| `TRACE /backend/orders/list` | `405`, respuesta servida por Cloudflare. |
+| `GET /gui/`, `/backend/orders/list` y `/auth/admin/realms/master` por HTTP | `403`, sin contenido de aplicación. |
+| `GET /gui/` forzando IPv4 | `403`, con TLS verificado. |
+| `GET /gui/` forzando IPv6 | La salida de pruebas no pudo establecer conexión; resultado no concluyente sobre IPv6 del servicio. |
+
+No se observó `Strict-Transport-Security` en las respuestas HTTPS de redirección
+y bloqueo muestreadas; revisar su configuración en Cloudflare. Los `403` prueban
+denegación desde esta posición anónima, pero no identifican qué regla concreta
+actuó; para atribuirlos hay que consultar Security Events sin copiar IP ni Ray
+ID. No se probaron entrada positiva con certificado, autenticación, permisos
+por rol, revocación, origen directo ni rutas con sesiones. Esta comprobación no
+cierra S11-D ni constituye un pentest completo del runtime.

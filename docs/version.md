@@ -1,6 +1,6 @@
 # v0.0.13b — Plataforma de demos controladas
 
-**Estado: en ejecución; apertura NO-GO hasta superar las puertas en Hetzner/K3s.** S00 y S01 están cerrados para preproducción con riesgos residuales. S02 y S03 tienen aceptación local en kind; el operador confirma que todas las pruebas locales del camino declarativo S03 están OK y se cierra esa aceptación. En la comprobación local del 13-11-2026, el preflight S03 pasó para nueve servicios y la inspección de variables no sensibles confirmó S03 activo y Blockchain OFF donde aplica. S07a superó en kind los E2E técnicos TLS y el E2E funcional autenticado LIGHT/SMART. La aceptación de S02, S03 y S07a en Hetzner/K3s sigue pendiente; la aceptación funcional/factual de v0.0.13 también.
+**Estado: desplegada en Hetzner/K3s, con salud OK según el operador; apertura NO-GO hasta completar las puertas de aceptación.** La captura del pipeline GitLab `#3070111046` muestra build, preflight y deploy correctos para `722c1d57`; el `build.json` aportado coincide con los diez digests de los pods reportados en `apis`/`frontend`, incluidos los sidecars `s03-tls-proxy`. Los pods reportados están `Running` y sus contenedores `ready=true`. El operador reporta Blockchain OFF (`false`) en Gateway, News Handler y los tres workers de validación; Kafka `SSL`; Evidence Search `SMART` en sus dos réplicas; y cero réplicas de Geth/`news-chain`. Falta documentar el perfil del pipeline y continuar las puertas de aceptación. El operador aclara que «todo OK» se refiere solo al despliegue y la salud, no a la aceptación S02/S03/S07a, S11-D ni S12-D. S00 y S01 están cerrados para preproducción con riesgos residuales. S02 y S03 tienen aceptación local en kind; el operador confirma que todas las pruebas locales del camino declarativo S03 están OK y se cierra esa aceptación. En la comprobación local del 13-11-2026, el preflight S03 pasó para nueve servicios y la inspección de variables no sensibles confirmó S03 activo y Blockchain OFF donde aplica. S07a superó en kind los E2E técnicos TLS y el E2E funcional autenticado LIGHT/SMART. El operador confirmó S02 verificado también en Hetzner/K3s (2026-11-15), sin adjuntar detalle de ejecución; S03 y S07a siguen pendientes en Hetzner/K3s; la aceptación funcional/factual de v0.0.13 también.
 
 **Entornos:** kind en VM es desarrollo local; Hetzner/K3s es preproducción; producción no existe. Los perfiles y overlays `-prod` conservan un nombre histórico. Código, render y pruebas kind no acreditan el comportamiento efectivo en Hetzner.
 
@@ -32,18 +32,18 @@ Esta versión no acredita producción, servicio autónomo, piloto comercial, cal
 ## Estado y trabajo de v0.0.13b
 
 La [ficha del candidato Hetzner/K3s](deploy/candidate-v0.0.13b-k3s.md)
-registra el SHA base y los renders comprobados; el candidato sigue sin fijar
-porque el árbol contiene cambios sin publicar y faltan digests y evidencia
-efectiva del mismo SHA en K3s.
+registra el deploy CI del SHA `722c1d57` y los controles pendientes de
+evidencia efectiva en K3s. Los cambios documentales locales posteriores no
+alteran las imágenes desplegadas.
 
 | Paquete | Estado observado | Trabajo y evidencia para demos |
 | --- | --- | --- |
-| S00 · inventario | Completado con hallazgos abiertos. [Inventario](security/s00-inventory.md). | Revalidar borde, flujos, secretos y responsables. No hay copias externas ni rotación definida. |
+| S00 · inventario | Completado con hallazgos abiertos. [Inventario](security/s00-inventory.md). | Revalidar borde, flujos, secretos y responsables. El operador comunicó copias externas de MongoDB y Keycloak/PostgreSQL; falta acreditar recuperación y definir rotación. |
 | S01 · confianza CI | Cerrado para preproducción: deploy `#3039935585`, preflight acceso/TLS/revisiones `#3040405655`; restauración de Deployment temporal probada en kind. | Revalidar preflight del candidato. TOFU de host key/CA y kubeconfig cluster-admin compartido son riesgos aceptados; rollback automático ante fallo real no ensayado en K3s y sin cobertura de datos/ConfigMaps. Preparar lock y rollback. |
-| S02 · descarga pública | Motor común implementado y aceptado en kind, con E2E LIGHT/SMART y DIRECT comunicados por el operador. | Desplegar en Hetzner y probar descargas válidas, bloqueo SSRF/rebinding, TLS, límites y regresión desde el borde. |
-| S03 · identidad y autorización | Aceptación local en kind, incluido el camino declarativo. En Hetzner/K3s, el operador verificó login, listado/detalle propios y E2E B de `s03_test_02`; dos búsquedas directas cruzadas devolvieron 403 `Resource denied`. | Completar las pruebas restantes de borde antes de aceptar S03 en Hetzner. Mantener inaccesibles propietarios legacy ambiguos y registrar el estado del maintenance lock en cada ventana. |
-| S07a · Kafka TLS | En kind: E2E técnico de producción/consumo TLS, rechazo PLAINTEXT y E2E funcional autenticado LIGHT/SMART superados. | Integrar y aceptar TLS/CA y LIGHT/SMART en Hetzner. No atribuirle identidad ni ACL Kafka. |
-| S11-D · borde de demos | Pendiente. | Verificar mTLS general/administrativo, gate de rutas, origen, login/refresh/logout, roles, Admin y revocación de invitación. Reutilizar la matriz S11. |
+| S02 · descarga pública | Validación local completa; el operador confirma S02 verificado también en Hetzner/K3s (2026-11-15). | Incorporar, si está disponible, el detalle o artefacto de ejecución asociado al SHA/digests desplegados. |
+| S03 · identidad y autorización | Aceptación local en kind; suite local `test_s03_security.py` 5/5. En Hetzner/K3s, el operador verificó login, listado/detalle propios y E2E B de `s03_test_02`; dos búsquedas directas cruzadas devolvieron 403 `Resource denied`. | Confirmar en Hetzner los negativos 401 (identidad ausente, token de servicio/cliente incorrecto, firma/issuer/audience inválidos) contra rutas reales; mantener inaccesibles propietarios legacy ambiguos y registrar el maintenance lock. |
+| S07a · Kafka TLS | En kind: E2E técnico de producción/consumo TLS, rechazo PLAINTEXT y E2E funcional autenticado LIGHT/SMART superados. | Comprobar TLS/CA y LIGHT/SMART efectivos y aceptar el flujo en Hetzner. No atribuirle identidad ni ACL Kafka. |
+| S11-D · borde de demos | Parcial: tras desactivar maintenance, las rutas anónimas y siete variantes de path probadas desde el exterior fueron denegadas por Cloudflare; TLS válido. | Verificar con certificado el camino positivo, atribuir reglas en Security Events, origen, login/refresh/logout, roles, Admin y revocación de invitación. Reutilizar la matriz S11. |
 | S12-D · aceptación de demos | Pendiente. | Campaña acotada del SHA/digests/render/configuración efectivos: dos organizaciones, negativos, LIGHT/SMART, costes, límites, fallos y baja; GO/NO-GO firmado. Reutilizar runner y matriz S12. |
 
 S11-D y S12-D son **cortes de aceptación** de S11 y S12, sin motores duplicados. Preparar S08 desde ahora. Antes de guardar datos que deban conservarse se exige copia y restauración demostrada. Un secreto activo expuesto o una ruta administrativa directa requiere contención inmediata, independientemente de la versión.
@@ -73,14 +73,14 @@ existentes incompatibles. Las búsquedas directas de órdenes ajenas entre ambas
 cuentas devolvieron 403 en las dos direcciones; el maintenance lock se reactivó
 y bloqueó la GUI en ventana privada; después se desactivó temporalmente para
 las pruebas S11-D; después se solicitó reactivarlo y la GUI mostró un nuevo
-bloqueo de Cloudflare. La aceptación integral de S03 sigue pendiente. El alta OAuth para
-integraciones autónomas de API
-sigue como propuesta pendiente tras validar el aislamiento y el candidato
-actual en Hetzner/K3s: decidir entre un cliente confidencial propio por cuenta
-con *client credentials* o `TrustNewsApi` compartido con usuarios del realm.
-Requiere revisar identidad de propietario, cuotas, auditoría, rotación y baja,
-y adaptar el motor S03, que hoy rechaza cuentas de servicio como identidad
-propietaria. No hay script ni cambio de runtime para cuentas OAuth nuevas.
+bloqueo de Cloudflare. La aceptación integral de S03 sigue pendiente. El alta
+OAuth para integraciones autónomas de API se realizará en **v0.0.13c**: un
+cliente confidencial propio por integración con *client credentials*, su cuenta
+de servicio Keycloak, asociación S03 y cuota concreta. En esa versión se
+adaptarán Gateway y las APIs, se implementarán S05 (admisión y contabilidad de
+cuotas) y S06 (rotación, suspensión y baja), y se hará la aceptación extremo a
+extremo. No hay script ni cambio de runtime para cuentas OAuth nuevas en el
+candidato actual de v0.0.13b.
 
 Los P1 diferidos no se consideran aceptados por reducir el alcance. [v0.0.13c](releases.md) reúne los controles **antes del acceso autónomo de clientes y de v0.0.14**:
 

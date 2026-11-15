@@ -56,9 +56,15 @@ S11-D y S12-D son **cortes de aceptación** de S11 y S12, sin motores duplicados
 
 **Alta de cuentas:** el [motor GUI](security/s03-gui-user-provisioning.md) está
 preparado localmente para crear usuarios del realm `TrustNews` que siempre usan
-`TrustNewsWeb`, junto con su membresía S03. Su ejecución en Hetzner aún no se
-ha validado y no se ha creado ninguna cuenta nueva. Las cuotas se gestionan
-por la API Admin existente. El alta OAuth para integraciones autónomas de API
+`TrustNewsWeb`, junto con su membresía S03. El primer intento en Hetzner creó
+`s03_test_02` deshabilitado y terminó con error antes de la membresía: Keycloak
+descartó el atributo personalizado no declarado por el perfil del realm. El
+operador confirmó que la cuenta sigue deshabilitada, sin roles privilegiados y
+con `UPDATE_PASSWORD`; no se ha habilitado ni validado el alta. Se corrigió
+localmente el motor para no depender de atributos personalizados y exigir una
+opción explícita para reanudar una cuenta huérfana deshabilitada; falta publicar
+y sincronizar esa corrección antes de continuar. Las cuotas se gestionan por la
+API Admin existente. El alta OAuth para integraciones autónomas de API
 sigue como propuesta pendiente tras validar el aislamiento y el candidato
 actual en Hetzner/K3s: decidir entre un cliente confidencial propio por cuenta
 con *client credentials* o `TrustNewsApi` compartido con usuarios del realm.

@@ -38,6 +38,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--context", required=True, help="Explicit Kubernetes context")
     parser.add_argument("--username", required=True, help="New realm username")
     parser.add_argument("--email", help="Optional email address for the realm user")
+    parser.add_argument(
+        "--resume-unmarked-disabled", action="store_true",
+        help="Explicitly resume this disabled user after confirming it was created by a failed run",
+    )
     parser.add_argument("--apply", action="store_true", help="Apply a reviewed plan")
     parser.add_argument("--confirm-context", help="Repeat the exact Kubernetes context")
     parser.add_argument("--confirm-plan", help="SHA-256 printed by the dry run")
@@ -88,24 +92,22 @@ def web_client_ready(client, root: str, required_scopes: set[str]) -> bool:
 
 
 def build_plan(*, context: str, issuer: str, username: str, email: str | None,
-               user: dict | None, memberships: list[dict], web_ready: bool) -> dict:
+               user: dict | None, memberships: list[dict], web_ready: bool,
+               resume_unmarked_disabled: bool = False) -> dict:
     state = "NEW"
     if user is not None:
         attributes = user.get("attributes") or {}
         marker = attributes.get(PROVISIONER_ATTRIBUTE)
-        if (marker != [PROVISIONER_VALUE] or user.get("enabled") is not False
-                or user.get("username") != username):
+        if (user.get("enabled") is not False or user.get("username") != username):
             state = "BLOCKED_EXISTING_USER"
         elif (user.get("email") or None) != email:
             state = "BLOCKED_EMAIL_MISMATCH"
         else:
-            state = "RESUME_DISABLED"
-        if state == "RESUME_DISABLED":
-            if len(memberships) > 1:
-                state = "BLOCKED_MEMBERSHIP"
             subject = user["id"]
             org_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{issuer}|{subject}"))
             alias = f"user_{subject}"
+            if len(memberships) > 1:
+                state = "BLOCKED_MEMBERSHIP"
             expected = (issuer, subject, org_id)
             for row in memberships:
                 identity = (row.get("issuer"), row.get("subject"), row.get("org_id"))
@@ -115,17 +117,29 @@ def build_plan(*, context: str, issuer: str, username: str, email: str | None,
                 if any(value != alias for value in row.get("legacy_client_ids", [])):
                     state = "BLOCKED_MEMBERSHIP"
                     break
+            if state not in {"BLOCKED_MEMBERSHIP", "BLOCKED_EMAIL_MISMATCH",
+                             "BLOCKED_EXISTING_USER"}:
+                if memberships or marker == [PROVISIONER_VALUE]:
+                    state = "RESUME_DISABLED"
+                elif (resume_unmarked_disabled
+                      and "UPDATE_PASSWORD" in (user.get("requiredActions") or [])):
+                    state = "RESUME_UNMARKED_DISABLED"
+                else:
+                    state = "BLOCKED_UNMARKED_DISABLED"
     if not web_ready:
         state = "BLOCKED_WEB_CLIENT"
     plan = {
-        "schema_version": 1, "context": context, "issuer": issuer,
+        "schema_version": 2, "context": context, "issuer": issuer,
         "username": username, "email": email, "client": GUI_CLIENT, "state": state,
         "subject": user.get("id") if user else None,
         "membership_count": len(memberships),
+        "resume_unmarked_disabled": resume_unmarked_disabled,
     }
     payload = json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
     plan["plan_sha256"] = hashlib.sha256(payload).hexdigest()
-    plan["can_apply"] = state in {"NEW", "RESUME_DISABLED"}
+    plan["can_apply"] = state in {
+        "NEW", "RESUME_DISABLED", "RESUME_UNMARKED_DISABLED",
+    }
     return plan
 
 
@@ -180,10 +194,11 @@ def membership_rows(collection, issuer: str, subject: str) -> list[dict]:
 
 
 def provision(client, root: str, username: str, email: str | None, user: dict | None,
-              issuer: str, collection, credentials_path: Path) -> None:
-    if user is None:
+              issuer: str, collection, credentials_path: Path,
+              resume_unmarked_disabled: bool = False) -> None:
+    created_by_this_run = user is None
+    if created_by_this_run:
         payload = {"username": username, "enabled": False,
-                   "attributes": {PROVISIONER_ATTRIBUTE: [PROVISIONER_VALUE]},
                    "requiredActions": ["UPDATE_PASSWORD"]}
         if email:
             payload["email"] = email
@@ -197,13 +212,17 @@ def provision(client, root: str, username: str, email: str | None, user: dict | 
     roles = keycloak_request(client, "GET", f"{root}/users/{subject}/role-mappings/realm/composite")
     if {row.get("name") for row in roles} & {"trust-admin", "trust-read-all"}:
         raise RuntimeError("GUI user has privileged realm roles and cannot be enabled")
-    # Recheck after creation and before touching MongoDB. A disabled user can
-    # be resumed, but an inactive or conflicting membership is never revived.
-    rows = membership_rows(collection, issuer, subject)
-    check = build_plan(context="apply", issuer=issuer, username=username, email=email,
-                       user=user, memberships=rows, web_ready=True)
-    if not check["can_apply"]:
-        raise RuntimeError("New user has a conflicting or inactive membership")
+    # Recheck resumed users before touching MongoDB. New users are trusted here
+    # only because this invocation created them while keeping them disabled.
+    if not created_by_this_run:
+        rows = membership_rows(collection, issuer, subject)
+        check = build_plan(
+            context="apply", issuer=issuer, username=username, email=email,
+            user=user, memberships=rows, web_ready=True,
+            resume_unmarked_disabled=resume_unmarked_disabled,
+        )
+        if not check["can_apply"]:
+            raise RuntimeError("Existing disabled user cannot be resumed safely")
 
     password = secrets.token_urlsafe(36)
     keycloak_request(client, "PUT", f"{root}/users/{subject}/reset-password",
@@ -276,16 +295,22 @@ def main() -> int:
                 rows = membership_rows(collection, issuer, user["id"]) if user else []
                 plan = build_plan(context=args.context, issuer=issuer,
                                   username=args.username, email=args.email,
-                                  user=user, memberships=rows, web_ready=web_ready)
+                                  user=user, memberships=rows, web_ready=web_ready,
+                                  resume_unmarked_disabled=args.resume_unmarked_disabled)
                 print_plan(plan)
                 if not args.apply:
                     return 0 if plan["can_apply"] else 3
                 if not plan["can_apply"] or plan["plan_sha256"] != args.confirm_plan:
                     raise SystemExit("Live plan is blocked or differs from the reviewed hash")
-                credentials_path = private_credentials_path(repo_root, args.username,
-                                                            resume=plan["state"] == "RESUME_DISABLED")
+                credentials_path = private_credentials_path(
+                    repo_root, args.username,
+                    resume=plan["state"] in {
+                        "RESUME_DISABLED", "RESUME_UNMARKED_DISABLED",
+                    },
+                )
                 provision(client, root, args.username, args.email, user,
-                          issuer, collection, credentials_path)
+                          issuer, collection, credentials_path,
+                          resume_unmarked_disabled=args.resume_unmarked_disabled)
                 return 0
 
 

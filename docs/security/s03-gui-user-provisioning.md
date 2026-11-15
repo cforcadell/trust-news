@@ -10,10 +10,14 @@ El motor crea el usuario deshabilitado, le asigna una contraseña temporal con
 entonces habilita el usuario. El `org_id` usa la misma fórmula determinista que
 el migrador de propietarios (`UUIDv5` del emisor y sujeto). Antes de escribir,
 rechaza nombres existentes ajenos al motor, membresías inactivas o conflictivas
-y configuración S03/Web incompleta. Si una ejecución se interrumpe con el
-usuario deshabilitado y marcado por el motor, el plan puede proponer reanudar;
-se generará una nueva contraseña temporal. Un usuario ya habilitado no se
-modifica en una repetición.
+y configuración S03/Web incompleta. Si se interrumpe con una membresía S03
+válida, el usuario deshabilitado puede reanudarse y recibirá una nueva
+contraseña temporal. Si el proceso se corta antes de crear la membresía, solo
+se puede reanudar con `--resume-unmarked-disabled`, tras confirmar que ese
+usuario fue creado por el intento fallido. El plan exige además que siga
+deshabilitado y requiera `UPDATE_PASSWORD`. Un usuario ya habilitado no se
+modifica en una repetición. El motor no depende de atributos personalizados
+del perfil Keycloak.
 
 La contraseña y la clave de cuotas se guardan en
 `secrets/clients/gui-<username>.json`, directorio privado `0700` y archivo
@@ -49,6 +53,12 @@ plan indica `client=TrustNewsWeb`, `state=NEW`, `s03_gui_provision=DRY_RUN` y
 un `plan_sha256`. Para un realm que exige verificación de correo, añadir
 `--email <correo>` en ambos comandos. Si el estado es `BLOCKED`, no aplicar.
 
+Para reanudar un usuario deshabilitado sin membresía tras un intento fallido
+confirmado, incluir `--resume-unmarked-disabled` en el dry-run. Revisar que el
+estado sea `RESUME_UNMARKED_DISABLED` y que el usuario sea el esperado; usar la
+misma opción y el hash nuevo al aplicar. Esta opción no sirve para adoptar
+usuarios deshabilitados preexistentes.
+
 Con el plan exacto revisado:
 
 ```bash
@@ -60,8 +70,9 @@ Con el plan exacto revisado:
 El motor vuelve a leer el destino y rechaza un plan que haya cambiado. La
 salida correcta termina con `s03_gui_provision=APPLIED`,
 `client=TrustNewsWeb`, `membership=active` y `quota=not_managed`. Si falla a mitad,
-consultar el estado del usuario en Keycloak; un usuario deshabilitado y marcado
-por este motor puede reanudarse después de generar y revisar un plan nuevo.
+consultar el estado del usuario en Keycloak. Solo reanudar una cuenta sin
+membresía cuando la procedencia del intento fallido esté confirmada y el nuevo
+plan `RESUME_UNMARKED_DISABLED` haya sido revisado.
 
 Entregar la contraseña temporal al titular por un canal privado y retirarla del
 host cuando haya cambiado la contraseña. La clave `quota_client_id` del archivo

@@ -52,28 +52,32 @@ prepare_off_rollout() {
 }
 
 check_pending_orders() {
-  local pending
-  pending="$(kubectl exec -i -n apis deployment/news-handler -- python - <<'PY'
-import asyncio
-import os
-from motor.motor_asyncio import AsyncIOMotorClient
-from common.utils.mongo import build_mongo_uri_from_env
-
-async def main():
-    client = AsyncIOMotorClient(build_mongo_uri_from_env(), serverSelectionTimeoutMS=5000)
-    collection = client[os.getenv("MONGO_DBNAME", "newsdb")][os.getenv("MONGO_COLLECTION", "news")]
-    count = await collection.count_documents({
-        "$or": [{"validation_mode": "BLOCKCHAIN"}, {"validation_mode": {"$exists": False}}],
-        "status": {"$in": ["CREATED", "ASSERTIONS_REQUESTED", "DOCUMENT_CREATED",
-                           "IPFS_PENDING", "IPFS_UPLOADED", "BLOCKCHAIN_REQUESTED",
-                           "BLOCKCHAIN_PENDING", "VALIDATION_PENDING"]},
-    })
-    print(count)
-    client.close()
-
-asyncio.run(main())
-PY
+  local pending database collection pending_query
+  database="$(kubectl get configmap news-handler-config -n apis -o jsonpath='{.data.MONGO_DBNAME}')"
+  collection="$(kubectl get configmap news-handler-config -n apis -o jsonpath='{.data.MONGO_COLLECTION}')"
+  [[ $database =~ ^[a-zA-Z0-9_-]+$ && $collection =~ ^[a-zA-Z0-9_-]+$ ]] || {
+    echo 'Invalid MongoDB database or collection in news-handler-config' >&2
+    exit 1
+  }
+  pending_query="$(cat <<'JS'
+const query = {
+  $or: [{validation_mode: "BLOCKCHAIN"}, {validation_mode: {$exists: false}}],
+  status: {$in: [
+    "CREATED", "ASSERTIONS_REQUESTED", "DOCUMENT_CREATED", "IPFS_PENDING",
+    "IPFS_UPLOADED", "BLOCKCHAIN_REQUESTED", "BLOCKCHAIN_PENDING",
+    "VALIDATION_PENDING"
+  ]}
+};
+print(db.getSiblingDB(_getEnv("CHECK_DATABASE"))
+  .getCollection(_getEnv("CHECK_COLLECTION")).countDocuments(query));
+JS
 )"
+  pending="$(kubectl exec -n infra statefulset/mongodb -- sh -c '
+    export CHECK_DATABASE="$1" CHECK_COLLECTION="$2"
+    exec mongo --quiet --username "$MONGO_INITDB_ROOT_USERNAME" \
+      --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin \
+      --eval "$3"
+  ' sh "$database" "$collection" "$pending_query")"
   if ! [[ "$pending" =~ ^[0-9]+$ ]]; then
     echo "Could not read pending blockchain order count: $pending" >&2
     exit 1

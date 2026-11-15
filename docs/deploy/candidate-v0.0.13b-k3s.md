@@ -111,6 +111,50 @@ infraestructura. Se preparó localmente la selección explícita del contenedor
 `keycloak` en el motor existente. No está publicada ni ejecutada; requiere
 otro SHA y la repetición de sus gates.
 
+El operador aportó después logs de `35f781eb`: el job `deploy infra-prod`
+estabilizó los nueve recursos, reconcilió el cliente web de Keycloak con
+`PASS` y verificó el issuer OIDC; `verify_mongodb_alignment` terminó con
+`aligned: true`. `sync-scripts` instaló el reconciliador S03 y su inventario.
+En el host Hetzner, el reconciliador creó siete clientes de servicio con
+`s03_keycloak_reconciliation=PASS`. El operador trasladó sus `.env` a
+`~/trust-news/secrets/clients` y ejecutó la fase `apis` con esa ruta explícita.
+La salida aportada de `check_configured_secrets.sh --phase apis` pasó para
+nueve servicios S03, Kafka y los Secrets de aplicación, sin mostrar valores.
+El directorio operativo de Hetzner no es un checkout Git. Falta el preflight
+CI `apis-frontend-prod` del mismo SHA antes de su despliegue.
+
+El log posterior de preflight CI `apis-frontend-prod` en `35f781eb` terminó
+con `Job succeeded`: TLS servido verificado, Secrets S03/Kafka y de aplicación
+correctos, y snapshot de revisiones capturado para 11 Deployments. Ese job
+no construyó ni desplegó APIs. Sigue pendiente el pipeline `deploy` del mismo
+SHA con Blockchain OFF y la verificación efectiva posterior en K3s.
+
+El job `deploy apis-frontend-prod` de `35f781eb` pasó Secrets y capturó 11
+revisiones; comprobó MongoDB alineado, cero órdenes BLOCKCHAIN pendientes y
+preparó el modo OFF. Skaffold aplicó parte de los manifiestos, pero falló en
+los tres Services `validate-service-{1,2,3}` porque el puerto `8070` no tenía
+nombre junto al puerto `s03-https:9443`. No se alcanzó la verificación final.
+El job automático `rollback` restauró las revisiones de los 11 Deployments y
+terminó correctamente, pero no esperó a que estuvieran disponibles ni revirtió
+Services o ConfigMaps. La captura posterior muestra `news-handler` en `0/1`
+con `CrashLoopBackOff`; los tres Services de validación conservan solo
+`8070/TCP`. El log del contenedor revela `security_protocol=SSL` sin
+`ssl_context` al crear `AIOKafkaProducer`. La imagen efectiva restaurada es
+`v0.0.13-4-g5a1e011@sha256:4267ee68…` y el ConfigMap establece `SSL`.
+El código fuente actual pasa ese contexto mediante el motor Kafka compartido;
+falta identificar la revisión/imagen nueva antes de decidir la recuperación.
+La corrección local añade `name: http` a los tres Services prod,
+coherente con sus equivalentes locales. El render del perfil muestra 11
+Services, sin puertos múltiples anónimos ni nombres duplicados. Mantener el
+lock, recuperar `news-handler` y después publicar un nuevo SHA y repetir los
+gates; no reutilizar el deploy fallido.
+
+El siguiente despliegue necesita también que el gate de órdenes pendientes
+funcione con `news-handler` caído. El script local ahora consulta MongoDB
+directamente, tomando base y colección de `news-handler-config`; se verificó
+con `kubectl` simulado para cero y dos pendientes. Falta publicar y validar
+esa versión en K3s antes de considerarla operativa.
+
 ## Fotografía local, 2026-11-11
 
 | Campo | Resultado comprobado | Para fijar el candidato |
@@ -124,7 +168,7 @@ otro SHA y la repetición de sus gates.
 | Preflight CI | `PIPELINE_ACTION=preflight` solo admite `infra-prod` y `apis-frontend-prod`. Comprueba acceso Kubernetes, certificado servido por Traefik con CA y hostname, Secrets con `scripts/check_configured_secrets.sh` y, para API, captura revisiones. No construye ni despliega. | Ejecutarlo en el SHA protegido final y conservar ID, hora, perfil y resultado. El motor comprueba S03, S07a (incluida cadena y SAN) y los Secrets de aplicación, sin mostrar valores; `deploy` repite la fase antes de mutar recursos. |
 | Lock y concurrencia | La guía documenta un Maintenance lock de Cloudflare; su estado actual no está comprobado. La CI no define `resource_group`. | El operador verifica y registra el estado del lock antes de la ventana, mantiene el acceso externo cerrado durante el cambio y evita pipelines concurrentes. Registrar responsable y criterio para abrir/cerrar la ventana. |
 | Observación | La guía prevé Loki/Grafana, estado Ready, rutas, errores y coste | Fijar periodo de observación, responsable y umbrales antes de desplegar. Conservar solo métricas y resultados redactados, sin tokens, cuerpos, IP ni identificadores de Cloudflare. |
-| Rollback | `rollout-revisions.sh` captura las revisiones de diez Deployments API y `frontend-web`; el job `rollback` intenta restaurarlas si falla `apis-frontend-prod`. Antes del rollout, la CI ejecuta `realign-source-routing-mongodb.sh --apply`, que puede modificar MongoDB. | Conservar snapshot y artefacto del pipeline anterior, imagen/digest, manifiestos, Secrets anteriores validados y respaldo de datos. El job no revierte ConfigMaps, Ingress, Kafka, Keycloak, MongoDB ni PVC; preparar recuperación por componente y datos antes de la ventana. No considerar probado en K3s el rollback automático por un fallo real. |
+| Rollback | `rollout-revisions.sh` captura las revisiones de diez Deployments API y `frontend-web`; el job `rollback` restauró las 11 revisiones tras el fallo real de `apis-frontend-prod` en `35f781eb`. No esperó disponibilidad: `news-handler` quedó `0/1` en la captura posterior. Antes del rollout, la CI ejecuta `realign-source-routing-mongodb.sh --apply`, que puede modificar MongoDB. | Conservar snapshot y artefacto del pipeline anterior, imagen/digest, manifiestos, Secrets anteriores validados y respaldo de datos. El job no revierte Services, ConfigMaps, Ingress, Kafka, Keycloak, MongoDB ni PVC; preparar recuperación por componente y datos antes de la ventana. El éxito del job no acredita recuperación funcional. |
 
 ## Revisión local del candidato, 2026-11-13
 

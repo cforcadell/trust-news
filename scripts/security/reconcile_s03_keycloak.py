@@ -120,7 +120,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="docs/security/s03-keycloak-clients.json")
     destination = parser.add_mutually_exclusive_group(required=True)
-    destination.add_argument("--output-dir", help="Private directory outside the repository")
+    destination.add_argument("--output-dir", help="Private directory outside the working directory or in secrets/clients")
     destination.add_argument("--local-overlays", action="store_true",
                              help="Write each service credential to its ignored local API overlay file")
     parser.add_argument("--services-config", default="docs/security/s03-local-services.json",
@@ -155,8 +155,9 @@ def main():
             credential_paths[client_id] = path
     else:
         output_dir = Path(args.output_dir).resolve()
-        if output_dir.is_relative_to(root):
-            raise SystemExit("Output directory must be outside the repository")
+        private_clients_dir = (root / "secrets" / "clients").resolve()
+        if output_dir.is_relative_to(root) and output_dir != private_clients_dir:
+            raise SystemExit("Output directory must be outside the working directory or in secrets/clients")
         output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(output_dir, 0o700)
         with open(args.config, encoding="utf-8") as handle:

@@ -296,7 +296,10 @@ Los OOM observados son de cgroup y afectan a Geth; no equivalen por sí solos a 
 
 **No ejecutar todavía el modo completo `BLOCKCHAIN_ENABLED=OFF scripts/k8s/set-blockchain-mode.sh`.** Ese modo y el soporte de `blockchain-mode` pertenecen a la versión nueva. Los pods antiguos no interpretan el nuevo ConfigMap y no proporcionan por sí mismos el gate de nuevas órdenes. Durante toda la transición, el maintenance lock de Cloudflare debe permanecer activo y verificado; es el que impide que entren órdenes externas en la versión antigua.
 
-La consulta de pendientes sí es compatible con el `news-handler` anterior y es de solo lectura. El archivo local no puede ejecutarse por su ruta en Hetzner; usar la copia sincronizada en el directorio operativo.
+La consulta de pendientes es de solo lectura y usa el MongoDB de `infra`
+con la base y colección declaradas en `news-handler-config`; no requiere que
+`news-handler` esté disponible. El archivo local no puede ejecutarse por su
+ruta en Hetzner; usar la copia sincronizada en el directorio operativo.
 
 **[HETZNER]** Ejecutar y conservar el número obtenido:
 
@@ -311,7 +314,7 @@ Si devuelve un número mayor que cero o no puede consultarlo, detener la transic
 
 #### Detener el runtime Blockchain saturado
 
-Si Geth continúa saturando CPU o provocando OOM antes del pipeline, se admite una parada anticipada y reversible del runtime. Esta acción funciona contra la versión antigua: vuelve a comprobar las órdenes pendientes y escala únicamente `deployment/news-chain` y los StatefulSets `geth-bootnode`, `geth-miner` y `geth-rpc-endpoint` a cero. Conserva sus PVC, Kafka, MongoDB, Gateway, News Handler y los servicios LIGHT. No escalar `news-handler` a cero porque la CI lo necesita para repetir el gate antes del rollout.
+Si Geth continúa saturando CPU o provocando OOM antes del pipeline, se admite una parada anticipada y reversible del runtime. Esta acción vuelve a comprobar las órdenes pendientes y escala únicamente `deployment/news-chain` y los StatefulSets `geth-bootnode`, `geth-miner` y `geth-rpc-endpoint` a cero. Conserva sus PVC, Kafka, MongoDB, Gateway, News Handler y los servicios LIGHT.
 
 Prerequisito: haber completado la sincronización **VM-KIND → HETZNER** anterior y verificar que el maintenance lock sigue activo. Si el gate devuelve cero, **[HETZNER]**:
 

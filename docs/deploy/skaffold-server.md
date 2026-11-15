@@ -156,7 +156,7 @@ ssh -N -i "$K3S_KEY" -p "$K3S_SSH_PORT" -L 6443:127.0.0.1:6443 "$K3S_USER@$K3S_H
 
 ## 3. Secrets productivos
 
-`.env` files and cryptographic material are kept outside the repository.
+`.env` files and cryptographic material are kept in the private `secrets/` directory on the Hetzner host; this host directory is not a Git checkout.
 
 ### 3.1 Helpers idempotentes
 
@@ -274,50 +274,32 @@ aplicación requeridos por el perfil. No usar certificados ni `.env` de kind en 
 Al preparar la activación S03 en preproducción o producción, reconciliar a mano
 el realm `TrustNews` contra el Keycloak del entorno. El reconciliador conserva
 las identidades ya existentes y escribe un `.env` por client en un directorio
-privado fuera del repositorio; nunca muestra los valores. El endpoint debe ser
+privado del host; nunca muestra los valores. El endpoint debe ser
 un port-forward al Keycloak del entorno y las credenciales administrativas se
 introducen por el entorno de la sesión, no como argumentos del proceso:
 
+En el host, ejecutar el reconciliador con un entorno Python que tenga `httpx` instalado; `sync-scripts` instala el archivo, pero no paquetes Python. El ejemplo usa el entorno virtual operativo del host:
+
 ```bash
 umask 077
-mkdir -p "$HOME/trust-news-secrets/s03-clients"
+install -d -m 700 "$HOME/trust-news/secrets/clients"
 (
   read -r -p 'Keycloak admin user: ' KC_ADMIN_USER
   read -r -s -p 'Keycloak admin password: ' KC_ADMIN_PASSWORD
   printf '\n'
   export KC_ADMIN_USER KC_ADMIN_PASSWORD
   export KC_ADMIN_URL='http://127.0.0.1:18080/auth'
-  python3 scripts/security/reconcile_s03_keycloak.py \
-    --output-dir "$HOME/trust-news-secrets/s03-clients"
+  "$HOME/trust-news-ops-venv/bin/python" scripts/security/reconcile_s03_keycloak.py \
+    --output-dir "$HOME/trust-news/secrets/clients"
 )
 ```
 
-Con el port-forward activo, crear/actualizar un Secret por client a partir de
-los ficheros generados. Esta operación no imprime el contenido de los Secrets:
+Después de reconciliar los clientes, crear/actualizar los Secrets de `apis`
+con el motor operativo común. Lee los `.env` de `secrets/clients/` y no muestra
+sus valores:
 
 ```bash
-set -o pipefail
-while IFS=$'\t' read -r namespace client secret; do
-  kubectl create secret generic "$secret" \
-    --namespace "$namespace" \
-    --from-env-file="$HOME/trust-news-secrets/s03-clients/${client}.env" \
-    --dry-run=client -o yaml | kubectl apply -f -
-done < <(python3 - <<'PY'
-import json
-with open('docs/security/s03-local-services.json', encoding='utf-8') as source:
-    services = json.load(source)
-clients = {}
-for service in services:
-    client = service.get('client')
-    namespace = service.get('namespace')
-    if client and namespace:
-        secret = service.get('secret_name', f's03-client-{client}')
-        clients[(namespace, client, secret)] = True
-for namespace, client, secret in sorted(clients):
-    print(f'{namespace}\t{client}\t{secret}')
-PY
-)
-
+bash scripts/create-secrets.sh --phase apis
 bash scripts/check_configured_secrets.sh --phase apis
 ```
 

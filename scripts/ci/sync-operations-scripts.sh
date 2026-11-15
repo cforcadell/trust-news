@@ -55,6 +55,8 @@ sync_group() {
   --target-dir "$target_root/secrets" --mode 0700 --directory-only
 "$script_dir/sync-remote-files.sh" "${sync_args[@]}" \
   --target-dir "$target_root/secrets/pkis" --mode 0700 --directory-only
+"$script_dir/sync-remote-files.sh" "${sync_args[@]}" \
+  --target-dir "$target_root/secrets/clients" --mode 0700 --directory-only
 
 # Keep this manifest explicit: adding a file to the repository must not
 # silently publish a private or local-only artifact to the operator host.

@@ -31,7 +31,7 @@ El generador de PKI reutiliza certificados existentes, crea los que faltan fuera
 
 ## Provisión manual en Hetzner/K3s
 
-Comprobar primero el contexto K3s y preparar los certificados y los `.env` en un directorio privado externo. Cada certificado de servicio debe verificar la CA interna, incluir `<service>.<namespace>.svc.cluster.local` en SAN, tener uso `serverAuth` y vigencia suficiente. Para los nombres y puertos, usar el inventario S03. Ejemplo parametrizado sin imprimir los valores:
+Comprobar primero el contexto K3s y preparar los certificados y los `.env` en `secrets/`, directorio privado del host Hetzner. Cada certificado de servicio debe verificar la CA interna, incluir `<service>.<namespace>.svc.cluster.local` en SAN, tener uso `serverAuth` y vigencia suficiente. Para los nombres y puertos, usar el inventario S03. Ejemplo parametrizado sin imprimir los valores:
 
 ```bash
 set -o pipefail

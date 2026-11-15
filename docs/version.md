@@ -1,6 +1,6 @@
 # v0.0.13b — Plataforma de demos controladas
 
-**Estado: desplegada en Hetzner/K3s, con salud OK según el operador; apertura NO-GO hasta completar las puertas de aceptación.** La captura del pipeline GitLab `#3070111046` muestra build, preflight y deploy correctos para `722c1d57`; el `build.json` aportado coincide con los diez digests de los pods reportados en `apis`/`frontend`, incluidos los sidecars `s03-tls-proxy`. Los pods reportados están `Running` y sus contenedores `ready=true`. El operador reporta Blockchain OFF (`false`) en Gateway, News Handler y los tres workers de validación; Kafka `SSL`; Evidence Search `SMART` en sus dos réplicas; y cero réplicas de Geth/`news-chain`. Falta documentar el perfil del pipeline y continuar las puertas de aceptación. El operador aclara que «todo OK» se refiere solo al despliegue y la salud, no a la aceptación S02/S03/S07a, S11-D ni S12-D. S00 y S01 están cerrados para preproducción con riesgos residuales. S02 y S03 tienen aceptación local en kind; el operador confirma que todas las pruebas locales del camino declarativo S03 están OK y se cierra esa aceptación. En la comprobación local del 13-11-2026, el preflight S03 pasó para nueve servicios y la inspección de variables no sensibles confirmó S03 activo y Blockchain OFF donde aplica. S07a superó en kind los E2E técnicos TLS y el E2E funcional autenticado LIGHT/SMART. El operador confirmó S02 verificado también en Hetzner/K3s (2026-11-15), sin adjuntar detalle de ejecución; S03 y S07a siguen pendientes en Hetzner/K3s; la aceptación funcional/factual de v0.0.13 también.
+**Estado: release v0.0.13b en preparación; NO-GO para abrir a clientes.** El commit candidato local es `5522184ffe647ba3ed95b78a527ae2a40e1637d1` (`postTFM`, mensaje `v0.0.13b preclosed`); todavía no hay etiqueta local `v0.0.13b`. La evidencia de pipeline y salud documentada corresponde al SHA anterior `722c1d570f8c85f36539bea356a2848a19d7cc5a`, no acredita el despliegue de `5522184` y no debe presentarse como evidencia del candidato nuevo. Para etiquetar la release hay que promover primero el commit/documentación acordados a `main` en GitHub y GitLab y completar la verificación del candidato según [el flujo de release](deploy/gitlab-github-release-workflow.md#6-release). La apertura sigue NO-GO hasta completar las puertas de aceptación. S00 y S01 están cerrados para preproducción con riesgos residuales. S02 y S03 tienen aceptación local en kind; el operador confirma que todas las pruebas locales del camino declarativo S03 están OK y se cierra esa aceptación. En la comprobación local del 13-11-2026, el preflight S03 pasó para nueve servicios y la inspección de variables no sensibles confirmó S03 activo y Blockchain OFF donde aplica. S07a superó en kind los E2E técnicos TLS y el E2E funcional autenticado LIGHT/SMART. El operador confirmó S02 verificado también en Hetzner/K3s (2026-11-15), sin adjuntar detalle de ejecución; S03 y S07a siguen pendientes en Hetzner/K3s; la aceptación funcional/factual de v0.0.13 también.
 
 **Entornos:** kind en VM es desarrollo local; Hetzner/K3s es preproducción; producción no existe. Los perfiles y overlays `-prod` conservan un nombre histórico. Código, render y pruebas kind no acreditan el comportamiento efectivo en Hetzner.
 
@@ -33,8 +33,9 @@ Esta versión no acredita producción, servicio autónomo, piloto comercial, cal
 
 La [ficha del candidato Hetzner/K3s](deploy/candidate-v0.0.13b-k3s.md)
 registra el deploy CI del SHA `722c1d57` y los controles pendientes de
-evidencia efectiva en K3s. Los cambios documentales locales posteriores no
-alteran las imágenes desplegadas.
+evidencia efectiva en K3s. Ese despliegue no está vinculado al commit candidato
+`5522184`; antes de atribuirle el estado desplegado hay que identificar/verificar
+el SHA efectivo y sus digests en K3s.
 
 | Paquete | Estado observado | Trabajo y evidencia para demos |
 | --- | --- | --- |

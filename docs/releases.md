@@ -4,12 +4,39 @@ Este documento recoge las versiones desplegadas, sus límites conocidos y los si
 
 ## v0.0.13b — Plataforma de demos controladas
 
-**Estado: desplegada en Hetzner/K3s, con salud OK según el operador; aceptación pendiente y NO-GO para abrir a clientes.** La captura del pipeline `#3070111046` muestra build, preflight y deploy correctos para `722c1d57`; faltan artefactos efectivos de K3s. El operador aclara que la aceptación S02/S03/S07a, S11-D y S12-D no está confirmada. S00/S01 cerrados para preproducción con límites; S02/S03 aceptados localmente en kind, incluido el camino declarativo S03 confirmado por el operador; S07a tiene E2E técnico y funcional kind. Hetzner/K3s es preproducción, producción no existe y los perfiles `-prod` son nombres heredados. [Objetivo, estado y puertas](version.md) · [Inventario S00](security/s00-inventory.md) · [Auditoría contrastada](security/security_review_codex.md).
+**Estado: release en preparación; NO-GO para abrir a clientes.** El commit candidato en `postTFM` es `5522184ffe647ba3ed95b78a527ae2a40e1637d1`; la etiqueta `v0.0.13b` aún no existe. La evidencia disponible del pipeline `#3070111046` y de salud en K3s corresponde al SHA anterior `722c1d570f8c85f36539bea356a2848a19d7cc5a`, por lo que no acredita el despliegue del commit candidato. La aceptación S02/S03/S07a, S11-D y S12-D no está confirmada íntegramente. S00/S01 están cerrados para preproducción con límites; S02/S03 se aceptaron localmente en kind, incluido el camino declarativo S03; S07a tiene E2E técnico y funcional kind. Hetzner/K3s es preproducción, producción no existe y los perfiles `-prod` son nombres heredados. [Objetivo, estado y puertas](version.md) · [Inventario S00](security/s00-inventory.md) · [Auditoría contrastada](security/security_review_codex.md).
 
 - Demos guiadas LIGHT/SMART, Blockchain OFF, mTLS general/administrativo y máximo dos organizaciones invitadas con identidad separada, datos desechables y vigencia limitada.
 - S02/S03/S07a requieren verificar su integración efectiva y completar la aceptación en Hetzner; S11-D y S12-D prueban borde, aislamiento, coste, baja y rollback sobre el mismo candidato. S01 exige vincular los preflights al SHA desplegado y aceptar sus riesgos residuales para la ventana.
 - Hasta S05 no se permite a invitados iniciar trabajos con gasto; cada ejecución autorizada es supervisada por el operador. Si ese límite no puede imponerse, solo hay demos internas.
 - El cierre habilita exclusivamente las demos descritas en [version.md](version.md#puertas-de-apertura-de-demos). No cierra v0.0.13, no retira mTLS, no acredita beta autónoma ni producción.
+
+### Pasos para crear la etiqueta v0.0.13b
+
+1. Revisar y cerrar el diff de `postTFM`; confirmar el SHA candidato y que el árbol de trabajo esté limpio.
+2. Verificar que el despliegue en Hetzner/K3s y sus artefactos (preflights, `build.json`, digests e imágenes efectivas) corresponden a ese SHA. La evidencia actualmente anotada para `722c1d57` no valida `5522184`.
+3. Completar la aceptación pendiente y dejar registrada la decisión de release. La etiqueta de software no cambia el estado **NO-GO** para abrir a clientes mientras falten puertas de demo.
+4. Promover mediante PR `postTFM -> main` en GitHub y MR `postTFM -> main` en GitLab; confirmar que ambas ramas `main` contienen el commit/cambios esperados.
+5. En el checkout actualizado de `main`, verificar el commit de destino y crear la etiqueta anotada:
+
+   ```bash
+   git fetch origin main
+   git fetch gitlab main
+   git checkout main
+   git pull --ff-only origin main
+   git log -1 --oneline
+   git tag -a v0.0.13b -m "Release v0.0.13b"
+   git show v0.0.13b --no-patch
+   ```
+
+6. Tras revisar que el tag apunta al commit correcto, publicar la misma etiqueta en cada remoto y crear la nota de release correspondiente:
+
+   ```bash
+   git push origin v0.0.13b
+   git push gitlab v0.0.13b
+   ```
+
+   No publicar el tag si el commit de `main` no es el candidato aprobado. El procedimiento general está en [gitlab-github-release-workflow.md](deploy/gitlab-github-release-workflow.md#6-release).
 
 ## v0.0.13c — Seguridad para acceso autónomo limitado
 

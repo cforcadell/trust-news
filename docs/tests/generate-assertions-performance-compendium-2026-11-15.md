@@ -4,6 +4,8 @@
 **Estado:** compendio y diseño candidato de C en dos fases; sin implementación ni mediciones nuevas.
 **Problema comunicado:** noticias largas cuya generación supera 90 s. No hay en este análisis una traza de una de esas órdenes que atribuya el tiempo a una fase concreta.
 
+**Actualización del 17 de noviembre:** la [comparación posterior de 20 llamadas encadenadas](generate-assertions-two-stage-live-probes-2026-11-17.md) no respaldó C en dos casos sintéticos breves: 3/9 cadenas produjeron documento V2 válido y todas tardaron más que su línea base LEGACY única. La [decisión intermedia y las estrategias en competencia](generate-assertions-strategy-competition-2026-11-17.md) priorizaron ensayar salida semántica compacta en una llamada. Ese [ensayo posterior de 20 llamadas compactas](generate-assertions-compact-single-call-2026-11-17.md) tampoco encontró una variante que conserve calidad, fiabilidad y velocidad a la vez. La preferencia por C que figura debajo es la conclusión histórica de este documento, anterior a ambas pruebas; LEGACY sigue siendo la ruta inicial.
+
 ## Fuentes y conclusión conjunta
 
 Este documento pone en comparación dos análisis independientes aportados para esta revisión y el análisis previo del repositorio. Se contrastaron sus propuestas con [el generador](../../api/generate-asertions/main.py), [el cliente LLM común](../../api/common/llm/factory.py), [la configuración versionada](../../k8s/apis/generate-asertions/configmap.yaml), [el benchmark de modelos](generate-assertions-openrouter-2026-10-31.md) y [la prueba de prompts](generate-assertions-prompt-ab-2026-10-29.md).

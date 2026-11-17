@@ -1,0 +1,7 @@
+{
+  "database": "newsdb",
+  "orders_collection": "news",
+  "quotas_collection": "clients_quotas",
+  "memberships_collection": "s03_memberships",
+  "legacy_prefixes": ["user", "TrustNewsWeb", "TrustNewsApi"]
+}

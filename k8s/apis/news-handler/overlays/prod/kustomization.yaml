@@ -15,4 +15,6 @@ resources:
 #     - prod-mongodb-app.env
 patches:
   - path: patch-resources.yaml
+  - path: ../../../../s03/runtime/patches/apis-news-handler-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-news-handler-service.json
 namespace: apis

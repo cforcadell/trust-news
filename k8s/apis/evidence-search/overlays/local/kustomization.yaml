@@ -3,6 +3,9 @@ kind: Kustomization
 resources:
   - ../../base
 
+patches:
+  - path: ../../../../s03/runtime/patches/apis-evidence-search-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-evidence-search-service.json
 generatorOptions:
   disableNameSuffixHash: true
 
@@ -11,5 +14,9 @@ secretGenerator:
     namespace: apis
     envs:
       - search.env
+  - name: s03-client-assermetry-evidence-search
+    namespace: apis
+    envs:
+      - s03-client.env
 
 namespace: apis

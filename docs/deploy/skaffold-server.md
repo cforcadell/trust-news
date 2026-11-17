@@ -6,7 +6,18 @@ Runbook operating the Hetzner environment. This document contains only:
 - repeatable deployment, verification and recovery procedures;
 - the next steps that have not yet been implemented.
 
-The status of the current version is in [`v0.0.13.md`](../releases/v0.0.13.md), the roadmap in [`next_releases.md`](../next_releases.md), the evidence of closed versions in [`releases.md`](../releases.md) and the incidences in [`issues.md`](../issues.md). The procedures shared with local are in [`k8s-common.md`](k8s-common.md).
+El estado y las puertas de la versión actual están en [`version.md`](../version.md), el roadmap en [`next_releases.md`](../next_releases.md), la historia de versiones en [`releases.md`](../releases.md) y las incidencias en [`issues.md`](../issues.md). Los procedimientos comunes están en [`k8s-common.md`](k8s-common.md).
+
+Hetzner/K3s es actualmente **preproducción**. Los nombres `-prod` son identificadores técnicos de perfiles y overlays; no acreditan producción. Esta guía sirve también para otro K3s después de adaptar dominio, issuer, Ingress, certificados y comprobaciones de CI al destino.
+
+## Guía rápida de K3s
+
+1. **Clúster limpio:** comprobar contexto, almacenamiento, registro, DNS y borde; aplicar `./skaffold deploy -p setup` y preparar los Secrets y certificados de [§3](#3-secrets-productivos). Desplegar inicialmente `infra-prod` con el `build.json` del mismo SHA, esperar a Keycloak, restaurar o crear realm/clientes base y completar MongoDB y clientes de servicio S03. Seguir la [secuencia detallada](#62-controlled-installation-or-reconstruction).
+2. Lanzar después los pipelines protegidos `traefik-prod`, `infra-prod` y `apis-frontend-prod`, por separado, con `BLOCKCHAIN_ENABLED=OFF`. La CI despliega con Skaffold y reconcilia el cliente web de Keycloak; no repetir ese ajuste tras un job correcto.
+3. **Clúster existente:** conservar estado, CA y Secrets; revisar contexto, backups, PVC, SHA/digests y modo. Para cambios solo de aplicación, lanzar `apis-frontend-prod`; para cambios de infraestructura, `infra-prod` y luego APIs. Rotar credenciales y certificados con el procedimiento S03/S07a cuando corresponda.
+4. Comprobar pods Ready, configuración efectiva, TLS, JWKS y rutas autorizadas/denegadas desde el borde. La aceptación kind no acredita Hetzner ni abre por sí sola las demos externas.
+
+Para instalar únicamente los scripts operativos y ficheros de soporte versionados en el host, lanzar el pipeline web con `PIPELINE_ACTION=sync-scripts` y `PROFILE=scripts-hetzner`; es un perfil de CI, no de Skaffold. El inventario, las rutas privadas y el uso de `secrets/pkis/` se detallan en [secrets-hetzner.md](secrets-hetzner.md#0-instalar-las-herramientas-del-repositorio-en-hetzner).
 
 Do not record here chronologies of tests, attempts of pipeline, identifiers, IP addresses, fingerprints, tokens, certificates or personal data.
 
@@ -53,7 +64,7 @@ The five custom rules are occupied and retain this order:
 | 4 | `Permanent block - non-public resources` | Activa |
 | 5 | `Permanent block - unexpected backend methods` | Activa |
 
-The lock exists and, as long as there are no redirects in an earlier phase, it can block the entire hostname. Its status is not assumed: the operator deliberately enables or disables it according to the working window. Its current observed state is disabled. Before changing it, the desired state is confirmed and, at the end, is left registered in the operational evidence, not in this runbook.
+The lock exists and, as long as there are no redirects in an earlier phase, it can block the entire hostname. The operator verifies its state before each working window and records the result in operational evidence. See [`version.md`](../version.md) and [`working.md`](../../working.md) for the last reported observation.
 
 The Free Managed Rulet is enabled. The only rule of rate limiting, `Expensive backend operations per IP`, protects the costly operations of the Gateway with the operating threshold of 5 requests for 10 seconds and 10 seconds mitigation. Login, refresh and Polling are not part of that rule.
 
@@ -125,11 +136,27 @@ The `postTFM` branch must be protected when the deployment variables are `Protec
 
 The deployment job opens a local `127.0.0.1:6443 -> Hetzner:127.0.0.1:6443` tunnel and forces the Kubeconfig endpoint to `https://127.0.0.1:6443`. This tunnel is for the K3s API and does not change the application's public issuer.
 
+Para operación interactiva desde un equipo externo, verificar la clave pública del host SSH por un canal independiente y usar `known_hosts` estricto. En el Hetzner actual el puerto SSH es `2222`; en otro K3s usar el configurado allí. Los ejemplos usan variables de la sesión (sin registrar sus valores):
+
+```bash
+export K3S_HOST=<host-o-ip>
+export K3S_USER=<usuario>
+export K3S_KEY=<ruta-clave-ssh>
+export K3S_SSH_PORT=2222
+ssh -i "$K3S_KEY" -p "$K3S_SSH_PORT" "$K3S_USER@$K3S_HOST" 'kubectl get nodes; kubectl get pods -A'
+```
+
+Con kubeconfig local preparado para el certificado del servidor, mantener abierto el túnel de la API y usar `https://127.0.0.1:6443` como endpoint del contexto. No publicar `6443/tcp`:
+
+```bash
+ssh -N -i "$K3S_KEY" -p "$K3S_SSH_PORT" -L 6443:127.0.0.1:6443 "$K3S_USER@$K3S_HOST"
+```
+
 ---
 
 ## 3. Secrets productivos
 
-`.env` files and cryptographic material are kept outside the repository.
+`.env` files and cryptographic material are kept in the private `secrets/` directory on the Hetzner host; this host directory is not a Git checkout.
 
 ### 3.1 Helpers idempotentes
 
@@ -180,12 +207,18 @@ No borrar primero un Secret para actualizarlo.
 | `apis` | `mongodb-secret` | `mongodb.env` |
 | `apis` | `search-secret` | `search.env` |
 | `apis` | `mongodb-app-secret` | `mongodb-app.env` |
+| `apis` | `source-router-enc` | `source-router.env` |
 | `infra` | `mongodb-secret` | `mongodb.env` |
 | `infra` | `keycloak-admin-secret` | `keycloak.env` |
 | `infra` | `keycloak-db-secret` | `keycloak-db.env` |
 | `infra` | `mongo-express-secret` | `mongo-express.env` |
 | `blockchain` | `ethereum-secrets` | `ethereum.env` |
 | `kube-system` | `trustnews-origin-tls` | `tls-origin.env` |
+| `infra` | `s03-internal-ca`, `s03-tls-keycloak` | CA y certificado TLS S03 de Keycloak |
+| `apis` | `s03-internal-ca`, `s03-tls-{admin-service,evidence-search,gateway,generate-asertions,news-handler,source-router,validate-service-1,validate-service-2,validate-service-3}` | misma CA S03 y un certificado TLS por servicio |
+| `apis` | `s03-client-*` | un `.env` privado por client de servicio S03 |
+| `infra` | `s07a-kafka-broker` | `broker.p12`, `ca.crt`, `KEYSTORE_PASSWORD`, `kafdrop.properties` |
+| `apis` | `s07a-kafka-ca` | la misma `ca.crt` pública de Kafka |
 
 Implementation:
 
@@ -200,6 +233,7 @@ apply_secret apis gate-config gateway.env
 apply_secret apis mongodb-secret mongodb.env
 apply_secret apis search-secret search.env
 apply_secret apis mongodb-app-secret mongodb-app.env
+apply_secret apis source-router-enc source-router.env
 
 apply_secret infra mongodb-secret mongodb.env
 apply_secret infra keycloak-admin-secret keycloak.env
@@ -213,7 +247,73 @@ apply_tls_secret kube-system trustnews-origin-tls \
 
 `MONGO_APP_USER` and `MONGO_APP_PWD` must match the user created by MongoDB's bootstrap. After lifting MongoDB the [`k8s-common.md`](k8s-common.md#7-mongodb-bootstrap)'s idepotent procedure is executed.
 
-### 3.3 Pull secret
+Los Secrets S03/S07a se aprovisionan por los procedimientos de [S03](../security/s03-skaffold.md) y [S07a](../security/s07a-kafka-tls.md); los nombres y claves son requisitos del manifiesto, no generadores de credenciales en Git. El `source-router.env` contiene `OPENROUTER_API_KEY` y una credencial Exa bajo `EXA_API_KEY` o `API_KEY_PROVIDER`. Reutilizar las credenciales de otros consumidores solo si la política de cuota y trazabilidad del entorno lo permite.
+
+Antes de cada despliegue de Hetzner, comprobar los Secrets desde el preflight de GitLab (mismo SHA y túnel a K3s). Para validación manual desde el checkout del SHA candidato:
+
+```bash
+PROFILE=infra-prod bash scripts/check_configured_secrets.sh --phase infra
+PROFILE=apis-frontend-prod bash scripts/check_configured_secrets.sh --phase apis
+```
+
+La fase elegida se ejecuta antes de su despliegue correspondiente. No continuar si el script falla. `infra` valida el Secret del broker; `apis` valida también el Secret de CA de APIs y su igualdad con la CA del broker. El motor incluye las comprobaciones S03 existentes y verifica Secrets de aplicación sin mostrar valores; para la secuencia, ver [Secrets de Hetzner](secrets-hetzner.md).
+
+### 3.3 Identidad TLS y credenciales S03
+
+Los perfiles `infra-prod` y `apis-frontend-prod` incluyen S03 en sus
+manifiestos. **Antes del siguiente despliegue de esos perfiles**, provisionar
+manualmente la CA interna y los Secrets `s03-tls-*` del entorno, con los
+certificados SAN indicados en [S03 con Skaffold](../security/s03-skaffold.md).
+`infra-prod` requiere `s03-tls-keycloak`; `apis-frontend-prod` requiere
+`s03-internal-ca` en `apis`, los certificados de las nueve APIs y los clients
+de servicio. La CI ejecuta el preflight S03 de la fase correspondiente antes
+del deploy. El job ejecuta `scripts/check_configured_secrets.sh --phase infra`
+o `--phase apis`, que agrupa el preflight S03 con S07a y los Secrets de
+aplicación requeridos por el perfil. No usar certificados ni `.env` de kind en Hetzner.
+
+Al preparar la activación S03 en preproducción o producción, reconciliar a mano
+el realm `TrustNews` contra el Keycloak del entorno. El reconciliador conserva
+las identidades ya existentes y escribe un `.env` por client en un directorio
+privado del host; nunca muestra los valores. El endpoint debe ser
+un port-forward al Keycloak del entorno y las credenciales administrativas se
+introducen por el entorno de la sesión, no como argumentos del proceso:
+
+En el host, ejecutar el reconciliador con un entorno Python que tenga `httpx` instalado; `sync-scripts` instala el archivo, pero no paquetes Python. El ejemplo usa el entorno virtual operativo del host:
+
+```bash
+umask 077
+install -d -m 700 "$HOME/trust-news/secrets/clients"
+(
+  read -r -p 'Keycloak admin user: ' KC_ADMIN_USER
+  read -r -s -p 'Keycloak admin password: ' KC_ADMIN_PASSWORD
+  printf '\n'
+  export KC_ADMIN_USER KC_ADMIN_PASSWORD
+  export KC_ADMIN_URL='http://127.0.0.1:18080/auth'
+  "$HOME/trust-news-ops-venv/bin/python" scripts/security/reconcile_s03_keycloak.py \
+    --output-dir "$HOME/trust-news/secrets/clients"
+)
+```
+
+Después de reconciliar los clientes, crear/actualizar los Secrets de `apis`
+con el motor operativo común. Lee los `.env` de `secrets/clients/` y no muestra
+sus valores:
+
+```bash
+bash scripts/create-secrets.sh --phase apis
+bash scripts/check_configured_secrets.sh --phase apis
+```
+
+El preflight comprueba, a partir del inventario de servicios, que cada Secret
+está presente, que `S03_CLIENT_ID` coincide y que `S03_CLIENT_SECRET` no está
+vacío ni contiene un placeholder. También comprueba las dos CA, las claves
+TLS, vigencia, SAN, correspondencia clave/certificado y cadena de cada
+servicio. Los overlays ya consumen esos Secrets y habilitan S03. El preflight
+no sustituye la prueba de autenticación remota; completarla según el runbook
+S03. Mantener los `.env` privados hasta
+completar esa operación y retirarlos después de acuerdo con el procedimiento
+operativo del host.
+
+### 3.4 Pull secret
 
 ```bash
 for ns in apis infra frontend blockchain; do
@@ -327,6 +427,17 @@ The discovery should continue to publish:
 https://assermetry.com/auth/realms/TrustNews
 ```
 
+Para diagnosticar un servicio interno sin publicarlo, abrir un túnel temporal desde el equipo del operador. Sustituir namespace, servicio y puertos según el caso; el HTTP directo omite Traefik y Cloudflare:
+
+```bash
+ssh -i "$K3S_KEY" -p "$K3S_SSH_PORT" \
+  -L <puerto-local>:127.0.0.1:<puerto-remoto> \
+  "$K3S_USER@$K3S_HOST" \
+  -t 'kubectl port-forward --address 127.0.0.1 -n <namespace> svc/<servicio> <puerto-remoto>:<puerto-servicio>'
+```
+
+Ejemplos de puertos internos: Admin API `apis/admin-service:8400`, Gateway `apis/gateway:8500`, Evidence Search `apis/evidence-search:8074`, Source Router `apis/source-router:8075`, Grafana `infra/grafana:3000` y Mongo Express `infra/mongo-express:8081`. Al cerrar, detener el `port-forward` y comprobar que no quedan túneles activos. Para validar OIDC o TLS de extremo a extremo, usar el dominio y la CA del origen o el borde real.
+
 ---
 
 ## 5. Cloudflare and firewall
@@ -419,23 +530,64 @@ Action: `Block`. Comparison remains capital sensitive. Keep URL Normalization, F
 | `news-chain-prod` | Integración blockchain, desplegada por el script de modo ON |
 | `apis-frontend-prod` | APIs, Gateway, Frontend and Domain Log-ins |
 
-No `infra-basic` in production.
+`infra-basic` es solo para kind; el K3s actual de preproducción usa `infra-prod`.
 
 ### 6.2 Controlled installation or reconstruction
 
-Orden:
+En un K3s limpio, la CI actual no completa por sí sola el primer arranque:
+`traefik-prod` comprueba el ConfigMap de Keycloak antes de `infra-prod`, y el
+job `infra-prod` reconcilia el cliente web antes de que Skaffold haya creado
+el realm y los clientes base. La preparación inicial es **manual**, una sola
+vez; los despliegues posteriores siguen el pipeline protegido.
 
-1. Aplicar `setup`.
-2. Create Secrets and pull secrets.
-3. Instalar `traefik-prod`.
-4. Unfold `infra-prod` and run MongoDB bootstrap.
-5. Desplegar `apis-frontend-prod` con `BLOCKCHAIN_ENABLED=OFF` para LIGHT. La CI
-   mantiene Geth y `news-chain` a cero réplicas y conserva Kafka.
+1. Confirmar contexto K3s, PVC/almacenamiento, acceso al registro, DNS,
+   certificado de origen y reglas del borde. Ejecutar `./skaffold deploy -p
+   setup`. Preparar pull secrets, Secrets habituales, CA/TLS S03 y Kafka S07a
+   según [§3](#3-secrets-productivos) y [S07a](../security/s07a-kafka-tls.md).
+   Los overlays de K3s consumen Secrets existentes; Skaffold no los genera.
+   Antes del despliegue inicial de infraestructura, ejecutar el preflight
+   integrado `bash scripts/check_configured_secrets.sh --phase infra` desde
+   el checkout con acceso al K3s de destino. Incluye S03, Kafka S07a y los
+   Secrets requeridos por el perfil.
+2. Construir en la CI el perfil `infra-prod` para el SHA elegido y descargar
+   su artefacto `build.json` (caduca al día). En un checkout del **mismo SHA**
+   con acceso K3s preparado, ejecutar una sola vez:
+
+   ```bash
+   kubectl config current-context
+   ./skaffold deploy --build-artifacts=build.json -p infra-prod
+   kubectl rollout status statefulset/keycloak-db -n infra
+   kubectl rollout status deployment/keycloak -n infra
+   kubectl rollout status statefulset/mongodb -n infra
+   ```
+
+   Este comando aplica el mismo perfil y las imágenes publicadas por CI; no
+   ejecuta el postdespliegue del job `infra-prod`. No usar `skaffold run` con
+   imágenes locales para un K3s remoto.
+3. Restaurar el estado previsto de Keycloak o configurar el realm `TrustNews`
+   y sus clientes base `TrustNewsWeb`/`TrustNewsApi` según
+   [Keycloak común](k8s-common.md#8-keycloak-and-assessed-contributions).
+   Skaffold no crea ese estado. Ejecutar el [bootstrap MongoDB](k8s-common.md#7-mongodb-bootstrap)
+   y la [reconciliación web](#65-keycloak-idepotent-alignment) una vez.
+4. Reconciliar clientes de servicio S03, crear sus Secrets desde los `.env`
+   privados y pasar `bash scripts/check_configured_secrets.sh --phase apis`
+   antes del despliegue del perfil API, como indica [§3.3](#33-identidad-tls-y-credenciales-s03). Cerrar los accesos
+   temporales usados para Keycloak.
+5. Lanzar y esperar los pipelines protegidos `traefik-prod`, `infra-prod` y
+   `apis-frontend-prod` en ese orden, con `BLOCKCHAIN_ENABLED=OFF`. La CI
+   ejecuta preflight, despliegue Skaffold y reconciliación web. La CI mantiene
+   Geth y `news-chain` a cero réplicas y conserva Kafka.
 6. Para habilitar blockchain, ejecutar el pipeline con
    `PROFILE=apis-frontend-prod` y `BLOCKCHAIN_ENABLED=ON`. La CI aplica
    `blockchain-prod`, inicia Geth y `news-chain`, y después habilita las APIs.
 7. Si se habilitó blockchain, comprobar contrato y categorías; ejecutar la
    verificación completa del modo elegido.
+
+En un **K3s existente**, no repetir los pasos de provisión si CA, certificados,
+realm, clientes y Secrets siguen válidos. Revisar respaldo, PVC, contexto,
+SHA/digests y modo antes de la [actualización normal](#64-normal-update).
+Si el entorno aún usa Kafka PLAINTEXT, el cambio a TLS exige una ventana
+coordinada y rollback preparado; no tratarlo como un redespliegue rutinario.
 
 Pipelines manuales:
 
@@ -538,6 +690,8 @@ kubectl get tlsstore default -n kube-system
 
 Inner services should not appear with Ingress, NodePort or LoadBalancer. The only web edge is Traefik.
 
+La aceptación S03/S07a exige además comprobar los Secrets por nombre y claves sin mostrar valores, pods Ready, JWKS por HTTPS con CA y hostname verificados, Traefik→Gateway por HTTPS y resultados esperados de rutas autenticadas y denegadas. Seguir la [matriz S03](../security/s03-skaffold.md#comprobaciones-y-rotación) y registrar evidencia separada de kind y K3s. Una configuración declarada o un rollout correcto no sustituyen estas pruebas.
+
 ### 7.2 Dominio
 
 Before testing the lock status is checked. If enabled, the general `403` is the expected result.
@@ -582,11 +736,28 @@ tests/operations/verify-loki-persistence.sh --execute
 
 For Grafana, a port-forward carried by SSH is used; the Service is not published. Check errors and rejections in Loki/Grafana without exporting tokens, headers, bodies, IPs or Cloudflare identifiers.
 
+### 7.4 Viewer de evaluación
+
+Preferir ejecutar el viewer de solo lectura en el checkout local con artefactos descargados, ligado a loopback:
+
+```bash
+PYTHONPATH=tests:api .venv/bin/python -m evaluation.viewer.server \
+  --artifacts-root tests/data/evaluation/artifacts --host 127.0.0.1 --port 8765
+```
+
+Si los artefactos solo están en el servidor K3s, ejecutar allí el mismo comando y abrir desde el equipo del operador un túnel `ssh -N -i "$K3S_KEY" -p "$K3S_SSH_PORT" -L 18765:127.0.0.1:8765 "$K3S_USER@$K3S_HOST"`; acceder a `http://127.0.0.1:18765/`. Detener el viewer y el túnel al terminar. Los E2E contra K3s pueden consumir cuotas y proveedores; seguir [el contrato de pruebas](../../tests/frontend/e2e/README.md) en una ventana autorizada.
+
 ---
 
 ## 8. Operation and recovery
 
 Rollback Application:
+
+Antes de ejecutar un rollback, revisar los recursos y revisiones concretas del
+despliegue y el plan de recuperación de la ventana. `rollout undo` solo restaura
+la plantilla de cada Deployment; no restaura datos, Secrets, Services ni
+ConfigMaps. Los comandos siguientes son ejemplos por recurso y no demuestran
+que la revisión anterior sea el destino correcto.
 
 ```bash
 kubectl rollout undo deployment/gateway -n apis
@@ -606,47 +777,12 @@ kubectl get pvc -n infra
 kubectl get pvc -n blockchain
 ```
 
-Active PVC destructive restorations are prohibited. Backups and complete isolated restoration belong to `v0.0.16`.
+Active PVC destructive restorations are prohibited. Según [version.md](../version.md), S08 se prepara desde ahora y una copia y restauración demostrada son necesarias antes de conservar datos; su cierre y la migración MongoDB se planifican en v0.0.13c. Las demos solo admiten datos desechables mientras esa puerta no esté superada.
 
 ---
 
-## 9. Next steps
+## 9. Siguientes pasos
 
-### 9.1 Closing of v0.0.12
-
-- Run `infra-prod`, get `keycloak_web_alignment=PASS` on the
-reconciliation of `TrustNewsWeb` and revalidate the IODC issuer.
-- Confirm the coexistence of the lock, the temporary mTLS and the mTLS
-  administrativo.
-- Validate from another network with temporary certificate frontend, OIDC and
-  LIGHT; include blockchain only with `BLOCKCHAIN_ENABLED=ON`.
-- Check Gateway with and without JWT.
-- Verify the attribution and access of administrative routes.
-- Prove that the lock blocks the entire hostname and leaves it in the operating state
-  decidido.
-- Register the stable baseline.
-
-### 9.2 v0.0.13
-
-- Run the reproducible regression of GUI and API with synthetic data.
-- Keep the mTLS rule on general temporary throughout the version.
-- Validate `aud` and `azp` or `client_id` before admitting external evaluators.
-- Solve `ISSUE-001` and pass your non-refresher competition tests
-LIGHT validator cache manual.
-- Run demos from lock controlled windows.
-
-### 9.3 v0.0.14
-
-- Enable the lock during the change window.
-- Unfold and validate `/gui` before modifying the Cloudflare border.
-- Create the exact `/` and `/gui` redirects to `/gui/` with `302`.
-- Replace `Temporary mTLS gate - assermetry.com` with `default deny`
-paths; do not open a window without the lock.
-- Maintain the mTLS association and the permanent administrative rule.
-- Revocation of a disposable administrative certificate and proof of rejection without
-affect the administrative endorsement certificate.
-- Validate uncertified user OIDC, administration with certificate,
-WAF, rate limit, logs and rollback.
-- Open beta only after you pass those checks.
-
-Subsequent steps are maintained exclusively in [`next_releases.md`](../next_releases.md) until your version becomes ongoing.
+Las puertas y pendientes vigentes están en [version.md](../version.md); la
+secuencia operativa y la evidencia más reciente, en [working.md](../../working.md).
+Los criterios de versiones futuras se mantienen en [next_releases.md](../next_releases.md).

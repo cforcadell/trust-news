@@ -5,12 +5,13 @@ from kafka.admin import KafkaAdminClient, NewTopic
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from common.utils.logging_utils import configure_single_line_json_logging
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, kafka_admin_security_kwargs
 
 log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
 configure_single_line_json_logging(log_level)
 logger = logging.getLogger("news-handler-kafka-init")
 
-KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", DEFAULT_KAFKA_BOOTSTRAP)
 TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "fake_news_requests")
 TOPIC_RESPONSES = os.getenv("TOPIC_RESPONSES", "fake_news_responses")
 TOPIC_LIGHT_VALIDATION_REQUESTS = os.getenv("TOPIC_LIGHT_VALIDATION_REQUESTS", "trustnews.validation.requests")
@@ -19,7 +20,8 @@ KAFKA_MAX_MESSAGE_BYTES = int(os.getenv("KAFKA_MAX_MESSAGE_BYTES", str(4 * 1024 
 
 def create_topics():
     admin_client = KafkaAdminClient(
-        bootstrap_servers=KAFKA_BROKER
+        bootstrap_servers=KAFKA_BROKER,
+        **kafka_admin_security_kwargs(),
     )
 
     topics = [

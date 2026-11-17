@@ -26,6 +26,15 @@ spec:
               done
       containers:
       - name: news-handler
+        volumeMounts:
+        - name: kafka-tls
+          mountPath: /etc/kafka-tls
+          readOnly: true
+        env:
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: "SSL"
+        - name: KAFKA_CA_FILE
+          value: /etc/kafka-tls/ca.crt
         #image: tfm-news-handler:latest
         image: news-handler
         imagePullPolicy: IfNotPresent
@@ -39,3 +48,11 @@ spec:
         - configMapRef:
             name: blockchain-mode
             optional: true
+        - configMapRef:
+            name: s03-runtime
+        - secretRef:
+            name: s03-client-assermetry-news-handler
+      volumes:
+      - name: kafka-tls
+        secret:
+          secretName: s07a-kafka-ca

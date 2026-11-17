@@ -38,7 +38,7 @@ from common.models.async_models import (
     ValidatorType,
     ValidationExecutionStatus,
 )
-from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN, DEFAULT_TOPIC_RESPONSES
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs
 from common.utils.ipfs_client import get_ipfs_text, get_ipfs_json
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.models.protocol_models import (
@@ -530,7 +530,7 @@ def get_validator_config(validator_address: str, recover_ipfs: bool = Query(True
 # =========================================================
 
 async def blockchain_event_listener():
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP, **kafka_security_kwargs())
     await producer.start()
 
     last_block = w3.eth.block_number
@@ -787,9 +787,10 @@ async def consume_register_kafka():
         KAFKA_REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
         group_id="trustnews-api-group",
-        auto_offset_reset="earliest"
+        auto_offset_reset="earliest",
+        **kafka_security_kwargs(),
     )
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP, **kafka_security_kwargs())
     
     try:
         await consumer.start()

@@ -104,6 +104,7 @@ async def test_light_consumer_bounds_parallel_validations(validator, monkeypatch
 
     monkeypatch.setattr(validator, "AIOKafkaConsumer", Consumer)
     monkeypatch.setattr(validator, "AIOKafkaProducer", Producer)
+    monkeypatch.setattr(validator, "kafka_security_kwargs", lambda: {})
     monkeypatch.setattr(validator, "LightValidationRequest", lambda **data: SimpleNamespace(
         index=data["index"], payload=SimpleNamespace(validation_mode=validator.ValidationMode.LIGHT)))
     monkeypatch.setattr(validator, "handle_light_validation_request", handle)

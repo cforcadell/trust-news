@@ -1,5 +1,6 @@
 import os
 import logging
+import ssl
 from typing import Any, List
 from urllib.parse import urlencode, quote
 import aiohttp
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 from jose import jwt
 from gateway.security import RequestSecurityMiddleware
 from common.utils.logging_utils import configure_single_line_json_logging
+from common.security.engine import KeycloakVerifier, USER_TOKEN_HEADER, internal_headers
 from common.models.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -105,6 +107,10 @@ KEYCLOAK_ALLOWED_CLIENT_IDS = {
     for value in os.getenv("KEYCLOAK_ALLOWED_CLIENT_IDS", "TrustNewsWeb,TrustNewsApi").split(",")
     if value.strip()
 }
+_s03_user_verifier = KeycloakVerifier(
+    issuer=KEYCLOAK_ISSUER_URL, jwks_url=KEYCLOAK_JWKS_URL,
+    ca_file=os.getenv("S03_CA_FILE") or None,
+) if os.getenv("S03_ENABLED", "false").lower() == "true" else None
 
 
 def presenting_client_id(payload: dict[str, Any]) -> str:
@@ -124,6 +130,11 @@ security = HTTPBearer()
 async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)):
     """Valida el token JWT pegado en Swagger o enviado por el cliente."""
     token = auth.credentials
+    if _s03_user_verifier is not None:
+        return await _s03_user_verifier.verify(
+            token, audience=KEYCLOAK_EXPECTED_AUDIENCE,
+            clients=frozenset(KEYCLOAK_ALLOWED_CLIENT_IDS),
+        )
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(KEYCLOAK_JWKS_URL) as resp:
@@ -167,18 +178,36 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
 # Helpers
 # ============================================================
 async def proxy_request(request: Request, target_url: str):
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    protected_target = None
+    if target_url.startswith(NEWS_HANDLER_URL.rstrip("/") + "/"):
+        protected_target = "assermetry-news-handler"
+    elif target_url.startswith(ADMIN_URL.rstrip("/") + "/"):
+        protected_target = "assermetry-admin"
+    elif target_url.startswith(GENERATE_ASSERTIONS_URL.rstrip("/") + "/"):
+        protected_target = "assermetry-generate"
+    if os.getenv("S03_ENABLED", "false").lower() == "true" and protected_target:
+        if not target_url.startswith("https://"):
+            raise HTTPException(status_code=503, detail="Protected target requires HTTPS")
+        user_auth = request.headers.get("authorization", "")
+        if not user_auth.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="User token required")
+        headers = {"Content-Type": request.headers.get("content-type", "application/json")}
+        headers.update(await internal_headers(protected_target, user_auth[7:]))
+    else:
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", USER_TOKEN_HEADER)}
     # Recuperamos el body en bytes. FastAPI ya lo ha parseado y validado
     # con Pydantic en el endpoint, pero lo mantiene en memoria.
     body = await request.body()
     
+    ssl_context = ssl.create_default_context(cafile=os.getenv("S03_CA_FILE") or None) if protected_target and os.getenv("S03_ENABLED", "false").lower() == "true" else None
     async with aiohttp.ClientSession() as session:
         try:
             async with session.request(
                 method=request.method,
                 url=target_url,
                 headers=headers,
-                data=body
+                data=body,
+                ssl=ssl_context,
             ) as response:
                 resp_content = await response.read()
                 try:
@@ -210,6 +239,12 @@ def is_admin_user(payload: dict) -> bool:
     return "trust-admin" in roles
 
 
+def is_read_all_user(payload: dict) -> bool:
+    if os.getenv("S03_ENABLED", "false").lower() != "true":
+        return is_admin_user(payload)
+    return "trust-read-all" in (payload.get("realm_access") or {}).get("roles", [])
+
+
 async def require_admin_user(auth_payload: dict = Depends(get_current_user)) -> dict:
     """Require a verified JWT with the realm role for every LLM admin route."""
     if not is_admin_user(auth_payload):
@@ -224,12 +259,21 @@ async def proxy_admin_request(request: Request, target_url: str, auth_payload: d
     request_id = request.headers.get("x-request-id")
     if request_id:
         headers["X-Request-ID"] = request_id
-    headers["X-Assermetry-Admin-User"] = str(
-        auth_payload.get("preferred_username") or auth_payload.get("sub") or "gateway-admin"
-    )
+    if os.getenv("S03_ENABLED", "false").lower() == "true":
+        if not target_url.startswith("https://"):
+            raise HTTPException(status_code=503, detail="Protected target requires HTTPS")
+        user_auth = request.headers.get("authorization", "")
+        if not user_auth.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="User token required")
+        headers.update(await internal_headers("assermetry-admin", user_auth[7:]))
+    else:
+        headers["X-Assermetry-Admin-User"] = str(
+            auth_payload.get("preferred_username") or auth_payload.get("sub") or "gateway-admin"
+        )
     try:
+        ssl_context = ssl.create_default_context(cafile=os.getenv("S03_CA_FILE") or None) if os.getenv("S03_ENABLED", "false").lower() == "true" else None
         async with aiohttp.ClientSession() as session:
-            async with session.request(request.method, target_url, headers=headers, data=body) as response:
+            async with session.request(request.method, target_url, headers=headers, data=body, ssl=ssl_context) as response:
                 content = await response.read()
                 try:
                     return JSONResponse(content=await response.json(), status_code=response.status)
@@ -249,6 +293,23 @@ admin_llm_router = APIRouter(
     tags=["LLM Administration"],
     dependencies=[Depends(require_admin_user)],
 )
+
+admin_clients_router = APIRouter(
+    prefix="/admin/clients",
+    tags=["Client Administration"],
+    dependencies=[Depends(require_admin_user)],
+)
+
+
+@admin_clients_router.api_route("", methods=["GET", "POST"])
+async def admin_clients(request: Request, auth_payload: dict = Depends(require_admin_user)):
+    suffix = f"?{request.url.query}" if request.url.query else ""
+    return await proxy_admin_request(request, f"{ADMIN_URL.rstrip('/')}/clients{suffix}", auth_payload)
+
+
+@admin_clients_router.api_route("/{client_id}", methods=["GET", "PATCH", "DELETE"])
+async def admin_client(client_id: str, request: Request, auth_payload: dict = Depends(require_admin_user)):
+    return await proxy_admin_request(request, f"{ADMIN_URL.rstrip('/')}/clients/{quote(client_id, safe='')}", auth_payload)
 
 
 def admin_target(path: str, query: str = "") -> str:
@@ -367,7 +428,7 @@ async def proxy_get_news(
     client_id = get_computed_client_id(auth_payload)
     
     # Para ver todas las órdenes, el usuario debe ser admin Y haber marcado el check
-    is_admin = is_admin_user(auth_payload)
+    is_admin = is_read_all_user(auth_payload)
     effective_admin = str(is_admin and view_all).lower()
     
     target_url = f"{NEWS_HANDLER_URL}/news?client_id={client_id}&admin={effective_admin}"
@@ -462,7 +523,7 @@ async def proxy_get_validator_cache_validations(
 @router.get("/orders/{order_id}", tags=["Orders"])
 async def proxy_get_order(order_id: str, request: Request, auth_payload: dict = Depends(get_current_user)):
     client_id = get_computed_client_id(auth_payload)
-    admin = str(is_admin_user(auth_payload)).lower()
+    admin = str(is_read_all_user(auth_payload)).lower()
     
     target_url = f"{NEWS_HANDLER_URL}/orders/{order_id}?client_id={client_id}&admin={admin}"
     return await proxy_request(request, target_url)
@@ -478,7 +539,7 @@ async def proxy_check_order_consistency(
     """
     require_blockchain_enabled()
     client_id = get_computed_client_id(auth_payload)
-    admin = str(is_admin_user(auth_payload)).lower()
+    admin = str(is_read_all_user(auth_payload)).lower()
     
     # Si la función vive en news-chain, cambia NEWS_HANDLER_URL por NEWS_CHAIN_URL
     target_url = f"{NEWS_HANDLER_URL}/checkOrderConsistency/{order_id}?client_id={client_id}&admin={admin}"
@@ -487,13 +548,14 @@ async def proxy_check_order_consistency(
 @router.get("/orders/{order_id}/events", tags=["Orders"])
 async def proxy_get_news_events(order_id: str, request: Request, auth_payload: dict = Depends(get_current_user)):
     client_id = get_computed_client_id(auth_payload)
-    admin = str(is_admin_user(auth_payload)).lower()
+    admin = str(is_read_all_user(auth_payload)).lower()
     
     target_url = f"{NEWS_HANDLER_URL}/news/{order_id}/events?client_id={client_id}&admin={admin}"
     return await proxy_request(request, target_url)
 
 app.include_router(router)
 app.include_router(admin_llm_router)
+app.include_router(admin_clients_router)
 
 if __name__ == "__main__":
     import uvicorn

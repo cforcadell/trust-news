@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 # Importar modelos comunes
 from common.models.async_models import UploadIpfsRequest, IpfsUploadedResponse, Metadata, Document
-from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_IPFS, DEFAULT_TOPIC_RESPONSES
+from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_IPFS, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs
 from common.utils.logging_utils import configure_single_line_json_logging
 
 # -----------------------------
@@ -129,9 +129,10 @@ async def consume_and_process():
         REQUEST_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
         group_id="ipfs-agent-group",
-        auto_offset_reset="earliest"
+        auto_offset_reset="earliest",
+        **kafka_security_kwargs(),
     )
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP, **kafka_security_kwargs())
 
     # Reintentos de conexión
     for attempt in range(1, MAX_RETRIES + 1):

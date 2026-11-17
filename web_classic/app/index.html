@@ -5,12 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Assermetry</title>
     <base href="/gui/">
-    <link rel="stylesheet" href="css/style.css?v=20260924-news-budget">
+    <link rel="stylesheet" href="css/style.css?v=20261111-sidebar-wrap">
+    <style>
+        html:not(.app-ready) #sidebar,
+        html:not(.app-ready) #main { display: none !important; }
+        #auth-gate {
+            position: fixed;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            background: #070d1a;
+            color: #f8fafc;
+            font: 700 1rem Inter, system-ui, sans-serif;
+        }
+        html.app-ready #auth-gate { display: none; }
+    </style>
     <link rel="icon" type="image/svg+xml" href="img/assermetry_favicon.svg">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/auth/js/keycloak.js"></script>
 </head>
 <body>
+<div id="auth-gate" role="status" aria-live="polite">Assermetry</div>
 
 <aside id="sidebar">
     <div id="sidebar-header" class="sidebar-header">
@@ -248,6 +263,6 @@
 </main>
 
 <script src="js/i18n.js?v=20260924-news-budget"></script>
-<script src="js/app.js?v=20260924-news-budget"></script>
+<script src="js/app.js?v=20261111-auth-gate"></script>
 </body>
 </html>

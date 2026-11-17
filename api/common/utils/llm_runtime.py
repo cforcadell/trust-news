@@ -8,10 +8,12 @@ in the process environment populated from Kubernetes Secrets.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+from common.security.engine import internal_headers
 
 
 async def fetch_llm_runtime_override(
@@ -27,10 +29,13 @@ async def fetch_llm_runtime_override(
     """
     if not admin_url or not config_id:
         return None
+    if os.getenv("S03_ENABLED", "false").lower() == "true" and not admin_url.startswith("https://"):
+        logger.warning("LLM runtime override unavailable; protected Admin URL requires HTTPS")
+        return None
     url = f"{admin_url.rstrip('/')}/internal/llm/overrides/{quote(config_id, safe=':')}"
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(url)
+        async with httpx.AsyncClient(timeout=5.0, verify=os.getenv("S03_CA_FILE") or True) as client:
+            response = await client.get(url, headers=await internal_headers("assermetry-admin"))
         if response.status_code == 404:
             return None
         response.raise_for_status()

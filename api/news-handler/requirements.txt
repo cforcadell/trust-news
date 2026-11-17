@@ -5,6 +5,7 @@ uvicorn[standard]==0.23.2
 # Cliente HTTP Asíncrono y Síncrono (Web Scraping/Peticiones)
 requests==2.32.3
 httpx==0.27.2
+python-jose
 aiohttp==3.10.5
 
 # Extracción y Procesamiento de Texto (Web Scraping)

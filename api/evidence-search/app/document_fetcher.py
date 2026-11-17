@@ -15,6 +15,7 @@ from typing import List, Optional
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
+from common.utils.public_fetch import FetchError as PublicFetchError, FetchPolicy, fetch as public_fetch
 
 try:
     from bs4 import BeautifulSoup
@@ -594,76 +595,54 @@ async def _fetch_main_text_once(url: str, timeout: float = 10.0,
     attempts = []
     normalized_url = None
     normalization_reason = None
+    fetched = None
+    started = time.monotonic()
+    policy = FetchPolicy(
+        ports=(80, 443), max_redirects=MAX_REDIRECTS,
+        timeout_seconds=max(0.001, timeout), max_bytes=MAX_DOCUMENT_BYTES,
+        pdf_max_bytes=PDF_MAX_BYTES,
+    )
     try:
-        async with httpx.AsyncClient(
-            follow_redirects=False,
-            timeout=timeout,
-            headers={"User-Agent": user_agent},
-        ) as client:
-            try:
-                response, redirect_error = await _get_following_validated_redirects(
-                    client, url, attempted_urls, attempts,
-                )
-                if redirect_error:
-                    latest = attempts[-1] if attempts else {}
-                    return FetchResult(
-                        status="failed", error=redirect_error, attempted_urls=attempted_urls,
-                        failure_stage="EXTRACTION" if redirect_error == "DOCUMENT_TOO_LARGE" else "FETCH",
-                        failure_code=redirect_error, retryable=False,
-                        http_status=latest.get("http_status"),
-                        response_bytes=latest.get("response_bytes", 0),
-                        content_type=latest.get("declared_content_type"),
-                        attempts=attempts,
-                    )
-            except Exception as exc:
-                error = _fetch_error_code(exc)
-                code, retryable = failure_metadata(error, "FETCH")
-                attempts.append({"url": url, "outcome": code})
-                normalized_url = www_hostname_variant(url) if error == "tls_hostname_mismatch" else None
-                if not normalized_url:
-                    return FetchResult(status="failed", error=error, attempted_urls=attempted_urls,
-                                       failure_stage="FETCH", failure_code=code, retryable=retryable,
-                                       attempts=attempts)
-                attempted_urls.append(normalized_url)
-                normalization_reason = "tls_hostname_mismatch_www_variant"
+        fetched = await public_fetch(url, policy, {"User-Agent": user_agent})
+    except PublicFetchError as exc:
+        normalized_url = www_hostname_variant(url) if exc.code == "TLS_HOSTNAME_MISMATCH" else None
+        if normalized_url:
+            attempted_urls.append(normalized_url)
+            normalization_reason = "tls_hostname_mismatch_www_variant"
+            remaining = timeout - (time.monotonic() - started)
+            if remaining > 0:
                 try:
-                    # The retry still uses httpx's default certificate checks.
-                    response, redirect_error = await _get_following_validated_redirects(
-                        client, normalized_url, attempted_urls, attempts,
-                    )
-                    if redirect_error:
-                        latest = attempts[-1] if attempts else {}
-                        return FetchResult(
-                            status="failed", error=redirect_error,
-                            normalization_reason=normalization_reason,
-                            attempted_urls=attempted_urls,
-                            failure_stage="EXTRACTION" if redirect_error == "DOCUMENT_TOO_LARGE" else "FETCH",
-                            failure_code=redirect_error, retryable=False,
-                            http_status=latest.get("http_status"),
-                            response_bytes=latest.get("response_bytes", 0),
-                            content_type=latest.get("declared_content_type"), attempts=attempts,
-                        )
-                except Exception as retry_exc:
-                    retry_error = _fetch_error_code(retry_exc)
-                    retry_code, retryable = failure_metadata(retry_error, "FETCH")
-                    attempts.append({"url": normalized_url, "outcome": retry_code})
-                    return FetchResult(
-                        status="failed",
-                        error=retry_error,
-                        normalization_reason=normalization_reason,
-                        attempted_urls=attempted_urls,
-                        failure_stage="FETCH",
-                        failure_code=retry_code,
-                        retryable=retryable,
-                        attempts=attempts,
-                    )
-    except Exception as exc:
-        error = _fetch_error_code(exc)
-        code, retryable = failure_metadata(error, "FETCH")
-        attempts.append({"url": attempted_urls[-1], "outcome": code})
-        return FetchResult(status="failed", error=error, attempted_urls=attempted_urls,
-                           failure_stage="FETCH", failure_code=code, retryable=retryable,
-                           attempts=attempts)
+                    fetched = await public_fetch(normalized_url, FetchPolicy(
+                        ports=policy.ports, max_redirects=policy.max_redirects,
+                        timeout_seconds=remaining, max_bytes=policy.max_bytes,
+                        pdf_max_bytes=policy.pdf_max_bytes,
+                    ), {"User-Agent": user_agent})
+                except PublicFetchError as retry_exc:
+                    exc = retry_exc
+            else:
+                exc = PublicFetchError("TIME_BUDGET")
+        if fetched is None:
+            code = "DOCUMENT_TOO_LARGE" if exc.code == "TOO_LARGE" else exc.code
+            retryable = code in {"NETWORK_ERROR", "TIME_BUDGET"}
+            attempts.append({"url": normalized_url or url, "outcome": code, "http_status": exc.status,
+                             "response_bytes": exc.received})
+            legacy_error = {"NETWORK_ERROR": "connect_error", "TIME_BUDGET": "http_timeout",
+                            "TLS_HOSTNAME_MISMATCH": "tls_hostname_mismatch"}.get(exc.code, exc.code)
+            return FetchResult(status="failed", error=legacy_error, attempted_urls=attempted_urls,
+                               normalization_reason=normalization_reason,
+                               failure_stage="EXTRACTION" if code == "DOCUMENT_TOO_LARGE" else "FETCH",
+                               failure_code=code, retryable=retryable, http_status=exc.status,
+                               response_bytes=exc.received, attempts=attempts)
+    attempted_urls = list(dict.fromkeys(attempted_urls + list(fetched.attempted_urls)))
+    attempts.extend(fetched.redirects)
+    normalized_headers = httpx.Headers(fetched.headers)
+    # public_fetch has already bounded and decoded the wire representation.
+    # Do not let httpx attempt a second content-decoding pass.
+    for header in ("content-encoding", "content-length", "transfer-encoding"):
+        if header in normalized_headers:
+            del normalized_headers[header]
+    response = httpx.Response(fetched.status, headers=normalized_headers, content=fetched.body,
+                              request=httpx.Request("GET", fetched.url))
 
     content_type = (response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     fetched_url = str(getattr(response, "url", url))

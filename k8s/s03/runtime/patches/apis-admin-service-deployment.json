@@ -1,0 +1,117 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "admin-deployment",
+    "namespace": "apis"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "s03-tls-proxy",
+            "image": "gateway",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+              "python",
+              "-m",
+              "common.security.tls_proxy"
+            ],
+            "env": [
+              {
+                "name": "S03_PROXY_TARGET_PORT",
+                "value": "8400"
+              },
+              {
+                "name": "S03_TLS_CERT_FILE",
+                "value": "/etc/s03-tls/tls.crt"
+              },
+              {
+                "name": "S03_TLS_KEY_FILE",
+                "value": "/etc/s03-tls/tls.key"
+              }
+            ],
+            "ports": [
+              {
+                "name": "s03-https",
+                "containerPort": 9443
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "s03-tls",
+                "mountPath": "/etc/s03-tls",
+                "readOnly": true
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "10m",
+                "memory": "32Mi"
+              },
+              "limits": {
+                "cpu": "200m",
+                "memory": "128Mi"
+              }
+            }
+          },
+          {
+            "name": "admin",
+            "env": [
+              {
+                "name": "S03_AUDIENCE",
+                "value": "assermetry-admin"
+              },
+              {
+                "name": "S03_POLICY_FILE",
+                "value": "/app/admin/s03-policy.json"
+              },
+              {
+                "name": "NEWS_HANDLER_URL",
+                "value": "https://news-handler.apis.svc.cluster.local:9443"
+              },
+              {
+                "name": "GENERATE_ASSERTIONS_URL",
+                "value": "https://generate-asertions.apis.svc.cluster.local:9443"
+              },
+              {
+                "name": "SOURCE_ROUTER_URL",
+                "value": "https://source-router.apis.svc.cluster.local:9443"
+              },
+              {
+                "name": "S03_TARGET_AUDIENCES",
+                "value": "{\"https://gateway.apis.svc.cluster.local:9443\":\"assermetry-gateway\",\"https://admin-service.apis.svc.cluster.local:9443\":\"assermetry-admin\",\"https://news-handler.apis.svc.cluster.local:9443\":\"assermetry-news-handler\",\"https://generate-asertions.apis.svc.cluster.local:9443\":\"assermetry-generate\",\"https://source-router.apis.svc.cluster.local:9443\":\"assermetry-source-router\",\"https://evidence-search.apis.svc.cluster.local:9443\":\"assermetry-evidence-search\",\"https://validate-service-1.apis.svc.cluster.local:9443\":\"assermetry-validator\",\"https://validate-service-2.apis.svc.cluster.local:9443\":\"assermetry-validator\",\"https://validate-service-3.apis.svc.cluster.local:9443\":\"assermetry-validator\"}"
+              },
+              {
+                "name": "S03_TLS_ORIGINS",
+                "value": "{\"http://gateway.apis.svc.cluster.local:8500\":\"https://gateway.apis.svc.cluster.local:9443\",\"http://admin-service.apis.svc.cluster.local:8400\":\"https://admin-service.apis.svc.cluster.local:9443\",\"http://news-handler.apis.svc.cluster.local:8072\":\"https://news-handler.apis.svc.cluster.local:9443\",\"http://generate-asertions.apis.svc.cluster.local:8071\":\"https://generate-asertions.apis.svc.cluster.local:9443\",\"http://source-router.apis.svc.cluster.local:8075\":\"https://source-router.apis.svc.cluster.local:9443\",\"http://evidence-search.apis.svc.cluster.local:8074\":\"https://evidence-search.apis.svc.cluster.local:9443\",\"http://validate-service-1.apis.svc.cluster.local:8070\":\"https://validate-service-1.apis.svc.cluster.local:9443\",\"http://validate-service-2.apis.svc.cluster.local:8070\":\"https://validate-service-2.apis.svc.cluster.local:9443\",\"http://validate-service-3.apis.svc.cluster.local:8070\":\"https://validate-service-3.apis.svc.cluster.local:9443\"}"
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "s03-ca",
+                "mountPath": "/etc/s03-ca",
+                "readOnly": true
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "s03-tls",
+            "secret": {
+              "secretName": "s03-tls-admin-service"
+            }
+          },
+          {
+            "name": "s03-ca",
+            "secret": {
+              "secretName": "s03-internal-ca"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

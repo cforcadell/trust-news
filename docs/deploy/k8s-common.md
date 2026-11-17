@@ -237,7 +237,7 @@ This step:
 - realinea `source_routes_v2`, `domain_profiles_v1` and `evidence_search_cache_v2` when changing the schema marker;
 - eliminates previous incompatible collections and retains new caches in repeated executions.
 
-In CI, `apis-frontend-prod` runs `--apply` and `--check` immediately before the API rollout. For `infra-prod`, the bootstrap executes them after the MongoDB StatefulSet is ready.
+In CI, `apis-frontend-prod` runs `--apply` and `--check` immediately before the API rollout. After a first `infra-prod` deployment, the operator runs the MongoDB bootstrap separately once its StatefulSet is ready; the `infra-prod` CI job does not run it.
 
 Verification:
 
@@ -259,7 +259,7 @@ Minima configuration:
   - Valid post logout redirect URIs: `<origen>/gui/*`.
   - Web Origins: only source (`scheme://host[:port]`), no path; use `*`
 only in disposable tests.
-  - In production they did not keep localhost entries or use a global comodin.
+  - En Hetzner/K3s de preproducción no conservar entradas `localhost` ni usar un comodín global.
 - Cliente backend: `TrustNewsApi`.
   - Client authentication: ON.
   - Service accounts roles: ON.
@@ -281,7 +281,7 @@ The mapper must have:
 
 The Gateway accepts tokens only with `aud` containing `TrustNewsGateway` and with `azp` or `client_id` equal to one of the permitted customers. After changing Keycloak you must request new tokens; existing tokens are not updated.
 
-In production, the `infra-prod` pipeline applies and validates these URLs using the idepotent script documented in [`skaffold-server.md`](skaffold-server.md#65-alineación-idempotente-de-keycloak). Use the same script, instead of the web console, for manual recovery.
+En Hetzner/K3s de preproducción, el pipeline `infra-prod` aplica y valida estas URLs con el script idempotente documentado en [`skaffold-server.md`](skaffold-server.md#65-alineación-idempotente-de-keycloak). Usar ese mismo script para una recuperación manual.
 
 Para obtener un token local sin recurrir a TLS inseguro, abrir temporalmente el
 puerto HTTP interno de Keycloak solo en loopback dentro de la VM y ejecutar la

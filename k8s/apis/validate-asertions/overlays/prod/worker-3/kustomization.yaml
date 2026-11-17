@@ -50,3 +50,5 @@ patches:
         path: /spec/template/spec/containers/0/env/2/valueFrom/secretKeyRef/name
         value: "validator-secret-3"
   - path: patch-resources.yaml
+  - path: ../../../../../s03/runtime/patches/apis-validate-service-3-deployment.json
+  - path: ../../../../../s03/runtime/patches/apis-validate-service-3-service.json

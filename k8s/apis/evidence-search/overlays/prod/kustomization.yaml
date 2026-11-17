@@ -16,3 +16,7 @@ resources:
 #       - prod-search.env
 
 namespace: apis
+
+patches:
+  - path: ../../../../s03/runtime/patches/apis-evidence-search-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-evidence-search-service.json

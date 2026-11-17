@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
+from common.security.engine import configure_route_guard, require_internal_route
 from common.utils.evaluation_context import evaluation_context
 from motor.motor_asyncio import AsyncIOMotorClient
 from common.models.async_models import EvidenceSearchStrategy
@@ -118,7 +119,10 @@ OFFICIAL_SOURCE_TYPES = {
 }
 
 
-app = FastAPI(title="TrustNews Evidence Search")
+app = FastAPI(title="TrustNews Evidence Search",
+              docs_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/docs",
+              redoc_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/redoc",
+              openapi_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/openapi.json")
 mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 cache_collection = None
@@ -1376,7 +1380,7 @@ async def health():
     return {"status": "ok", "service": "evidence-search"}
 
 
-@app.delete("/admin/cache")
+@app.delete("/admin/cache", dependencies=[Depends(require_internal_route)])
 async def clear_cache():
     """Delete all cached evidence-search responses."""
     # Refuse cache operations until startup has initialized the collection.
@@ -1393,7 +1397,8 @@ async def clear_cache():
     }
 
 
-@app.post("/search/evidence", response_model=EvidenceSearchResponseV2)
+@app.post("/search/evidence", response_model=EvidenceSearchResponseV2,
+          dependencies=[Depends(require_internal_route)])
 async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None):
     """Search for evidence supporting a validated assertion payload."""
     cold, run_id = evaluation_context(request)
@@ -2095,3 +2100,7 @@ async def search_evidence(req: EvidenceSearchRequestV2, request: Request = None)
                                                    "chunk_overlap_chars": EVIDENCE_CHUNK_OVERLAP_CHARS}}
     # Return the fresh response to the validator service.
     return response
+
+
+if os.getenv("S03_ENABLED", "false").lower() == "true":
+    configure_route_guard(app, os.getenv("S03_POLICY_FILE", "/app/evidence-search/s03-policy.json"))

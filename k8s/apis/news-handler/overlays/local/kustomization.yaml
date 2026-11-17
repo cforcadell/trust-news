@@ -8,5 +8,14 @@ resources:
   - ../../service.yaml
   - ../../deployment.yaml
 
+patches:
+  - path: ../../../../s03/runtime/patches/apis-news-handler-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-news-handler-service.json
 generatorOptions:
   disableNameSuffixHash: true
+
+secretGenerator:
+  - name: s03-client-assermetry-news-handler
+    namespace: apis
+    envs:
+      - s03-client.env

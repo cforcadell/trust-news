@@ -1,0 +1,18 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "validate-service",
+    "namespace": "apis"
+  },
+  "spec": {
+    "ports": [
+      {
+        "name": "s03-https",
+        "port": 9443,
+        "targetPort": 9443,
+        "protocol": "TCP"
+      }
+    ]
+  }
+}

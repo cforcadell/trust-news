@@ -2,7 +2,8 @@ import logging
 import math
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from common.security.engine import configure_route_guard, require_internal_route
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -17,7 +18,8 @@ from .app.service import SourceRouterService
 
 configure_single_line_json_logging(logging.INFO)
 settings = get_settings()
-app = FastAPI(title="TrustNews Source Router", docs_url=None, redoc_url=None)
+app = FastAPI(title="TrustNews Source Router", docs_url=None, redoc_url=None,
+              openapi_url=None if os.getenv("S03_ENABLED", "false").lower() == "true" else "/openapi.json")
 app.include_router(router)
 
 
@@ -100,12 +102,12 @@ async def ready():
     return {"status": "ready", "service": "source-router"}
 
 
-@app.get("/admin/config", tags=["Admin"])
+@app.get("/admin/config", tags=["Admin"], dependencies=[Depends(require_internal_route)])
 async def get_admin_config():
     return app.state.source_router_service.llm_runtime_config()
 
 
-@app.put("/admin/config", tags=["Admin"])
+@app.put("/admin/config", tags=["Admin"], dependencies=[Depends(require_internal_route)])
 async def update_admin_config(config: LLMRuntimeConfigUpdate):
     try:
         return {
@@ -114,3 +116,7 @@ async def update_admin_config(config: LLMRuntimeConfigUpdate):
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+if os.getenv("S03_ENABLED", "false").lower() == "true":
+    configure_route_guard(app, os.getenv("S03_POLICY_FILE", "/app/source-router/s03-policy.json"))

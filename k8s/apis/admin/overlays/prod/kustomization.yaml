@@ -15,5 +15,7 @@ resources:
 #     - prod-mongodb-app.env
 patches:
   - path: patch-resources.yaml 
+  - path: ../../../../s03/runtime/patches/apis-admin-service-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-admin-service-service.json
 generatorOptions:
   disableNameSuffixHash: true

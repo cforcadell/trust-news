@@ -6,6 +6,10 @@ resources:
   - ../../configmap.yaml
   - ../../service.yaml
   - ../../deployment.yaml
+
+patches:
+  - path: ../../../../s03/runtime/patches/apis-gateway-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-gateway-service.json
 generatorOptions:
   disableNameSuffixHash: true
 # Reemplaza el comando manual: kubectl create secret generic mongodb-secret ...
@@ -14,5 +18,9 @@ secretGenerator:
   namespace: apis
   envs:
     - gateway.env
+- name: s03-client-assermetry-gateway
+  namespace: apis
+  envs:
+    - s03-client.env
 
 namespace: apis

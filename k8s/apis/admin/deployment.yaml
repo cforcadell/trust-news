@@ -15,6 +15,15 @@ spec:
     spec:
       containers:
       - name: admin
+        volumeMounts:
+        - name: kafka-tls
+          mountPath: /etc/kafka-tls
+          readOnly: true
+        env:
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: "SSL"
+        - name: KAFKA_CA_FILE
+          value: /etc/kafka-tls/ca.crt
         #image: tfm-generate-asertions:latest
         image: admin
         imagePullPolicy: IfNotPresent  # Importante para usar la imagen local
@@ -25,3 +34,11 @@ spec:
             name: admin-config
         - secretRef:
             name: mongodb-app-secret
+        - configMapRef:
+            name: s03-runtime
+        - secretRef:
+            name: s03-client-assermetry-admin
+      volumes:
+      - name: kafka-tls
+        secret:
+          secretName: s07a-kafka-ca

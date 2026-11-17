@@ -9,6 +9,7 @@ spec:
     app: generate-asertions
   ports:
   - protocol: TCP
+    name: http
     port: 8071        # Puerto expuesto del servicio
     targetPort: 8071  # Puerto al que apunta en el contenedor
   type: ClusterIP     # Solo visible dentro del clúster

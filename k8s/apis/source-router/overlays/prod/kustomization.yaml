@@ -4,3 +4,7 @@ resources:
   - ../../base
 namespace: apis
 # source-router-enc and mongodb-app-secret are provisioned externally.
+
+patches:
+  - path: ../../../../s03/runtime/patches/apis-source-router-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-source-router-service.json

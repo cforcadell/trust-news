@@ -4,11 +4,15 @@ kind: Service
 metadata:
   name: gateway
   namespace: apis
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: https
+    traefik.ingress.kubernetes.io/service.serverstransport: apis-s03-gateway@kubernetescrd
 spec:
   selector:
     app: gateway
   ports:
   - protocol: TCP
+    name: http
     port: 8500        # Puerto expuesto del servicio
     targetPort: 8500  # Puerto al que apunta en el contenedor
   type: ClusterIP     # Solo visible dentro del clúster

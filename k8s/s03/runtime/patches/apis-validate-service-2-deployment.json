@@ -1,0 +1,109 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "validate-worker",
+    "namespace": "apis"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "s03-tls-proxy",
+            "image": "gateway",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+              "python",
+              "-m",
+              "common.security.tls_proxy"
+            ],
+            "env": [
+              {
+                "name": "S03_PROXY_TARGET_PORT",
+                "value": "8070"
+              },
+              {
+                "name": "S03_TLS_CERT_FILE",
+                "value": "/etc/s03-tls/tls.crt"
+              },
+              {
+                "name": "S03_TLS_KEY_FILE",
+                "value": "/etc/s03-tls/tls.key"
+              }
+            ],
+            "ports": [
+              {
+                "name": "s03-https",
+                "containerPort": 9443
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "s03-tls",
+                "mountPath": "/etc/s03-tls",
+                "readOnly": true
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "10m",
+                "memory": "32Mi"
+              },
+              "limits": {
+                "cpu": "200m",
+                "memory": "128Mi"
+              }
+            }
+          },
+          {
+            "name": "worker",
+            "env": [
+              {
+                "name": "S03_AUDIENCE",
+                "value": "assermetry-validator"
+              },
+              {
+                "name": "S03_POLICY_FILE",
+                "value": "/app/common/security/runtime-policy.json"
+              },
+              {
+                "name": "ADMIN_URL",
+                "value": "https://admin-service.apis.svc.cluster.local:9443"
+              },
+              {
+                "name": "SOURCE_ROUTER_URL",
+                "value": "https://source-router.apis.svc.cluster.local:9443"
+              },
+              {
+                "name": "EVIDENCE_SEARCH_URL",
+                "value": "https://evidence-search.apis.svc.cluster.local:9443"
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "s03-ca",
+                "mountPath": "/etc/s03-ca",
+                "readOnly": true
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "s03-tls",
+            "secret": {
+              "secretName": "s03-tls-validate-service-2"
+            }
+          },
+          {
+            "name": "s03-ca",
+            "secret": {
+              "secretName": "s03-internal-ca"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+[
+  {"method":"POST","path":"/search/evidence","action":"evidence:search","callers":["assermetry-validator"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"DELETE","path":"/admin/cache","action":"evidence:cache:clear","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"}
+]

@@ -6,18 +6,15 @@ import asyncio
 import logging
 import hashlib
 import re
-import ipaddress
-import socket
-from urllib.parse import urljoin, urlparse
-import requests
 import httpx
+from common.utils.public_fetch import FetchError as PublicFetchError, FetchPolicy, fetch_sync as public_fetch_sync
 import time # Añadir import de time
 import lxml.html
 
 from bs4 import BeautifulSoup
 from typing import Any, Dict, List, Optional, Tuple
 from common.utils.hash_utils import hash_text_to_multihash,hash_text_to_hash
-from fastapi import FastAPI, HTTPException, Query,APIRouter
+from fastapi import FastAPI, HTTPException, Query,APIRouter, Request
 from pydantic import ValidationError
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -78,6 +75,7 @@ from common.utils.scoring import (
 from common.utils.validator_registry import light_validators_for_category
 from common.utils.mongo import build_mongo_uri_from_env
 from common.utils.logging_utils import configure_single_line_json_logging
+from common.security.engine import AuthenticatedCall, InternalSecurity, USER_TOKEN_HEADER, settings_from_env
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     EnrichedAssertion,
@@ -102,7 +100,7 @@ KAFKA_BROKER = os.getenv("KAFKA_BROKER", DEFAULT_KAFKA_BOOTSTRAP)
 KAFKA_MAX_MESSAGE_BYTES = int(os.getenv("KAFKA_MAX_MESSAGE_BYTES", str(4 * 1024 * 1024)))
 KAFKA_USERNAME = os.getenv("KAFKA_USERNAME", "app")
 KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "")
-KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_PLAINTEXT")
+KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL", "SSL")
 KAFKA_MECHANISM = os.getenv("KAFKA_MECHANISM", "PLAIN")
 
 TOPIC_REQUESTS_GENERATE = os.getenv("TOPIC_REQUESTS_GENERATE", DEFAULT_TOPIC_REQUESTS_GENERATE)
@@ -143,7 +141,9 @@ IMPORT_URL_USER_AGENT = os.getenv("IMPORT_URL_USER_AGENT", "Mozilla/5.0 (compati
 # =========================================================
 # App & globals
 # =========================================================
-app = FastAPI(title="Fake News Orchestrator (Typed)")
+S03_ENABLED = os.getenv("S03_ENABLED", "false").lower() == "true"
+app = FastAPI(title="Fake News Orchestrator (Typed)", docs_url=None if S03_ENABLED else "/docs",
+              redoc_url=None if S03_ENABLED else "/redoc", openapi_url=None if S03_ENABLED else "/openapi.json")
 producer: Optional[AIOKafkaProducer] = None
 consumer: Optional[AIOKafkaConsumer] = None
 mongo_client: Optional[AsyncIOMotorClient] = None
@@ -158,6 +158,42 @@ validations_collection = None
 config_collection = None
 validator_registry_collection = None
 validator_type_weights = default_validator_type_weights()
+
+
+async def s03_owner_check(request: Request, call: AuthenticatedCall) -> bool:
+    """Resolve membership and owner from Mongo rather than forwarded identity."""
+    if db is None or not call.user_sub or not call.user_issuer:
+        return False
+    global_read_actions = {"orders:read", "orders:list", "events:read", "orders:consistency:read"}
+    if request.query_params.get("admin", "false").lower() == "true" and call.action in global_read_actions and "trust-read-all" in call.user_roles:
+        return True
+    if request.query_params.get("admin", "false").lower() == "true":
+        return False
+    memberships = await db["s03_memberships"].find(
+        {"issuer": call.user_issuer, "subject": call.user_sub, "active": True},
+        {"org_id": 1, "legacy_client_ids": 1},
+    ).to_list(length=100)
+    org_ids = {row.get("org_id") for row in memberships if row.get("org_id")}
+    client_ids = {value for row in memberships for value in row.get("legacy_client_ids", []) if isinstance(value, str)}
+    if not org_ids:
+        return False
+    requested_client = request.query_params.get("client_id")
+    if requested_client and requested_client not in client_ids:
+        return False
+    order_id = request.path_params.get("order_id")
+    if order_id:
+        order = await orders_collection.find_one({"order_id": order_id}, {"org_id": 1, "client_id": 1})
+        if not order:
+            return False
+        return (order.get("org_id") in org_ids if order.get("org_id") else order.get("client_id") in client_ids)
+    if call.action == "orders:search":
+        request.state.s03_org_ids = org_ids
+        request.state.s03_client_ids = client_ids
+        return True
+    if not requested_client or requested_client not in client_ids:
+        return False
+    request.state.s03_org_id = next((row["org_id"] for row in memberships if requested_client in row.get("legacy_client_ids", [])), None)
+    return request.state.s03_org_id is not None
 
 
 
@@ -805,12 +841,14 @@ async def log_validation(order_id: str, post_id: str, id_assertion: str, id_vali
 # =========================================================
 # Función auxiliar para consultar cuotas
 # =========================================================
-async def fetch_client_quotas(client_id: str) -> dict:
-    return await fetch_admin_client_quotas(ADMIN_URL, client_id)
+async def fetch_client_quotas(client_id: str, *, order_id: str | None = None, user_token: str | None = None) -> dict:
+    return await fetch_admin_client_quotas(ADMIN_URL, client_id, order_id=order_id, user_token=user_token)
 
 
-async def update_client_consumed(client_id: str, field: str, new_value: int):
-    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value)
+async def update_client_consumed(client_id: str, field: str, new_value: int, *, order_id: str | None = None,
+                                 user_token: str | None = None):
+    await update_admin_client_consumed(ADMIN_URL, client_id, field, new_value,
+                                       order_id=order_id, user_token=user_token)
 
 # ===========================
 # manejo blockchain
@@ -947,7 +985,7 @@ async def process_kafka_message(data: dict):
             client_id = doc.get("client_id")
             if client_id:
                 try:
-                    quotas = await fetch_client_quotas(client_id)
+                    quotas = await fetch_client_quotas(client_id, order_id=order_id)
                     cons_news = quotas.get("consumed", {}).get("news_generation", 0)
                     lim_news = quotas.get("limits", {}).get("news_generation", 0)
                     
@@ -964,7 +1002,7 @@ async def process_kafka_message(data: dict):
                             "assertions": assertions_list
                         })
                         return # Finalizamos aquí.
-                    await update_client_consumed(client_id, "news_generation", cons_news + 1)
+                    await update_client_consumed(client_id, "news_generation", cons_news + 1, order_id=order_id)
                     logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
                     
                 except Exception as e:
@@ -1411,10 +1449,10 @@ async def process_kafka_message(data: dict):
                 client_id = doc.get("client_id")
                 if client_id:
                     try:
-                        quotas = await fetch_client_quotas(client_id)
+                        quotas = await fetch_client_quotas(client_id, order_id=order_id)
                         cons_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
                         
-                        await update_client_consumed(client_id, "blockchain_validation", cons_val + 1)
+                        await update_client_consumed(client_id, "blockchain_validation", cons_val + 1, order_id=order_id)
                         logger.info(f"[{order_id}] 💰 Cuota blockchain_validation incrementada a {cons_val + 1} para {client_id}")
                     except Exception as e:
                         logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
@@ -1931,10 +1969,10 @@ def normalize_api_timestamp(value: Any) -> str:
 
 
 @app.post("/publishNew", status_code=202)
-async def publish_new(req: PublishRequest, client_id: str):
+async def publish_new(req: PublishRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
     # 1. Comprobación de cuota "news_generation"
-    quotas = await fetch_client_quotas(client_id)
+    quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
     limits_news = quotas.get("limits", {}).get("news_generation", 0)
     
@@ -1950,6 +1988,7 @@ async def publish_new(req: PublishRequest, client_id: str):
         "order_id": order_id,
         "text": req.text,
         "client_id": client_id, # 🔑 Guardar el client_id para luego
+        **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
         "status": "CREATED",
         "validation_mode": validation_mode.value,
         "source_url": req.source_url,
@@ -1983,10 +2022,10 @@ async def publish_new(req: PublishRequest, client_id: str):
     return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED", "validation_mode": normalize_validation_mode(req.validation_mode).value}
 
 @app.post("/publishWithAssertions", status_code=202)
-async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str):
+async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
     # 1. Comprobación de cuota "blockchain_validation"
-    quotas = await fetch_client_quotas(client_id)
+    quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
     limits_val = quotas.get("limits", {}).get("blockchain_validation", 0)
     cons_news = quotas.get("consumed", {}).get("news_generation", 0)
@@ -2002,7 +2041,8 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
     
     order_id = str(uuid.uuid4())   
 
-    await update_client_consumed(client_id, "news_generation", cons_news + 1)
+    await update_client_consumed(client_id, "news_generation", cons_news + 1,
+                                 user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
     
     order_doc = {
@@ -2010,6 +2050,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         "text": req.text,
         "assertions": [a.dict() for a in req.assertions],
         "client_id": client_id, # 🔑
+        **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
         "status": "ASSERTIONS_REQUESTED",
         "validation_mode": validation_mode.value,
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -2036,7 +2077,8 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
             }
         )
 
-        await update_client_consumed(client_id, "news_generation", cons_news - 1)
+        await update_client_consumed(client_id, "news_generation", cons_news - 1,
+                                     user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
         logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
 
         await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
@@ -2052,7 +2094,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
 async def get_order(
     order_id: str, 
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     order = await orders_collection.find_one({"order_id": order_id})
     if not order:
@@ -2084,7 +2126,7 @@ async def get_order(
 async def get_news_events(
     order_id: str, 
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     # Validar primero la propiedad de la orden si no es administrador
     if not admin:
@@ -2110,7 +2152,7 @@ async def get_news_events(
 @app.get("/news")
 async def list_news(
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     # Si es admin no filtramos por client_id, si no lo es, añadimos el filtro a la query
     query = {} if admin else {"client_id": client_id}
@@ -2241,7 +2283,7 @@ async def get_validator_with_validations_cache(
 
 
 @app.post("/find-order-by-text")
-async def find_order_by_text(request: PublishRequest):
+async def find_order_by_text(request: PublishRequest, http_request: Request):
     global orders_collection
     try:
         if not request.text:
@@ -2252,8 +2294,14 @@ async def find_order_by_text(request: PublishRequest):
 
         logger.info(f"🧮 Buscando órdenes con hash_text={digest_hex}")
 
+        owner_filter = {}
+        if S03_ENABLED:
+            owner_filter = {"$or": [
+                {"org_id": {"$in": list(http_request.state.s03_org_ids)}},
+                {"org_id": {"$exists": False}, "client_id": {"$in": list(http_request.state.s03_client_ids)}},
+            ]}
         cursor = orders_collection.find(
-            {"hash_text": digest_hex},
+            {"hash_text": digest_hex, **owner_filter},
             {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1}
         )
         docs = await cursor.to_list(length=1000)
@@ -2279,36 +2327,6 @@ async def find_order_by_text(request: PublishRequest):
 
 
 
-def _is_public_ip(ip: str) -> bool:
-    try:
-        parsed = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    return parsed.is_global and not (parsed.is_multicast or parsed.is_reserved)
-
-
-def _validate_import_url(raw_url: str) -> str:
-    url = str(raw_url).strip()
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=400, detail="Solo se permiten URLs http o https.")
-    if not parsed.hostname:
-        raise HTTPException(status_code=400, detail="La URL debe incluir un host válido.")
-    if parsed.username or parsed.password:
-        raise HTTPException(status_code=400, detail="No se permiten credenciales embebidas en la URL.")
-
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        resolved = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
-    except socket.gaierror:
-        raise HTTPException(status_code=400, detail="No se pudo resolver el host de la URL.")
-
-    resolved_ips = {item[4][0] for item in resolved}
-    if not resolved_ips or any(not _is_public_ip(ip) for ip in resolved_ips):
-        raise HTTPException(status_code=400, detail="La URL apunta a una red no permitida.")
-    return url
-
-
 def _is_supported_import_content_type(content_type: str) -> bool:
     media_type = (content_type or "").split(";", 1)[0].strip().lower()
     return media_type in {
@@ -2321,89 +2339,38 @@ def _is_supported_import_content_type(content_type: str) -> bool:
     }
 
 
-def _read_limited_response_body(resp: requests.Response) -> str:
-    content_length = resp.headers.get("Content-Length")
-    if content_length:
-        try:
-            if int(content_length) > IMPORT_URL_MAX_BYTES:
-                raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.")
-        except ValueError:
-            pass
-
-    chunks = []
-    total = 0
-    for chunk in resp.iter_content(chunk_size=65536):
-        if not chunk:
-            continue
-        total += len(chunk)
-        if total > IMPORT_URL_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.")
-        chunks.append(chunk)
-
-    body = b"".join(chunks)
-    encoding = resp.encoding or resp.apparent_encoding or "utf-8"
-    return body.decode(encoding, errors="replace")
-
-
 def fetch_public_url_text(raw_url: str) -> Tuple[str, str]:
     headers = {"User-Agent": IMPORT_URL_USER_AGENT, "Accept": "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1"}
-    current_url = _validate_import_url(raw_url)
-
-    with requests.Session() as session:
-        session.trust_env = False
-        for redirect_count in range(IMPORT_URL_MAX_REDIRECTS + 1):
-            last_timeout = None
-            for attempt in range(IMPORT_URL_RETRIES + 1):
-                try:
-                    resp = session.get(
-                        current_url,
-                        timeout=IMPORT_URL_TIMEOUT_SECONDS,
-                        headers=headers,
-                        allow_redirects=False,
-                        stream=True,
-                    )
-                    break
-                except requests.exceptions.Timeout as exc:
-                    last_timeout = exc
-                    if attempt >= IMPORT_URL_RETRIES:
-                        raise
-                    time.sleep(min(0.5 * (attempt + 1), 2.0))
-                    logger.warning(
-                        f"Timeout importing URL; retrying | url={current_url} "
-                        f"attempt={attempt + 1}/{IMPORT_URL_RETRIES + 1} "
-                        f"timeout_seconds={IMPORT_URL_TIMEOUT_SECONDS}"
-                    )
-            else:
-                raise last_timeout
-
-            if resp.is_redirect or resp.is_permanent_redirect:
-                location = resp.headers.get("Location")
-                resp.close()
-                if not location:
-                    raise HTTPException(status_code=502, detail="Redirección sin cabecera Location.")
-                if redirect_count >= IMPORT_URL_MAX_REDIRECTS:
-                    raise HTTPException(status_code=400, detail="Demasiadas redirecciones al acceder a la URL.")
-                current_url = _validate_import_url(urljoin(current_url, location))
-                continue
-
-            if resp.status_code != 200:
-                status_code = resp.status_code if 400 <= resp.status_code < 600 else 502
-                resp.close()
-                raise HTTPException(status_code=status_code, detail="No se pudo acceder a la URL.")
-
-            content_type = resp.headers.get("Content-Type", "")
-            if not _is_supported_import_content_type(content_type):
-                resp.close()
-                raise HTTPException(status_code=415, detail="La URL no devuelve contenido HTML/texto soportado.")
-
-            final_url = _validate_import_url(resp.url or current_url)
-            try:
-                html = _read_limited_response_body(resp)
-            finally:
-                resp.close()
-            return final_url, html
-
-    raise HTTPException(status_code=400, detail="No se pudo completar la descarga de la URL.")
+    try:
+        response = public_fetch_sync(raw_url, FetchPolicy(
+            ports=(80, 443), max_redirects=IMPORT_URL_MAX_REDIRECTS,
+            max_attempts=IMPORT_URL_RETRIES + 1,
+            timeout_seconds=IMPORT_URL_TIMEOUT_SECONDS,
+            connect_timeout_seconds=min(10.0, IMPORT_URL_TIMEOUT_SECONDS),
+            max_bytes=IMPORT_URL_MAX_BYTES,
+            retry_delay_seconds=0.5,
+        ), headers)
+    except PublicFetchError as exc:
+        if exc.code == "TOO_LARGE":
+            raise HTTPException(status_code=413, detail="La página supera el tamaño máximo permitido.") from None
+        if exc.code == "TIME_BUDGET":
+            raise HTTPException(status_code=504, detail="Tiempo de espera agotado al acceder a la URL.") from None
+        if exc.code in {"INVALID_URL", "UNSAFE_TARGET", "UNSAFE_PORT", "REDIRECT_LOOP",
+                        "REDIRECT_LIMIT_EXCEEDED", "REDIRECT_HTTPS_DOWNGRADE"}:
+            raise HTTPException(status_code=400, detail="La URL apunta a un destino no permitido.") from None
+        raise HTTPException(status_code=502, detail="No se pudo acceder a la URL.") from None
+    if response.status != 200:
+        raise HTTPException(status_code=response.status if 400 <= response.status < 600 else 502,
+                            detail="No se pudo acceder a la URL.")
+    content_type = response.headers.get("Content-Type", "")
+    if not _is_supported_import_content_type(content_type):
+        raise HTTPException(status_code=415, detail="La URL no devuelve contenido HTML/texto soportado.")
+    charset = response.headers.get("Content-Type", "").partition("charset=")[2].split(";")[0].strip() or "utf-8"
+    try:
+        html = response.body.decode(charset, errors="replace")
+    except LookupError:
+        html = response.body.decode("utf-8", errors="replace")
+    return response.url, html
 
 
 @app.post(
@@ -2458,14 +2425,6 @@ def extract_text_from_url(request: ExtractTextRequest):
     except HTTPException:
         raise
 
-    except requests.exceptions.Timeout:
-        logger.error(f"Timeout al acceder a URL: {url}")
-        raise HTTPException(status_code=504, detail="Tiempo de espera agotado al acceder a la URL.")
-    
-    except requests.RequestException as e:
-        logger.error(f"Error de conexión accediendo a URL {url}: {e}")
-        raise HTTPException(status_code=502, detail="Error de conexión accediendo a la URL.")
-    
     except ValueError as e:
         logger.warning(f"Error de extracción para {url}: {e}")
         raise HTTPException(status_code=422, detail=str(e))
@@ -2478,7 +2437,7 @@ def extract_text_from_url(request: ExtractTextRequest):
 async def check_order_consistency(
     order_id: str,
     client_id: str = Query(..., description="ID del cliente"), 
-    admin: bool = Query(True, description="Indica si es administrador")
+    admin: bool = Query(False, description="Indica si es administrador")
 ):
     # 1. Recuperar la orden para validación
     order = await orders_collection.find_one({"order_id": order_id})
@@ -2558,6 +2517,8 @@ async def startup_event():
         await validations_collection.create_index([("idValidator", 1)])
         await validations_collection.create_index([("idValidator", 1), ("order_id", 1)])
         await validations_collection.create_index([("order_id", 1), ("idAssertion", 1), ("idValidator", 1)], unique=True)
+        if S03_ENABLED:
+            await db["s03_memberships"].create_index([("issuer", 1), ("subject", 1), ("org_id", 1)], unique=True)
         logger.info("MongoDB indexes for events and validations ensured")
     except Exception as e:
         logger.warning(f"Could not create indexes: {e}")
@@ -2590,3 +2551,13 @@ async def shutdown_event():
     if mongo_client:
         mongo_client.close()
     logger.info("Shutdown complete")
+
+
+if S03_ENABLED:
+    _s03 = settings_from_env()
+    InternalSecurity(
+        app, audience=_s03["S03_AUDIENCE"], issuer=_s03["KEYCLOAK_ISSUER_URL"],
+        jwks_url=_s03["KEYCLOAK_JWKS_URL"], policy_file=_s03["S03_POLICY_FILE"],
+        user_clients=frozenset(_s03["S03_USER_CLIENTS"].split(",")),
+        ca_file=_s03["S03_CA_FILE"] or None, owner_check=s03_owner_check,
+    ).install()

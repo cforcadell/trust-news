@@ -1,0 +1,19 @@
+[
+  {"method":"GET","path":"/internal/llm/overrides/{config_id:path}","action":"runtime:override:read","callers":["assermetry-generate","assermetry-validator","assermetry-source-router"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"GET","path":"/llm/components","action":"runtime:list","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/llm/components/{component}","action":"runtime:read","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"PUT","path":"/llm/components/{component}","action":"runtime:write","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/llm/validators","action":"runtime:list","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/llm/validators/{validator_id}","action":"runtime:read","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"PUT","path":"/llm/validators/{validator_id}","action":"runtime:write","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/ai/openrouter/recommendations","action":"runtime:recommend","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/config/validator-type-weights","action":"runtime:weights:read","callers":["assermetry-gateway","assermetry-news-handler"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"PUT","path":"/config/validator-type-weights","action":"runtime:weights:write","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"POST","path":"/clients","action":"clients:create","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/clients","action":"clients:list","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/clients/{client_id}","action":"clients:read","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"PATCH","path":"/clients/{client_id}","action":"clients:write","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"GET","path":"/internal/quotas/{client_id}","action":"quotas:read","callers":["assermetry-news-handler","assermetry-generate"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"PATCH","path":"/internal/quotas/{client_id}/consumed","action":"quotas:write","callers":["assermetry-news-handler","assermetry-generate"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"DELETE","path":"/clients/{client_id}","action":"clients:delete","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"}
+]

@@ -3,6 +3,7 @@ import logging
 from common.utils.evaluation_context import evaluation_context
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from common.security.engine import require_internal_route
 
 from ..models import ResolveRouteRequest, ResolveRouteResponse, StoredRouteResponse
 from ..repository import utc_now
@@ -16,7 +17,8 @@ def service(request: Request):
     return request.app.state.source_router_service
 
 
-@router.post("/resolve", response_model=ResolveRouteResponse, response_model_exclude_none=True)
+@router.post("/resolve", response_model=ResolveRouteResponse, response_model_exclude_none=True,
+             dependencies=[Depends(require_internal_route)])
 async def resolve_route(payload: ResolveRouteRequest, source_router=Depends(service), request: Request = None):
     cold, run_id = evaluation_context(request)
     trace = {} if run_id else None
@@ -61,7 +63,7 @@ def stored_response(route) -> StoredRouteResponse:
     return StoredRouteResponse(**route.model_dump(), route_state=state)
 
 
-@router.get("", response_model=list[StoredRouteResponse])
+@router.get("", response_model=list[StoredRouteResponse], dependencies=[Depends(require_internal_route)])
 async def list_routes(
     source_router=Depends(service), route_key: str | None = None, topic_code: str | None = None,
     evidence_kind: str | None = None, jurisdiction_key: str | None = None,
@@ -77,7 +79,7 @@ async def list_routes(
     return [stored_response(route) for route in routes]
 
 
-@router.get("/{route_key}", response_model=StoredRouteResponse)
+@router.get("/{route_key}", response_model=StoredRouteResponse, dependencies=[Depends(require_internal_route)])
 async def get_route(route_key: str, source_router=Depends(service)):
     route = await source_router.repository.get(route_key)
     if not route:

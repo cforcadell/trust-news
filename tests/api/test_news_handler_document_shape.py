@@ -4,6 +4,7 @@ import importlib.util
 import os
 import sys
 import types
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,26 @@ def load_news_handler_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_public_article_import_uses_shared_fetch_policy(monkeypatch):
+    module = load_news_handler_module()
+    captured = {}
+
+    def fake_fetch(url, policy, headers):
+        captured.update(url=url, policy=policy, headers=headers)
+        return SimpleNamespace(
+            url="https://public.example/article", status=200,
+            headers={"Content-Type": "text/html; charset=utf-8"},
+            body="<p>Información pública</p>".encode(),
+        )
+
+    monkeypatch.setattr(module, "public_fetch_sync", fake_fetch)
+    fetched_url, html = module.fetch_public_url_text("https://public.example/article")
+    assert fetched_url == "https://public.example/article"
+    assert "Información pública" in html
+    assert captured["policy"].max_bytes == module.IMPORT_URL_MAX_BYTES
+    assert captured["policy"].max_redirects == module.IMPORT_URL_MAX_REDIRECTS
 
 
 def assertion_payload():

@@ -1,4 +1,5 @@
 node_modules
+/secrets/
 cache
 ignition/deployments/chain-12345/journal.jsonl
 ignition/deployments/chain-12345/build-info/56172074225d99cafa008427fb3ce358.json
@@ -49,6 +50,12 @@ skaffold
 docs/fake_news/password_unlock.txt
 docs/github/github.txt
 *.env
+/k8s/infra/kafka/overlays/local/broker.p12
+/k8s/infra/kafka/overlays/local/ca.crt
+/k8s/apis/kafka-tls/overlays/local/ca.crt
+/k8s/s03/tls/overlays/local/infra/pki
+/k8s/s03/tls/overlays/local/apis/pki
+/web_classic/certs/privkey.pem
 hardhat.config.js
 
 smart-contracts/hardhat.config.js

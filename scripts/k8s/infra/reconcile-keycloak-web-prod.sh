@@ -3,6 +3,7 @@ set -euo pipefail
 
 NAMESPACE="infra"
 DEPLOYMENT="keycloak"
+CONTAINER="keycloak"
 REALM="TrustNews"
 CLIENT_ID="TrustNewsWeb"
 BACKEND_CLIENT_ID="TrustNewsApi"
@@ -20,7 +21,7 @@ for command_name in kubectl python3; do
 done
 
 observed_state="$({
-  kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -- \
+  kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -c "$CONTAINER" -- \
     sh -s -- "$REALM" "$CLIENT_ID" "$BACKEND_CLIENT_ID" "$GATEWAY_AUDIENCE" "$GATEWAY_SCOPE_NAME" "$KEYCLOAK_URL" "$FRONTEND_URL" "$WEB_ORIGIN" <<'KEYCLOAK_SCRIPT'
 set -eu
 

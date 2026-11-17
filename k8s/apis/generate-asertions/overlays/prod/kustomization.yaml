@@ -22,4 +22,6 @@ configMapGenerator:
 #     - generate-asertions.env
 patches:
   - path: patch-resources.yaml
+  - path: ../../../../s03/runtime/patches/apis-generate-asertions-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-generate-asertions-service.json
 namespace: apis

@@ -1,0 +1,7 @@
+[
+  {"method":"GET","path":"/admin/config","action":"runtime:read","callers":["assermetry-admin"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"PUT","path":"/admin/config","action":"runtime:write","callers":["assermetry-admin"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
+  {"method":"POST","path":"/routes/resolve","action":"sources:resolve","callers":["assermetry-validator"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"GET","path":"/routes","action":"sources:list","callers":["assermetry-admin"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"GET","path":"/routes/{route_key}","action":"sources:read","callers":["assermetry-admin"],"user_required":false,"roles":[],"scope":"system"}
+]

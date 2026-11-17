@@ -76,8 +76,9 @@ a:hover { text-decoration: underline; }
 }
 .brand-copy h1 { margin: 0; font-size: 1.25rem; line-height: 1.1; }
 .brand-copy span { color: var(--text-muted); font-size: 0.72rem; }
-.sidebar-nav { display: flex; flex-direction: column; gap: 14px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .menu-group {
+  min-width: 0;
   border: 1px solid var(--border-color);
   border-radius: 16px;
   padding: 8px;
@@ -94,9 +95,10 @@ a:hover { text-decoration: underline; }
   text-transform: uppercase;
   cursor: default;
 }
-.submenu { display: block !important; }
+.submenu { display: block !important; min-width: 0; }
 .nav-btn {
   width: 100%;
+  min-width: 0;
   border: none;
   border-radius: 12px;
   background: transparent;
@@ -106,12 +108,16 @@ a:hover { text-decoration: underline; }
   text-align: left;
   cursor: pointer;
   font-weight: 800;
-  display: flex;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
+  white-space: normal;
+  overflow: hidden;
   transition: .18s ease;
 }
-.nav-btn span { color: var(--text-muted); width: 18px; display: inline-block; }
+.nav-btn span:first-child { color: var(--text-muted); text-align: center; }
+.nav-btn span:last-child { display: block; min-width: 0; line-height: 1.25; overflow-wrap: break-word; white-space: normal; }
 .nav-btn:hover, .nav-btn.active {
   background: linear-gradient(90deg, rgba(16, 214, 154, 0.16), rgba(34, 211, 238, 0.08));
   color: #fff;

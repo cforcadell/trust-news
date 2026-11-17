@@ -1,0 +1,9 @@
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: s03-gateway
+  namespace: apis
+spec:
+  serverName: gateway.apis.svc.cluster.local
+  rootCAs:
+    - secret: s03-internal-ca

@@ -36,3 +36,5 @@ patches:
         path: /spec/selector/matchLabels/instance
         value: "3"
   - path: patch-config-ai.yaml
+  - path: ../../../../../s03/runtime/patches/apis-validate-service-3-deployment.json
+  - path: ../../../../../s03/runtime/patches/apis-validate-service-3-service.json

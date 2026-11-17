@@ -1,3 +1,5 @@
+import os
+import ssl
 from typing import Dict, Type
 
 from pydantic import BaseModel
@@ -31,7 +33,7 @@ DEFAULT_TOPIC_REQUESTS_BLOCKCHAIN = "fake_news_requests_blockchain"
 DEFAULT_TOPIC_REQUESTS_VALIDATE = "fake_news_requests_validate"
 DEFAULT_TOPIC_LIGHT_VALIDATION_REQUESTS = "fake_news_requests_light_validation"
 DEFAULT_TOPIC_RESPONSES = "fake_news_responses"
-DEFAULT_KAFKA_BOOTSTRAP = "kafka:9092"
+DEFAULT_KAFKA_BOOTSTRAP = "kafka.infra.svc.cluster.local:9092"
 
 ACTION_TO_MODEL_RESPONSE: Dict[str, Type[BaseModel]] = {
     ACTION_ASSERTIONS_GENERATED: AssertionsGeneratedResponse,
@@ -63,23 +65,33 @@ def kafka_security_kwargs(
     password: str = "",
     logger=None,
 ) -> dict:
-    protocol = (security_protocol or "").upper()
+    protocol = (security_protocol or os.getenv("KAFKA_SECURITY_PROTOCOL", "SSL")).upper()
+    if protocol not in {"SSL", "SASL_SSL"}:
+        raise ValueError(f"Kafka requires an encrypted security protocol, got {protocol!r}")
+    ca_file = os.getenv("KAFKA_CA_FILE", "/etc/kafka-tls/ca.crt")
+    if not os.path.isfile(ca_file):
+        raise ValueError(f"Kafka CA file is missing: {ca_file}")
+    tls = ssl.create_default_context(cafile=ca_file)
+    tls.check_hostname = True
+    tls.verify_mode = ssl.CERT_REQUIRED
+    kwargs = {"security_protocol": protocol, "ssl_context": tls}
     if "SASL" in protocol:
         if not (username and password):
-            if logger:
-                logger.warning(
-                    "Kafka SASL requested but username/password are incomplete; "
-                    "falling back to default PLAINTEXT client settings."
-                )
-            return {}
-        return {
-            "security_protocol": security_protocol,
+            raise ValueError("Kafka SASL credentials are incomplete")
+        kwargs.update({
             "sasl_mechanism": mechanism or "PLAIN",
             "sasl_plain_username": username,
             "sasl_plain_password": password,
-        }
-
-    kwargs = {}
-    if security_protocol:
-        kwargs["security_protocol"] = security_protocol
+        })
     return kwargs
+
+
+def kafka_admin_security_kwargs() -> dict:
+    """The kafka-python adapter uses the same TLS contract as aiokafka."""
+    protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "SSL").upper()
+    if protocol != "SSL":
+        raise ValueError("Kafka admin client requires SSL in S07a")
+    ca_file = os.getenv("KAFKA_CA_FILE", "/etc/kafka-tls/ca.crt")
+    if not os.path.isfile(ca_file):
+        raise ValueError(f"Kafka CA file is missing: {ca_file}")
+    return {"security_protocol": "SSL", "ssl_cafile": ca_file, "ssl_check_hostname": True}

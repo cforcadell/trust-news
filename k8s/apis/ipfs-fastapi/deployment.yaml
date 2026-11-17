@@ -33,6 +33,15 @@ spec:
               done
       containers:
       - name: ipfs-fastapi
+        volumeMounts:
+        - name: kafka-tls
+          mountPath: /etc/kafka-tls
+          readOnly: true
+        env:
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: "SSL"
+        - name: KAFKA_CA_FILE
+          value: /etc/kafka-tls/ca.crt
         #image: tfm-ipfs-fastapi:latest
         image: ipfs-api
         imagePullPolicy: IfNotPresent
@@ -41,3 +50,7 @@ spec:
         envFrom:
         - configMapRef:
             name: ipfs-fastapi-config
+      volumes:
+      - name: kafka-tls
+        secret:
+          secretName: s07a-kafka-ca

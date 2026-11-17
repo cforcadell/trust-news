@@ -19,6 +19,8 @@ configMapGenerator:
 patches:
   - path: patch-keycloak.yaml
   - path: patch-postgres.yaml
+  - path: ../../../../s03/runtime/patches/infra-keycloak-deployment.json
+  - path: ../../../../s03/runtime/patches/infra-keycloak-service.json
 generatorOptions:
   disableNameSuffixHash: true
 namespace: infra

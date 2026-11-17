@@ -21,3 +21,7 @@ secretGenerator:
 generatorOptions:
   disableNameSuffixHash: true
 namespace: infra
+
+patches:
+  - path: ../../../../s03/runtime/patches/infra-keycloak-deployment.json
+  - path: ../../../../s03/runtime/patches/infra-keycloak-service.json

@@ -3,11 +3,18 @@ kind: Kustomization
 resources:
   - ../../base
 
+patches:
+  - path: ../../../../s03/runtime/patches/apis-source-router-deployment.json
+  - path: ../../../../s03/runtime/patches/apis-source-router-service.json
 secretGenerator:
   - name: source-router-enc
     namespace: apis
     envs:
       - source-router.env
+  - name: s03-client-assermetry-source-router
+    namespace: apis
+    envs:
+      - s03-client.env
 
 generatorOptions:
   disableNameSuffixHash: true

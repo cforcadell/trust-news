@@ -7,8 +7,8 @@ acreditan el mismo resultado en Hetzner.
 
 ## Guías vigentes
 
-- **Estado y planificación:** [versión actual](version.md),
-  [roadmap](next_releases.md), [historial de releases](releases.md),
+- **Estado y planificación:** [versión actual v0.0.13c](version.md),
+  [archivo v0.0.13b](releases/v0.0.13b.md), [roadmap desde v0.0.13d](next_releases.md), [historial de releases](releases.md),
   [incidencias funcionales](issues.md) y [bitácora operativa](../working.md).
 - **Despliegue:** [kind local](deploy/skaffold-local.md),
   [Hetzner/K3s](deploy/skaffold-server.md), [procedimientos comunes](deploy/k8s-common.md),

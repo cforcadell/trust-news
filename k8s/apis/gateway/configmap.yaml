@@ -22,3 +22,5 @@ data:
   GATEWAY_API_DOCS_ENABLED: "true"
   # Debe coincidir con el middleware buffering de Traefik.
   GATEWAY_MAX_REQUEST_BODY_BYTES: "5242880"
+  # Plazo de validacion de nuevas ordenes; 0 desactiva el cierre automatico.
+  ORDER_VALIDATION_DEADLINE_MINUTES: "30"

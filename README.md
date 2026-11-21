@@ -15,9 +15,10 @@ problem:
 > available sources of knowledge, rather than relying on a single
 > general-purpose AI model?**
 
-Version `v0.0.13` is deployed in Hetzner in LIGHT mode with SMART evidence
-acquisition and blockchain disabled. Functional validation at the public edge
-and acceptance remain pending; see the [release record](docs/releases/v0.0.13.md).
+Version `v0.0.13` was reported deployed in Hetzner with LIGHT/SMART and
+blockchain disabled; its acceptance remains pending. The current local
+development is [v0.0.13c](docs/version.md), which has no final commit, tag or
+verified Hetzner deployment. See the [release history](docs/releases.md).
 
 Assermetry is currently a research and product-validation prototype. It is not
 yet a production fact-checking service, and its automated results should not be
@@ -670,7 +671,8 @@ acceptance are still pending. Deployment alone does not establish factual
 quality or a release tag.
 Versioned documentation:
 
-- [Current version record](docs/releases/v0.0.13.md)
+- [Current local version](docs/version.md)
+- [v0.0.13 deployment record](docs/releases/v0.0.13.md)
 - [Release history](docs/releases.md)
 - [Future roadmap](docs/next_releases.md)
 - [Known issues](docs/issues.md)
@@ -681,7 +683,9 @@ Planned progression:
 |---|---|---|
 | `v0.0.12` | Closed | Cloudflare perimeter, controlled access and administrative protection |
 | `v0.0.13` | Deployed; acceptance pending | Functional stabilization and repeatable private demo |
-| `v0.0.13b` | Planned; remediation pending | [Security closure before beta](docs/version.md), with P0/P1 acceptance gates |
+| `v0.0.13b` | Work recorded; demo acceptance pending | [Controlled demos](docs/releases/v0.0.13b.md), with mTLS and supervised spending |
+| `v0.0.13c` | Local development; uncommitted deadline closure | [Generation and order completion](docs/version.md) |
+| `v0.0.13d` | Planned | [P1 security and autonomous access preparation](docs/releases.md#v0013d--seguridad-para-acceso-autónomo-limitado) |
 | `v0.0.14` | Planned | Closed beta by invitation |
 | `v0.0.15` | Planned | Design-partner pilot with explicit success criteria |
 | `v0.0.16` | Planned | Production hardening, recovery and operational readiness |

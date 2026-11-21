@@ -3,7 +3,7 @@
 This document orders currently checks from those that travel through more layers of the system to the most local ones. A test above provides more integration coverage, but is usually slow, more variable and dependent on the environment. Local tests better isolate a cause and must be executed before regression is deployed.
 
 Para v0.0.13b, el alcance es LIGHT/SMART con Blockchain OFF; las pruebas
-locales no sustituyen las puertas de Hetzner de [version.md](../version.md).
+locales no sustituyen las puertas de Hetzner de [la ficha v0.0.13b](../releases/v0.0.13b.md).
 Las pruebas que crean órdenes o llaman a proveedores consumen cuota y deben
 ejecutarse dentro de una ventana y presupuesto autorizados.
 

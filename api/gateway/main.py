@@ -77,6 +77,10 @@ IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.l
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
 ADMIN_URL = os.getenv("ADMIN_URL", "http://admin-service.apis.svc.cluster.local:8400")
 BLOCKCHAIN_ENABLED = os.getenv("BLOCKCHAIN_ENABLED", "false").strip().lower() in {"1", "true", "on", "yes"}
+ORDER_VALIDATION_DEADLINE_MINUTES = int(os.getenv("ORDER_VALIDATION_DEADLINE_MINUTES", "30"))
+if not 0 <= ORDER_VALIDATION_DEADLINE_MINUTES <= 1440:
+    raise ValueError("ORDER_VALIDATION_DEADLINE_MINUTES must be between 0 and 1440")
+ORDER_VALIDATION_DEADLINE_HEADER = "X-Order-Validation-Deadline-Minutes"
 
 
 @app.get("/capabilities", tags=["Capabilities"])
@@ -177,7 +181,7 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
 # ============================================================
 # Helpers
 # ============================================================
-async def proxy_request(request: Request, target_url: str):
+async def proxy_request(request: Request, target_url: str, extra_headers: dict[str, str] | None = None):
     protected_target = None
     if target_url.startswith(NEWS_HANDLER_URL.rstrip("/") + "/"):
         protected_target = "assermetry-news-handler"
@@ -194,7 +198,9 @@ async def proxy_request(request: Request, target_url: str):
         headers = {"Content-Type": request.headers.get("content-type", "application/json")}
         headers.update(await internal_headers(protected_target, user_auth[7:]))
     else:
-        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", USER_TOKEN_HEADER)}
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", USER_TOKEN_HEADER, ORDER_VALIDATION_DEADLINE_HEADER.lower())}
+    if extra_headers:
+        headers.update(extra_headers)
     # Recuperamos el body en bytes. FastAPI ya lo ha parseado y validado
     # con Pydantic en el endpoint, pero lo mantiene en memoria.
     body = await request.body()
@@ -384,7 +390,7 @@ async def proxy_publish_new(
     # Inyectar el client_id como query param al microservicio
     target_url = f"{NEWS_HANDLER_URL}/publishNew?client_id={client_id}"
     
-    return await proxy_request(request, target_url)
+    return await proxy_request(request, target_url, {ORDER_VALIDATION_DEADLINE_HEADER: str(ORDER_VALIDATION_DEADLINE_MINUTES)})
 
 @router.post("/orders/publishWithAssertions", tags=["Orders"])
 async def proxy_publish_with_assertions(
@@ -395,7 +401,7 @@ async def proxy_publish_with_assertions(
     
     target_url = f"{NEWS_HANDLER_URL}/publishWithAssertions?client_id={client_id}"
     
-    return await proxy_request(request, target_url)
+    return await proxy_request(request, target_url, {ORDER_VALIDATION_DEADLINE_HEADER: str(ORDER_VALIDATION_DEADLINE_MINUTES)})
 
 @router.post("/extract_text_from_url", tags=["News Import"])
 async def proxy_extract_text_from_url(

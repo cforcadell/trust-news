@@ -97,13 +97,19 @@ def test_generated_payload_requires_the_canonical_document():
 def test_start_light_flow_stores_the_full_protocol_document(monkeypatch):
     module = load_news_handler_module()
     calls = {}
+    state = {"status": "ASSERTIONS_REQUESTED"}
 
-    async def fake_update_order(order_id, update):
-        calls["order_id"] = order_id
-        calls["update"] = update
+    class Orders:
+        async def update_one(self, query, update):
+            if state["status"] not in query["status"]["$in"]:
+                return types.SimpleNamespace(modified_count=0)
+            calls["order_id"] = query["order_id"]
+            calls["update"] = update
+            state["status"] = update["$set"]["status"]
+            return types.SimpleNamespace(modified_count=1)
 
     async def fake_dispatch(order_id, text, assertions_document, client_id=None):
-        calls["dispatched"] = True
+        calls["dispatch_count"] = calls.get("dispatch_count", 0) + 1
         calls["dispatch_args"] = {
             "order_id": order_id,
             "text": text,
@@ -113,7 +119,7 @@ def test_start_light_flow_stores_the_full_protocol_document(monkeypatch):
     def fake_hash_text_to_multihash(text):
         return types.SimpleNamespace(digest="fake-digest")
 
-    monkeypatch.setattr(module, "update_order", fake_update_order)
+    monkeypatch.setattr(module, "orders_collection", Orders())
     monkeypatch.setattr(module, "dispatch_light_validation_requests", fake_dispatch)
     monkeypatch.setattr(module, "hash_text_to_multihash", fake_hash_text_to_multihash)
 
@@ -125,9 +131,11 @@ def test_start_light_flow_stores_the_full_protocol_document(monkeypatch):
     )
 
     asyncio.run(module.start_light_flow("order-123", "Texto de prueba", assertions_document, client_id="client-1"))
+    asyncio.run(module.start_light_flow("order-123", "Texto de prueba", assertions_document, client_id="client-1"))
 
     assert calls["order_id"] == "order-123"
-    assert calls["dispatched"] is True
+    assert calls["dispatch_count"] == 1
+    assert state["status"] == "DOCUMENT_CREATED"
 
     assert "$set" in calls["update"]
     order_update = calls["update"]["$set"]
@@ -186,17 +194,24 @@ def test_blockchain_registered_merges_assignments_with_canonical_document(monkey
         provider="test",
     ).model_dump(mode="json")
 
-    async def fake_get_order_doc(order_id):
-        return {"order_id": order_id, "document": document, "assertions": []}
+    state = {"status": "BLOCKCHAIN_REQUESTED"}
 
-    async def fake_update_order(order_id, update):
-        updates.append(update)
+    async def fake_get_order_doc(order_id):
+        return {"order_id": order_id, "document": document, "assertions": [], "status": state["status"]}
+
+    class Orders:
+        async def update_one(self, query, update):
+            if query["status"] != state["status"]:
+                return types.SimpleNamespace(modified_count=0)
+            updates.append(update)
+            state["status"] = update["$set"]["status"]
+            return types.SimpleNamespace(modified_count=1)
 
     async def fake_log_event(*args, **kwargs):
         return None
 
     monkeypatch.setattr(module, "get_order_doc", fake_get_order_doc)
-    monkeypatch.setattr(module, "update_order", fake_update_order)
+    monkeypatch.setattr(module, "orders_collection", Orders())
     monkeypatch.setattr(module, "log_event", fake_log_event)
 
     asyncio.run(module.process_kafka_message({

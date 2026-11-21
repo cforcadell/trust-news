@@ -83,6 +83,7 @@ from common.models.protocol_models import (
     build_assertions_document_v2,
     build_assertion_validation_payload_v2,
 )
+from common.utils.order_lifecycle import AUTOMATIC_STATUS, PENDING_STATUS, completed_status, deadline_fields, expected_pairs, missing_pairs, mongo_utc_datetime
 
 # =========================================================
 # Cargar .env
@@ -135,6 +136,19 @@ IMPORT_URL_RETRIES = int(os.getenv("IMPORT_URL_RETRIES", "2"))
 IMPORT_URL_MAX_REDIRECTS = int(os.getenv("IMPORT_URL_MAX_REDIRECTS", "3"))
 IMPORT_URL_MAX_BYTES = int(os.getenv("IMPORT_URL_MAX_BYTES", str(2 * 1024 * 1024)))
 IMPORT_URL_USER_AGENT = os.getenv("IMPORT_URL_USER_AGENT", "Mozilla/5.0 (compatible; TrustNewsArticleExtractor/1.0)")
+ORDER_VALIDATION_DEADLINE_HEADER = "X-Order-Validation-Deadline-Minutes"
+ORDER_VALIDATION_SWEEP_SECONDS = 30
+
+
+def validation_deadline_minutes(request: Request) -> int:
+    raw = request.headers.get(ORDER_VALIDATION_DEADLINE_HEADER, "0")
+    try:
+        minutes = int(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid validation deadline") from exc
+    if not 0 <= minutes <= 1440:
+        raise HTTPException(status_code=400, detail="Invalid validation deadline")
+    return minutes
 
 
 
@@ -146,6 +160,7 @@ app = FastAPI(title="Fake News Orchestrator (Typed)", docs_url=None if S03_ENABL
               redoc_url=None if S03_ENABLED else "/redoc", openapi_url=None if S03_ENABLED else "/openapi.json")
 producer: Optional[AIOKafkaProducer] = None
 consumer: Optional[AIOKafkaConsumer] = None
+deadline_task: Optional[asyncio.Task] = None
 mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 orders_collection = None
@@ -667,6 +682,7 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
     no_validator_assertions = []
     total_pending = 0
     validator_health_cache: Dict[str, bool] = {}
+    requests_to_send = []
 
     for index, assertion in enumerate(assertions_document.assertions):
         assertion_id = str(assertion.assertion_id)
@@ -726,12 +742,13 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
                     "assertion_validation_payload": payload_v2,
                 }
             )
-            await producer.send_and_wait(TOPIC_LIGHT_VALIDATION_REQUESTS, msg.model_dump_json().encode("utf-8"))
-            await log_event(order_id, msg.action, TOPIC_LIGHT_VALIDATION_REQUESTS, msg.payload.model_dump(mode="json"))
-            logger.info(f"[news-handler] mode=LIGHT publishing assertion-validation-payload-v2 assertion_id={assertion_id}")
+            requests_to_send.append(msg)
             total_pending += 1
 
     status = "VALIDATION_PENDING" if total_pending else "NO_VALIDATORS_AVAILABLE"
+    order = await get_order_doc(order_id)
+    minutes = int((order or {}).get("validation_deadline_minutes") or 0)
+    timing = deadline_fields(minutes) if total_pending else {}
     await update_order(order_id, {
         "$set": {
             "validators": validators_info,
@@ -739,9 +756,15 @@ async def dispatch_light_validation_requests(order_id: str, text: str, assertion
             "validators_pending": total_pending,
             "assertions_without_validator": no_validator_assertions,
             "status": status,
+            "validation_revision": 0,
+            **timing,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
     })
+    for msg in requests_to_send:
+        await producer.send_and_wait(TOPIC_LIGHT_VALIDATION_REQUESTS, msg.model_dump_json().encode("utf-8"))
+        await log_event(order_id, msg.action, TOPIC_LIGHT_VALIDATION_REQUESTS, msg.payload.model_dump(mode="json"))
+        logger.info("[news-handler] mode=LIGHT publishing assertion-validation-payload-v2 assertion_id=%s", msg.payload.idAssertion)
     return total_pending
 
 
@@ -750,7 +773,7 @@ async def start_light_flow(order_id: str, text: str, assertions_document: Assert
     logger.info(f"[LIGHT] Skipping IPFS and blockchain publication | order_id={order_id}")
     assertions_list = protocol_assertions_for_mongo(assertions_document)
     document = assertions_document.model_dump(mode="json")
-    await update_order(order_id, {
+    transition = await orders_collection.update_one({"order_id": order_id, "status": {"$in": ["CREATED", "ASSERTIONS_REQUESTED"]}}, {
         "$set": {
             "validation_mode": ValidationMode.LIGHT.value,
             "assertions": assertions_list,
@@ -767,6 +790,9 @@ async def start_light_flow(order_id: str, text: str, assertions_document: Assert
         },
         "$unset": {"assertions_document_cid": ""}
     })
+    if not transition.modified_count:
+        logger.info("[LIGHT] Duplicate or stale assertions result ignored | order_id=%s", order_id)
+        return
     logger.info(f"[LIGHT] Generated assertions-document-v2 | order_id={order_id} count={len(assertions_list)}")
     await dispatch_light_validation_requests(order_id, text, assertions_document, client_id)
 
@@ -780,6 +806,152 @@ async def get_order_lock(order_id: str):
     if order_id not in order_locks:
         order_locks[order_id] = asyncio.Lock()
     return order_locks[order_id]
+
+
+async def persist_validation_result(order_id: str, assertion_id: str, validator_id: str, entry: dict) -> str | None:
+    """Atomically accept one response while the order is open; return its resulting status."""
+    for _ in range(8):
+        order = await get_order_doc(order_id)
+        if not order or order.get("status") != PENDING_STATUS:
+            return None
+        deadline = order.get("validation_deadline_at")
+        if isinstance(deadline, datetime) and mongo_utc_datetime(deadline) <= datetime.now(timezone.utc):
+            return None
+        validations = order.get("validations") or {}
+        if validator_id in validations.get(assertion_id, {}):
+            return None
+        if (assertion_id, validator_id) not in missing_pairs(order, validations):
+            return None
+        validations.setdefault(assertion_id, {})[validator_id] = entry
+        remaining = missing_pairs(order, validations)
+        status = PENDING_STATUS if remaining else completed_status(validations)
+        now = datetime.now(timezone.utc).isoformat()
+        update = {
+            "validations": validations,
+            "validators_pending": len(remaining),
+            "validation_revision": int(order.get("validation_revision") or 0) + 1,
+            "updated_at": now,
+            "status": status,
+        }
+        if not remaining:
+            update.update(closed_at=now, closure_reason="ALL_VALIDATIONS_REPORTED", unanswered_validations_count=0)
+        condition = {"order_id": order_id, "status": PENDING_STATUS, "validation_revision": order.get("validation_revision")}
+        if isinstance(deadline, datetime):
+            condition["validation_deadline_at"] = {"$gt": datetime.now(timezone.utc)}
+        result = await orders_collection.update_one(condition, {"$set": update})
+        if result.modified_count:
+            return status
+    raise RuntimeError("Concurrent validation updates did not converge")
+
+
+async def expire_validation_order(order_id: str, now: datetime | None = None) -> bool:
+    """Close an expired order from the same persisted snapshot used by response writes."""
+    now = now or datetime.now(timezone.utc)
+    for _ in range(8):
+        order = await get_order_doc(order_id)
+        if not order or order.get("status") != PENDING_STATUS:
+            return False
+        deadline = order.get("validation_deadline_at")
+        if not isinstance(deadline, datetime) or mongo_utc_datetime(deadline) > now:
+            return False
+        missing = sorted(missing_pairs(order))
+        automatic = bool(missing)
+        status = AUTOMATIC_STATUS if automatic else completed_status(order.get("validations") or {})
+        closed_at = now.isoformat()
+        result = await orders_collection.update_one(
+            {"order_id": order_id, "status": PENDING_STATUS, "validation_revision": order.get("validation_revision"), "validation_deadline_at": {"$lte": now}},
+            {"$set": {
+                "status": status,
+                "validators_pending": 0,
+                "validation_revision": int(order.get("validation_revision") or 0) + 1,
+                "closed_at": closed_at,
+                "updated_at": closed_at,
+                "closure_reason": "VALIDATION_DEADLINE_EXCEEDED" if automatic else "ALL_VALIDATIONS_REPORTED",
+                "unanswered_validations_count": len(missing),
+                "unanswered_validations": [{"idAssertion": aid, "validator_id": vid} for aid, vid in missing],
+                **({"closure_event_recorded": False} if automatic else {}),
+            }},
+        )
+        if result.modified_count:
+            logger.info("[%s] Validation deadline closed order status=%s unanswered=%s", order_id, status, len(missing))
+            return True
+    raise RuntimeError("Concurrent deadline updates did not converge")
+
+
+async def record_automatic_closure_event(order: dict) -> None:
+    order_id = order["order_id"]
+    event_key = f"{order_id}:validation_deadline_exceeded"
+    await events_collection.update_one(
+        {"event_key": event_key},
+        {"$setOnInsert": {
+            "event_key": event_key,
+            "order_id": order_id,
+            "action": "validation_deadline_exceeded",
+            "topic": "order_lifecycle",
+            "timestamp": order["closed_at"],
+            "payload": {
+                "status": AUTOMATIC_STATUS,
+                "deadline_at": mongo_utc_datetime(order["validation_deadline_at"]).isoformat(),
+                "received_validations_count": len(expected_pairs(order)) - order["unanswered_validations_count"],
+                "unanswered_validations_count": order["unanswered_validations_count"],
+                "unanswered_validations": order["unanswered_validations"],
+            },
+        }},
+        upsert=True,
+    )
+    await orders_collection.update_one(
+        {"order_id": order_id, "status": AUTOMATIC_STATUS},
+        {"$set": {"closure_event_recorded": True}},
+    )
+
+
+async def record_late_validation(order_id: str, assertion_id: str, validator_id: str) -> None:
+    """Record one audit event per unanswered response after its order deadline."""
+    order = await get_order_doc(order_id)
+    if not order:
+        return
+    deadline = order.get("validation_deadline_at")
+    if not isinstance(deadline, datetime) or mongo_utc_datetime(deadline) > datetime.now(timezone.utc):
+        return
+    if validator_id in (order.get("validations") or {}).get(assertion_id, {}):
+        return
+    event_key = f"{order_id}:late_validation:{assertion_id}:{validator_id}"
+    await events_collection.update_one(
+        {"event_key": event_key},
+        {"$setOnInsert": {
+            "event_key": event_key,
+            "order_id": order_id,
+            "action": "validation_response_late",
+            "topic": "order_lifecycle",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": {"idAssertion": assertion_id, "validator_id": validator_id,
+                        "status": order.get("status"), "deadline_at": mongo_utc_datetime(deadline).isoformat()},
+        }},
+        upsert=True,
+    )
+
+
+async def reconcile_validation_deadlines() -> None:
+    """Restart-safe, bounded sweep of deadlines and pending audit events."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            cursor = orders_collection.find(
+                {"status": PENDING_STATUS, "validation_deadline_at": {"$lte": now}},
+                {"order_id": 1},
+            ).sort("validation_deadline_at", 1).limit(100)
+            async for order in cursor:
+                await expire_validation_order(order["order_id"], now)
+            audit_cursor = orders_collection.find(
+                {"status": AUTOMATIC_STATUS, "closure_event_recorded": False},
+            ).limit(100)
+            async for order in audit_cursor:
+                await record_automatic_closure_event(order)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Validation deadline reconciliation failed")
+        await asyncio.sleep(ORDER_VALIDATION_SWEEP_SECONDS)
 
 # =========================================================
 # 🟢 Helpers para logging de eventos y validaciones
@@ -1153,6 +1325,9 @@ async def process_kafka_message(data: dict):
             if not doc:
                 logger.warning(f"[{order_id}] ❌ Documento no encontrado en MongoDB.")
                 return
+            if doc.get("status") == PENDING_STATUS or str(doc.get("status", "")).startswith("VALIDATED"):
+                logger.info("[%s] Duplicate blockchain registration ignored for closed order", order_id)
+                return
 
             canonical_assertions = {
                 str(item.get("assertion_id")): item
@@ -1190,11 +1365,15 @@ async def process_kafka_message(data: dict):
                 })
 
             # 🔍 DEBUG: Log before update
+            total_pending = sum(len(v["validatorAddresses"]) for v in validators_info)
+            timing = deadline_fields(int(doc.get("validation_deadline_minutes") or 0)) if total_pending else {}
             update_payload = {
                 "$set": {
                     "validators": validators_info,
-                    "validators_pending": sum(len(v["validatorAddresses"]) for v in validators_info),
-                    "status": "VALIDATION_PENDING",
+                    "validators_pending": total_pending,
+                    "status": PENDING_STATUS if total_pending else "NO_VALIDATORS_AVAILABLE",
+                    "validation_revision": 0,
+                    **timing,
                     "post_id": postId,
                     "tx_hash": tx_hash,
                     "hash_text": hash_text
@@ -1203,7 +1382,12 @@ async def process_kafka_message(data: dict):
             }
             logger.debug(f"[{order_id}] 📤 Updating order with post_id={postId} (type={type(postId).__name__}), status=VALIDATION_PENDING")
             
-            await update_order(order_id, update_payload)
+            transition = await orders_collection.update_one(
+                {"order_id": order_id, "status": doc.get("status")}, update_payload,
+            )
+            if not transition.modified_count:
+                logger.info("[%s] Duplicate blockchain registration ignored after status change", order_id)
+                return
             
             logger.info(f"[{order_id}] ✅ Validadores guardados en MongoDB ({len(validators_info)} aserciones). post_id={postId} type={type(postId).__name__}")
 
@@ -1352,17 +1536,11 @@ async def process_kafka_message(data: dict):
                     logger.warning(f"[LIGHT] Ignoring LIGHT response for non-LIGHT order | order_id={order_id}")
                     return
 
-                validations = doc.get("validations", {})
-                validations.setdefault(id_assert, {})
-                if id_val in validations[id_assert]:
-                    logger.info(f"[LIGHT] Duplicate validation ignored | order_id={order_id} assertion={id_assert} validator={id_val}")
-                    return
-
                 response_ms = int(time.time() * 1000)
                 response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
                 validator_config_snapshot = get_cached_validator_config(id_val)
                 weight_snapshot = validation_weight_snapshot(validator_config_snapshot, validator_type_weights)
-                validations[id_assert][id_val] = {
+                entry = {
                     "approval": status_val,
                     "text": description,
                     "tx_hash": None,
@@ -1387,29 +1565,16 @@ async def process_kafka_message(data: dict):
                     "response_time_seconds": response_time_seconds,
                     **weight_snapshot,
                 }
-                await update_order(order_id, {"$set": {"validations": validations, "updated_at": datetime.now(timezone.utc).isoformat()}})
+                status = await persist_validation_result(order_id, id_assert, str(id_val), entry)
+                if status is None:
+                    logger.info("[LIGHT] Late, duplicate or unexpected validation ignored | order_id=%s assertion=%s validator=%s", order_id, id_assert, id_val)
+                    await record_late_validation(order_id, id_assert, str(id_val))
+                    return
                 validation_payload = {**payload, "validator_config": validator_config_snapshot, **weight_snapshot}
                 validation_payload.pop("assertion_index", None)
                 await log_validation(order_id, order_id, id_assert, id_val, status_val, None, validation_payload, execution_status, response_time_seconds)
-
-                validators_cfg = doc.get("validators", [])
-                total_pending = 0
-                for v in validators_cfg:
-                    aid = str(v.get("idAssertion"))
-                    expected = set(v.get("validatorAddresses") or [])
-                    done = set(validations.get(aid, {}).keys())
-                    total_pending += len(expected - done)
-
-                await update_order(order_id, {"$set": {"validators_pending": total_pending}})
-                if total_pending == 0:
-                    has_errors = any(
-                        item.get("execution_status") == ValidationExecutionStatus.ERROR.value
-                        for assertion_validations in validations.values()
-                        for item in assertion_validations.values()
-                    )
-                    terminal_status = "VALIDATED_WITH_ERRORS" if has_errors else "VALIDATED"
-                    await update_order(order_id, {"$set": {"status": terminal_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
-                    logger.info(f"[LIGHT] All validation responses completed | order_id={order_id} status={terminal_status}")
+                if status != PENDING_STATUS:
+                    logger.info("[LIGHT] All validation responses completed | order_id=%s status=%s", order_id, status)
 
         elif action == "validation_completed":
             payload = parsed.payload.model_dump()
@@ -1437,32 +1602,12 @@ async def process_kafka_message(data: dict):
                     logger.warning(f"[{order_id}] ❌ Documento no encontrado para validation_completed.")
                     return
 
-                validations = doc.get("validations", {})
-                if id_assert not in validations:
-                    validations[id_assert] = {}
-
-                already_done = id_val in validations[id_assert]
-                if already_done:
-                    logger.info(f"[{order_id}] ⚠️ Validación duplicada ignorada (Assertion={id_assert}, Validator={id_val}).")
-                    return
-                
-                client_id = doc.get("client_id")
-                if client_id:
-                    try:
-                        quotas = await fetch_client_quotas(client_id, order_id=order_id)
-                        cons_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
-                        
-                        await update_client_consumed(client_id, "blockchain_validation", cons_val + 1, order_id=order_id)
-                        logger.info(f"[{order_id}] 💰 Cuota blockchain_validation incrementada a {cons_val + 1} para {client_id}")
-                    except Exception as e:
-                        logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
-
                 response_ms = int(time.time() * 1000)
                 response_time_seconds = await calculate_validation_response_time_seconds(order_id, id_assert, id_val, response_ms)
                 validator_config_snapshot = get_cached_validator_config(id_val)
                 weight_snapshot = validation_weight_snapshot(validator_config_snapshot, validator_type_weights)
 
-                validations[id_assert][id_val] = {
+                entry = {
                     "approval": status_val,
                     "text": assertion_text,
                     "tx_hash": tx_hash,
@@ -1484,8 +1629,21 @@ async def process_kafka_message(data: dict):
                     **weight_snapshot,
                 }
 
-                await update_order(order_id, {"$set": {"validations": validations}})
+                status = await persist_validation_result(order_id, id_assert, str(id_val), entry)
+                if status is None:
+                    logger.info("[%s] Late, duplicate or unexpected validation ignored assertion=%s validator=%s", order_id, id_assert, id_val)
+                    await record_late_validation(order_id, id_assert, str(id_val))
+                    return
                 logger.info(f"[{order_id}] ✅ Validación registrada Assertion={id_assert}, Validator={id_val}.")
+
+                client_id = doc.get("client_id")
+                if client_id:
+                    try:
+                        quotas = await fetch_client_quotas(client_id, order_id=order_id)
+                        cons_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
+                        await update_client_consumed(client_id, "blockchain_validation", cons_val + 1, order_id=order_id)
+                    except Exception as e:
+                        logger.error(f"[{order_id}] ❌ Error incrementando cuota de validaciones: {e}")
 
                 # Registrar validación en colección 'validations'
                 await log_validation(
@@ -1500,32 +1658,8 @@ async def process_kafka_message(data: dict):
                     response_time_seconds,
                 )
 
-                validators_cfg = doc.get("validators", [])
-                total_pending = 0
-                for v in validators_cfg:
-                    aid = str(v["idAssertion"])
-                    expected = set(v["validatorAddresses"])
-                    done = set(validations.get(aid, {}).keys())
-                    pending = expected - done
-                    total_pending += len(pending)
-                    logger.info(
-                        f"[{order_id}] 🧮 Assertion {aid}: {len(done)}/{len(expected)} completadas. Pendientes: {list(pending) if pending else 'NINGUNO'}"
-                    )
-
-                await update_order(order_id, {"$set": {"validators_pending": total_pending}})
-                logger.info(f"[{order_id}] 📊 Validadores pendientes totales: {total_pending}")
-
-                if total_pending == 0:
-                    has_errors = any(
-                        item.get("execution_status") == ValidationExecutionStatus.ERROR.value
-                        for assertion_validations in validations.values()
-                        for item in assertion_validations.values()
-                    )
-                    terminal_status = "VALIDATED_WITH_ERRORS" if has_errors else "VALIDATED"
-                    await update_order(order_id, {"$set": {"status": terminal_status}})
-                    logger.info(f"[{order_id}] 🎯 Todas las validaciones finalizadas. Estado={terminal_status}.")
-                else:
-                    logger.info(f"[{order_id}] 🕓 Aún quedan {total_pending} validaciones pendientes.")
+                if status != PENDING_STATUS:
+                    logger.info("[%s] All validation responses completed status=%s", order_id, status)
 
         else:
             logger.warning(f"[{order_id}] ⚠️ Acción desconocida recibida: {action}")
@@ -1971,6 +2105,7 @@ def normalize_api_timestamp(value: Any) -> str:
 @app.post("/publishNew", status_code=202)
 async def publish_new(req: PublishRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
+    deadline_minutes = validation_deadline_minutes(request)
     # 1. Comprobación de cuota "news_generation"
     quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
@@ -1991,6 +2126,7 @@ async def publish_new(req: PublishRequest, client_id: str, request: Request):
         **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
         "status": "CREATED",
         "validation_mode": validation_mode.value,
+        "validation_deadline_minutes": deadline_minutes,
         "source_url": req.source_url,
         "source_domain": req.source_domain,
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -2018,12 +2154,17 @@ async def publish_new(req: PublishRequest, client_id: str, request: Request):
         logger.exception(f"[{order_id}] Error validando generate_assertions request: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")
 
-    await update_order(order_id, {"status": "ASSERTIONS_REQUESTED"})
-    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED", "validation_mode": normalize_validation_mode(req.validation_mode).value}
+    await orders_collection.update_one(
+        {"order_id": order_id, "status": "CREATED"},
+        {"$set": {"status": "ASSERTIONS_REQUESTED"}},
+    )
+    return {"order_id": order_id, "status": "ASSERTIONS_REQUESTED", "validation_mode": normalize_validation_mode(req.validation_mode).value,
+            "validation_deadline_minutes": deadline_minutes}
 
 @app.post("/publishWithAssertions", status_code=202)
 async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
+    deadline_minutes = validation_deadline_minutes(request)
     # 1. Comprobación de cuota "blockchain_validation"
     quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
     consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
@@ -2053,6 +2194,7 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
         "status": "ASSERTIONS_REQUESTED",
         "validation_mode": validation_mode.value,
+        "validation_deadline_minutes": deadline_minutes,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await save_order_doc(order_doc)
@@ -2088,7 +2230,8 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
         raise HTTPException(status_code=500, detail="Internal validation error")
 
     current = await get_order_doc(order_id)
-    return {"order_id": order_id, "status": (current or {}).get("status", "ASSERTIONS_REQUESTED"), "validation_mode": normalize_validation_mode(req.validation_mode).value}
+    return {"order_id": order_id, "status": (current or {}).get("status", "ASSERTIONS_REQUESTED"), "validation_mode": normalize_validation_mode(req.validation_mode).value,
+            "validation_deadline_minutes": deadline_minutes}
 
 @app.get("/orders/{order_id}")
 async def get_order(
@@ -2112,6 +2255,8 @@ async def get_order(
         order["created_at"] = normalize_api_timestamp(created_at)
         if order.get("updated_at") is not None:
             order["updated_at"] = normalize_api_timestamp(order["updated_at"])
+        if isinstance(order.get("validation_deadline_at"), datetime):
+            order["validation_deadline_at"] = mongo_utc_datetime(order["validation_deadline_at"]).isoformat()
     except ValueError as exc:
         logger.error("Order %s contains an invalid timestamp: %s", order_id, exc)
         raise HTTPException(status_code=500, detail="Order contains an invalid timestamp") from exc
@@ -2497,7 +2642,7 @@ async def check_order_consistency(
 # =========================================================
 @app.on_event("startup")
 async def startup_event():
-    global producer, consumer, mongo_client, db, orders_collection, events_collection, validations_collection, config_collection, validator_registry_collection, validators_cache
+    global producer, consumer, mongo_client, db, orders_collection, events_collection, validations_collection, config_collection, validator_registry_collection, validators_cache, deadline_task
 
     # MongoDB
     mongo_client = AsyncIOMotorClient(MONGO_URI)
@@ -2513,6 +2658,9 @@ async def startup_event():
     try:
         await events_collection.create_index([("order_id", 1)])
         await events_collection.create_index([("action", 1)])
+        await events_collection.create_index([("event_key", 1)], unique=True, sparse=True)
+        await orders_collection.create_index([("status", 1), ("validation_deadline_at", 1)])
+        await orders_collection.create_index([("status", 1), ("closure_event_recorded", 1)])
         await validations_collection.create_index([("order_id", 1)])
         await validations_collection.create_index([("idValidator", 1)])
         await validations_collection.create_index([("idValidator", 1), ("order_id", 1)])
@@ -2540,10 +2688,18 @@ async def startup_event():
     # Consumer lanzado en background
     asyncio.create_task(consume_responses_loop())
     logger.info("Background consumer task started")
+    deadline_task = asyncio.create_task(reconcile_validation_deadlines())
+    logger.info("Validation deadline reconciler started")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global producer, consumer, mongo_client
+    global producer, consumer, mongo_client, deadline_task
+    if deadline_task:
+        deadline_task.cancel()
+        try:
+            await deadline_task
+        except asyncio.CancelledError:
+            pass
     if producer:
         await producer.stop()
     if consumer:

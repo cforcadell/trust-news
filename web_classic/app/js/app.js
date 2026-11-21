@@ -308,6 +308,19 @@ function isTerminalOrderStatus(status) {
     ].includes(normalized);
 }
 
+function orderPollingDurationMs(order, startedAt = Date.now()) {
+    const deadlineMinutes = Number(order?.validation_deadline_minutes);
+    const configuredDuration = Number.isFinite(deadlineMinutes) && deadlineMinutes > 0
+        ? Math.max(POLLING_DURATION, (deadlineMinutes + 5) * 60 * 1000)
+        : POLLING_DURATION;
+    const deadline = order?.validation_deadline_at ? parseApiTimestamp(order.validation_deadline_at) : null;
+    return Math.max(configuredDuration, deadline ? deadline.getTime() - startedAt + 60 * 1000 : 0);
+}
+
+function currentPollingDurationMs(session) {
+    return orderPollingDurationMs({validation_deadline_minutes: session.deadlineMinutes, ...currentOrderData}, session.startedAt);
+}
+
 function stopOrderPolling(session = activeOrderPollingSession) {
     if (!session) return;
     session.stopped = true;
@@ -393,7 +406,7 @@ function renderOrderPollingState(type, session, status = "") {
         },
         timeout: {
             title: t("messages.verificationTimeoutTitle"),
-            detail: t("messages.verificationTimeoutError", { minutes: Math.round(POLLING_DURATION / 60000), orderId: session.orderId })
+            detail: t("messages.verificationTimeoutError", { minutes: Math.round(currentPollingDurationMs(session) / 60000), orderId: session.orderId })
         },
         "connection-error": {
             title: t("messages.verificationConnectionErrorTitle"),
@@ -427,7 +440,7 @@ function renderOrderPollingState(type, session, status = "") {
 async function runOrderPollingCycle(session) {
     if (session.stopped || activeOrderPollingSession !== session) return;
 
-    if (Date.now() - session.startedAt >= POLLING_DURATION) {
+    if (Date.now() - session.startedAt >= currentPollingDurationMs(session)) {
         stopOrderPolling(session);
         activateOrderTab("process");
         renderOrderPollingState("timeout", session, currentOrderData?.status);
@@ -487,6 +500,7 @@ function pollOrder(orderId, options = {}) {
     const session = {
         orderId,
         startedAt: Date.now(),
+        deadlineMinutes: options.deadlineMinutes,
         consecutiveErrors: 0,
         timerId: null,
         controller: null,
@@ -832,7 +846,7 @@ async function publishNew() {
     document.getElementById("orderId").value = newOrderId;
     updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
     alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
-    pollOrder(newOrderId, { resetView: true, followProcess: true });
+    pollOrder(newOrderId, { resetView: true, followProcess: true, deadlineMinutes: data.validation_deadline_minutes });
 }
 
 async function publishWithAssertions() {
@@ -893,7 +907,7 @@ async function publishWithAssertions() {
         document.getElementById("orderId").value = newOrderId;
         updateAppHistory({ section: "order", inputId: "orderId", value: newOrderId }, true);
         alertMessage(t("ui.newsPublished", { orderId: newOrderId }), 'primary');
-        pollOrder(newOrderId, { resetView: true, followProcess: true });
+        pollOrder(newOrderId, { resetView: true, followProcess: true, deadlineMinutes: data.validation_deadline_minutes });
 
         return data;
     } catch (error) {
@@ -1276,6 +1290,11 @@ function formatDurationSeconds(secondsValue) {
 }
 
 function getEndToEndValidationDuration(order, events = []) {
+    if (order.status === "VALIDATED_AUTOMATICALLY") {
+        const started = parseApiTimestamp(order.validation_started_at);
+        const closed = parseApiTimestamp(order.closed_at);
+        return started && closed ? formatDurationMinutesSeconds(closed.getTime() - started.getTime()) : "";
+    }
     if (!Array.isArray(events) || events.length === 0) return "";
 
     const startActions = new Set(["request_validation", "validation_requested", "light_validation_request"]);
@@ -1404,6 +1423,7 @@ function getAssertionCategory(assertion) {
 }
 
 function buildVerificationSummary(order, events = []) {
+    const automaticallyClosed = order.status === "VALIDATED_AUTOMATICALLY";
     const weightedResults = order.assertion_results || {};
     const validations = order.validations || {};
     const validationRequestCount = Object.values(order.validation_requests || {}).reduce((sum, items) => {
@@ -1415,7 +1435,8 @@ function buildVerificationSummary(order, events = []) {
         return sum + (validators && typeof validators === "object" ? Object.keys(validators).length : 0);
     }, 0);
     const totalValidations = validationRequestCount || expectedValidations || Math.max(receivedValidationCount + Number(order.validators_pending || 0), 0);
-    const pendingValidations = Math.max(Number(order.validators_pending || 0), totalValidations - receivedValidationCount, 0);
+    const unansweredValidations = automaticallyClosed ? Number(order.unanswered_validations_count || 0) : 0;
+    const pendingValidations = automaticallyClosed ? 0 : Math.max(Number(order.validators_pending || 0), totalValidations - receivedValidationCount, 0);
     const errorValidations = Object.values(validations).reduce((sum, validators) => {
         return sum + Object.values(validators || {}).filter(isValidationError).length;
     }, 0);
@@ -1478,12 +1499,12 @@ function buildVerificationSummary(order, events = []) {
     let statusKey = "inconclusive";
     let documentStatus = "INCONCLUSIVE";
 
-    if (totalValidations > 0 && receivedValidationCount < totalValidations) {
+    if (!automaticallyClosed && totalValidations > 0 && receivedValidationCount < totalValidations) {
         statusKey = "pending";
     } else if (scoredAssertions === 0 && errorValidations > 0) {
         statusKey = "error";
     } else if (totalAssertions === 0) {
-        statusKey = receivedValidationCount > 0 ? "inconclusive" : "pending";
+        statusKey = receivedValidationCount > 0 || automaticallyClosed ? "inconclusive" : "pending";
     } else if (confirmedAssertions > 0 && contradictedAssertions > 0) {
         statusKey = "mixed";
         documentStatus = "MIXED";
@@ -1497,6 +1518,10 @@ function buildVerificationSummary(order, events = []) {
         statusKey = "verified";
         documentStatus = "SUPPORTED";
     }
+    if (automaticallyClosed) {
+        statusKey = scoredAssertions > 0 ? "partial" : "inconclusive";
+        documentStatus = scoredAssertions > 0 ? "PARTIALLY_VERIFIED" : "INCONCLUSIVE";
+    }
 
     const statusMap = {
         verified: { statusLabel: t("summary.verified"), statusIcon: "🟢" },
@@ -1505,7 +1530,7 @@ function buildVerificationSummary(order, events = []) {
         contradicted: { statusLabel: t("summary.contradicted"), statusIcon: "🔴" },
         inconclusive: { statusLabel: t("summary.inconclusive"), statusIcon: "🟠" },
         pending: { statusLabel: t("summary.pending"), statusIcon: "⚪" },
-        error: { statusLabel: "Validation error", statusIcon: "🔴" }
+        error: { statusLabel: t("summary.validationErrorLabel"), statusIcon: "🔴" }
     };
 
     const assertionBreakdown = [
@@ -1521,10 +1546,12 @@ function buildVerificationSummary(order, events = []) {
         : t("summary.noVerifiedAssertions");
 
     let conclusionText;
-    if (statusKey === "pending") {
+    if (automaticallyClosed) {
+        conclusionText = t("summary.automaticClosureConclusion", { count: unansweredValidations });
+    } else if (statusKey === "pending") {
         conclusionText = t("summary.pendingConclusion", { completed: receivedValidationCount, total: totalValidations || receivedValidationCount });
     } else if (statusKey === "error") {
-        conclusionText = `No valid result was produced; ${errorValidations} validation(s) ended in error.`;
+        conclusionText = t("summary.noValidResultErrors", { count: errorValidations });
     } else if (statusKey === "verified") {
         conclusionText = t("summary.verifiedConclusion", { breakdown: assertionBreakdown });
     } else if (statusKey === "contradicted") {
@@ -1555,7 +1582,8 @@ function buildVerificationSummary(order, events = []) {
         totalValidations,
         completedValidations: receivedValidationCount,
         pendingValidations,
-        validationDuration: pendingValidations === 0 && receivedValidationCount > 0
+        unansweredValidations,
+        validationDuration: pendingValidations === 0 && (receivedValidationCount > 0 || automaticallyClosed)
             ? getEndToEndValidationDuration(order, events)
             : "",
         validatorVotes
@@ -1727,7 +1755,8 @@ function buildOrderProcessRows(orderData, events = []) {
         DOCUMENT_CREATED: t("status.DOCUMENT_CREATED"), IPFS_PENDING: t("status.IPFS_PENDING"),
         IPFS_UPLOADED: t("status.IPFS_UPLOADED"), BLOCKCHAIN_PENDING: t("status.BLOCKCHAIN_PENDING"),
         VALIDATION_PENDING: t("status.VALIDATION_PENDING"), VALIDATED: t("status.VALIDATED"),
-        VALIDATED_WITH_ERRORS: "Validated with errors",
+        VALIDATED_WITH_ERRORS: t("status.VALIDATED_WITH_ERRORS"),
+        VALIDATED_AUTOMATICALLY: t("status.VALIDATED_AUTOMATICALLY"),
         NO_VALIDATORS_AVAILABLE: t("status.NO_VALIDATORS_AVAILABLE"),
         ASSERTIONS_NOT_AVAILABLE: t("status.ASSERTIONS_NOT_AVAILABLE"), QUOTA_EXCEDED: t("status.QUOTA_EXCEDED")
     };
@@ -1735,7 +1764,8 @@ function buildOrderProcessRows(orderData, events = []) {
         generate_assertions: ["ASSERTIONS_REQUESTED"], assertions_generated: ["DOCUMENT_CREATED"],
         upload_ipfs: ["IPFS_PENDING"], ipfs_uploaded: ["IPFS_UPLOADED", "BLOCKCHAIN_PENDING"],
         blockchain_registered: ["VALIDATION_PENDING"], light_validation_request: ["VALIDATION_PENDING"],
-        assertions_not_generated: ["ASSERTIONS_NOT_AVAILABLE"]
+        assertions_not_generated: ["ASSERTIONS_NOT_AVAILABLE"],
+        validation_deadline_exceeded: ["VALIDATED_AUTOMATICALLY"]
     };
     const sorted = [...(events || [])].sort((x, y) =>
         (parseApiTimestamp(x?.timestamp)?.getTime() || 0) - (parseApiTimestamp(y?.timestamp)?.getTime() || 0)
@@ -1819,6 +1849,7 @@ function buildProcessResultPresentation(orderData, summary) {
     const normalizedStatus = String(orderData?.status || "").toUpperCase();
     const completedWithErrors = summary.errorValidations > 0
         || normalizedStatus === "VALIDATED_WITH_ERRORS"
+        || normalizedStatus === "VALIDATED_AUTOMATICALLY"
         || !normalizedStatus.startsWith("VALIDATED");
 
     return {
@@ -1827,7 +1858,9 @@ function buildProcessResultPresentation(orderData, summary) {
         className: noValidDecision || inconclusive ? "inconclusive" : trend.className,
         title: t("ui.finalResult"),
         badge: completedWithErrors ? t("ui.completedWithIssues") : t("ui.definitive"),
-        notice: noValidDecision
+        notice: normalizedStatus === "VALIDATED_AUTOMATICALLY"
+            ? t("ui.automaticClosureNotice", { count: summary.unansweredValidations })
+            : noValidDecision
             ? t("ui.finalNoValidResponsesNotice")
             : summary.noConsensusAssertions > 0
                 ? t("ui.finalNoConsensusNotice")
@@ -1836,9 +1869,13 @@ function buildProcessResultPresentation(orderData, summary) {
                     : completedWithErrors
                         ? t("ui.finalWithErrorsNotice")
                         : t("ui.finalResultNotice"),
-        activity: completedWithErrors ? t("ui.validationsCompletedWithIssues") : t("ui.validationCollectionFinished"),
+        activity: normalizedStatus === "VALIDATED_AUTOMATICALLY"
+            ? t("ui.automaticClosureNotice", { count: summary.unansweredValidations })
+            : completedWithErrors ? t("ui.validationsCompletedWithIssues") : t("ui.validationCollectionFinished"),
         decision: t("ui.decisionClosed"),
-        resultState: noValidDecision ? t("ui.noDecisionAvailable") : t("ui.definitiveResult")
+        resultState: normalizedStatus === "VALIDATED_AUTOMATICALLY"
+            ? t("ui.partialResultClosed")
+            : noValidDecision ? t("ui.noDecisionAvailable") : t("ui.definitiveResult")
     };
 }
 function renderOrderProcess(container, orderData, events = []) {
@@ -1877,7 +1914,7 @@ function renderOrderProcess(container, orderData, events = []) {
                 <section class="process-card process-provisional"><div class="process-section-title"><h3>${safeText(resultPresentation.title)}</h3><span>${safeText(resultPresentation.badge)}</span></div><strong class="provisional-result ${resultPresentation.className}">${safeText(resultPresentation.label)}</strong><div class="provisional-counts"><div><b>${summary.confirmedAssertions}</b><small>${t("ui.confirmed")}</small></div><div><b>${summary.contradictedAssertions}</b><small>${t("ui.disproved")}</small></div><div><b>${summary.inconclusiveAssertions}</b><small>${t("ui.inconclusive")}</small></div></div><p>${safeText(resultPresentation.notice)}</p></section>
                 <section class="process-card process-activity" data-process-widget="recent-activity"><div class="process-section-title"><h3>${t("ui.recentActivity")}</h3><span>${t("ui.changesCount", { count: rows.length })}</span></div><ol>${recent.map(row => `<li><i>•</i><span><b>${safeText(row.label)}</b><small>${formatAnyDate(row.date)}</small></span></li>`).join("") || `<li>${t("ui.noActivity")}</li>`}</ol></section>
             </div>
-            <div class="process-kpi-grid"><article><i>V</i><div><small>${t("ui.validationSummary")}</small><strong>${safeText(ratio)}</strong><span>${t("ui.percentCompleted", { percent: validationPercent })}</span></div></article><article><i>◷</i><div><small>${t("ui.elapsedTime")}</small><strong>${safeText(getProcessElapsedTime(orderData))}</strong><span>${t("ui.sinceOrderCreation")}</span></div></article><article><i>◎</i><div><small>${t("ui.currentStatus")}</small><strong>${safeText(currentStage)}</strong><span>${pending ? t("ui.pendingCount", { count: pending }) : complete ? t("ui.consensusComplete") : t("ui.updating")}</span></div></article><article><i>↻</i><div><small>${t("ui.statusChanges")}</small><strong>${rows.length}</strong><span>${t("ui.untilNow")}</span></div></article></div>
+            <div class="process-kpi-grid"><article><i>V</i><div><small>${t("ui.validationSummary")}</small><strong>${safeText(ratio)}</strong><span>${t("ui.percentCompleted", { percent: validationPercent })}</span></div></article><article><i>◷</i><div><small>${t("ui.elapsedTime")}</small><strong>${safeText(getProcessElapsedTime(orderData))}</strong><span>${t("ui.sinceOrderCreation")}</span></div></article><article><i>◎</i><div><small>${t("ui.currentStatus")}</small><strong>${safeText(currentStage)}</strong><span>${orderData.status === "VALIDATED_AUTOMATICALLY" ? t("ui.partialResultClosed") : pending ? t("ui.pendingCount", { count: pending }) : complete ? t("ui.consensusComplete") : t("ui.updating")}</span></div></article><article><i>↻</i><div><small>${t("ui.statusChanges")}</small><strong>${rows.length}</strong><span>${t("ui.untilNow")}</span></div></article></div>
             <div class="process-auto-note">ⓘ ${t("ui.autoSummaryNotice")}</div>
         </div>`;
 }
@@ -1904,8 +1941,10 @@ function renderDetails(container, data, events = []) {
 
     const summary = buildVerificationSummary(data, events);
     const progressPercent = summary.totalValidations > 0 ? Math.round((summary.completedValidations / summary.totalValidations) * 100) : 0;
-    const consensusLabel = summary.errorValidations > 0
-        ? `Completed with ${summary.errorValidations} error(s)`
+    const consensusLabel = data.status === "VALIDATED_AUTOMATICALLY"
+        ? t("summary.partialConsensus")
+        : summary.errorValidations > 0
+        ? t("summary.completedWithErrorsCount", { count: summary.errorValidations })
         : summary.pendingValidations === 0 && summary.totalValidations > 0
             ? t("summary.fullConsensus")
             : t("summary.partialConsensus");
@@ -3690,6 +3729,7 @@ function renderJsonTree(value, key = null) {
 
 function statusClass(status) {
     const normalized = String(status || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    if (normalized === "validated_automatically" || normalized === "validated_with_errors") return "status-automatic";
     if (normalized.includes("validated")) return "status-validated";
     if (normalized.includes("error") || normalized.includes("fail")) return "status-error";
     if (normalized.includes("pending")) return `status-${normalized}`;

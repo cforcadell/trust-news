@@ -777,7 +777,7 @@ kubectl get pvc -n infra
 kubectl get pvc -n blockchain
 ```
 
-Active PVC destructive restorations are prohibited. Según [version.md](../version.md), S08 se prepara desde ahora y una copia y restauración demostrada son necesarias antes de conservar datos; su cierre y la migración MongoDB se planifican en v0.0.13c. Las demos solo admiten datos desechables mientras esa puerta no esté superada.
+Active PVC destructive restorations are prohibited. Según [la planificación vigente](../releases.md#v0013d--seguridad-para-acceso-autónomo-limitado), S08 se prepara desde ahora y una copia y restauración demostrada son necesarias antes de conservar datos; su cierre y la migración MongoDB se planifican en v0.0.13d. Las demos solo admiten datos desechables mientras esa puerta no esté superada.
 
 ---
 

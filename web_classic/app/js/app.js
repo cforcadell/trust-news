@@ -502,9 +502,10 @@ function pollOrder(orderId, options = {}) {
 // ========================================================
 
 function startAssertionsProgress(container) {
-    if (!container) return { stop() {} };
-
     const startedAt = Date.now();
+    const elapsedMs = () => Math.max(0, Date.now() - startedAt);
+    if (!container) return { stop() {}, elapsedMs };
+
     const stages = [
         { after: 0, label: t("messages.assertionStageAnalyzing") },
         { after: 6000, label: t("messages.assertionStageExtracting") },
@@ -548,7 +549,7 @@ function startAssertionsProgress(container) {
 
     update();
     const intervalId = window.setInterval(update, 1000);
-    return { stop: () => window.clearInterval(intervalId) };
+    return { stop: () => window.clearInterval(intervalId), elapsedMs };
 }
 
 function createFrontendRequestError(code, status = null) {
@@ -581,7 +582,11 @@ function setAssertionsButtonLoading(loading) {
         : safeText(t("sections.generateAssertions"));
 }
 
-function renderAssertionsGenerationResult(container, count) {
+function assertionGenerationDuration(elapsedMs) {
+    return t("messages.assertionGenerationDuration", { duration: formatDurationMinutesSeconds(elapsedMs) });
+}
+
+function renderAssertionsGenerationResult(container, count, elapsedMs) {
     if (!container) return;
     const empty = count === 0;
     container.insertAdjacentHTML("afterbegin", `
@@ -590,12 +595,13 @@ function renderAssertionsGenerationResult(container, count) {
             <div>
                 <strong>${safeText(empty ? t("messages.noAssertionsFound") : t("messages.assertionsGeneratedCount", { count }))}</strong>
                 <p>${safeText(empty ? t("messages.noAssertionsFoundHelp") : t("messages.assertionsReviewHelp"))}</p>
+                <p>${safeText(assertionGenerationDuration(elapsedMs))}</p>
             </div>
         </div>
     `);
 }
 
-function renderAssertionsGenerationError(container, error) {
+function renderAssertionsGenerationError(container, error, elapsedMs) {
     if (!container) return;
     const message = assertionsErrorMessage(error);
     container.innerHTML = `
@@ -604,6 +610,7 @@ function renderAssertionsGenerationError(container, error) {
             <div>
                 <strong>${safeText(t("messages.assertionGenerationErrorTitle"))}</strong>
                 <p>${safeText(message)}</p>
+                <p>${safeText(assertionGenerationDuration(elapsedMs))}</p>
                 <button type="button" class="btn-secondary btn-retry-assertions">${safeText(t("messages.retry"))}</button>
             </div>
         </div>
@@ -703,9 +710,10 @@ async function handleGenerateAssertions() {
 
     try {
         const assertions = await generateAssertionsFromText(text, controller.signal);
+        const elapsedMs = progress.elapsedMs();
         progress.stop();
         renderAssertionsTable(container, assertions);
-        renderAssertionsGenerationResult(container, assertions.length);
+        renderAssertionsGenerationResult(container, assertions.length, elapsedMs);
         alertMessage(
             assertions.length
                 ? t("messages.assertionsGeneratedCount", { count: assertions.length })
@@ -714,13 +722,14 @@ async function handleGenerateAssertions() {
             4500
         );
     } catch (error) {
+        const elapsedMs = progress.elapsedMs();
         progress.stop();
         let normalizedError = error;
         if (timedOut || error?.name === "AbortError") normalizedError = createFrontendRequestError("timeout");
         else if (!error?.code) normalizedError = createFrontendRequestError("network");
 
         console.error("Error al generar aserciones:", error);
-        renderAssertionsGenerationError(container, normalizedError);
+        renderAssertionsGenerationError(container, normalizedError, elapsedMs);
         alertMessage(assertionsErrorMessage(normalizedError), "error", 7000);
     } finally {
         window.clearTimeout(timeoutId);
@@ -794,6 +803,11 @@ function renderAssertionsTable(container, assertions) {
 // =========================================================
 // OPERACIONES DE NEWS
 // =========================================================
+function newsSourceMetadata() {
+    const sourceUrl = document.getElementById("newsUrl")?.value.trim();
+    return sourceUrl ? { source_url: sourceUrl } : {};
+}
+
 async function publishNew() {
     const text = document.getElementById("newsText").value.trim();
     if (!text) return alertMessage(t("ui.publishTextRequired"), 'error');
@@ -803,7 +817,7 @@ async function publishNew() {
 
     const res = await fetchWithAuth(`${API}/orders/publishNew`, {
         method: "POST",
-        body: JSON.stringify({text, validation_mode: getSelectedValidationMode()})
+        body: JSON.stringify({text, validation_mode: getSelectedValidationMode(), ...newsSourceMetadata()})
     });
 
     if (!res.ok) {
@@ -857,7 +871,7 @@ async function publishWithAssertions() {
         return alertMessage(t("ui.assertionRequired"), 'error');
     }
 
-    const payload = { text, assertions, validation_mode: getSelectedValidationMode() };
+    const payload = { text, assertions, validation_mode: getSelectedValidationMode(), ...newsSourceMetadata() };
 
     try {
         const response = await fetchWithAuth(`${API}/orders/publishWithAssertions`, {
@@ -3023,6 +3037,8 @@ async function importarNoticia() {
         if (!text) throw new Error("La importación no devolvió texto utilizable.");
 
         newsText.value = text;
+        const fetchedUrl = String(data?.url || "").trim();
+        if (fetchedUrl) document.getElementById('newsUrl').value = fetchedUrl;
         alertMessage("Noticia importada correctamente", "success");
 
     } catch (err) {

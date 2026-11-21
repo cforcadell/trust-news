@@ -20,6 +20,7 @@ from common.utils.logging_utils import (
 
 # Cargar env
 load_dotenv()
+os.environ.setdefault("HTTP_TIMEOUT", "120")
 
 # Logging dinámico
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -144,7 +145,7 @@ def build_assertions_prompt(text: str) -> str:
     )
 
 # Timeouts / retries
-HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "60"))
+HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "120"))
 NUM_REINTENTOS = int(os.getenv("NUM_REINTENTOS", os.getenv("MAX_RETRIES", "3")))
 MAX_RETRIES = NUM_REINTENTOS
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))

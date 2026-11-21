@@ -16,7 +16,7 @@ acreditan el mismo resultado en Hetzner.
   [ficha del candidato](deploy/candidate-v0.0.13b-k3s.md) y
   [flujo GitLab/GitHub](deploy/gitlab-github-release-workflow.md).
 - **Seguridad:** [inventario S00](security/s00-inventory.md),
-  [diseño S02](security/s02-design.md), [diseño S03](security/s03-design.md),
+  [diseño S02](architecture/designs/s02-design.md), [diseño S03](architecture/designs/s03-design.md),
   [S03 en Skaffold](security/s03-skaffold.md),
   [migración de propietarios](security/s03-owner-migration.md),
   [alta GUI y cuotas](security/s03-gui-user-provisioning.md) y

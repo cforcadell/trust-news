@@ -8,9 +8,10 @@
 
 - `POST /publishNew`: creates a new command for a text, checks `news_generation` quota, saves the command and publishes `generate_assertions` in Kafka.
 - `POST /publishWithAssertions`: creates an order with customer-provided assertions and publishes a synthetic `assertions_generated` response to continue the flow.
-- `GET /orders/{order_id}`: returns the command, its enriched data, validation snapshots and results added by assertion.
+- Both creation routes store `created_by_username` from the verified Keycloak principal (human `preferred_username` or API integration ID). No historical order backfill is performed.
+- `GET /orders/{order_id}`: returns the command, its enriched data, validation snapshots, assertion results and `created_by_username`.
 - `GET /news/{order_id}/events`: returns the events registered for a command.
-- `GET /news`: lists commands/news, filtering by `client_id` except in admin mode.
+- `GET /news`: lists commands/news and `created_by_username`, filtering by `client_id` except in admin mode. Orders created before this field was added return it as `null` in both endpoints.
 - `GET /validators/cache`: Check the validator cache, optionally refreshed from blockchain/IPFS.
 - `GET /validators/cache/{validator_hash}`: returns the configuration detail of a cached validator.
 - `GET /validators/cache/{validator_hash}/validations`: returns validations associated with a validator, with proveedor/modelo filters and detail options.

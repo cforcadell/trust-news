@@ -50,7 +50,7 @@ from common.routing_taxonomy import (
     JurisdictionScope,
     TemporalType,
 )
-from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed
+from common.utils.quotas_client import fetch_client_quotas as fetch_admin_client_quotas, update_client_consumed as update_admin_client_consumed, integration_quota_operation, integration_quota_payload
 from common.utils.kafka_contracts import DEFAULT_KAFKA_BOOTSTRAP, DEFAULT_TOPIC_REQUESTS_GENERATE, DEFAULT_TOPIC_RESPONSES, kafka_security_kwargs
 from common.utils.llm_json import parse_model_list
 from common.llm import LLMConfigurationError, LLMRequest, acomplete_structured_with_repair
@@ -659,18 +659,30 @@ async def extraer_texto(
     client_id: str = Query(..., description="ID del cliente para cuotas") 
 ):
     endpoint_started = time.monotonic()
+    integration = (os.getenv("S03_ENABLED", "false").lower() == "true"
+                   and request.state.s03_call.actor_type == "integration")
+    quota_payload = None
     # ================================================================
     # 1️⃣ Control de Cuotas PRE-Extracción
     # ================================================================
     try:
-        quotas = await fetch_client_quotas(client_id, request.headers.get(USER_TOKEN_HEADER) if os.getenv("S03_ENABLED", "false").lower() == "true" else None)
-        cons_news = quotas.get("consumed", {}).get("news_generation", 0)
-        lim_news = quotas.get("limits", {}).get("news_generation", 0)
-
-        if cons_news >= lim_news:
-            logger.warning(f"⛔ QUOTA_EXCEDED para {client_id} en /extraer. ({cons_news}/{lim_news})")
-            raise HTTPException(status_code=429, detail="Quota news_generation exceded")
-            
+        if integration:
+            if client_id != request.state.s03_call.quota_id:
+                raise HTTPException(status_code=403, detail="Integration quota denied")
+            quota_payload = integration_quota_payload(request.headers.get("idempotency-key"),
+                                                       "news_generation", body.model_dump(mode="json"),
+                                                       client_id, request.url.path)
+            reservation = await integration_quota_operation(
+                ADMIN_URL, client_id, "reserve", quota_payload, request.headers.get(USER_TOKEN_HEADER, ""))
+            if not reservation.get("created"):
+                raise HTTPException(status_code=409, detail="Integration operation already submitted")
+        else:
+            quotas = await fetch_client_quotas(client_id, request.headers.get(USER_TOKEN_HEADER) if os.getenv("S03_ENABLED", "false").lower() == "true" else None)
+            cons_news = quotas.get("consumed", {}).get("news_generation", 0)
+            lim_news = quotas.get("limits", {}).get("news_generation", 0)
+            if cons_news >= lim_news:
+                logger.warning(f"⛔ QUOTA_EXCEEDED para {client_id} en /extraer. ({cons_news}/{lim_news})")
+                raise HTTPException(status_code=429, detail="Quota news_generation exceded")
     except HTTPException as he:
         raise he # Re-lanzar error 429
     except Exception as e:
@@ -686,19 +698,30 @@ async def extraer_texto(
     try:
         assertion_objs = await extract_assertions_from_text(text, trace=trace)
     except HTTPException as he:
+        if quota_payload:
+            await integration_quota_operation(ADMIN_URL, client_id, "release", quota_payload,
+                                              request.headers.get(USER_TOKEN_HEADER, ""))
         raise he
     except Exception as e:
+        if quota_payload:
+            await integration_quota_operation(ADMIN_URL, client_id, "release", quota_payload,
+                                              request.headers.get(USER_TOKEN_HEADER, ""))
         logger.exception("Error generando aserciones")
         raise HTTPException(status_code=500, detail=str(e))
 
+    quota_update_started = time.monotonic()
     try:
-        quota_update_started = time.monotonic()
-        await update_client_consumed(client_id, "news_generation", cons_news + 1,
-                                     request.headers.get(USER_TOKEN_HEADER) if os.getenv("S03_ENABLED", "false").lower() == "true" else None)
-        logger.info(f"💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id} (Endpoint: /extraer)")
+        if quota_payload:
+            await integration_quota_operation(ADMIN_URL, client_id, "consume", quota_payload,
+                                              request.headers.get(USER_TOKEN_HEADER, ""))
+        else:
+            await update_client_consumed(client_id, "news_generation", cons_news + 1,
+                                         request.headers.get(USER_TOKEN_HEADER) if os.getenv("S03_ENABLED", "false").lower() == "true" else None)
+            logger.info(f"💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id} (Endpoint: /extraer)")
     except Exception as e:
         logger.error(f"❌ Error incrementando cuota en /extraer para {client_id}: {e}")
-        # No bloqueamos el return aunque falle la actualización, para no perjudicar al usuario si la BBDD de cuotas falla puntualmente.
+        if integration:
+            raise HTTPException(status_code=503, detail="Integration quota unavailable") from e
     finally:
         log_event(
             logger, logging.INFO, "assertion_generation_timing",

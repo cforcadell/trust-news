@@ -11,6 +11,7 @@ import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiokafka import AIOKafkaConsumer
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pymongo import ReturnDocument
 from typing import Optional, List, Dict, Any
 
 # =========================================================
@@ -803,6 +804,11 @@ async def process_quota_event(data: dict):
             return
 
         # 4. Buscar a quién cobrarle
+        if order_id:
+            integration_order = await orders_collection.find_one(
+                {"order_id": order_id, "integration_id": {"$exists": True}}, {"_id": 1})
+            if integration_order:
+                return  # The integration reservation already accounts for this work.
         client_id = await resolve_client_id(order_id=order_id, post_id=post_id)
 
         if not client_id:
@@ -819,6 +825,9 @@ async def process_quota_event(data: dict):
             
             logger.warning(f"⚠️ Event '{action}' discarded. No client_id found in DB for OrderID={order_id} / PostID={post_id}.{debug_info}")
             return
+
+        if await db["s03_integrations"].find_one({"quota_id": client_id}, {"_id": 1}):
+            return  # Integration quota is reserved and consumed by its HTTP operation.
 
         # 5. Ejecutar cobro
         await record_consumption(client_id, service_type, cost=1)
@@ -1292,6 +1301,8 @@ async def update_validator_type_weights(payload: ValidatorTypeWeightsUpdate):
 
 @app.post("/clients", response_model=dict, status_code=201)
 async def create_client(client: ClientCreate):
+    if client.client_id.startswith("integration_"):
+        raise HTTPException(status_code=403, detail="Use integration provisioning")
     existing = await quotas_collection.find_one({"client_id": client.client_id})
     if existing:
         raise HTTPException(status_code=400, detail="El cliente ya existe.")
@@ -1338,6 +1349,10 @@ async def require_quota_resource(client_id: str, request: Request, order_id: str
     if not S03_ENABLED:
         return
     call = request.state.s03_call
+    if call.actor_type == "integration":
+        if client_id == call.quota_id:
+            return
+        raise HTTPException(status_code=403, detail="Quota resource denied")
     if call.user_sub and call.user_issuer:
         member = await db["s03_memberships"].find_one({
             "issuer": call.user_issuer, "subject": call.user_sub, "active": True,
@@ -1352,9 +1367,73 @@ async def require_quota_resource(client_id: str, request: Request, order_id: str
     raise HTTPException(status_code=403, detail="Quota resource denied")
 
 
+async def resolve_integration_local(claims: dict, token: str, action: str) -> dict[str, str]:
+    """Resolve one active Keycloak service account without trusting caller fields."""
+    if db is None:
+        raise HTTPException(status_code=503, detail="Integration registry unavailable")
+    presenter = claims.get("azp")
+    subject = claims.get("sub")
+    issuer = claims.get("iss")
+    if (not all(isinstance(value, str) and value for value in (presenter, subject, issuer))
+            or presenter in {"TrustNewsApi", "TrustNewsWeb"} or presenter.startswith("assermetry-")):
+        raise HTTPException(status_code=401, detail="Integration identity denied")
+    rows = await db["s03_integrations"].find(
+        {"issuer": issuer, "azp": presenter, "sub": subject},
+        {"_id": 0, "integration_id": 1, "org_id": 1, "quota_id": 1,
+         "status": 1, "expires_at": 1, "actions": 1},
+    ).to_list(length=2)
+    if len(rows) != 1:
+        raise HTTPException(status_code=403, detail="Integration binding denied")
+    row = rows[0]
+    expiry = row.get("expires_at")
+    if isinstance(expiry, str):
+        try:
+            expiry = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+        except ValueError:
+            expiry = None
+    if isinstance(expiry, datetime) and expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    if (row.get("status") != "active" or not isinstance(expiry, datetime)
+            or expiry.tzinfo is None or expiry <= datetime.now(timezone.utc)
+            or not all(isinstance(row.get(key), str) and row[key] for key in ("integration_id", "org_id", "quota_id"))):
+        raise HTTPException(status_code=403, detail="Integration inactive")
+    organization = await db["s03_organizations"].find_one(
+        {"org_id": row["org_id"], "status": "active",
+         f"integrations.{row['integration_id']}.quota_id": row["quota_id"],
+         f"integrations.{row['integration_id']}.status": "Active"}, {"_id": 1})
+    if not organization:
+        raise HTTPException(status_code=403, detail="Integration organization or quota inactive")
+    if action != "integration:resolve" and not action.startswith("quotas:") and action not in row.get("actions", []):
+        raise HTTPException(status_code=403, detail="Integration action denied")
+    return {key: row[key] for key in ("integration_id", "org_id", "quota_id")}
+
+
+@app.get("/internal/integrations/resolve")
+async def resolve_integration(request: Request, requested_action: str):
+    if (not S03_ENABLED or not requested_action or len(requested_action) > 100
+            or requested_action == "integration:resolve" or requested_action.startswith("quotas:")):
+        raise HTTPException(status_code=403, detail="Integration resolution denied")
+    call = request.state.s03_call
+    if call.actor_type != "integration":
+        raise HTTPException(status_code=403, detail="Integration required")
+    # The guard already validated the signed actor token and active binding.
+    claims = {"iss": call.user_issuer, "sub": call.user_sub,
+              "azp": call.user_client_id}
+    return await resolve_integration_local(claims, "", requested_action)
+
+
 @app.get("/internal/quotas/{client_id}")
 async def get_internal_quotas(client_id: str, request: Request, order_id: str | None = None):
     await require_quota_resource(client_id, request, order_id)
+    if S03_ENABLED and request.state.s03_call.actor_type == "integration":
+        call = request.state.s03_call
+        org = await db["s03_organizations"].find_one({"org_id": call.org_id},
+                                                      {f"integrations.{call.integration_id}": 1})
+        entry = (org or {}).get("integrations", {}).get(call.integration_id)
+        if not entry or entry.get("status") != "Active":
+            raise HTTPException(status_code=403, detail="Integration quota inactive")
+        return {"client_id": client_id, "limits": entry["limits"],
+                "consumed": entry["consumed"], "status": entry["status"]}
     document = await quotas_collection.find_one({"client_id": client_id}, {"_id": 0, "client_id": 1, "limits": 1, "consumed": 1, "status": 1})
     if not document:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
@@ -1364,6 +1443,8 @@ async def get_internal_quotas(client_id: str, request: Request, order_id: str | 
 @app.patch("/internal/quotas/{client_id}/consumed")
 async def update_internal_consumption(client_id: str, payload: InternalQuotaConsumptionUpdate, request: Request,
                                       order_id: str | None = None):
+    if S03_ENABLED and request.state.s03_call.actor_type == "integration":
+        raise HTTPException(status_code=403, detail="Use integration quota operations")
     await require_quota_resource(client_id, request, order_id)
     if payload.field not in QuotaDetail.model_fields:
         raise HTTPException(status_code=422, detail="Tipo de cuota desconocido")
@@ -1373,8 +1454,122 @@ async def update_internal_consumption(client_id: str, payload: InternalQuotaCons
     return {"status": "success"}
 
 
+class IntegrationQuotaOperation(BaseModel):
+    field: str
+    operation_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,96}$")
+    request_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cost: int = Field(default=1, ge=1, le=1000)
+
+
+def require_integration_quota(request: Request, client_id: str, payload: IntegrationQuotaOperation) -> str:
+    call = request.state.s03_call
+    if (call.actor_type != "integration" or call.quota_id != client_id
+            or payload.field not in QuotaDetail.model_fields):
+        raise HTTPException(status_code=403, detail="Integration quota denied")
+    return call.integration_id
+
+
+@app.post("/internal/integrations/quotas/{client_id}/reserve")
+async def reserve_integration_quota(client_id: str, payload: IntegrationQuotaOperation, request: Request):
+    integration_id = require_integration_quota(request, client_id, payload)
+    org_id = request.state.s03_call.org_id
+    field = payload.field
+    prefix = f"integrations.{integration_id}"
+    operation = {"id": payload.operation_id, "integration_id": integration_id,
+                 "field": field, "cost": payload.cost,
+                 "request_hash": payload.request_hash, "state": "reserved",
+                 "created_at": datetime.now(timezone.utc)}
+    # Both the limit check and the reservation are one atomic document update.
+    query = {
+        "org_id": org_id, "status": "active",
+        f"{prefix}.quota_id": client_id, f"{prefix}.status": "Active",
+        "quota_operations": {"$not": {"$elemMatch": {
+            "id": payload.operation_id, "integration_id": integration_id}}},
+        "$expr": {"$and": [
+            {"$lt": [{"$size": {"$ifNull": ["$quota_operations", []]}}, 10000]},
+            {"$lte": [{"$add": [
+                {"$ifNull": [f"$consumed.{field}", 0]},
+                {"$ifNull": [f"$reserved.{field}", 0]}, payload.cost,
+            ]}, f"$limits.{field}"]},
+            {"$lte": [{"$add": [
+                {"$ifNull": [f"${prefix}.consumed.{field}", 0]},
+                {"$ifNull": [f"${prefix}.reserved.{field}", 0]}, payload.cost,
+            ]}, f"${prefix}.limits.{field}"]},
+        ]},
+    }
+    updated = await db["s03_organizations"].find_one_and_update(
+        query, {"$inc": {f"reserved.{field}": payload.cost,
+                         f"{prefix}.reserved.{field}": payload.cost},
+                "$push": {"quota_operations": operation}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated:
+        return {"state": "reserved", "created": True}
+    existing = await db["s03_organizations"].find_one(
+        {"org_id": org_id, f"{prefix}.quota_id": client_id},
+        {"status": 1, f"{prefix}.status": 1,
+         "quota_operations": {"$elemMatch": {"id": payload.operation_id,
+                                                "integration_id": integration_id}}},
+    )
+    if (not existing or existing.get("status") != "active"
+            or existing.get("integrations", {}).get(integration_id, {}).get("status") != "Active"):
+        raise HTTPException(status_code=403, detail="Integration quota inactive")
+    prior = (existing.get("quota_operations") or [None])[0]
+    if prior:
+        if (prior.get("field") != field or prior.get("cost") != payload.cost
+                or prior.get("request_hash") != payload.request_hash):
+            raise HTTPException(status_code=409, detail="Idempotency key conflict")
+        return {"state": prior["state"], "created": False}
+    raise HTTPException(status_code=429, detail="Integration quota exceeded")
+
+
+async def finish_integration_quota(client_id: str, payload: IntegrationQuotaOperation,
+                                   request: Request, target: str):
+    integration_id = require_integration_quota(request, client_id, payload)
+    org_id = request.state.s03_call.org_id
+    prefix = f"integrations.{integration_id}"
+    query = {"org_id": org_id, f"{prefix}.quota_id": client_id,
+             "quota_operations": {"$elemMatch": {
+                 "id": payload.operation_id, "integration_id": integration_id,
+                 "field": payload.field,
+                 "cost": payload.cost, "request_hash": payload.request_hash,
+                 "state": "reserved"}}}
+    increments = {f"reserved.{payload.field}": -payload.cost,
+                  f"{prefix}.reserved.{payload.field}": -payload.cost}
+    if target == "consumed":
+        increments[f"consumed.{payload.field}"] = payload.cost
+        increments[f"{prefix}.consumed.{payload.field}"] = payload.cost
+    updated = await db["s03_organizations"].find_one_and_update(
+        query, {"$inc": increments, "$set": {"quota_operations.$.state": target}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated:
+        return {"state": target}
+    existing = await db["s03_organizations"].find_one(
+        {"org_id": org_id, f"{prefix}.quota_id": client_id},
+        {"quota_operations": {"$elemMatch": {"id": payload.operation_id,
+                                                "integration_id": integration_id}}},
+    )
+    prior = (existing or {}).get("quota_operations") or []
+    if prior and prior[0].get("state") == target and prior[0].get("request_hash") == payload.request_hash:
+        return {"state": target}
+    raise HTTPException(status_code=409, detail="Quota operation cannot transition")
+
+
+@app.post("/internal/integrations/quotas/{client_id}/consume")
+async def consume_integration_quota(client_id: str, payload: IntegrationQuotaOperation, request: Request):
+    return await finish_integration_quota(client_id, payload, request, "consumed")
+
+
+@app.post("/internal/integrations/quotas/{client_id}/release")
+async def release_integration_quota(client_id: str, payload: IntegrationQuotaOperation, request: Request):
+    return await finish_integration_quota(client_id, payload, request, "released")
+
+
 @app.patch("/clients/{client_id}", response_model=dict)
 async def update_client(client_id: str, update_data: ClientUpdate):
+    if client_id.startswith("integration_"):
+        raise HTTPException(status_code=403, detail="Use integration maintenance")
     update_dict = update_data.model_dump(exclude_unset=True)
     if not update_dict:
         raise HTTPException(status_code=400, detail="No se enviaron datos.")
@@ -1413,6 +1608,8 @@ async def delete_client(client_id: str):
     """
     Elimina un cliente de la base de datos de cuotas.
     """
+    if client_id.startswith("integration_"):
+        raise HTTPException(status_code=403, detail="Use integration maintenance")
     result = await quotas_collection.delete_one({"client_id": client_id})
     
     if result.deleted_count == 0:
@@ -1448,6 +1645,10 @@ async def startup_event():
         upsert=True,
     )
     await quotas_collection.create_index("client_id", unique=True)
+    await db["s03_integrations"].create_index([("issuer", 1), ("azp", 1)], unique=True)
+    await db["s03_integrations"].create_index("integration_id", unique=True)
+    await db["s03_integrations"].create_index("quota_id", unique=True)
+    await db["s03_organizations"].create_index("org_id", unique=True)
     await orders_collection.create_index("order_id")
     await orders_collection.create_index("postId")
     
@@ -1471,4 +1672,5 @@ if S03_ENABLED:
         jwks_url=_s03["KEYCLOAK_JWKS_URL"], policy_file=_s03["S03_POLICY_FILE"],
         user_clients=frozenset(_s03["S03_USER_CLIENTS"].split(",")),
         ca_file=_s03["S03_CA_FILE"] or None,
+        integration_resolver=resolve_integration_local,
     ).install()

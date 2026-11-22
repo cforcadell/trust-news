@@ -13,7 +13,11 @@
   {"method":"GET","path":"/clients","action":"clients:list","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
   {"method":"GET","path":"/clients/{client_id}","action":"clients:read","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
   {"method":"PATCH","path":"/clients/{client_id}","action":"clients:write","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"},
-  {"method":"GET","path":"/internal/quotas/{client_id}","action":"quotas:read","callers":["assermetry-news-handler","assermetry-generate"],"user_required":false,"roles":[],"scope":"system"},
-  {"method":"PATCH","path":"/internal/quotas/{client_id}/consumed","action":"quotas:write","callers":["assermetry-news-handler","assermetry-generate"],"user_required":false,"roles":[],"scope":"system"},
+  {"method":"GET","path":"/internal/quotas/{client_id}","action":"quotas:read","callers":["assermetry-news-handler","assermetry-generate"],"user_required":false,"roles":[],"scope":"system","actors":["service","human","integration"]},
+  {"method":"PATCH","path":"/internal/quotas/{client_id}/consumed","action":"quotas:write","callers":["assermetry-news-handler","assermetry-generate"],"user_required":false,"roles":[],"scope":"system","actors":["service","human","integration"]},
+  {"method":"GET","path":"/internal/integrations/resolve","action":"integration:resolve","callers":["assermetry-gateway","assermetry-news-handler","assermetry-generate"],"user_required":true,"roles":[],"scope":"system","actors":["integration"]},
+  {"method":"POST","path":"/internal/integrations/quotas/{client_id}/reserve","action":"quotas:reserve","callers":["assermetry-news-handler","assermetry-generate"],"user_required":true,"roles":[],"scope":"system","actors":["integration"]},
+  {"method":"POST","path":"/internal/integrations/quotas/{client_id}/consume","action":"quotas:consume","callers":["assermetry-news-handler","assermetry-generate"],"user_required":true,"roles":[],"scope":"system","actors":["integration"]},
+  {"method":"POST","path":"/internal/integrations/quotas/{client_id}/release","action":"quotas:release","callers":["assermetry-news-handler","assermetry-generate"],"user_required":true,"roles":[],"scope":"system","actors":["integration"]},
   {"method":"DELETE","path":"/clients/{client_id}","action":"clients:delete","callers":["assermetry-gateway"],"user_required":true,"roles":["trust-admin"],"scope":"system"}
 ]

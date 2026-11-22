@@ -76,6 +76,7 @@ from common.utils.validator_registry import light_validators_for_category
 from common.utils.mongo import build_mongo_uri_from_env
 from common.utils.logging_utils import configure_single_line_json_logging
 from common.security.engine import AuthenticatedCall, InternalSecurity, USER_TOKEN_HEADER, settings_from_env
+from common.utils.quotas_client import integration_quota_operation, integration_quota_payload
 from common.models.protocol_models import (
     AssertionsDocumentV2,
     EnrichedAssertion,
@@ -177,6 +178,30 @@ validator_type_weights = default_validator_type_weights()
 
 async def s03_owner_check(request: Request, call: AuthenticatedCall) -> bool:
     """Resolve membership and owner from Mongo rather than forwarded identity."""
+    if call.actor_type == "integration":
+        if not all((call.integration_id, call.org_id, call.quota_id)):
+            return False
+        if request.query_params.get("admin", "false").lower() == "true":
+            return False
+        requested_client = request.query_params.get("client_id")
+        if requested_client and requested_client != call.quota_id:
+            return False
+        order_id = request.path_params.get("order_id")
+        if order_id:
+            order = await orders_collection.find_one({"order_id": order_id},
+                                                     {"org_id": 1, "integration_id": 1})
+            return bool(order and order.get("org_id") == call.org_id
+                        and order.get("integration_id") == call.integration_id)
+        if call.action == "orders:search":
+            request.state.s03_org_ids = {call.org_id}
+            request.state.s03_client_ids = {call.quota_id}
+            request.state.s03_integration_id = call.integration_id
+            return True
+        if requested_client != call.quota_id:
+            return False
+        request.state.s03_org_id = call.org_id
+        request.state.s03_integration_id = call.integration_id
+        return True
     if db is None or not call.user_sub or not call.user_issuer:
         return False
     global_read_actions = {"orders:read", "orders:list", "events:read", "orders:consistency:read"}
@@ -209,6 +234,27 @@ async def s03_owner_check(request: Request, call: AuthenticatedCall) -> bool:
         return False
     request.state.s03_org_id = next((row["org_id"] for row in memberships if requested_client in row.get("legacy_client_ids", [])), None)
     return request.state.s03_org_id is not None
+
+
+async def reserve_order_integration_quota(request: Request, client_id: str, body: dict):
+    """Reserve once for a new integration order and replay a completed order."""
+    if not S03_ENABLED or request.state.s03_call.actor_type != "integration":
+        return None, None
+    payload = integration_quota_payload(request.headers.get("idempotency-key"),
+                                        "news_generation", body, client_id, request.url.path)
+    reservation = await integration_quota_operation(
+        ADMIN_URL, client_id, "reserve", payload, request.headers.get(USER_TOKEN_HEADER, ""))
+    if reservation.get("created"):
+        return payload, None
+    if reservation["state"] == "consumed":
+        previous = await orders_collection.find_one(
+            {"integration_id": request.state.s03_integration_id,
+             "idempotency_key": payload["operation_id"]},
+            {"_id": 0, "order_id": 1, "status": 1, "validation_mode": 1,
+             "validation_deadline_minutes": 1})
+        if previous:
+            return payload, previous
+    raise HTTPException(status_code=409, detail="Integration operation already in progress")
 
 
 
@@ -249,6 +295,18 @@ def kafka_security_kwargs():
 async def save_order_doc(order_doc: dict):
     global orders_collection
     await orders_collection.insert_one(order_doc)
+
+
+def created_by_username(request: Request) -> Optional[str]:
+    """Return the creator name from the independently verified S03 identity."""
+    call = getattr(request.state, "s03_call", None)
+    if call is None:
+        return None
+    if call.actor_type == "integration":
+        return call.integration_id
+    if call.actor_type == "human":
+        return call.user_username
+    return None
 
 async def update_order(order_id: str, update: dict):
     global orders_collection
@@ -2106,16 +2164,20 @@ def normalize_api_timestamp(value: Any) -> str:
 async def publish_new(req: PublishRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
     deadline_minutes = validation_deadline_minutes(request)
+    if (S03_ENABLED and request.state.s03_call.actor_type == "integration"
+            and validation_mode == ValidationMode.BLOCKCHAIN):
+        raise HTTPException(status_code=503, detail="Integration blockchain validation unavailable")
+    quota_payload, previous = await reserve_order_integration_quota(request, client_id, req.model_dump(mode="json"))
+    if previous:
+        return previous
+    integration = quota_payload is not None
     # 1. Comprobación de cuota "news_generation"
-    quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
-    consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
-    limits_news = quotas.get("limits", {}).get("news_generation", 0)
-    
-    if consumed_news >= limits_news:
-        raise HTTPException(
-            status_code=429, 
-            detail=f"Quota generate assertions exceded. Limit: {limits_news}, Consumed: {consumed_news}"
-        )
+    if not integration:
+        quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
+        consumed_news = quotas.get("consumed", {}).get("news_generation", 0)
+        limits_news = quotas.get("limits", {}).get("news_generation", 0)
+        if consumed_news >= limits_news:
+            raise HTTPException(status_code=429, detail=f"Quota generate assertions exceded. Limit: {limits_news}, Consumed: {consumed_news}")
 
     # 2. Continúa con tu lógica habitual de crear la orden...
     order_id = str(uuid.uuid4())
@@ -2123,7 +2185,11 @@ async def publish_new(req: PublishRequest, client_id: str, request: Request):
         "order_id": order_id,
         "text": req.text,
         "client_id": client_id, # 🔑 Guardar el client_id para luego
+        "created_by_username": created_by_username(request),
         **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
+        **({"integration_id": request.state.s03_integration_id}
+           if S03_ENABLED and hasattr(request.state, "s03_integration_id") else {}),
+        **({"idempotency_key": quota_payload["operation_id"]} if quota_payload else {}),
         "status": "CREATED",
         "validation_mode": validation_mode.value,
         "validation_deadline_minutes": deadline_minutes,
@@ -2131,10 +2197,17 @@ async def publish_new(req: PublishRequest, client_id: str, request: Request):
         "source_domain": req.source_domain,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    await save_order_doc(order_doc)
+    try:
+        await save_order_doc(order_doc)
+    except Exception:
+        if quota_payload:
+            await integration_quota_operation(ADMIN_URL, client_id, "release", quota_payload,
+                                              request.headers.get(USER_TOKEN_HEADER, ""))
+        raise
     logger.info(f"[{order_id}] Order saved in MongoDB, status=PENDING")
 
     # LIGHT y BLOCKCHAIN comparten la solicitud/respuesta de aserciones por Kafka.
+    sent = False
     try:
         validation_mode = normalize_validation_mode(req.validation_mode)
         msg = GenerateAssertionsRequest(
@@ -2148,11 +2221,19 @@ async def publish_new(req: PublishRequest, client_id: str, request: Request):
             }
         )
         await producer.send_and_wait(TOPIC_REQUESTS_GENERATE, msg.model_dump_json().encode("utf-8"))
+        sent = True
         logger.info(f"[{order_id}] Published generate_assertions to Kafka topic {TOPIC_REQUESTS_GENERATE}")
         await log_event(order_id, msg.action, TOPIC_REQUESTS_GENERATE, msg.payload.model_dump())
-    except ValidationError as e:
+    except Exception as e:
+        if quota_payload:
+            await integration_quota_operation(ADMIN_URL, client_id, "consume" if sent else "release", quota_payload,
+                                              request.headers.get(USER_TOKEN_HEADER, ""))
         logger.exception(f"[{order_id}] Error validando generate_assertions request: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")
+
+    if quota_payload:
+        await integration_quota_operation(ADMIN_URL, client_id, "consume", quota_payload,
+                                          request.headers.get(USER_TOKEN_HEADER, ""))
 
     await orders_collection.update_one(
         {"order_id": order_id, "status": "CREATED"},
@@ -2165,16 +2246,24 @@ async def publish_new(req: PublishRequest, client_id: str, request: Request):
 async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: str, request: Request):
     validation_mode = require_available_validation_mode(req.validation_mode)
     deadline_minutes = validation_deadline_minutes(request)
+    if (S03_ENABLED and request.state.s03_call.actor_type == "integration"
+            and validation_mode == ValidationMode.BLOCKCHAIN):
+        raise HTTPException(status_code=503, detail="Integration blockchain validation unavailable")
+    quota_payload, previous = await reserve_order_integration_quota(request, client_id, req.model_dump(mode="json"))
+    if previous:
+        return previous
+    integration = quota_payload is not None
     # 1. Comprobación de cuota "blockchain_validation"
-    quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
-    consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
-    limits_val = quotas.get("limits", {}).get("blockchain_validation", 0)
-    cons_news = quotas.get("consumed", {}).get("news_generation", 0)
+    if not integration:
+        quotas = await fetch_client_quotas(client_id, user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
+        consumed_val = quotas.get("consumed", {}).get("blockchain_validation", 0)
+        limits_val = quotas.get("limits", {}).get("blockchain_validation", 0)
+        cons_news = quotas.get("consumed", {}).get("news_generation", 0)
     
 
     
     # Opcional: También podemos verificar si (consumed_val + len(req.assertions)) supera el límite
-    if validation_mode == ValidationMode.BLOCKCHAIN and consumed_val + len(req.assertions) >= limits_val:
+    if not integration and validation_mode == ValidationMode.BLOCKCHAIN and consumed_val + len(req.assertions) >= limits_val:
          raise HTTPException(
             status_code=429, 
             detail=f"Quota validations exceded. Limit: {limits_val}, Consumed: {consumed_val}"
@@ -2182,22 +2271,33 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
     
     order_id = str(uuid.uuid4())   
 
-    await update_client_consumed(client_id, "news_generation", cons_news + 1,
-                                 user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
-    logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
+    if not integration:
+        await update_client_consumed(client_id, "news_generation", cons_news + 1,
+                                     user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
+        logger.info(f"[{order_id}] 💰 Cuota news_generation incrementada a {cons_news + 1} para {client_id}")
     
     order_doc = {
         "order_id": order_id,
         "text": req.text,
         "assertions": [a.dict() for a in req.assertions],
         "client_id": client_id, # 🔑
+        "created_by_username": created_by_username(request),
         **({"org_id": request.state.s03_org_id} if S03_ENABLED else {}),
+        **({"integration_id": request.state.s03_integration_id}
+           if S03_ENABLED and hasattr(request.state, "s03_integration_id") else {}),
+        **({"idempotency_key": quota_payload["operation_id"]} if quota_payload else {}),
         "status": "ASSERTIONS_REQUESTED",
         "validation_mode": validation_mode.value,
         "validation_deadline_minutes": deadline_minutes,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    await save_order_doc(order_doc)
+    try:
+        await save_order_doc(order_doc)
+    except Exception:
+        if quota_payload:
+            await integration_quota_operation(ADMIN_URL, client_id, "release", quota_payload,
+                                              request.headers.get(USER_TOKEN_HEADER, ""))
+        raise
     logger.info(f"[{order_id}] Order saved in MongoDB with pre-generated assertions")
 
     # Publicar respuesta equivalente a la del generador; el consumidor bifurca por validation_mode.
@@ -2219,15 +2319,23 @@ async def publish_with_assertions(req: PublishWithAssertionsRequest, client_id: 
             }
         )
 
-        await update_client_consumed(client_id, "news_generation", cons_news - 1,
-                                     user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
-        logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
+        if not integration:
+            await update_client_consumed(client_id, "news_generation", cons_news - 1,
+                                         user_token=request.headers.get(USER_TOKEN_HEADER) if S03_ENABLED else None)
+            logger.info(f"[{order_id}] 💰 Cuota news_generation decrementada a {cons_news -1} para {client_id} por haberse generado antes las aserciones")
 
         await producer.send_and_wait(TOPIC_RESPONSES, msg.model_dump_json().encode("utf-8"))
         logger.info(f"[{order_id}] Published 'assertions_generated' to Kafka topic {TOPIC_RESPONSES}")
-    except ValidationError as e:
+    except Exception as e:
+        if quota_payload:
+            await integration_quota_operation(ADMIN_URL, client_id, "release", quota_payload,
+                                              request.headers.get(USER_TOKEN_HEADER, ""))
         logger.exception(f"[{order_id}] Error validando assertions_generated message: {e}")
         raise HTTPException(status_code=500, detail="Internal validation error")
+
+    if quota_payload:
+        await integration_quota_operation(ADMIN_URL, client_id, "consume", quota_payload,
+                                          request.headers.get(USER_TOKEN_HEADER, ""))
 
     current = await get_order_doc(order_id)
     return {"order_id": order_id, "status": (current or {}).get("status", "ASSERTIONS_REQUESTED"), "validation_mode": normalize_validation_mode(req.validation_mode).value,
@@ -2242,6 +2350,8 @@ async def get_order(
     order = await orders_collection.find_one({"order_id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    order.setdefault("created_by_username", None)
 
     # Validación: Si no es admin, el client_id de la orden debe coincidir con el consultado
     if not admin and order.get("client_id") != client_id:
@@ -2303,7 +2413,10 @@ async def list_news(
     query = {} if admin else {"client_id": client_id}
     
 
-    cursor = db.news.find(query, {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1, "client_id": 1})
+    cursor = db.news.find(query, {
+        "_id": 1, "order_id": 1, "status": 1, "hash_text": 1,
+        "client_id": 1, "created_by_username": 1,
+    })
     news_list = await cursor.to_list(length=1000)
 
     if not news_list:
@@ -2312,6 +2425,7 @@ async def list_news(
     for news in news_list:
         oid = ObjectId(news["_id"])
         news["created_at"] = oid.generation_time.isoformat()
+        news.setdefault("created_by_username", None)
         del news["_id"]
 
     return news_list
@@ -2441,10 +2555,14 @@ async def find_order_by_text(request: PublishRequest, http_request: Request):
 
         owner_filter = {}
         if S03_ENABLED:
-            owner_filter = {"$or": [
-                {"org_id": {"$in": list(http_request.state.s03_org_ids)}},
-                {"org_id": {"$exists": False}, "client_id": {"$in": list(http_request.state.s03_client_ids)}},
-            ]}
+            if hasattr(http_request.state, "s03_integration_id"):
+                owner_filter = {"org_id": {"$in": list(http_request.state.s03_org_ids)},
+                                "integration_id": http_request.state.s03_integration_id}
+            else:
+                owner_filter = {"$or": [
+                    {"org_id": {"$in": list(http_request.state.s03_org_ids)}},
+                    {"org_id": {"$exists": False}, "client_id": {"$in": list(http_request.state.s03_client_ids)}},
+                ]}
         cursor = orders_collection.find(
             {"hash_text": digest_hex, **owner_filter},
             {"_id": 1, "order_id": 1, "status": 1, "hash_text": 1}
@@ -2667,6 +2785,10 @@ async def startup_event():
         await validations_collection.create_index([("order_id", 1), ("idAssertion", 1), ("idValidator", 1)], unique=True)
         if S03_ENABLED:
             await db["s03_memberships"].create_index([("issuer", 1), ("subject", 1), ("org_id", 1)], unique=True)
+            await orders_collection.create_index(
+                [("integration_id", 1), ("idempotency_key", 1)], unique=True,
+                partialFilterExpression={"integration_id": {"$exists": True},
+                                         "idempotency_key": {"$exists": True}})
         logger.info("MongoDB indexes for events and validations ensured")
     except Exception as e:
         logger.warning(f"Could not create indexes: {e}")

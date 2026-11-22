@@ -955,7 +955,7 @@ async function listOrders() {
 
     // 1. Leemos si el check de admin está marcado (si no existe o no está marcado, valdrá false)
     const chkViewAll = document.getElementById('chk-viewAll');
-    const viewAll = chkViewAll ? chkViewAll.checked : false;
+    const viewAll = CAN_VIEW_ALL_ORDERS && Boolean(chkViewAll?.checked);
 
     // 2. Construimos la URL con el parámetro view_all
     const url = `${API}/orders/list?view_all=${viewAll}`;
@@ -2031,6 +2031,7 @@ function renderDetails(container, data, events = []) {
         </div>
         <table class="compact-table summary-metrics-table">
             <tr><th>${t("summary.orderId")}</th><td>${safeText(data.order_id || "N/A")}</td></tr>
+            <tr><th>${t("ui.createdBy")}</th><td>${safeText(data.created_by_username || t("ui.creatorUnavailable"))}</td></tr>
             <tr><th>${t("summary.progress")}</th><td>${renderStatusBadge(data.status || "N/A")}${renderProcessingFlow(data.status || "PENDING", summary.pendingValidations, summary.totalValidations)}</td></tr>
             <tr>
                 <th>${t("summary.newsSummary")}</th>
@@ -3089,6 +3090,7 @@ async function importarNoticia() {
 }
 
 let IS_ADMIN = false;
+let CAN_VIEW_ALL_ORDERS = false;
 
 async function checkAdminStatus() {
     try {
@@ -3098,11 +3100,19 @@ async function checkAdminStatus() {
         if (response.ok) {
             const data = await response.json();
             IS_ADMIN = data.is_admin;
+            CAN_VIEW_ALL_ORDERS = data.can_view_all_orders === true;
 
-            // Si es admin, mostramos el checkbox en la vista de órdenes
+            const adminViewContainer = document.getElementById('admin-view-container');
+            if (adminViewContainer) {
+                adminViewContainer.style.display = CAN_VIEW_ALL_ORDERS ? 'flex' : 'none';
+            }
             if (IS_ADMIN) {
-                document.getElementById('admin-view-container').style.display = 'flex';
                 document.getElementById('llm-admin-nav').style.display = 'block';
+            }
+            const viewAllCheckbox = document.getElementById('chk-viewAll');
+            if (viewAllCheckbox) {
+                viewAllCheckbox.disabled = !CAN_VIEW_ALL_ORDERS;
+                if (!CAN_VIEW_ALL_ORDERS) viewAllCheckbox.checked = false;
             }
         }
     } catch (error) {
@@ -3788,10 +3798,10 @@ function renderTableData(container, data) {
 
     let keys;
     if (isOrdersContainer) {
-        const preferred = ["order_id", "client_id", "validation_mode", "status", "hash_text", "tx_hash", "created_at", "updated_at", "validators_pending"];
+        const preferred = ["order_id", "created_by_username", "client_id", "validation_mode", "status", "hash_text", "tx_hash", "created_at", "updated_at", "validators_pending"];
         const existing = new Set();
         data.forEach(row => Object.keys(row).forEach(k => existing.add(k)));
-        keys = preferred.filter(k => existing.has(k));
+        keys = preferred.filter(k => k === "created_by_username" || existing.has(k));
         [...existing].forEach(k => { if (!keys.includes(k) && !["_id", "document", "assertions", "validations", "validators", "assertion_results", "text"].includes(k)) keys.push(k); });
     } else {
         const keysSet = new Set();
@@ -3817,6 +3827,7 @@ function renderTableData(container, data) {
 
     const headerLabels = {
         order_id: "Order ID",
+        created_by_username: t("ui.createdBy"),
         client_id: "Client ID",
         validation_mode: t("ui.mode"),
         status: t("ui.status"),
@@ -3837,6 +3848,10 @@ function renderTableData(container, data) {
 
             if (k === "status") {
                 return `<td>${renderStatusBadge(val)}</td>`;
+            }
+
+            if (k === "created_by_username") {
+                return `<td>${safeText(val || t("ui.creatorUnavailable"))}</td>`;
             }
 
             if (k === "hash_text" || k === "tx_hash" || String(k).toLowerCase().includes("hash")) {

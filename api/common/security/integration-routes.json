@@ -1,0 +1,11 @@
+[
+  {"method":"POST","path":"/assertions/generate","action":"assertions:generate","audiences":["assermetry-admin","assermetry-generate"]},
+  {"method":"POST","path":"/orders/publishNew","action":"orders:create","audiences":["assermetry-admin","assermetry-news-handler"]},
+  {"method":"POST","path":"/orders/publishWithAssertions","action":"orders:create","audiences":["assermetry-admin","assermetry-news-handler"]},
+  {"method":"POST","path":"/extract_text_from_url","action":"news:import","audiences":["assermetry-admin","assermetry-news-handler"]},
+  {"method":"GET","path":"/orders/list","action":"orders:list","audiences":["assermetry-admin","assermetry-news-handler"]},
+  {"method":"GET","path":"/validators/cache/{validator_hash}/validations","action":"validators:validations:read","audiences":["assermetry-admin","assermetry-news-handler"]},
+  {"method":"GET","path":"/orders/{order_id}","action":"orders:read","audiences":["assermetry-admin","assermetry-news-handler"]},
+  {"method":"GET","path":"/orders/checkOrderConsistency/{order_id}","action":"orders:consistency:read","audiences":["assermetry-admin","assermetry-news-handler"]},
+  {"method":"GET","path":"/orders/{order_id}/events","action":"events:read","audiences":["assermetry-admin","assermetry-news-handler"]}
+]

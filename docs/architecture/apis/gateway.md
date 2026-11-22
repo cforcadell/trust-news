@@ -6,12 +6,12 @@
 
 ## Endpoints
 
-- `GET /auth/is-admin`: returns if the authenticated user has the `trust-admin` role.
+- `GET /auth/is-admin`: returns `is_admin` for the `trust-admin` role and `can_view_all_orders` for the separate `trust-read-all` permission.
 - `POST /assertions/generate`: forward the text to `generate-asertions` (`/extraer`) and inject `client_id` for quota control.
 - `POST /orders/publishNew`: Creates a new command in `news-handler` to generate assertions and continue validation flow.
 - `POST /orders/publishWithAssertions`: Creates an order in `news-handler` using pre-generated assertions.
 - `POST /extract_text_from_url`: forwards text extraction from URL to `news-handler`.
-- `GET /orders/list`: Lists commands from `news-handler`; if the user is admin and `view_all=true`, it allows you to view all.
+- `GET /orders/list`: Lists commands from `news-handler`; `view_all=true` requires `trust-read-all` and returns `403` when that permission is missing.
 - `GET /orders/{order_id}`: recovers a specific command, spreading `client_id` and flag `admin`.
 - `GET /orders/checkOrderConsistency/{order_id}`: forwards Order/IPFS/Blockchain. consistency check
 - `GET /orders/{order_id}/events`: Recovers events from an order from `news-handler`.

@@ -68,6 +68,10 @@ sync_group scripts/security 0750 \
   scripts/security/check_s03_configured_secrets.sh \
   scripts/security/migrate_s03_owners.py \
   scripts/security/provision_s03_gui_user.py \
+  scripts/security/provision_s03_integration.py \
+  scripts/security/provision_s03_organization.py \
+  scripts/security/manage_s03.py \
+  scripts/security/inspect_s03.py \
   scripts/security/reconcile_s03_keycloak.py
 sync_group scripts/k8s 0750 \
   scripts/k8s/backup-artifact.sh \
@@ -83,5 +87,8 @@ sync_group scripts/k8s 0750 \
 sync_group docs/security 0640 \
   docs/security/s03-owner-migration.json \
   docs/security/s03-local-services.json \
-  docs/security/s03-keycloak-clients.json
+  docs/security/s03-keycloak-clients.json \
+  docs/security/s03-gui-user-provisioning.md \
+  docs/security/s03-api-integrations.md
+sync_group api/common/security 0640 api/common/security/integration-routes.json
 sync_group k8s/infra/kafka 0640 k8s/infra/kafka/kafdrop.properties

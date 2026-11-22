@@ -31,7 +31,7 @@ No hay etiqueta local ni promoción comprobada a ambas ramas `main`. Antes de et
 - S04: segmentación declarativa default-deny con enforcement probado; S05: cuotas con reserva/consumo/liberación idempotentes y concurrencia; S06: estado/vigencia y revocación de organizaciones, usuarios y clientes; S07b: identidad, ACL y política de eventos Kafka.
 - S08: copia cifrada externa y restauración aislada MongoDB/Keycloak, **antes** de S09: migración reproducible de MongoDB 4.4 a versión soportada con retorno ensayado. S10 completa caché, rotación y fallo acotado de JWKS sobre el verificador S03.
 - S11/S12 completos: contrato de borde, aislamiento, gasto, bajas, mensajería, recuperación y regresión LIGHT/SMART sobre SHA/digests exactos. Los hallazgos P0 requieren contención inmediata; no esperan esta versión.
-- OAuth para integraciones API: cliente confidencial propio por integración, cuenta de servicio Keycloak, asociación S03, cuota y ciclo de vida; implementación y aceptación todavía pendientes.
+- OAuth para integraciones API: [diseño](architecture/designs/oauth-api-integrations-design.md) e [implementación local](security/s03-api-integrations.md) de clientes nuevos por integración, asociación S03, cuota y ciclo de vida. `TrustNewsApi` queda destinado a retirada; `TrustNewsWeb` y el login GUI permanecen fuera del cambio. Activación, despliegue y aceptación pendientes.
 - **GO:** todos los P1 anteriores implementados y aceptados en Hetzner, con recuperación, operación y riesgos residuales documentados. Este GO acredita preparación para la puerta propia de v0.0.14; no abre acceso autónomo. La estimación histórica 178–314 h correspondía al alcance integral anterior y debe reestimarse para el trabajo restante.
 
 ## v0.0.14 — Beta cerrada por invitación

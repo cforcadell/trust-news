@@ -16,9 +16,11 @@ data:
   KEYCLOAK_ISSUER_URL: "https://localhost:7443/auth/realms/TrustNews"
   KEYCLOAK_JWKS_URL: "http://keycloak.infra.svc.cluster.local:8080/auth/realms/TrustNews/protocol/openid-connect/certs"
   KEYCLOAK_EXPECTED_AUDIENCE: "TrustNewsGateway"
-  KEYCLOAK_ALLOWED_CLIENT_IDS: "TrustNewsWeb,TrustNewsApi"
+  KEYCLOAK_ALLOWED_CLIENT_IDS: "TrustNewsWeb"
 
   # La documentación interactiva solo se mantiene en local.
   GATEWAY_API_DOCS_ENABLED: "true"
   # Debe coincidir con el middleware buffering de Traefik.
   GATEWAY_MAX_REQUEST_BODY_BYTES: "5242880"
+  # Plazo de validacion de nuevas ordenes; 0 desactiva el cierre automatico.
+  ORDER_VALIDATION_DEADLINE_MINUTES: "30"

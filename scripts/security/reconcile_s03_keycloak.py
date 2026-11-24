@@ -30,6 +30,43 @@ def request(client, method, path, **kwargs):
     return response.json() if response.content else None
 
 
+def confidential_service_client(client, root: str, client_id: str, *, create_disabled: bool = False,
+                                attributes: dict | None = None) -> tuple[str, bool]:
+    """Find or create one confidential service account; shared by internal and API provisioning."""
+    rows = request(client, "GET", f"{root}/clients", params={"clientId": client_id})
+    matches = [row for row in rows if row.get("clientId") == client_id]
+    if len(matches) > 1:
+        raise RuntimeError(f"Duplicate client {client_id}")
+    created = not matches
+    if created:
+        payload = {
+            "clientId": client_id, "enabled": not create_disabled,
+            "protocol": "openid-connect", "publicClient": False,
+            "serviceAccountsEnabled": True, "standardFlowEnabled": False,
+            "directAccessGrantsEnabled": False,
+        }
+        if attributes:
+            payload["attributes"] = attributes
+        request(client, "POST", f"{root}/clients", json=payload)
+        rows = request(client, "GET", f"{root}/clients", params={"clientId": client_id})
+        matches = [row for row in rows if row.get("clientId") == client_id]
+    if len(matches) != 1:
+        raise RuntimeError(f"Client {client_id} could not be resolved")
+    client_uuid = matches[0]["id"]
+    state = request(client, "GET", f"{root}/clients/{client_uuid}")
+    if (state.get("publicClient") or not state.get("serviceAccountsEnabled")
+            or state.get("standardFlowEnabled") or state.get("directAccessGrantsEnabled")):
+        raise RuntimeError(f"Service client has unsafe flows: {client_id}")
+    return client_uuid, created
+
+
+def attach_audiences(client, root: str, client_uuid: str, scope_ids: list[str]) -> None:
+    assigned = {item["id"] for item in request(client, "GET", f"{root}/clients/{client_uuid}/default-client-scopes")}
+    for scope_id in scope_ids:
+        if scope_id not in assigned:
+            request(client, "PUT", f"{root}/clients/{client_uuid}/default-client-scopes/{scope_id}")
+
+
 def reconcile(config, client, token, credential_paths):
     realm = config["realm"]
     root = f"/admin/realms/{realm}"
@@ -70,30 +107,15 @@ def reconcile(config, client, token, credential_paths):
     def attach(client_id, audiences):
         row = exact_one(request(client, "GET", f"{root}/clients", params={"clientId": client_id}), client_id)
         client_uuid = row["id"]
-        assigned = {item["id"] for item in request(client, "GET", f"{root}/clients/{client_uuid}/default-client-scopes")}
-        for audience in audiences:
-            scope_id = scopes[audience]
-            if scope_id not in assigned:
-                request(client, "PUT", f"{root}/clients/{client_uuid}/default-client-scopes/{scope_id}")
+        attach_audiences(client, root, client_uuid, [scopes[audience] for audience in audiences])
         return client_uuid
 
     for client_id in existing_user_clients:
         attach(client_id, config["user_audiences"])
 
     for client_id, audiences in config["service_clients"].items():
-        rows = request(client, "GET", f"{root}/clients", params={"clientId": client_id})
-        matches = [row for row in rows if row.get("clientId") == client_id]
-        if len(matches) > 1:
-            raise RuntimeError(f"Duplicate client {client_id}")
-        if not matches:
-            request(client, "POST", f"{root}/clients", json={
-                "clientId": client_id, "enabled": True, "protocol": "openid-connect", "publicClient": False,
-                "serviceAccountsEnabled": True, "standardFlowEnabled": False, "directAccessGrantsEnabled": False,
-            })
-        client_uuid = attach(client_id, audiences)
-        state = request(client, "GET", f"{root}/clients/{client_uuid}")
-        if state.get("publicClient") or not state.get("serviceAccountsEnabled") or state.get("standardFlowEnabled"):
-            raise RuntimeError(f"Service client has unsafe flows: {client_id}")
+        client_uuid, _ = confidential_service_client(client, root, client_id)
+        attach_audiences(client, root, client_uuid, [scopes[audience] for audience in audiences])
         secret = request(client, "GET", f"{root}/clients/{client_uuid}/client-secret").get("value")
         if not secret:
             raise RuntimeError(f"Missing service secret: {client_id}")
@@ -104,6 +126,25 @@ def reconcile(config, client, token, credential_paths):
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(f"S03_CLIENT_ID={client_id}\nS03_CLIENT_SECRET={secret}\n")
         print(f"service_client={client_id} audiences={len(audiences)} secret_file={path}")
+
+    retired = set(config.get("retired_clients", []))
+    if retired & (set(config["user_clients"]) | set(config["service_clients"])):
+        raise RuntimeError("A client cannot be active and retired")
+    for client_id in sorted(retired):
+        rows = request(client, "GET", f"{root}/clients", params={"clientId": client_id})
+        matches = [row for row in rows if row.get("clientId") == client_id]
+        if len(matches) > 1:
+            raise RuntimeError(f"Duplicate retired client {client_id}")
+        if not matches:
+            continue
+        client_uuid = matches[0]["id"]
+        state = request(client, "GET", f"{root}/clients/{client_uuid}")
+        if state.get("enabled"):
+            request(client, "PUT", f"{root}/clients/{client_uuid}", json={**state, "enabled": False})
+        observed = request(client, "GET", f"{root}/clients/{client_uuid}")
+        if observed.get("enabled") is not False:
+            raise RuntimeError(f"Retired client is still enabled: {client_id}")
+        print(f"retired_client={client_id} enabled=false")
 
     for role in config.get("roles", []):
         response = client.get(f"{root}/roles/{role}")

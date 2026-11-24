@@ -1,6 +1,8 @@
 import os
 import logging
 import ssl
+import json
+from pathlib import Path
 from typing import Any, List
 from urllib.parse import urlencode, quote
 import aiohttp
@@ -13,7 +15,7 @@ from dotenv import load_dotenv
 from jose import jwt
 from gateway.security import RequestSecurityMiddleware
 from common.utils.logging_utils import configure_single_line_json_logging
-from common.security.engine import KeycloakVerifier, USER_TOKEN_HEADER, internal_headers
+from common.security.engine import KeycloakVerifier, USER_TOKEN_HEADER, internal_headers, resolve_integration_remote
 from common.models.async_models import (
     TextoEntrada, 
     PublishRequest, 
@@ -77,6 +79,10 @@ IPFS_API_URL = os.getenv("IPFS_API_URL", "http://ipfs-fastapi.apis.svc.cluster.l
 GENERATE_ASSERTIONS_URL = os.getenv("GENERATE_ASSERTIONS_URL", "http://generate-asertions.apis.svc.cluster.local:8071")
 ADMIN_URL = os.getenv("ADMIN_URL", "http://admin-service.apis.svc.cluster.local:8400")
 BLOCKCHAIN_ENABLED = os.getenv("BLOCKCHAIN_ENABLED", "false").strip().lower() in {"1", "true", "on", "yes"}
+ORDER_VALIDATION_DEADLINE_MINUTES = int(os.getenv("ORDER_VALIDATION_DEADLINE_MINUTES", "30"))
+if not 0 <= ORDER_VALIDATION_DEADLINE_MINUTES <= 1440:
+    raise ValueError("ORDER_VALIDATION_DEADLINE_MINUTES must be between 0 and 1440")
+ORDER_VALIDATION_DEADLINE_HEADER = "X-Order-Validation-Deadline-Minutes"
 
 
 @app.get("/capabilities", tags=["Capabilities"])
@@ -104,7 +110,7 @@ KEYCLOAK_JWKS_URL = os.getenv(
 KEYCLOAK_EXPECTED_AUDIENCE = os.getenv("KEYCLOAK_EXPECTED_AUDIENCE", "TrustNewsGateway").strip()
 KEYCLOAK_ALLOWED_CLIENT_IDS = {
     value.strip()
-    for value in os.getenv("KEYCLOAK_ALLOWED_CLIENT_IDS", "TrustNewsWeb,TrustNewsApi").split(",")
+    for value in os.getenv("KEYCLOAK_ALLOWED_CLIENT_IDS", "TrustNewsWeb").split(",")
     if value.strip()
 }
 _s03_user_verifier = KeycloakVerifier(
@@ -119,7 +125,7 @@ def presenting_client_id(payload: dict[str, Any]) -> str:
 
 def validate_presenting_client(payload: dict[str, Any]) -> None:
     client_id = presenting_client_id(payload)
-    if not client_id or client_id not in KEYCLOAK_ALLOWED_CLIENT_IDS:
+    if not client_id or client_id == "TrustNewsApi" or client_id not in KEYCLOAK_ALLOWED_CLIENT_IDS:
         raise HTTPException(status_code=401, detail="Cliente JWT no autorizado")
 
 # ============================================================
@@ -127,14 +133,33 @@ def validate_presenting_client(payload: dict[str, Any]) -> None:
 # ============================================================
 security = HTTPBearer()
 
-async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)):
+_integration_routes = json.loads((Path(__file__).resolve().parents[1] / "common/security/integration-routes.json").read_text())
+GATEWAY_INTEGRATION_ACTIONS = {(row["method"], row["path"]): row["action"] for row in _integration_routes}
+if len(GATEWAY_INTEGRATION_ACTIONS) != len(_integration_routes):
+    raise ValueError("Duplicate integration route")
+
+
+async def get_current_user(request: Request, auth: HTTPAuthorizationCredentials = Depends(security)):
     """Valida el token JWT pegado en Swagger o enviado por el cliente."""
     token = auth.credentials
     if _s03_user_verifier is not None:
-        return await _s03_user_verifier.verify(
-            token, audience=KEYCLOAK_EXPECTED_AUDIENCE,
-            clients=frozenset(KEYCLOAK_ALLOWED_CLIENT_IDS),
-        )
+        payload = await _s03_user_verifier.verify(
+            token, audience=KEYCLOAK_EXPECTED_AUDIENCE, clients=None)
+        presenter = presenting_client_id(payload)
+        service_account = payload.get("preferred_username") == f"service-account-{presenter}"
+        if presenter != "TrustNewsApi" and presenter in KEYCLOAK_ALLOWED_CLIENT_IDS and not service_account:
+            return payload
+        if (not service_account or presenter in {"TrustNewsApi", "TrustNewsWeb"}
+                or presenter.startswith("assermetry-")):
+            raise HTTPException(status_code=401, detail="Cliente JWT no autorizado")
+        if os.getenv("S03_INTEGRATIONS_ENABLED", "false").lower() != "true":
+            raise HTTPException(status_code=403, detail="API integrations disabled")
+        route = request.scope.get("route")
+        action = GATEWAY_INTEGRATION_ACTIONS.get((request.method, getattr(route, "path", "")))
+        if not action:
+            raise HTTPException(status_code=403, detail="Integration route denied")
+        binding = await resolve_integration_remote(payload, token, action)
+        return {**payload, "_s03_actor_type": "integration", "_s03_integration": binding}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(KEYCLOAK_JWKS_URL) as resp:
@@ -177,7 +202,7 @@ async def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security
 # ============================================================
 # Helpers
 # ============================================================
-async def proxy_request(request: Request, target_url: str):
+async def proxy_request(request: Request, target_url: str, extra_headers: dict[str, str] | None = None):
     protected_target = None
     if target_url.startswith(NEWS_HANDLER_URL.rstrip("/") + "/"):
         protected_target = "assermetry-news-handler"
@@ -193,8 +218,13 @@ async def proxy_request(request: Request, target_url: str):
             raise HTTPException(status_code=401, detail="User token required")
         headers = {"Content-Type": request.headers.get("content-type", "application/json")}
         headers.update(await internal_headers(protected_target, user_auth[7:]))
+        idempotency_key = request.headers.get("idempotency-key")
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
     else:
-        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", USER_TOKEN_HEADER)}
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", USER_TOKEN_HEADER, ORDER_VALIDATION_DEADLINE_HEADER.lower())}
+    if extra_headers:
+        headers.update(extra_headers)
     # Recuperamos el body en bytes. FastAPI ya lo ha parseado y validado
     # con Pydantic en el endpoint, pero lo mantiene en memoria.
     body = await request.body()
@@ -222,6 +252,11 @@ async def proxy_request(request: Request, target_url: str):
 
 # Función auxiliar para extraer el client_id con la fórmula solicitada
 def get_computed_client_id(payload: dict) -> str:
+    if payload.get("_s03_actor_type") == "integration":
+        quota_id = payload.get("_s03_integration", {}).get("quota_id")
+        if not isinstance(quota_id, str) or not quota_id:
+            raise HTTPException(status_code=403, detail="Integration quota unavailable")
+        return quota_id
     sub = payload.get("sub", "unknown_sub")
     # Keep the historical owner key stable; azp/client_id is only an
     # authentication constraint, not part of the user's effective identity.
@@ -234,12 +269,16 @@ def get_computed_client_id(payload: dict) -> str:
     
 def is_admin_user(payload: dict) -> bool:
     """Extrae los roles del token JWT y comprueba si tiene el rol trust-admin."""
+    if payload.get("_s03_actor_type") == "integration":
+        return False
     realm_access = payload.get("realm_access", {})
     roles = realm_access.get("roles", [])
     return "trust-admin" in roles
 
 
 def is_read_all_user(payload: dict) -> bool:
+    if payload.get("_s03_actor_type") == "integration":
+        return False
     if os.getenv("S03_ENABLED", "false").lower() != "true":
         return is_admin_user(payload)
     return "trust-read-all" in (payload.get("realm_access") or {}).get("roles", [])
@@ -353,8 +392,11 @@ async def llm_validator(validator_id: str, request: Request, auth_payload: dict 
 
 @router.get("/auth/is-admin", tags=["Auth"])
 async def check_admin_status(auth_payload: dict = Depends(get_current_user)):
-    """Devuelve si el usuario actual tiene el rol de administrador."""
-    return {"is_admin": is_admin_user(auth_payload)}
+    """Return administrative UI permissions for the authenticated user."""
+    return {
+        "is_admin": is_admin_user(auth_payload),
+        "can_view_all_orders": is_read_all_user(auth_payload),
+    }
 
 
 
@@ -384,7 +426,7 @@ async def proxy_publish_new(
     # Inyectar el client_id como query param al microservicio
     target_url = f"{NEWS_HANDLER_URL}/publishNew?client_id={client_id}"
     
-    return await proxy_request(request, target_url)
+    return await proxy_request(request, target_url, {ORDER_VALIDATION_DEADLINE_HEADER: str(ORDER_VALIDATION_DEADLINE_MINUTES)})
 
 @router.post("/orders/publishWithAssertions", tags=["Orders"])
 async def proxy_publish_with_assertions(
@@ -395,7 +437,7 @@ async def proxy_publish_with_assertions(
     
     target_url = f"{NEWS_HANDLER_URL}/publishWithAssertions?client_id={client_id}"
     
-    return await proxy_request(request, target_url)
+    return await proxy_request(request, target_url, {ORDER_VALIDATION_DEADLINE_HEADER: str(ORDER_VALIDATION_DEADLINE_MINUTES)})
 
 @router.post("/extract_text_from_url", tags=["News Import"])
 async def proxy_extract_text_from_url(
@@ -409,14 +451,6 @@ async def proxy_extract_text_from_url(
 from fastapi import Query
 
 # ============================================================
-# Nuevo endpoint para comprobar si el token es admin
-# ============================================================
-@router.get("/auth/is-admin", tags=["Auth"])
-async def check_admin_status(auth_payload: dict = Depends(get_current_user)):
-    """Devuelve si el usuario actual tiene el rol de administrador."""
-    return {"is_admin": is_admin_user(auth_payload)}
-
-# ============================================================
 # Endpoint modificado para aceptar view_all
 # ============================================================
 @router.get("/orders/list", tags=["Orders"])
@@ -426,10 +460,10 @@ async def proxy_get_news(
     auth_payload: dict = Depends(get_current_user)
 ):
     client_id = get_computed_client_id(auth_payload)
-    
-    # Para ver todas las órdenes, el usuario debe ser admin Y haber marcado el check
-    is_admin = is_read_all_user(auth_payload)
-    effective_admin = str(is_admin and view_all).lower()
+    can_view_all_orders = is_read_all_user(auth_payload)
+    if view_all and not can_view_all_orders:
+        raise HTTPException(status_code=403, detail="Se requiere el rol trust-read-all para ver todas las órdenes")
+    effective_admin = str(view_all).lower()
     
     target_url = f"{NEWS_HANDLER_URL}/news?client_id={client_id}&admin={effective_admin}"
     return await proxy_request(request, target_url)

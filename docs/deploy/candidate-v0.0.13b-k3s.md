@@ -7,7 +7,8 @@ protegido y el clúster K3s. No autoriza despliegue ni apertura de demos.
 
 **Lectura de la bitácora:** los párrafos y tablas fechados conservan el estado
 conocido en cada momento y no son instrucciones actuales. Para la situación
-actual y las puertas pendientes, consultar [version.md](../version.md) y
+actual de v0.0.13b y sus puertas, consultar [la ficha archivada](../releases/v0.0.13b.md);
+para la versión en desarrollo, [version.md](../version.md) y
 [working.md](../../working.md). El operador comunicó copias MongoDB y
 PostgreSQL fuera de Hetzner; la restauración aislada aún no está demostrada.
 Las comprobaciones posteriores del operador incluyen S03 y Kafka en K3s, sin

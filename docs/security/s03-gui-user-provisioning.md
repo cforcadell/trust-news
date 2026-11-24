@@ -1,17 +1,22 @@
-# S03 — alta de usuarios GUI
+# S03 — gestión de usuarios GUI e integraciones API
 
-`scripts/security/provision_s03_gui_user.py` da de alta una identidad humana en
+`scripts/security/provision_s03_gui_user.py` gestiona el alta de una identidad humana en
 el realm configurado en `apis/gateway-config`. **Todos los usuarios GUI usan
 `TrustNewsWeb`**: el script comprueba ese cliente y sus audiencias, pero no crea
 ni modifica clientes Keycloak. No concede roles administrativos.
 
-El motor crea el usuario deshabilitado, le asigna una contraseña temporal con
-`UPDATE_PASSWORD`, crea su membresía S03 con la clave `user_<sub>` y solo
-entonces habilita el usuario. En el dry-run se deben indicar límites explícitos
+El motor crea el usuario deshabilitado en Keycloak, le asigna una contraseña temporal con
+`UPDATE_PASSWORD`, crea su membresía S03 y su cuota de aplicación con la clave `user_<sub>` y solo
+entonces habilita el usuario. La alta comprende la identidad y credenciales iniciales,
+la membresía/organización y el registro de cuota; no debe considerarse completa si
+cualquiera de estos pasos falla. En el dry-run se deben indicar límites explícitos
 para `news_generation` y `blockchain_validation`; ambos forman parte del hash
 revisado. Crea una cuota activa con consumo inicial cero y no cambia cuotas
-existentes. El `org_id` usa la misma fórmula determinista que
-el migrador de propietarios (`UUIDv5` del emisor y sujeto). Antes de escribir,
+existentes. El gestor genera un UUID aleatorio para el `org_id` de cada alta
+OpenID antes de crear al usuario en Keycloak; el identificador no depende del
+`sub`. Las altas CLI que no pasan `--org-id` usan un UUIDv5 de la aplicación y
+el username para mantener estable el plan dry-run/apply. Las membresías
+existentes conservan su `org_id`; no se recalcula ni migra. Antes de escribir,
 rechaza nombres existentes ajenos al motor, membresías inactivas o conflictivas
 y configuración S03/Web incompleta. Si se interrumpe con una membresía S03
 válida, el usuario deshabilitado puede reanudarse y recibirá una nueva
@@ -33,12 +38,71 @@ contraseña, el `sub`, el `org_id` ni la clave `user_<sub>` en los logs.
 Tras revisar y publicar un SHA autorizado, usar en GitLab un pipeline web con
 `PIPELINE_ACTION=sync-scripts` y `PROFILE=scripts-hetzner`. Ejecutar el job
 manual `sync_operations_scripts` y comprobar que instaló desde ese SHA el
-script, `migrate_s03_owners.py`, `reconcile_s03_keycloak.py` y
-`s03-keycloak-clients.json`. El job copia solo ficheros versionados; no crea
-cuentas ni transporta credenciales. No iniciar un despliegue de APIs para esta
-alta: el runtime S03 existente ya acepta usuarios de `TrustNewsWeb`.
+`manage_s03.py`, `inspect_s03.py`, `provision_s03_gui_user.py`,
+`provision_s03_integration.py`, `provision_s03_organization.py`, sus motores
+compartidos y los ficheros de
+soporte de `docs/security/` y `api/common/security/`. El job copia solo ficheros
+versionados; no crea cuentas ni transporta credenciales. No iniciar un
+despliegue de APIs para el alta GUI: el runtime S03 existente ya acepta usuarios
+de `TrustNewsWeb`.
 
 ## Ejecución
+
+Para gestionar usuarios GUI e integraciones OAuth desde un menú de texto
+ASCII, ejecutar en el host:
+
+```bash
+cd ~/trust-news
+"$HOME/trust-news-ops-venv/bin/python" -m scripts.security.manage_s03
+```
+
+El gestor ofrece opciones numeradas, selección por número y `q` para volver; no
+depende de flechas, marcos Unicode ni colores. También puede ejecutarse con
+otro Python que tenga `httpx` y `pymongo`; selecciona el entorno operativo
+disponible para sus motores. Para cada operación consulta
+`kubectl config current-context` y lo propone como contexto predeterminado;
+Enter lo acepta y se puede escribir una alternativa explícita.
+
+En el alta OpenID propone el primer username libre `user-NNN` y crea un UUID
+aleatorio de aplicación para el `org_id`, antes de aprovisionar en Keycloak.
+Las cuotas sugeridas son `9999` para generación y `9999` para validación;
+pueden cambiarse antes de revisar el plan.
+En el alta OAuth propone el primer `integration-NNN` libre; la sugerencia
+contrasta IDs existentes en Keycloak y en las asociaciones/cuotas para evitar
+colisiones, pero no usa IDs internos de Keycloak. El `org_id` OAuth debe ser
+una organización existente con membresía activa: el gestor no inventa uno para
+esa asociación.
+
+El menú de usuarios GUI incluye alta/reanudación y listado/consulta.
+El listado de usuarios web consulta Keycloak y cruza los usuarios con las
+membresías `s03_memberships` y cuotas `clients_quotas`; muestra username, estado
+de cuenta, estado de membresía/cuota y límites/consumo, pero nunca contraseña,
+tokens, `sub`, `org_id` ni claves internas de cuota. Debe paginar el listado y
+dejar buscar por username, sin volcar datos personales innecesarios.
+
+El menú de integraciones API incluye alta/listado de integraciones, alta/listado
+de organizaciones, cambiar límites, rotar secreto, suspender, reactivar y
+retirar. El listado de integraciones cruza
+los clientes administrados `tnapi-*` de Keycloak con `s03_integrations` y
+`s03_organizations.integrations`; muestra ID de integración, estado de cliente
+y asociación, acciones, expiración y límites/consumo de integración y
+organización. No muestra secretos, tokens, `sub`, UUID de Keycloak ni IDs
+internos. Debe paginar y permitir búsqueda por ID. El listado de organizaciones
+muestra su UUID de aplicación, estado, límites, consumo, reservas y número de
+integraciones para poder elegir el `org_id` al crear clientes API. La creación
+de organizaciones es independiente de Keycloak y deja las cuotas inicializadas
+en cero.
+
+Ambos listados son de solo lectura: no cambian Keycloak, membresías ni cuotas.
+La TUI debe obtenerlos del mismo contexto explícito que el operador elige y
+fallar cerrada si no puede leer cualquiera de las fuentes necesarias; no debe
+presentar un resultado parcial como inventario completo. El alta y las demás
+operaciones de escritura guían los campos, ejecutan primero el motor existente
+en modo de lectura y solo aplican tras revisar el plan y escribir `APLICAR`.
+Para usuarios GUI, Keycloak y la cuota de uso de la aplicación forman una única
+alta lógica. Para API, el alta incluye el cliente confidencial, cuenta de
+servicio, audiencias mínimas, asociación y cuotas de integración/organización.
+Los motores CLI siguen disponibles para automatización y operación sin TUI.
 
 Mantener el maintenance lock activo durante el alta. Desactivarlo solo durante
 la ventana autorizada de pruebas de navegador que lo necesiten y restaurar

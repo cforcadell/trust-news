@@ -147,6 +147,32 @@ test('summary falls back to current completed validations without weighted resul
     assert.equal(summary.validValidations, 1);
 });
 
+test('automatic completion is terminal, shows unanswered validations, and translates both completion states', () => {
+    for (const [language, automaticLabel, errorLabel] of [
+        ['es', 'Completada automáticamente', 'Completada con errores'],
+        ['en', 'Completed automatically', 'Completed with errors']
+    ]) {
+        const context = createContext(language);
+        installSummaryFunction(context);
+        vm.runInContext(functionBlock('statusClass', 'renderStatusBadge'), context);
+        vm.runInContext(functionBlock('renderStatusBadge', 'formatAnyDate'), context);
+        const order = {
+            status: 'VALIDATED_AUTOMATICALLY',
+            unanswered_validations_count: 1,
+            validation_requests: { 1: ['a', 'b'] },
+            assertions: [{ idAssertion: '1' }],
+            validations: { 1: { a: { execution_status: 'COMPLETED', approval: 'TRUE' } } }
+        };
+        const summary = context.buildVerificationSummary(order);
+        assert.equal(summary.pendingValidations, 0);
+        assert.equal(summary.unansweredValidations, 1);
+        assert.equal(summary.statusKey, 'partial');
+        assert.match(summary.conclusionText, /1/);
+        assert.match(context.renderStatusBadge(order.status), new RegExp(automaticLabel));
+        assert.match(context.renderStatusBadge('VALIDATED_WITH_ERRORS'), new RegExp(errorLabel));
+    }
+});
+
 test('terminal process presentation never labels the result provisional', () => {
     const context = createContext('es');
     context.isTerminalOrderStatus = status => ['VALIDATED', 'VALIDATED_WITH_ERRORS', 'ERROR'].includes(String(status));

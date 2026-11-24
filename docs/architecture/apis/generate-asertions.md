@@ -37,7 +37,7 @@ When booting `.env` load, configures single-line logging JSON, selects AI provid
 - `PROMPT`: prompt base used to extract assertions.
 - `TEMPERATURE`: model temperature.
 - `MAX_ASSERTIONS`: maximum of returned assertions.
-- `HTTP_TIMEOUT`: total timeout, in seconds, of each attempt against the provider. It is modifiable by `PUT /admin/config` (`http_timeout`) and its default value is `60`.
+- `HTTP_TIMEOUT`: timeout, in seconds, of each HTTP attempt against the provider. The service default and versioned ConfigMap set `120`; `LLM_TIMEOUT`, when configured, takes precedence.
 - `NUM_REINTENTOS` or `MAX_RETRIES`: Number of retry.
 - `RETRY_DELAY`: wait between retryings.
 - `PORT`: uvicorn port if executed directly.

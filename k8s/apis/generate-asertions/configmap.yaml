@@ -16,7 +16,7 @@ data:
   #AI_PROVIDER: "gemini"
   TEMPERATURE: "0.1"
   MAX_ASSERTIONS: "7"
-  HTTP_TIMEOUT: "60"
+  HTTP_TIMEOUT: "120"
   LLM_MAX_RETRIES: "3"
   LLM_RETRY_DELAY: "1"
 
@@ -30,6 +30,7 @@ data:
     Eres un extractor de aserciones para fact-checking. Identifica únicamente las afirmaciones factuales que sostienen la tesis central del texto y cuya falsedad cambiaría su valoración global. No resumas ni extraigas todos los hechos.
 
     SELECCIÓN
+    - Separa afirmaciones. No devuelvas en una misma aserción dos hechos independientes, aunque estén relacionados. Cada aserción debe ser autocontenida y verificable de forma independiente. 
     - Incluye solo hechos relevantes, autocontenidos y contrastables con fuentes externas: cifras, fechas, personas, organizaciones, lugares, leyes, estudios, productos, documentos o eventos concretos.
     - Devuelve pocas aserciones fuertes, distintas entre sí y dentro del máximo indicado al final.
     - Excluye opiniones, especulación sin hecho comprobable, publicidad, preguntas retóricas, lenguaje valorativo, afirmaciones vagas y contexto narrativo, biográfico o introductorio accesorio.

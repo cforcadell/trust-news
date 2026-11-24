@@ -49,11 +49,12 @@ class Policy:
     user_required: bool
     roles: frozenset[str]
     scope: str
+    actors: frozenset[str]
 
     @classmethod
     def parse(cls, row: Mapping[str, Any]) -> "Policy":
         required = {"method", "path", "action", "callers", "user_required", "roles", "scope"}
-        if set(row) != required:
+        if set(row) not in (required, required | {"actors"}):
             raise ValueError(f"Invalid policy fields for {row.get('path', '<unknown>')}")
         method, path, action, scope = (_text(row[key]) for key in ("method", "path", "action", "scope"))
         callers, roles = row["callers"], row["roles"]
@@ -67,7 +68,15 @@ class Policy:
             raise ValueError("Policy user_required must be boolean")
         if scope == "own" and not row["user_required"]:
             raise ValueError("Owner-scoped policy requires a user")
-        return cls(method.upper(), path, action, frozenset(callers), row["user_required"], frozenset(roles), scope)
+        actors = row.get("actors", ["human"] if row["user_required"] else ["service", "human"])
+        if not isinstance(actors, list) or not actors or set(actors) - {"human", "integration", "service"}:
+            raise ValueError("Invalid policy actors")
+        if row["user_required"] and "service" in actors:
+            raise ValueError("A required actor cannot be a bare service")
+        if roles and "integration" in actors:
+            raise ValueError("Human roles cannot authorize integrations")
+        return cls(method.upper(), path, action, frozenset(callers), row["user_required"], frozenset(roles), scope,
+                   frozenset(actors))
 
 
 @dataclass(frozen=True)
@@ -79,6 +88,11 @@ class AuthenticatedCall:
     action: str
     scope: str
     user_client_id: str | None = None
+    actor_type: str = "service"
+    integration_id: str | None = None
+    org_id: str | None = None
+    quota_id: str | None = None
+    user_username: str | None = None
 
 
 class KeycloakVerifier:
@@ -114,7 +128,7 @@ class KeycloakVerifier:
                 raise HTTPException(status_code=401, detail="Unknown token key")
             return key
 
-    async def verify(self, token: str, *, audience: str, clients: frozenset[str]) -> dict[str, Any]:
+    async def verify(self, token: str, *, audience: str, clients: frozenset[str] | None) -> dict[str, Any]:
         if not token or len(token.encode("utf-8")) > MAX_TOKEN_BYTES:
             raise HTTPException(status_code=401, detail="Invalid token")
         try:
@@ -128,7 +142,7 @@ class KeycloakVerifier:
             )
             if not _text(claims.get("sub")) or not _text(claims.get("azp")):
                 raise JWTError("Missing identity")
-            if claims["azp"] not in clients:
+            if clients is not None and claims["azp"] not in clients:
                 raise JWTError("Presenting client denied")
             return claims
         except HTTPException:
@@ -138,6 +152,30 @@ class KeycloakVerifier:
 
 
 OwnerCheck = Callable[[Request, AuthenticatedCall], Awaitable[bool]]
+IntegrationResolver = Callable[[dict[str, Any], str, str], Awaitable[dict[str, str]]]
+
+
+async def resolve_integration_remote(claims: dict[str, Any], token: str, action: str) -> dict[str, str]:
+    """Ask Admin for the active binding using a service token and the verified actor token."""
+    admin_url = os.getenv("ADMIN_URL", "").rstrip("/")
+    if urlsplit(admin_url).scheme != "https":
+        raise HTTPException(status_code=503, detail="Integration registry requires HTTPS")
+    try:
+        headers = await internal_headers("assermetry-admin", token)
+        async with httpx.AsyncClient(verify=os.getenv("S03_CA_FILE") or True, timeout=5) as client:
+            response = await client.get(f"{admin_url}/internal/integrations/resolve",
+                                        params={"requested_action": action}, headers=headers)
+        if response.status_code in (401, 403):
+            raise HTTPException(status_code=403, detail="Integration denied")
+        response.raise_for_status()
+        result = response.json()
+        if not all(_text(result.get(key)) for key in ("integration_id", "org_id", "quota_id")):
+            raise ValueError("Incomplete integration binding")
+        return result
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=503, detail="Integration registry unavailable") from exc
 
 
 class InternalSecurity:
@@ -145,11 +183,13 @@ class InternalSecurity:
 
     def __init__(self, app, *, audience: str, issuer: str, jwks_url: str,
                  policy_file: str, user_clients: frozenset[str], ca_file: str | None = None,
-                 owner_check: OwnerCheck | None = None):
+                 owner_check: OwnerCheck | None = None,
+                 integration_resolver: IntegrationResolver | None = None):
         self.app = app
         self.audience = audience
         self.user_clients = user_clients
         self.owner_check = owner_check
+        self.integration_resolver = integration_resolver or resolve_integration_remote
         self.verifier = KeycloakVerifier(issuer=issuer, jwks_url=jwks_url, ca_file=ca_file)
         with open(policy_file, encoding="utf-8") as handle:
             rows = json.load(handle)
@@ -199,10 +239,29 @@ class InternalSecurity:
         if policy.user_required and not user_token:
             raise HTTPException(status_code=401, detail="User token required")
         user = None
+        actor_type = "service"
+        binding = None
         if user_token:
-            user = await self.verifier.verify(user_token, audience=self.audience, clients=self.user_clients)
-            if _text(user.get("preferred_username", "")).startswith("service-account-"):
-                raise HTTPException(status_code=401, detail="Human user required")
+            if "integration" in policy.actors:
+                user = await self.verifier.verify(user_token, audience=self.audience, clients=None)
+            else:
+                user = await self.verifier.verify(user_token, audience=self.audience, clients=self.user_clients)
+            presenter = _text(user.get("azp"))
+            service_account = _text(user.get("preferred_username")) == f"service-account-{presenter}"
+            if service_account:
+                if os.getenv("S03_INTEGRATIONS_ENABLED", "false").lower() != "true":
+                    raise HTTPException(status_code=403, detail="API integrations disabled")
+                if (presenter in self.user_clients or presenter == "TrustNewsApi"
+                        or presenter.startswith("assermetry-") or "integration" not in policy.actors):
+                    raise HTTPException(status_code=401, detail="Integration client denied")
+                binding = await self.integration_resolver(user, user_token, policy.action)
+                actor_type = "integration"
+            else:
+                if presenter not in self.user_clients or _text(user.get("preferred_username", "")).startswith("service-account-"):
+                    raise HTTPException(status_code=401, detail="Human user required")
+                actor_type = "human"
+        if actor_type not in policy.actors:
+            raise HTTPException(status_code=403, detail="Actor denied")
         realm_access = (user or {}).get("realm_access")
         role_list = realm_access.get("roles", []) if isinstance(realm_access, dict) else []
         if not isinstance(role_list, list) or not all(isinstance(role, str) for role in role_list):
@@ -211,7 +270,10 @@ class InternalSecurity:
         if policy.roles and not policy.roles.intersection(roles):
             raise HTTPException(status_code=403, detail="Role denied")
         call = AuthenticatedCall(service, (user or {}).get("sub"), (user or {}).get("iss"), roles, policy.action, policy.scope,
-                                 _text((user or {}).get("client_id")) or None)
+                                 _text((user or {}).get("azp" if actor_type == "integration" else "client_id")) or None, actor_type,
+                                 (binding or {}).get("integration_id"), (binding or {}).get("org_id"),
+                                 (binding or {}).get("quota_id"),
+                                 _text((user or {}).get("preferred_username")) or None)
         if policy.scope == "own":
             if self.owner_check is None or not await self.owner_check(request, call):
                 raise HTTPException(status_code=403, detail="Resource denied")

@@ -42,7 +42,7 @@ test('polling selects Process once, preserves navigation, and returns there at t
     let options;
     const activated = [];
     const session = { startedAt: Date.now(), followProcess: true, consecutiveErrors: 0 };
-    const context = contextFor(['runOrderPollingCycle'], {
+    const context = contextFor(['orderPollingDurationMs', 'currentPollingDurationMs', 'runOrderPollingCycle'], {
         Date, AbortController, POLLING_DURATION: 300000, POLLING_INTERVAL: 3000,
         POLLING_REQUEST_TIMEOUT_MS: 15000, activeOrderPollingSession: session,
         currentOrderData: { status: 'VALIDATION_PENDING' },
@@ -65,7 +65,7 @@ test('terminal polling awaits a clean final render before activating Summary', a
     const calls = [];
     const activated = [];
     const session = { startedAt: Date.now(), followProcess: true, consecutiveErrors: 0, stopped: false };
-    const context = contextFor(['runOrderPollingCycle'], {
+    const context = contextFor(['orderPollingDurationMs', 'currentPollingDurationMs', 'runOrderPollingCycle'], {
         Date, AbortController, POLLING_DURATION: 300000, POLLING_INTERVAL: 3000,
         POLLING_REQUEST_TIMEOUT_MS: 15000, activeOrderPollingSession: session,
         currentOrderData: { status: 'VALIDATION_PENDING' },
@@ -87,4 +87,24 @@ test('terminal polling awaits a clean final render before activating Summary', a
         { cleanup: true, preferredTabKey: 'summary' }
     ]);
     assert.deepEqual(activated, ['summary']);
+});
+
+test('order polling lasts through the configured automatic completion deadline', () => {
+    const context = contextFor(['orderPollingDurationMs'], {
+        POLLING_DURATION: 300000,
+        parseApiTimestamp: value => new Date(value)
+    });
+    assert.equal(context.orderPollingDurationMs({ validation_deadline_minutes: 30 }), 35 * 60 * 1000);
+    assert.equal(context.orderPollingDurationMs({ validation_deadline_minutes: 0 }), 5 * 60 * 1000);
+    assert.equal(context.orderPollingDurationMs({ validation_deadline_minutes: 30, validation_deadline_at: '2026-11-21T11:40:00Z' }, Date.parse('2026-11-21T11:00:00Z')), 41 * 60 * 1000);
+});
+
+test('polling uses the publish policy before the first order detail arrives', () => {
+    const context = contextFor(['orderPollingDurationMs', 'currentPollingDurationMs'], {
+        POLLING_DURATION: 300000, currentOrderData: {}, parseApiTimestamp: value => new Date(value)
+    });
+    const session = { startedAt: Date.parse('2026-11-21T11:00:00Z'), deadlineMinutes: 30 };
+    assert.equal(context.currentPollingDurationMs(session), 35 * 60 * 1000);
+    context.currentOrderData = { validation_deadline_minutes: 30, validation_deadline_at: '2026-11-21T11:40:00Z' };
+    assert.equal(context.currentPollingDurationMs(session), 41 * 60 * 1000);
 });

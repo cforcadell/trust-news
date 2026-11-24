@@ -1,6 +1,6 @@
 {
   "realm": "TrustNews",
-  "user_clients": ["TrustNewsWeb", "TrustNewsApi"],
+  "user_clients": ["TrustNewsWeb"],
   "user_audiences": ["assermetry-news-handler", "assermetry-admin", "assermetry-generate", "assermetry-validator", "assermetry-source-router"],
   "service_clients": {
     "assermetry-gateway": ["assermetry-news-handler", "assermetry-admin", "assermetry-generate"],
@@ -11,5 +11,6 @@
     "assermetry-source-router": ["assermetry-admin"],
     "assermetry-evidence-search": []
   },
-  "roles": ["trust-read-all"]
+  "roles": ["trust-read-all"],
+  "retired_clients": ["TrustNewsApi"]
 }

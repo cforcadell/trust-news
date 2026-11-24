@@ -449,6 +449,7 @@ tr:hover td { background: rgba(148, 163, 184, .035); }
 }
 .status-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status-validated { color: #52ffb5; background: rgba(16,214,154,.11); border-color: rgba(16,214,154,.32); }
+.status-automatic { color: #ffd56a; background: rgba(245,181,27,.15); border-color: rgba(245,181,27,.35); }
 .status-validation_pending, .status-pending, .status-ipfs_pending, .status-blockchain_pending { color: #f6c56f; background: rgba(245,158,11,.11); border-color: rgba(245,158,11,.30); }
 .status-assertions_requested, .status-document_created, .status-ipfs_uploaded, .status-blockchain_registered { color: #67d8ff; background: rgba(34,211,238,.10); border-color: rgba(34,211,238,.28); }
 .status-error, .status-failed { color: #ff8b9a; background: rgba(255,91,110,.11); border-color: rgba(255,91,110,.32); }

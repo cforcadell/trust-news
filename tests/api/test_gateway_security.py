@@ -2,8 +2,10 @@ import json
 import logging
 
 import pytest
+from fastapi import HTTPException, Request
 
 from gateway.security import RequestSecurityMiddleware
+from gateway import main as gateway
 
 
 def http_scope(*, method="POST", path="/orders/publishNew", headers=None):
@@ -131,3 +133,42 @@ async def test_logs_security_relevant_statuses(status_code, caplog):
 
     event = json.loads(caplog.records[-1].message)
     assert event["status"] == status_code
+
+
+@pytest.mark.asyncio
+async def test_global_order_list_requires_explicit_read_all_role(monkeypatch):
+    monkeypatch.setenv("S03_ENABLED", "true")
+    request = Request(http_scope(method="GET", path="/orders/list"))
+    trust_admin_only = {"sub": "admin", "realm_access": {"roles": ["trust-admin"]}}
+
+    with pytest.raises(HTTPException) as denied:
+        await gateway.proxy_get_news(request, view_all=True, auth_payload=trust_admin_only)
+    assert denied.value.status_code == 403
+
+    integration = {
+        "sub": "integration-sub", "_s03_actor_type": "integration",
+        "_s03_integration": {"quota_id": "integration-one"},
+        "realm_access": {"roles": ["trust-read-all"]},
+    }
+    with pytest.raises(HTTPException) as integration_denied:
+        await gateway.proxy_get_news(request, view_all=True, auth_payload=integration)
+    assert integration_denied.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_read_all_role_controls_gateway_list_forwarding(monkeypatch):
+    monkeypatch.setenv("S03_ENABLED", "true")
+    forwarded = []
+
+    async def fake_proxy(request, target_url):
+        forwarded.append(target_url)
+        return {"forwarded": target_url}
+
+    monkeypatch.setattr(gateway, "proxy_request", fake_proxy)
+    request = Request(http_scope(method="GET", path="/orders/list"))
+    user = {"sub": "reader", "realm_access": {"roles": ["trust-read-all"]}}
+
+    response = await gateway.proxy_get_news(request, view_all=True, auth_payload=user)
+    assert "admin=true" in response["forwarded"]
+    response = await gateway.proxy_get_news(request, view_all=False, auth_payload=user)
+    assert "admin=false" in response["forwarded"]

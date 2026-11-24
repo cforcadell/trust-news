@@ -7,8 +7,8 @@ acreditan el mismo resultado en Hetzner.
 
 ## Guías vigentes
 
-- **Estado y planificación:** [versión actual](version.md),
-  [roadmap](next_releases.md), [historial de releases](releases.md),
+- **Estado y planificación:** [versión actual v0.0.13c](version.md),
+  [archivo v0.0.13b](releases/v0.0.13b.md), [roadmap desde v0.0.13d](next_releases.md), [historial de releases](releases.md),
   [incidencias funcionales](issues.md) y [bitácora operativa](../working.md).
 - **Despliegue:** [kind local](deploy/skaffold-local.md),
   [Hetzner/K3s](deploy/skaffold-server.md), [procedimientos comunes](deploy/k8s-common.md),
@@ -16,7 +16,7 @@ acreditan el mismo resultado en Hetzner.
   [ficha del candidato](deploy/candidate-v0.0.13b-k3s.md) y
   [flujo GitLab/GitHub](deploy/gitlab-github-release-workflow.md).
 - **Seguridad:** [inventario S00](security/s00-inventory.md),
-  [diseño S02](security/s02-design.md), [diseño S03](security/s03-design.md),
+  [diseño S02](architecture/designs/s02-design.md), [diseño S03](architecture/designs/s03-design.md),
   [S03 en Skaffold](security/s03-skaffold.md),
   [migración de propietarios](security/s03-owner-migration.md),
   [alta GUI y cuotas](security/s03-gui-user-provisioning.md) y

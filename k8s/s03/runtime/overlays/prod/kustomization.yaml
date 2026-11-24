@@ -10,5 +10,6 @@ configMapGenerator:
       - KEYCLOAK_ISSUER_URL=https://assermetry.com/auth/realms/TrustNews
       - KEYCLOAK_JWKS_URL=https://keycloak.infra.svc.cluster.local:9443/auth/realms/TrustNews/protocol/openid-connect/certs
       - S03_TOKEN_URL=https://keycloak.infra.svc.cluster.local:9443/auth/realms/TrustNews/protocol/openid-connect/token
-      - S03_USER_CLIENTS=TrustNewsWeb,TrustNewsApi
+      - S03_USER_CLIENTS=TrustNewsWeb
+      - S03_INTEGRATIONS_ENABLED=false
       - S03_CA_FILE=/etc/s03-ca/ca.crt

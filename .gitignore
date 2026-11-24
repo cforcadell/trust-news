@@ -74,3 +74,4 @@ skaffold-v*.bak
 launch_e2e.sh
 api/validate-asertions/__pycache__/main.cpython-312.pyc
 api/validate-asertions/__pycache__/main.cpython-312.pyc
+clean_fs.sh

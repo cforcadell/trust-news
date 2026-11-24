@@ -6,7 +6,6 @@ DEPLOYMENT="keycloak"
 CONTAINER="keycloak"
 REALM="TrustNews"
 CLIENT_ID="TrustNewsWeb"
-BACKEND_CLIENT_ID="TrustNewsApi"
 GATEWAY_AUDIENCE="TrustNewsGateway"
 GATEWAY_SCOPE_NAME="trustnews-gateway-audience"
 KEYCLOAK_URL="${KEYCLOAK_URL:-https://assermetry.com/auth}"
@@ -22,17 +21,16 @@ done
 
 observed_state="$({
   kubectl exec -i -n "$NAMESPACE" "deployment/$DEPLOYMENT" -c "$CONTAINER" -- \
-    sh -s -- "$REALM" "$CLIENT_ID" "$BACKEND_CLIENT_ID" "$GATEWAY_AUDIENCE" "$GATEWAY_SCOPE_NAME" "$KEYCLOAK_URL" "$FRONTEND_URL" "$WEB_ORIGIN" <<'KEYCLOAK_SCRIPT'
+    sh -s -- "$REALM" "$CLIENT_ID" "$GATEWAY_AUDIENCE" "$GATEWAY_SCOPE_NAME" "$KEYCLOAK_URL" "$FRONTEND_URL" "$WEB_ORIGIN" <<'KEYCLOAK_SCRIPT'
 set -eu
 
 realm="$1"
 client_id="$2"
-  backend_client_id="$3"
-  gateway_audience="$4"
-  gateway_scope_name="$5"
-  keycloak_url="$6"
-  frontend_url="$7"
-  web_origin="$8"
+  gateway_audience="$3"
+  gateway_scope_name="$4"
+  keycloak_url="$5"
+  frontend_url="$6"
+  web_origin="$7"
 kcadm=/opt/keycloak/bin/kcadm.sh
 config="/tmp/kcadm-reconcile-web-$$.config"
 trap 'rm -f "$config"' EXIT
@@ -127,7 +125,7 @@ printf '%s\n' "$mapper_state" | grep -F '"included.custom.audience"' | grep -F "
   exit 1
 }
 
-for presenting_client in "$client_id" "$backend_client_id"; do
+for presenting_client in "$client_id"; do
   presenting_rows="$($kcadm get clients \
     --config "$config" \
     -r "$realm" \
